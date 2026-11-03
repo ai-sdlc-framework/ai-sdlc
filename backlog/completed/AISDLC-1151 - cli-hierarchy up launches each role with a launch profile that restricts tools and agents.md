@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1151
 title: 'cli-hierarchy up launches each role with a launch profile: restricted tool and agent set per role, starting with the planner'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-01'
 labels:
@@ -39,12 +39,38 @@ Velocity impact: positive. Roughly 20k tokens less per planner turn and a later 
 
 ## Acceptance Criteria
 
-- [ ] AC-1: A per-role launch profile exists in `.ai-sdlc/model-routing.yaml` (or a sibling `launch:` block in the same file, whichever keeps one per-role file) with optional `allowedTools`, `disallowedTools` and `disallowedAgents` lists; `plan()` in `up.ts` resolves it into `PlannedSession.launchProfile` and `buildClaudeCommand` renders the matching `--allowedTools` / `--disallowedTools` flags (and the agent restriction the CLI supports, if any) after `--permission-mode`. Absent profile means today's command line, byte for byte.
-- [ ] AC-2: The repository's default profile for `planner` disallows the tools the planner command never uses (browser automation, artifacts, workflows, notebooks and similar built-ins) and keeps Bash, Read, Edit, Write, Agent, AskUserQuestion, Skill, SendMessage, ToolSearch and the MCP backlog and ai-sdlc tools. Executors and dispatch keep today's full set unless the operator adds a profile.
-- [ ] AC-3: `RosterEntry` records the profile name, and `restart.ts` and `spawn.ts` launch through the same resolution so a restarted or ephemeral session gets the same flags as `up`.
+- [x] AC-1: A per-role launch profile exists in `.ai-sdlc/model-routing.yaml` (or a sibling `launch:` block in the same file, whichever keeps one per-role file) with optional `allowedTools`, `disallowedTools` and `disallowedAgents` lists; `plan()` in `up.ts` resolves it into `PlannedSession.launchProfile` and `buildClaudeCommand` renders the matching `--allowedTools` / `--disallowedTools` flags (and the agent restriction the CLI supports, if any) after `--permission-mode`. Absent profile means today's command line, byte for byte.
+- [x] AC-2: The repository's default profile for `planner` disallows the tools the planner command never uses (browser automation, artifacts, workflows, notebooks and similar built-ins) and keeps Bash, Read, Edit, Write, Agent, AskUserQuestion, Skill, SendMessage, ToolSearch and the MCP backlog and ai-sdlc tools. Executors and dispatch keep today's full set unless the operator adds a profile.
+- [x] AC-3: `RosterEntry` records the profile name, and `restart.ts` and `spawn.ts` launch through the same resolution so a restarted or ephemeral session gets the same flags as `up`.
 - [ ] AC-4: Tests in `hierarchy.test.ts` cover: no profile means unchanged command; planner profile renders the flags in order; restart reproduces the profile from the roster. `docs/operations/cli-hierarchy.md` gains a short "Launch profiles" section under the planner context ceiling material naming the file and the measured saving.
 - [ ] AC-5: After one planner launch with the profile, `cli-hierarchy status` shows the planner's first-turn context (the `CONTEXT` column) at least 15k tokens below the value measured before the change; the number goes in the PR body.
 
 ## Notes
 
 Origin: operator question 2026-11-01 ("why is the planner starting at 90k") and the survey the planner ran that afternoon; operator go on the three recommendations at 22:56Z. Sibling task: AISDLC-1152 wires the fixed prefix of AISDLC-782 into SessionStart and slims `planner.md` and `CLAUDE.md`. The user-settings plugin trim (Cloudflare and impeccable skills off) was applied locally by the operator on 2026-11-01 and is not part of this task.
+
+## Final Summary
+
+## Summary
+Fixed the variadic-flag bug: launch profile flags now render as `--allowedTools='a,b'` and `--disallowedTools='a,b'`, so the positional prompt is no longer consumed as a tool name. An absent profile renders byte-for-byte as before. The planner profile now also denies Artifact, Workflow, `mcp__claude-in-chrome__*` and `mcp__playwright__*`. A new test asserts that malformed `launch` lists are rejected.
+
+## Changes
+- pipeline-cli/src/hierarchy/up.ts
+- pipeline-cli/src/hierarchy/hierarchy.test.ts
+- pipeline-cli/src/routing/resolve-model.test.ts
+- .ai-sdlc/model-routing.yaml
+- docs/operations/cli-hierarchy.md
+
+## Design decisions
+Not pushed, per instruction; the pipeline pushes. The shape check on spec.launch was not added to parseRoutingTable because the JSON schema already requires string arrays for the launch lists and rejects unknown keys; a test in resolve-model.test.ts asserts malformed launch inputs return schema-invalid. Hierarchy and routing vitest suites pass (1168 tests); the full pnpm test was not re-run after the last test fix.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (246 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+

@@ -84,6 +84,11 @@
           "minLength": 1,
           "description": "Permission mode the session was started with."
         },
+        "launchProfile": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of the launch profile (tool and agent restrictions) the session started with; restart reproduces it. Absent when the session started without one."
+        },
         "startedAt": {
           "type": "string",
           "format": "date-time",

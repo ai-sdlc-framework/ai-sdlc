@@ -27,6 +27,7 @@ export const sharedTestConfig = {
   setupFiles: [
     // Incident 2026-10-30: strip inherited GIT_DIR & co. before any test shells out to git.
     fileURLToPath(new URL('./vitest.git-env.setup.mjs', import.meta.url)),
+    fileURLToPath(new URL('./vitest.hierarchy-env.setup.mjs', import.meta.url)),
     fileURLToPath(new URL('./vitest.parent-watch.setup.mjs', import.meta.url)),
   ],
 };

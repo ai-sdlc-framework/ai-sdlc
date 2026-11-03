@@ -9,6 +9,8 @@
 import { ghCallsPath, GH_CALL_LOG_ENV, installGhShim } from './gh-calls.js';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { routedLaunchProfile } from '../routing/role-model.js';
+import type { LaunchProfile } from '../routing/default-table.js';
 
 import { loadOperationalPolicy } from './operational.js';
 import { verifiedMainRoot } from './trusted-root.js';
@@ -142,6 +144,44 @@ export interface PlannedSession {
   prompt: string;
   /** Task an ephemeral executor serves; exported as `AI_SDLC_EXECUTOR_TASK` (RFC-0059). */
   taskId?: string;
+  /** Launch profile (AISDLC-1151); absent means the harness default tool set. */
+  launchProfile?: ResolvedLaunchProfile;
+}
+
+/** A launch profile with the name the roster records. */
+export interface ResolvedLaunchProfile extends LaunchProfile {
+  name: string;
+}
+
+/**
+ * Resolve the launch profile for `name` (the role, or the name a roster entry recorded) through
+ * the one path `up`, `restart` and `spawn` share (AISDLC-1151). Undefined when none is defined.
+ */
+export function resolveProfile(
+  deps: Pick<HierarchyDeps, 'resolveLaunchProfile' | 'cwd'>,
+  name: string,
+): ResolvedLaunchProfile | undefined {
+  const profile = deps.resolveLaunchProfile
+    ? deps.resolveLaunchProfile(name)
+    : routedLaunchProfile(name, { workDir: deps.cwd });
+  return profile ? { ...profile, name } : undefined;
+}
+
+/**
+ * The restriction flags a profile renders, in a fixed order. The tool flags are variadic in the
+ * claude CLI, so the `--flag=<list>` form is used: a space-separated value would swallow the
+ * positional prompt that follows as another tool name.
+ */
+export function launchProfileArgs(p: ResolvedLaunchProfile | undefined): string[] {
+  if (!p) return [];
+  const denied = [
+    ...(p.disallowedTools ?? []),
+    ...(p.disallowedAgents ?? []).map((a) => `Agent(${a})`),
+  ];
+  return [
+    ...(p.allowedTools?.length ? [`--allowedTools=${shellQuote(p.allowedTools.join(','))}`] : []),
+    ...(denied.length ? [`--disallowedTools=${shellQuote(denied.join(','))}`] : []),
+  ];
 }
 
 /**
@@ -202,7 +242,8 @@ export function executorMcpArgs(role: string, env: NodeJS.ProcessEnv = process.e
 /** Build the `claude` command line for one session. */
 export function buildClaudeCommand(
   bin: string,
-  s: Pick<PlannedSession, 'role' | 'name' | 'model' | 'permissionMode' | 'prompt' | 'taskId'>,
+  s: Pick<PlannedSession, 'role' | 'name' | 'model' | 'permissionMode' | 'prompt' | 'taskId'> &
+    Partial<Pick<PlannedSession, 'launchProfile'>>,
   nodeVersion?: string,
   ghLog?: { shimDir: string; logPath: string },
   projectDir?: string,
@@ -230,9 +271,16 @@ export function buildClaudeCommand(
     shellQuote(s.model),
     '--permission-mode',
     shellQuote(s.permissionMode),
+    ...launchProfileArgs(s.launchProfile),
     ...executorMcpArgs(s.role),
     shellQuote(s.prompt),
   ].join(' ');
+}
+
+export function withProfile(p: ResolvedLaunchProfile | undefined): {
+  launchProfile?: ResolvedLaunchProfile;
+} {
+  return p ? { launchProfile: p } : {};
 }
 
 function plan(
@@ -240,6 +288,7 @@ function plan(
   project: string,
   count: number,
   plannerMode: string,
+  profileFor: (role: HierarchyRole) => ResolvedLaunchProfile | undefined,
 ): PlannedSession[] {
   const sessions: PlannedSession[] = [];
   if (!opts.noPlanner) {
@@ -250,6 +299,7 @@ function plan(
       model: opts.plannerModel,
       permissionMode: plannerMode,
       prompt: ROLE_PROMPT.planner,
+      ...withProfile(profileFor('planner')),
     });
   }
   sessions.push({
@@ -259,6 +309,7 @@ function plan(
     model: opts.dispatchModel,
     permissionMode: BYPASS_MODE,
     prompt: ROLE_PROMPT['operator-dispatch'],
+    ...withProfile(profileFor('operator-dispatch')),
   });
   for (const bare of executorNames(count)) {
     sessions.push({
@@ -268,6 +319,7 @@ function plan(
       model: opts.executorModel,
       permissionMode: BYPASS_MODE,
       prompt: ROLE_PROMPT.executor,
+      ...withProfile(profileFor('executor')),
     });
   }
   return sessions;
@@ -390,6 +442,7 @@ export async function launchSession(
       pid: registered?.pid ?? pane.panePid,
       model: s.model,
       permissionMode: s.permissionMode,
+      ...(s.launchProfile ? { launchProfile: s.launchProfile.name } : {}),
       startedAt: spawnedAt.toISOString(),
       ...(nodeVersion && /^\d+\.\d+\.\d+$/.test(nodeVersion) ? { nodeVersion } : {}),
       status: registered ? 'running' : 'starting',
@@ -457,7 +510,7 @@ export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): P
   // The operator's own `defaultMode` setting does not feed the planner mode: the
   // hierarchy is an unattended fleet and its mode is a hierarchy decision.
   const plannerMode = opts.plannerPermissionMode ?? DEFAULT_PLANNER_MODE;
-  const planned = plan(opts, project, count, plannerMode);
+  const planned = plan(opts, project, count, plannerMode, (role) => resolveProfile(deps, role));
   for (const s of planned) assertSessionName(s.name);
 
   const warnings: string[] = [];

@@ -15,7 +15,7 @@ import { readRosterChecked, writeRoster } from './roster.js';
 import { listInflight } from './inflight.js';
 import { hasSession, killSession, listSessionNames } from './tmux.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
-import { launchSession, ROLE_PROMPT } from './up.js';
+import { launchSession, resolveProfile, ROLE_PROMPT, withProfile } from './up.js';
 import {
   assertModel,
   assertProject,
@@ -93,6 +93,7 @@ export async function hierarchySpawn(
       permissionMode: 'bypassPermissions',
       prompt: ROLE_PROMPT.executor,
       taskId,
+      ...withProfile(resolveProfile(deps, 'executor')),
     },
     project,
     deps,

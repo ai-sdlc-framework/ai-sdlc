@@ -104,6 +104,24 @@ describe('default behaviour (no table on the base ref)', () => {
   });
 });
 
+describe('launch profile shape (AISDLC-1151)', () => {
+  it('accepts string-array lists and rejects malformed ones', () => {
+    const ok = `${TABLE}\n  launch:\n    planner:\n      disallowedTools: [NotebookEdit]\n`;
+    expect(parseRoutingTable(ok).ok).toBe(true);
+    for (const bad of [
+      '  launch:\n    planner:\n      disallowedTools: NotebookEdit\n',
+      '  launch:\n    planner:\n      allowedTools: [1]\n',
+      '  launch:\n    planner: oops\n',
+      '  launch: [a]\n',
+    ]) {
+      expect(parseRoutingTable(`${TABLE}\n${bad}`)).toEqual({
+        ok: false,
+        reason: 'schema-invalid',
+      });
+    }
+  });
+});
+
 describe('security reviewer floor', () => {
   it('rejects a table whose security-reviewer cell is weaker than the default', () => {
     for (const text of [

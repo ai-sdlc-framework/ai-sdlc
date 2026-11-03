@@ -4874,6 +4874,12 @@ export const hierarchyRosterV1Schema = {
           minLength: 1,
           description: 'Permission mode the session was started with.',
         },
+        launchProfile: {
+          type: 'string',
+          minLength: 1,
+          description:
+            'Name of the launch profile (tool and agent restrictions) the session started with; restart reproduces it. Absent when the session started without one.',
+        },
         startedAt: {
           type: 'string',
           format: 'date-time',
@@ -5872,6 +5878,20 @@ export const modelRoutingV1Schema = {
         salt: {
           type: 'string',
           description: 'Salt mixed into the assignment hash so a new salt reshuffles assignments.',
+        },
+        launch: {
+          type: 'object',
+          description:
+            'Launch profiles (AISDLC-1151), keyed by profile name (the hierarchy role): the tool and agent set a session of that role starts with. Absent role means the harness default.',
+          additionalProperties: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              allowedTools: { type: 'array', items: { type: 'string', minLength: 1 } },
+              disallowedTools: { type: 'array', items: { type: 'string', minLength: 1 } },
+              disallowedAgents: { type: 'array', items: { type: 'string', minLength: 1 } },
+            },
+          },
         },
         cells: {
           type: 'object',

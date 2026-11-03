@@ -211,9 +211,10 @@ const NON_INSTRUMENTED_PATTERNS = [
   // coverage report can contain them. They are test configuration, exercised by
   // scripts/vitest-parent-death.test.mjs under node --test. Same for the
   // per-worker git-env setup (incident 2026-10-30), exercised by
-  // scripts/pre-push-patch-coverage.test.mjs. Exactly these three root-level
+  // scripts/pre-push-patch-coverage.test.mjs. The hierarchy-env setup (AISDLC-1151)
+  // is the fourth. Exactly these four root-level
   // filenames, anchored; any other vitest.*.mjs is not excluded.
-  /^vitest\.(?:shared|parent-watch\.setup|git-env\.setup)\.mjs$/,
+  /^vitest\.(?:shared|parent-watch\.setup|git-env\.setup|hierarchy-env\.setup)\.mjs$/,
   // vscode-hierarchy/src/extension.ts: thin adapter over the `vscode` runtime API,
   // which cannot be loaded under Vitest; the logic lives in reconciler.ts and
   // roster.ts (covered). Mirrors that package's vitest `coverage.exclude`.

@@ -22,6 +22,7 @@ export default tseslint.config(
       'vitest.shared.mjs',
       'vitest.parent-watch.setup.mjs',
       'vitest.git-env.setup.mjs',
+      'vitest.hierarchy-env.setup.mjs',
       '.github/workflows/__tests__/',
       '.claude/hooks/',
       'ai-sdlc-plugin/hooks/',

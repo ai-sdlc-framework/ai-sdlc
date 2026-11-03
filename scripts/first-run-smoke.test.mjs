@@ -56,8 +56,19 @@ function withoutHook(manifest, script) {
 }
 
 function runSmoke(env) {
+  // AISDLC-1151: the smoke run is a fresh adopter session; drop ambient hierarchy
+  // variables an executor session exports, which otherwise abort the pipeline.
+  const ambient = { ...process.env };
+  for (const k of [
+    'AI_SDLC_HIERARCHY_ROLE',
+    'AI_SDLC_HIERARCHY_SESSION',
+    'AI_SDLC_EXECUTOR_TASK',
+    'AI_SDLC_GH_CALL_LOG',
+  ]) {
+    delete ambient[k];
+  }
   return spawnSync(process.execPath, [SCRIPT], {
-    env: { ...process.env, ...env },
+    env: { ...ambient, ...env },
     encoding: 'utf8',
     timeout: 120_000,
   });
