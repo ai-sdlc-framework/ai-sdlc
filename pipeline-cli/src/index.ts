@@ -253,6 +253,15 @@ export {
   type FollowupViolation,
 } from './backlog/followup-rule.js';
 
+// RFC-0061 clean-replay carry-forward rule, consumed by the verdict check (AISDLC-1170).
+export {
+  cleanReplayCarriesForward,
+  findCarriedVerdict,
+  GitTooOldError,
+  type CarryForwardResult,
+  type ReplaySubject,
+} from './attestation/clean-replay.js';
+
 // Required consumer configuration manifest: init, execute preflight, doctor and
 // SessionStart share one list (AISDLC-910).
 export {
