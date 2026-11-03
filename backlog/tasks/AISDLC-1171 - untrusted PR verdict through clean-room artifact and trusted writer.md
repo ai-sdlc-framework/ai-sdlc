@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1171
 title: 'RFC-0061 Phase 1: untrusted PRs get a verdict record through a clean-room artifact and a trusted workflow_run writer'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-03'
 labels:
