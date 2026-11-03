@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1165
 title: 'cli-decisions supersede writes its event through recordEvents; main is red on decisions-write-root.test.ts and every pre-push fails'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-03'
 labels:
