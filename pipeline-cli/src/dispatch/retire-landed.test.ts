@@ -178,3 +178,78 @@ describe('cli-dispatch retire-landed', () => {
     spy.mockRestore();
   });
 });
+
+describe('only the task code PR retires a failed verdict (AISDLC-1177)', () => {
+  const seed = (id: string, extra: Record<string, unknown>): void => {
+    writeFileSync(
+      path.join(board, 'failed', `${id}.verdict.json`),
+      JSON.stringify({ taskId: id, outcome: 'failed', cause: 'x', ...extra }),
+    );
+  };
+  const stillFailed = (id: string): boolean =>
+    existsSync(path.join(board, 'failed', `${id}.verdict.json`)) &&
+    !existsSync(path.join(board, 'done', `${id}.verdict.json`));
+  const run = (pr: ReconcilePr): void => {
+    reconcile([pr], { boardDir: board, execute: () => ({ ran: true }), now: () => new Date() });
+  };
+
+  it('keeps the 1156 shape failed: verdict PR 2308, filing PR 2288 merged (AC-1)', () => {
+    seed('AISDLC-1156', { prNumber: 2308 });
+    run({
+      prNumber: 2288,
+      taskId: 'AISDLC-1156',
+      title: 'chore(docs): file backlog task AISDLC-1156 (AISDLC-1156)',
+      headBranch: 'ai-sdlc/file-aisdlc-1156',
+      headSha: 'h',
+      mergeSha: 'm',
+      merged: true,
+    });
+    expect(stillFailed('AISDLC-1156')).toBe(true);
+    expect(
+      retireLandedSweep(board, [{ pr: 2288, taskId: 'AISDLC-1156', landed: 't' }]).moved,
+    ).toEqual([]);
+    expect(stillFailed('AISDLC-1156')).toBe(true);
+  });
+
+  it('keeps the 1167 shape failed: no verdict prNumber, filing PR 2317 merged (AC-2, AC-4)', () => {
+    seed('AISDLC-1167', {});
+    run({
+      prNumber: 2317,
+      taskId: 'AISDLC-1167',
+      title: 'chore(docs): file backlog task AISDLC-1167 (AISDLC-1167)',
+      headBranch: 'ai-sdlc/file-aisdlc-1167',
+      headSha: 'h',
+      mergeSha: 'm',
+      merged: true,
+    });
+    expect(stillFailed('AISDLC-1167')).toBe(true);
+    const records = listLanding(board);
+    expect(records[0]).toMatchObject({ kind: 'docs', headBranch: 'ai-sdlc/file-aisdlc-1167' });
+    expect(retireLandedSweep(board, records).moved).toEqual([]);
+    expect(stillFailed('AISDLC-1167')).toBe(true);
+  });
+
+  it('refuses a docs head branch or non-task kind when given directly (AC-2)', () => {
+    seed('AISDLC-1167', {});
+    const base = { taskId: 'AISDLC-1167', landedAt: 't' };
+    expect(retireFailedVerdict(board, { ...base, headBranch: 'docs/x' })).toBe(false);
+    expect(retireFailedVerdict(board, { ...base, kind: 'docs' })).toBe(false);
+  });
+
+  it('still retires on a matching prNumber or a task-kind PR with none (AC-3)', () => {
+    seed('AISDLC-1', { prNumber: 5 });
+    seed('AISDLC-2', {});
+    expect(retireFailedVerdict(board, { taskId: 'AISDLC-1', landedAt: 't', prNumber: 5 })).toBe(
+      true,
+    );
+    expect(
+      retireFailedVerdict(board, {
+        taskId: 'AISDLC-2',
+        landedAt: 't',
+        prNumber: 9,
+        kind: 'task',
+        headBranch: 'ai-sdlc/aisdlc-2-x',
+      }),
+    ).toBe(true);
+  });
+});

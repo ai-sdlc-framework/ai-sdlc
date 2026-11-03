@@ -102,6 +102,8 @@ export interface LandingEntry {
 export interface LandingRecord {
   pr: number;
   kind: Exclude<PrKind, 'release'>;
+  /** AISDLC-1177: head branch of the PR, so the sweep can tell a filing PR from a code PR. */
+  headBranch?: string;
   taskId?: string;
   owner: string;
   state: PrState;
@@ -916,6 +918,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     const record: LandingRecord = {
       pr: f.prNumber,
       kind: d.kind,
+      ...(f.headBranch ? { headBranch: f.headBranch } : {}),
       ...(f.taskId ? { taskId: f.taskId } : {}),
       owner,
       state: d.state,
@@ -963,6 +966,8 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
           landedAt,
           ...(sha === undefined ? {} : { landedSha: sha }),
           prNumber: f.prNumber,
+          kind: d.kind,
+          ...(f.headBranch === undefined ? {} : { headBranch: f.headBranch }),
         });
       } catch {
         /* the sweep (cli-dispatch retire-landed) retries it */
