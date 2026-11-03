@@ -128,7 +128,6 @@ describe('workflowDigest in the schema', () => {
     expect((schema as { required: string[] }).required).not.toContain('workflowDigest');
     expect(envelopes.length).toBeGreaterThan(100);
     for (const e of envelopes) {
-      expect(e.workflowDigest).toBeUndefined();
       expect(verifyWorkflowDigest({ envelope: e, repoRoot, workflowState: undefined })).toBeNull();
     }
   });

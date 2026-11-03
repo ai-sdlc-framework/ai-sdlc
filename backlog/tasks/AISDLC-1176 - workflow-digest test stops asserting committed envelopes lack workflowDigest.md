@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1176
 title: 'workflow-digest test asserts no committed envelope carries workflowDigest, so every hook-signed push since AISDLC-1164 is refused'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-03'
 labels:
