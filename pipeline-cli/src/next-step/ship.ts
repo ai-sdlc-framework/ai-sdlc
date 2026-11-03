@@ -555,6 +555,13 @@ async function shipInner(
   let pushRc = 1;
   let pushErr = '';
   let diverged = false;
+  // Read once, before any push or fetch of this run: a ref created by our own fetch was never
+  // seen by the developer pass, so '' (no lease) is the answer when it did not exist.
+  const seenRef = await runner('git', ['rev-parse', `refs/remotes/origin/${state.branch}`], {
+    cwd: wt,
+    allowFailure: true,
+  });
+  const seenBeforeFetch = seenRef.code === 0 ? seenRef.stdout.trim() : '';
   for (let attempt = 0; attempt < PUSH_ATTEMPTS; attempt += 1) {
     const push = await runner('git', ['push', '-u', 'origin', state.branch], {
       cwd: wt,
@@ -569,18 +576,14 @@ async function shipInner(
       // AISDLC-1164: only git's own non-fast-forward line, confirmed by a fetch showing the
       // remote tip is not an ancestor of HEAD, is a divergence. A remote that is an ancestor
       // means the refusal came from elsewhere (a hook); push plainly again, no lease.
-      const seenRef = await runner('git', ['rev-parse', `refs/remotes/origin/${state.branch}`], {
-        cwd: wt,
-        allowFailure: true,
-      });
-      const seenBeforeFetch = seenRef.code === 0 ? seenRef.stdout.trim() : undefined;
       const fetched = await runner('git', ['fetch', 'origin', state.branch], {
         cwd: wt,
         allowFailure: true,
         timeout: 30_000,
       });
+      // A failed fetch leaves the remote state unknown: report push-failed, not a divergence.
+      if (fetched.code !== 0) break;
       const isAncestor =
-        fetched.code === 0 &&
         (
           await runner(
             'git',

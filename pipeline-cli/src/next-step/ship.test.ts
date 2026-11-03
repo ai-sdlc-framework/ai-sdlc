@@ -918,6 +918,34 @@ describe('shipTask: failures stop before anything irreversible', () => {
     expect(cmds().some((c) => c.includes('--force-with-lease'))).toBe(false);
   });
 
+  it('aborts without a lease push when the remote ref was never seen (AISDLC-1164)', async () => {
+    giveKey();
+    let fetched = false;
+    h.runner.on(/^git fetch origin ai-sdlc\//, () => {
+      fetched = true;
+      return ok('');
+    });
+    h.runner.on(/rev-parse refs\/remotes\/origin\//, () =>
+      fetched ? ok(`${'b'.repeat(40)}\n`) : fail('unknown revision', 128),
+    );
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(/^git push -u origin/, fail('! [rejected] non-fast-forward', 1));
+    scriptShip();
+    const res = await shipTask(h.ctx, state);
+    expect(res.action === 'stop' && res.cause).toBe('push-non-fast-forward');
+    expect(cmds().some((c) => c.includes('--force-with-lease'))).toBe(false);
+  });
+
+  it('reports push-failed when the fetch after a rejection fails (AISDLC-1164)', async () => {
+    giveKey();
+    h.runner.on(/^git fetch origin ai-sdlc\//, fail('network down', 128));
+    h.runner.on(/^git push -u origin/, fail('! [rejected] non-fast-forward', 1));
+    scriptShip();
+    const res = await shipTask(h.ctx, state);
+    expect(res.action === 'stop' && res.cause).toBe('push-failed');
+    expect(cmds().some((c) => c.includes('--force-with-lease'))).toBe(false);
+  });
+
   it('reports a hook refusal as push-failed with its stderr, not as a divergence (AISDLC-1164)', async () => {
     giveKey();
     h.runner.on(
