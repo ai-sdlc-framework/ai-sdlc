@@ -28,6 +28,7 @@ import { classifyPr, type PrCheck, type PrFacts, type PrState } from './pr-state
 import { collectVerdicts, readInflightManifest, readQueuedManifest } from '../dispatch/board.js';
 import { DECISIONS_SYNC_BRANCH } from '../decisions/remote-persist.js';
 import { completeLandedIterateNeeded } from '../dispatch/complete.js';
+import { retireFailedVerdict } from '../dispatch/retire-landed.js';
 import { clearRuling, readRuling } from '../dispatch/ruling.js';
 import type { TaskRuling } from '../dispatch/types.js';
 import type { CommandRunner } from './types.js';
@@ -87,6 +88,8 @@ export interface ReconcilePr extends PrFacts {
    * attestation (every reviewer approved); only the push is missing, so the machine owns it.
    */
   reclaimable?: boolean;
+  /** AISDLC-1158: the commit the PR merged as, when the merge was read from GitHub. */
+  mergeSha?: string;
 }
 
 export interface LandingEntry {
@@ -123,6 +126,8 @@ export interface LandingRecord {
   agedAttempts?: number;
   delivered?: string;
   landed?: string;
+  /** AISDLC-1158: the commit that landed, when known. */
+  landedSha?: string;
   /** Set once the PR is confirmed closed without landing; the record is not re-checked. */
   closedUnlanded?: string;
   history: LandingEntry[];
@@ -907,6 +912,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         ? ts
         : undefined);
     const landedAt = existing?.landed ?? (d.state === 'merged' ? ts : undefined);
+    const landedSha = existing?.landedSha ?? (d.state === 'merged' ? f.mergeSha : undefined);
     const record: LandingRecord = {
       pr: f.prNumber,
       kind: d.kind,
@@ -926,6 +932,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
       lastActionAt: ts,
       ...(deliveredAt === undefined ? {} : { delivered: deliveredAt }),
       ...(landedAt === undefined ? {} : { landed: landedAt }),
+      ...(landedSha === undefined ? {} : { landedSha }),
       history: [...(existing?.history ?? []), entry],
     };
     let result: ActionResult = { ran: false };
@@ -947,6 +954,20 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     }
     writeLanding(opts.boardDir, record);
     report.records.push(record);
+    // Landing retires the task's failed verdict (AISDLC-1158).
+    if (d.state === 'merged' && f.taskId && landedAt !== undefined) {
+      const sha = landedSha ?? f.headSha;
+      try {
+        retireFailedVerdict(opts.boardDir, {
+          taskId: f.taskId,
+          landedAt,
+          ...(sha === undefined ? {} : { landedSha: sha }),
+          prNumber: f.prNumber,
+        });
+      } catch {
+        /* the sweep (cli-dispatch retire-landed) retries it */
+      }
+    }
     // A merged PR completes an iterate-needed task and frees its slot (AISDLC-1030).
     if (
       d.state === 'merged' &&
@@ -1253,8 +1274,14 @@ export function gatherFacts(
   const open = new Set(facts.map((x) => x.prNumber));
   for (const r of listLanding(boardDir)) {
     if (r.landed || r.closedUnlanded || open.has(r.pr)) continue;
-    const v = run('gh', ['pr', 'view', String(r.pr), '--json', 'state'], { cwd });
-    const state = v.status === 0 ? parse<{ state?: string }>(v.stdout)?.state : undefined;
+    const v = run('gh', ['pr', 'view', String(r.pr), '--json', 'state,mergeCommit'], {
+      cwd,
+    });
+    const viewed =
+      v.status === 0
+        ? parse<{ state?: string; mergeCommit?: { oid?: string } | null }>(v.stdout)
+        : undefined;
+    const state = viewed?.state;
     if (state === 'CLOSED') {
       // Closed without landing: one confirmation, then the record expires (AISDLC-959).
       writeLanding(boardDir, { ...r, closedUnlanded: clockNow().toISOString() });
@@ -1266,6 +1293,7 @@ export function gatherFacts(
         taskId: r.taskId ?? '',
         merged: true,
         ...(r.headSha ? { headSha: r.headSha } : {}),
+        ...(viewed?.mergeCommit?.oid ? { mergeSha: viewed.mergeCommit.oid } : {}),
       });
     }
   }
