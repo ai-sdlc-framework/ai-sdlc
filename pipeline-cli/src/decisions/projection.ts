@@ -30,6 +30,7 @@ import {
   type OverriddenEvent,
   type RoutingChangedEvent,
   type StageCCompletedEvent,
+  type SupersededEvent,
   type TimeboxExtendedEvent,
 } from './decision-record.js';
 
@@ -199,7 +200,26 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
     };
   }
 
+  if (event.type === 'superseded') {
+    // AISDLC-1162 — terminal: closed without choosing one of its own options.
+    if (current === null) return null;
+    if (['answered', 'superseded', 'archived'].includes(current.status.lifecycle)) {
+      return { ...current, decisionLog: [...current.decisionLog, event] };
+    }
+    const sup = event as SupersededEvent;
+    return {
+      ...current,
+      metadata: { ...current.metadata, updated: event.ts },
+      status: { ...current.status, lifecycle: 'superseded', supersededBy: sup.supersededBy },
+      decisionLog: [...current.decisionLog, event],
+    };
+  }
+
   if (event.type === 'operator-answered') {
+    // AISDLC-1162 — a superseded decision is immutable.
+    if (current !== null && current.status.lifecycle === 'superseded') {
+      return { ...current, decisionLog: [...current.decisionLog, event] };
+    }
     // RFC-0035 Phase 4 / AC#3 — fold operator answer into the Decision
     // state: lifecycle → 'answered', capture chosenOptionId + actor + ts.
     if (current === null) return null; // no base state to fold into

@@ -44,6 +44,7 @@ import {
   type DecisionPriority,
   type EscalationTier,
   type OperatorAnsweredEvent,
+  type SupersededEvent,
   type RoutingChangedEvent,
   type TimeboxExtendedEvent,
 } from './decision-record.js';
@@ -640,6 +641,30 @@ export function makeOperatorAnsweredEvent(input: AnswerDecisionInput): OperatorA
   if (input.rationale !== undefined) event.rationale = input.rationale;
   if (input.contextRef !== undefined) event.contextRef = input.contextRef;
   if (input.surfacingAgent !== undefined) event.surfacingAgent = input.surfacingAgent;
+  if (input.by !== undefined) event.by = input.by;
+  return event;
+}
+
+// ── Superseded event factory (AISDLC-1162) ───────────────────────────────────
+
+export interface SupersedeDecisionInput {
+  decisionId: string;
+  supersededBy: string;
+  reason: string;
+  by?: string;
+  now?: Date;
+}
+
+/** Build a well-formed `superseded` event without writing it. */
+export function makeSupersededEvent(input: SupersedeDecisionInput): SupersededEvent {
+  const event: SupersededEvent = {
+    eventVersion: 'v1',
+    type: 'superseded',
+    ts: (input.now ?? clockNow()).toISOString(),
+    decisionId: input.decisionId,
+    supersededBy: input.supersededBy,
+    reason: input.reason,
+  };
   if (input.by !== undefined) event.by = input.by;
   return event;
 }

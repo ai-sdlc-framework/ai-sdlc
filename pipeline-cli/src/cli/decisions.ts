@@ -54,6 +54,7 @@ import {
   makeAutoExpiredEvent,
   makeDecisionOpenedEvent,
   makeOperatorAnsweredEvent,
+  makeSupersededEvent,
   makeOverriddenEvent,
   makeRecommendationIssuedEvent,
   makeStageCAutoApplyAnsweredEvent,
@@ -209,7 +210,9 @@ function renderListTable(decisions: Decision[]): string {
   const rows = decisions.map((d) => {
     const base = [
       d.metadata.id,
-      d.status.lifecycle,
+      d.status.lifecycle === 'superseded' && d.status.supersededBy
+        ? `superseded -> ${d.status.supersededBy}`
+        : d.status.lifecycle,
       d.metadata.source,
       d.metadata.created.slice(0, 10),
     ];
@@ -2105,6 +2108,71 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           if (typeof argv['surfacing-agent'] === 'string' && argv['surfacing-agent']) {
             emitText(`  surfacing: ${argv['surfacing-agent']}`);
           }
+        }
+      },
+    )
+    .command(
+      'supersede <id>',
+      'AISDLC-1162 — close a decision overruled by a later one without recording any of its own options as chosen. Appends a `superseded` event. Refuses an answered/archived/superseded target, an unknown --by, and --by equal to <id>.',
+      (y) =>
+        y
+          .positional('id', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Decision id to close (DEC-NNNN).',
+          })
+          .option('by', {
+            type: 'string',
+            demandOption: true,
+            describe: 'The decision that overruled it (DEC-NNNN).',
+          })
+          .option('reason', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Why the decision is superseded (audited).',
+          })
+          .option('actor', {
+            type: 'string',
+            describe: 'Actor identifier recorded on the event.',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'text'] as const,
+            default: 'text' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const id = String(argv.id);
+        const by = String(argv.by);
+        const reason = String(argv.reason ?? '');
+        if (!/^DEC-\d{4,}$/.test(id)) fail(`invalid decision id: ${id} — expected DEC-NNNN`);
+        if (!/^DEC-\d{4,}$/.test(by)) fail(`invalid --by decision id: ${by} — expected DEC-NNNN`);
+        if (reason.trim().length === 0) fail('--reason must be non-empty');
+        if (!isDecisionCatalogEnabled()) {
+          fail(
+            decisionCatalogDisabledMessage() +
+              '\n[cli-decisions] supersede: refusing to mutate the event log while the flag is off.',
+          );
+        }
+        if (id === by) fail(`${id} cannot supersede itself (--by equals the target)`);
+        const decision = projectDecision(id, { workDir });
+        if (decision === null) fail(`decision not found: ${id}`);
+        const lc = decision!.status.lifecycle;
+        if (lc === 'answered' || lc === 'archived' || lc === 'superseded') {
+          fail(`${id} is already ${lc} — refusing to supersede.`);
+        }
+        if (projectDecision(by, { workDir }) === null) fail(`--by decision not found: ${by}`);
+        const evt = makeSupersededEvent({
+          decisionId: id,
+          supersededBy: by,
+          reason,
+          ...(typeof argv.actor === 'string' ? { by: String(argv.actor) } : {}),
+        });
+        appendDecisionEvent(evt, { workDir });
+        if (String(argv.format) === 'json') {
+          emit({ ok: true, decisionId: id, supersededBy: by, reason });
+        } else {
+          emitText(`decision superseded: ${id} -> ${by}`);
         }
       },
     )
