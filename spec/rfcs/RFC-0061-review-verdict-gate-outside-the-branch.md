@@ -1,8 +1,8 @@
 ---
 id: RFC-0061
 title: Review verdict as a head-bound gate outside the branch (successor to RFC-0042)
-status: Draft
-lifecycle: Draft
+status: Under Review
+lifecycle: Ready for Review
 author: 'Dominique Legault'
 created: 2026-11-03
 updated: 2026-11-03
@@ -10,21 +10,21 @@ targetSpecVersion: v1alpha1
 requires: []
 assumes: [RFC-0042, RFC-0043, RFC-0046, RFC-0052, RFC-0054]
 amends: [RFC-0042]
-requiresDocs: []
+requiresDocs: [operator-runbook]
 ---
 
 # RFC-0061: Review verdict as a head-bound gate outside the branch (successor to RFC-0042)
 
-**Status:** Draft
-**Lifecycle:** Draft
+**Status:** Under Review (v0.2). All eight Open Questions resolved with the operator on 2026-11-03: error-resistant trust claim (OQ-8); verdict ref pushed atomically by Step 11, CI posts the gate result (OQ-1); clean-replay carry-forward evaluated by the gate (OQ-2); hard v6 cut with names kept (OQ-3); leaves in the verdict ref, derived catch report (OQ-4); merge-queue rule decided, built later (OQ-5); tier derived once at Step 8 (OQ-6); untrusted PRs through a split CI writer (OQ-7).
+**Lifecycle:** Ready for Review
 **Author:** Dominique Legault
 **Created:** 2026-11-03
 **Updated:** 2026-11-03
 **Target Spec Version:** v1alpha1
 
-> Draft. No design is decided here. The Open Questions below are resolved only with the
-> operator through the decision rubric, one at a time. No implementation task is filed
-> until the RFC is Signed Off. When this RFC reaches Implemented, RFC-0042's lifecycle
+> Ready for Review. The eight Open Questions were resolved with the operator through the
+> decision rubric on 2026-11-03, one at a time; each carries a Resolution block below. No
+> implementation task is filed until the RFC is Signed Off. When this RFC reaches Implemented, RFC-0042's lifecycle
 > becomes Superseded and RFC-0043, RFC-0046 and RFC-0052 are amended where they assume
 > the v6 substrate (see "Dependents").
 
@@ -218,7 +218,9 @@ measure the gate never had.
 
 ### Schema Changes
 
-Sketch of the verdict record, subject to OQ-1 and OQ-4:
+The verdict record, as resolved by OQ-1, OQ-4, OQ-6 and OQ-7. It is stored as `record.json` in the
+tree of `refs/ai-sdlc/verdicts/<headSha>`, beside `leaves.jsonl`. `independenceTier` uses the
+shipped RFC-0046 values `none | attested | isolated`:
 
 ```json
 {
@@ -236,13 +238,13 @@ Sketch of the verdict record, subject to OQ-1 and OQ-4:
       "name": "correctness-reviewer",
       "harness": "claude",
       "model": "…",
-      "independenceTier": "same-session",
+      "independenceTier": "attested",
       "verdict": "approved"
     }
   ],
   "coverage": { "policy": "review-policy@sha", "required": ["…"], "satisfied": true },
-  "evidence": { "leaves": "…" },
-  "issuedBy": { "principal": "…", "at": "2026-11-03T00:00:00Z" },
+  "evidence": { "leaves": "leaves.jsonl", "digest": "sha256:…" },
+  "issuedBy": { "principal": "pipeline-step-11 | ci-clean-room", "at": "2026-11-03T00:00:00Z" },
   "carriedForwardFrom": null
 }
 ```
@@ -352,7 +354,7 @@ No task is filed until Signed Off. Expected tasks after sign-off, by phase:
       `attestation-reference.md`, `review-attestations.md` rule, CLAUDE.md schema line.
 - [ ] Phase 4: adopter path per OQ-3 (`consumer-verify-attestation.yml`,
       `cli-attestation verify`, release note).
-- [ ] `requiresDocs` is empty while Draft; set `operator-runbook` at Ready for Review.
+- [x] `requiresDocs` set to `operator-runbook` at Ready for Review (2026-11-03).
 
 ## Dependents
 
@@ -369,8 +371,9 @@ No task is filed until Signed Off. Expected tasks after sign-off, by phase:
 
 ## Open Questions
 
-The operator walks these one at a time through the decision rubric, never batched. All
-eight are unresolved. Options are listed to frame the rubric, not to pre-empt it.
+The operator walked these one at a time through the decision rubric on 2026-11-03, never
+batched. All eight are resolved; the original question text is kept above each Resolution.
+OQ-8 was walked first because it bounds OQ-1 and OQ-4.
 
 ### OQ-1: Where the verdict record lives and which principal issues it
 
@@ -385,6 +388,26 @@ GitHub artifact attestation with a custom predicate signed by a workflow's Sigst
 identity (strongest provenance, GitHub-only, private repos get no transparency log).
 Hybrids are possible (a status for the gate plus c for evidence).
 
+**Resolution (2026-11-03, full rubric):** **Verdict ref plus CI status.** Step 11 pushes the
+task branch and `refs/ai-sdlc/verdicts/<headSha>` in one `git push --atomic`; the ref's tree holds
+`record.json` (and the leaves, OQ-4a). The CI gate reads the ref, checks subject and coverage, and
+posts the result into `ai-sdlc/pr-ready` with the workflow token it already uses. Industry research:
+SLSA's source tool and git-appraise keep review data in refs or notes outside the branch; gittuf uses
+`refs/gittuf/attestations`; GitHub check runs can be created only by a GitHub App, and a commit status
+carries a description of at most 140 characters. **Substantive gaps surfaced:** the repository has no
+GitHub App and every status today is posted by CI with `github.token`
+(`attestation-post.yml`); the local pipeline's user token can post statuses but never check runs, so
+option (a) "check run posted by the pipeline" was not available as written; a status alone cannot hold
+the record body. **Refinement:** the OQ-8 fence becomes a concrete rule: a push to
+`refs/ai-sdlc/verdicts/*` is refused unless it comes from the Step 11 ship step (or the trusted CI
+writer of OQ-7); the namespace needs a pruning policy (refs of heads on closed or merged PRs) decided
+in the Phase 1 task. **Counter-argument:** "A custom ref namespace is new machinery; one status from
+Step 11 is one API call." Rebuttal: the digest in a status would point at nothing, because the body
+must live somewhere for the catch report and for audit, and a status lands after the `pull_request`
+event, so the gate would need a second trigger and a race window; the atomic push delivers the record
+with the head. **Selected over a local status only, a PR comment or asset, and a GitHub App now**
+because it keeps the full record, readable without GitHub, with no new principal, as OQ-8 allows.
+
 ### OQ-2: Carry-forward after a rebase
 
 When the head changes, does the pipeline (a) always review again; (b) re-issue the record
@@ -395,6 +418,26 @@ deterministic stage of the staged review (RFC-0052) confirms nothing changed? Wh
 the re-issue (the executor's ship step, the dispatch re-enter path, or the gate itself)
 is part of this question.
 
+**Resolution (2026-11-03, full rubric):** **Clean-replay rule, evaluated by the gate.** An
+earlier verdict for the same PR carries forward to a new head only when (i) the new head's tree equals
+the reviewed head's tree (message-only change), or (ii) `git merge-tree --write-tree
+--merge-base=<reviewed baseSha> <new baseSha> <reviewed headSha>` is conflict-free and its tree equals
+the new head's tree. Anything else needs a fresh review. Industry research: Gerrit's `copyCondition`
+copies approvals only for `TRIVIAL_REBASE` and `NO_CODE_CHANGE`; gittuf binds approvals to the merge
+tree; git documents `patch-id` as only "reasonably unique". **Substantive gaps surfaced:**
+`governance/rebase-rearm.ts` and `next-step/resume-decision.ts` decide "rebase only" by patch-id
+equality alone and never compare trees; this rule replaces that comparison (replacement semantics:
+the patch-id path is deleted, not kept beside the new rule). **Refinement:** one pipeline-cli function
+implements the rule; the CI gate calls it, finding earlier records for the PR among the verdict refs,
+and writes `carriedForwardFrom` into its result; resume and rebase re-arm call the same function
+locally to decide whether review is needed. No rebasing path writes a verdict, so Step 11 stays the
+only local writer. Requires git 2.40 or later. **Counter-argument:** "A clean replay is not
+semantically safe; main may have changed code the PR calls." Rebuttal: re-review would show reviewers
+the same diff, since their remit is the change; interaction breakage is what CI tests on the new head
+catch, the same risk Gerrit's trivial-rebase rule accepts. **Selected over always re-review,
+byte-identical diff and a staged-review confirmation stage** because those spend reviewer cost or add
+writers outside Step 11 without adding coverage the tests do not already give.
+
 ### OQ-3: Adopter migration and the v6 cut
 
 (a) Hard cut, per DEC-0284's precedent (v6 refused from the cutover release, release note
@@ -404,6 +447,24 @@ point with the same exit codes and the same `ai-sdlc/attestation` context name, 
 the window. Whether the `pipeline-cli-version` input and the exact-version pins in
 `adopter-attestation-verify-ci.md` constrain the choice belongs here.
 
+**Resolution (2026-11-03, full rubric):** **Hard cut, names kept.** v6 is refused as a
+signed or verified format from the cutover release (DEC-0284 precedent). `cli-attestation verify`, its
+exit codes, the `consumer-verify-attestation.yml` workflow and the `ai-sdlc/attestation` status context
+keep their names and check the verdict record instead. Industry research: Kubernetes and Stripe run
+9-12 month deprecation windows because they have real external consumers; GitHub branch protection
+names required checks by context string, so a renamed context is never posted and blocks every PR.
+**Substantive gaps surfaced:** the consumer workflow pins an exact `pipeline-cli-version` (default
+0.31.0) and the adopter doc tells adopters to pin both the workflow SHA and that version, so a pinned
+adopter moves producer and verifier together; no external adopter consuming attestation was found.
+**Refinement:** the release note and `adopter-attestation-verify-ci.md` state that the names are kept
+for branch-protection compatibility and now mean the verdict check. **Counter-argument:** "No adopter
+exists; delete the adopter path rather than keep a misleading name." Rebuttal: absence of evidence is
+not evidence of absence for a published, documented workflow; keeping the names costs one doc
+paragraph, and the path can still be deleted after a release passes with no consumer. **Selected over
+a renamed cut, a dual-read window and deleting the adopter path** because the version pin already
+protects adopters, a window would keep alive the code this RFC deletes, and a rename silently breaks
+required-check rules.
+
 ### OQ-4: What happens to the transcript leaves and the audit trail
 
 The leaves are the only evidence that a reviewer ran. (a) Drop them: the record's
@@ -412,12 +473,54 @@ record by digest (notes ref, release asset, or check-run output); (c) keep them 
 branch as today but stop signing them (keeps P1's growth and chore commits). Where the
 catch ledger lives is decided with this question.
 
+**Resolution (2026-11-03, full rubric; asked as two sub-questions):**
+
+- **OQ-4a, leaves: stored in the verdict ref.** The leaves are kept as plain JSONL (`leaves.jsonl`) in
+  the tree of the verdict ref beside `record.json`, referenced from the record by digest. The Merkle
+  construction and the signing code are still deleted. Industry research: in-toto and SLSA keep
+  evidence as separate digest-referenced statements outside the source tree; git-appraise keeps review
+  data in refs. **Gap surfaced:** about 1,063 leaf files and 1,271 envelopes are committed today, and
+  outside the signer and verifier only sizing and housekeeping code reads them
+  (`attestation-growth.ts`, doctor gitignore checks, `ship.ts`, `merge-if-eligible.ts`). Under OQ-8 the
+  gate no longer relies on them; they become investigation evidence. **Counter-argument:** "Nobody
+  audited a leaf in six months; drop them." Rebuttal: every catch or false positive in the new ledger
+  needs explaining (DEC-0286 was diagnosed from leaf content), and storing them in a ref OQ-1 already
+  pushes costs one file. **Selected over dropping, Actions artifacts (90-day expiry, GitHub-only) and
+  keeping them in the branch (P1).**
+- **OQ-4b, catch ledger: derived report.** The gate writes a reason code into its status description
+  (`no-record`, `subject-mismatch`, `coverage-short`, `replay-dirty`, or `tier-short`), and a report
+  command compiles catches (verdict check failed while every other `ai-sdlc/pr-ready` input passed)
+  from GitHub status history on demand. Industry research: delivery metrics tooling such as DORA
+  dashboards derives from event history rather than a second log. **Gap surfaced:** no ledger of gate
+  outcomes exists today; `.ai-sdlc/reviews/<task>.jsonl` measures reviewers, not the gate, and is out
+  of this RFC's scope. **Counter-argument:** "Statuses on force-pushed-away heads can be
+  garbage-collected." Rebuttal: the report can snapshot its output on demand if that ever matters, and
+  catches on never-merged heads are the least important to keep. **Selected over a CI-appended ledger
+  ref (needs write permission and append retries) and a periodic ledger PR (churn).**
+
 ### OQ-5: Merge queue and the merge-group SHA
 
 If the repository adopts a GitHub merge queue (RFC-0054 OQs touch this), the queue tests a
 temporary SHA that no reviewer saw. Does the verdict check (a) run on `merge_group` and
 accept a record whose `treeSha` delta matches the queued head; (b) require re-issue for
 the queue head; or (c) declare the merge queue out of scope until adopted?
+
+**Resolution (2026-11-03, full rubric):** **Rule decided now, built when the queue
+returns.** The merge queue stays out of scope while it is disabled. The rule is fixed now: on
+`merge_group`, the gate applies the OQ-2 clean-replay check of the PR's reviewed diff against the
+queue base, with no re-issue. Industry research: GitHub's queue runs required checks on a temporary
+branch of the PR stacked on the queue base; Gerrit's submit-time rebase applies the same trivial-rebase
+rule. **Substantive gaps surfaced:** the queue is disabled (`merge_group` removed from
+`ai-sdlc-gate.yml` under AISDLC-400, restore note kept), and `merge-without-queue.md` says dropping the
+queue was safe only because v6 envelopes were base-independent; that reasoning must be restated for
+the verdict record. **Refinement:** the RFC records that a direct squash merge of a head that is
+behind `main` is already covered: GitHub's squash is a three-way replay of the reviewed diff onto
+current `main`, refused on conflict, which is what OQ-2 accepts; `merge-without-queue.md` is updated
+with that reasoning. **Counter-argument:** "The queue may become attractive soon; deferring builds a
+later rush." Rebuttal: the deferred work is wiring an existing function to one more event type; the
+design, which is what would be rushed, is decided here. **Selected over building now (untested code
+for a disabled path, which the dark-code gate exists to prevent), re-reviewing the queue head (rules
+the queue out) and no rule.**
 
 ### OQ-6: Independence tier evidence (RFC-0046)
 
@@ -427,12 +530,49 @@ derived by the checker from `issuedBy` and the reviewer harness (for example, a 
 or workflow identity implies at least `separate-principal`); or (c) RFC-0046 is amended to
 define tiers over the record's fields.
 
+**Resolution (2026-11-03, full rubric):** **Derived once at Step 8, copied unchanged.**
+The shipped RFC-0046 derivation runs at Step 8 and its result is written to `reviewers[].independenceTier`;
+the checker reads the field and enforces the required tier without recomputing it. `isolated` is set
+only on records the CI clean-room path issues (OQ-7). Industry research: SLSA treats who reviewed as a
+platform-asserted property; in-toto verifiers check signatures over claims rather than re-deriving
+them; recomputation helps only when the evidence comes from a different principal. **Substantive gaps
+surfaced:** the v0.1 sketch used the values `same-session` and `separate-principal`; the shipped enum is
+`none | attested | isolated` (`attestation/merkle.ts`), with `attested` derived from a
+`SubagentStart` marker, nonce and allowlisted agent type (`attestation/verdict-class.ts`) and
+`isolated` credited only to the CI-only key. The sketch is corrected to the shipped values.
+**Refinement:** the RFC states that the tier is a pipeline claim, consistent with OQ-8; RFC-0046 is
+amended for the carrier only, the derivation is unchanged, and the consumer workflow's
+`required-independence-tier` input keeps working. **Counter-argument:** "This is weaker than v6, where
+a signed leaf carried the tier." Rebuttal: under OQ-8 forgery by a token holder is outside the trust
+claim, and the leaves a checker would recompute from are pushed by the same token holder, so
+recomputation adds a second derivation site (P4) without adding a principal. **Selected over checker
+inference from `issuedBy`, checker recomputation and dropping tiers.**
+
 ### OQ-7: Untrusted PRs (RFC-0043)
 
 The clean-room signer builds a v6 envelope for untrusted PRs. (a) It builds the verdict
 record instead, issued by the workflow identity, which naturally satisfies OQ-1 (b) or (d)
 for that path only; (b) untrusted PRs keep a separate check that this RFC does not touch;
 (c) one record format for both paths, with `issuedBy` distinguishing them.
+
+**Resolution (2026-11-03, full rubric):** **One format, split writer.** The clean-room job
+emits the verdict record as an Actions artifact. A separate trusted `workflow_run` workflow, which never
+checks out or reads PR content, validates the record's schema, checks that `subject.headSha` is the PR
+head and that the review jobs concluded, then pushes `refs/ai-sdlc/verdicts/<headSha>` with
+`issuedBy.principal: ci-clean-room` and tier `isolated`. The checker is the same one used for trusted
+PRs. Industry research: GitHub's security guidance on "pwn requests" says never to combine a
+write-scoped token with untrusted PR content in one job, and to act on an artifact in a separate
+`workflow_run`; SLSA separates the build touching untrusted input from the provenance signer.
+**Substantive gaps surfaced:** the clean-room job signs v6 with a key written from the stored secret
+`AISDLC_SIGNING_KEY_CONTENT` and uses no OIDC; pushing a ref needs `contents: write`, which beside
+prompt-injectable AI reviewers would let an injected reviewer push to any unprotected branch.
+**Refinement:** the trusted writer is the second sanctioned writer of the verdict namespace (the OQ-1
+fence names it); it repurposes `attestation-post.yml`'s slot rather than adding a workflow; the signing
+secret is deleted in Phase 3. **Counter-argument:** "The extra hop adds latency and a workflow; let the
+clean-room job post its own status." Rebuttal: that gives the checker two verdict paths, the P4
+failure this RFC closes, and a poisoned artifact can at worst claim approval for the PR it reviewed,
+no more than a forged status. **Selected over the clean-room job pushing the ref itself, a direct
+status with no record, and leaving untrusted PRs on v6 (contradicts OQ-3).**
 
 ### OQ-8: What the gate must prove, as a written threat model
 
@@ -442,6 +582,48 @@ reviewer step ran; that it ran against this head; that the reviewer was a differ
 principal from the author; that the verdict was not edited after the fact; and that the
 record can be verified without GitHub. The answer feeds OQ-1 and OQ-4 and sets the catch
 ledger's definition of a catch.
+
+**Resolution (2026-11-03, full rubric):** **Error-resistant, not forgery-resistant.** The gate
+guarantees that (1) the pipeline's reviewer step ran and (2) it ran against this exact head (or a head
+OQ-2 accepts as a clean replay). (4) "Not edited after the fact" holds as an audit trail: a re-posted
+status or re-pushed ref leaves history with its creator. The gate does **not** guarantee (3) that the
+reviewer was a different principal from the author, nor (5) verification without GitHub, beyond the
+record being readable from git. The threat it defends against is a goal-seeking or mistaken agent,
+the 2026-05-20 shape; a deliberately adversarial agent holding the operator token is outside the claim.
+Industry research: SLSA's Source Track has provenance issued by the platform and two-party review by
+trusted persons at its top level; GitHub and Gerrit get independence from a server-enforced identity;
+gittuf ignores approvals signed by the change's own signer. **Substantive gaps surfaced:** the only
+recorded incident (2026-05-20) had no check that reviewers ran at all; the hook signed whatever files
+were on disk. No adversarial agent act is on record, and AISDLC-568 already concedes v6 proves only
+that a transcript exists. **Refinement:** only the pipeline writes a verdict (OQ-1 and OQ-7 name the
+two writers); a hook refuses agent sessions any push to `refs/ai-sdlc/verdicts/*` or any status post
+with the gate's context; **upgrade trigger:** one forged or out-of-pipeline verdict found by the catch
+report (OQ-4b), or a recorded decision granting agents broader autonomy, reopens this question for a
+separate-principal issuer (a GitHub App or a CI workflow identity). **Counter-argument:** "A hook fence
+is the same thin control the 2026-05-20 agent got past; without a separate principal this rebuilds
+v6's weakness." Rebuttal: that agent got past no check, because none existed; here the verdict is a
+product of Step 8, not files an agent writes, and forging one means deliberately calling a refused
+path, which the hook denies and the report would show. **Selected over forgery-resistant, full
+SLSA-style and bare minimum** because the separate principal is a permanent infrastructure cost
+against a threat with no recorded instance, and the trigger escalates on evidence.
+
+## Sign-Off
+
+Eligible: all eight Open Questions resolved on 2026-11-03.
+
+| Role | Owner | Status | Date |
+|---|---|---|---|
+| Engineering | Dominique Legault | pending | |
+| Operator | Dominique Legault | pending | |
+| Product | | pending | |
+| Design | | pending | |
+
+## Revision History
+
+| Version | Date | Change |
+|---|---|---|
+| v0.1 | 2026-11-03 | Draft from the 2026-11-03 attestation design review: four v6 design properties, goals against outcomes, proposal shape, eight unresolved OQs. |
+| v0.2 | 2026-11-03 | All eight OQs resolved with the operator through the decision rubric; Draft to Ready for Review; `requiresDocs: [operator-runbook]`. OQ-8: error-resistant trust claim with a hook fence and an upgrade trigger. OQ-1: `refs/ai-sdlc/verdicts/<headSha>` pushed atomically by Step 11, CI posts the gate result; no GitHub App. OQ-2: clean-replay tree rule in one function, run by the gate; patch-id comparison replaced. OQ-3: hard v6 cut, `cli-attestation verify` and `ai-sdlc/attestation` names kept. OQ-4: leaves in the verdict ref tree; catch ledger derived from status reason codes. OQ-5: merge-queue rule decided, built when the queue returns; direct squash of a behind head covered. OQ-6: tier derived once at Step 8 with shipped values `none / attested / isolated` (sketch corrected). OQ-7: untrusted PRs through an artifact plus a trusted `workflow_run` writer; signing secret deleted. |
 
 ## References
 
