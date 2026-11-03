@@ -33,7 +33,7 @@ import {
   readDecisionEvents,
   resolveEventsDir,
 } from '../decisions/event-log.js';
-import { paceFiling, recordFiling } from './file-pacing.js';
+import { defaultPacingDeps, paceFiling, recordFiling, type PacingDeps } from './file-pacing.js';
 import { isProtectedBranch } from '../hierarchy/lease-policy.js';
 import { writeAutoBrief } from '../hierarchy/auto-brief.js';
 import type { DecisionEvent } from '../decisions/decision-record.js';
@@ -413,6 +413,36 @@ export function assertIdFreeOnMain(
   }
 }
 
+/**
+ * AISDLC-1160: runs backlog-drift against the task file being filed. A source already at its
+ * place in the parent checkout is checked there; any other source (a scratchpad) is copied into
+ * a throwaway worktree of origin/main under `.worktrees/` (so node_modules still resolves) and
+ * checked there, since the parent does not contain it and drift would pass with no report.
+ */
+function driftWithSource(
+  deps: FileDeps,
+  repo: string,
+  id: string,
+  abs: string,
+  rel: string,
+): string | null {
+  if (abs === join(repo, rel)) return deps.drift(id, repo);
+  const wt = join(repo, '.worktrees', `drift-${id.toLowerCase()}`);
+  deps.exec('git', ['worktree', 'remove', '--force', wt], repo);
+  const add = deps.exec('git', ['worktree', 'add', '--detach', wt, 'origin/main'], repo);
+  if (add.status !== 0) {
+    throw new Error(`git worktree add (drift check) failed: ${add.stderr.trim()}`);
+  }
+  try {
+    const dest = join(wt, rel);
+    mkdirSync(dirname(dest), { recursive: true });
+    copyFileSync(abs, dest);
+    return deps.drift(id, wt);
+  } finally {
+    deps.exec('git', ['worktree', 'remove', '--force', wt], repo);
+  }
+}
+
 /** Runs every filing check (ASCII, path, duplicate id on main, drift, DoR); creates nothing. */
 export function validateTaskFile(
   repo: string,
@@ -452,7 +482,7 @@ export function validateTaskFile(
   } else {
     assertIdFreeOnMain(deps, repo, rel, id, fm ? [fm[1]] : []);
   }
-  const drift = deps.drift(id, repo);
+  const drift = driftWithSource(deps, repo, id, abs, rel);
   if (drift) throw new FileRefusal(drift);
   const dor = deps.dor(abs, repo);
   if (dor) throw new FileRefusal(dor);
@@ -714,7 +744,7 @@ export function fileRebase(
     if (sourceId.toLowerCase() !== slug) {
       throw new FileRefusal(`source task id ${sourceId} does not match ${id}`);
     }
-    const drift = deps.drift(sourceId, repo);
+    const drift = driftWithSource(deps, repo, sourceId, abs, `backlog/tasks/${basename(abs)}`);
     if (drift) throw new FileRefusal(drift);
     const dor = deps.dor(abs, repo);
     if (dor) throw new FileRefusal(dor);
@@ -826,7 +856,35 @@ export function fileRebase(
 
 // -- CLI --------------------------------------------------------------------------
 
-export async function runFileCli(argv: string[] = hideBin(process.argv)): Promise<number> {
+/** Quotes one argument for a POSIX shell; plain words pass through unchanged. */
+function shellQuote(arg: string): string {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * AISDLC-1160: the replay line for a queued filing, built from the argv the CLI received
+ * (pacing flags removed) so every flag the operator passed is carried.
+ */
+export function replayCommand(argv: string[]): string {
+  const kept: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const t = argv[i];
+    if (/^--(no-)?queue(=.*)?$/.test(t)) continue;
+    if (/^--spacing-?[mM]inutes=/.test(t)) continue;
+    if (/^--spacing-?[mM]inutes$/.test(t)) {
+      i++;
+      continue;
+    }
+    kept.push(t);
+  }
+  return ['cli-file', ...kept].map(shellQuote).join(' ');
+}
+
+export async function runFileCli(
+  argv: string[] = hideBin(process.argv),
+  deps: FileDeps = defaultDeps,
+  pacingDeps: PacingDeps = defaultPacingDeps,
+): Promise<number> {
   const repo = process.cwd();
   let code = 0;
   const report = (r: { branch: string; prUrl: string | null; armed?: boolean }) =>
@@ -844,15 +902,19 @@ export async function runFileCli(argv: string[] = hideBin(process.argv)): Promis
     }
   };
   /** AISDLC-986: pace a `--pr` filing; false when it was queued instead. */
-  const paced = async (a: Record<string, unknown>, id: string, cmd: string): Promise<boolean> => {
+  const paced = async (a: Record<string, unknown>, id: string): Promise<boolean> => {
     if (!a.pr) return true;
     try {
-      const outcome = await paceFiling(repo, {
-        id,
-        command: cmd,
-        spacingMinutes: a.spacingMinutes as number | undefined,
-        queue: a.queue as boolean,
-      });
+      const outcome = await paceFiling(
+        repo,
+        {
+          id,
+          command: replayCommand(argv),
+          spacingMinutes: a.spacingMinutes as number | undefined,
+          queue: a.queue as boolean,
+        },
+        pacingDeps,
+      );
       return outcome === 'proceed';
     } catch (err) {
       process.stderr.write(`[cli-file] error: ${(err as Error).message}\n`);
@@ -897,14 +959,19 @@ export async function runFileCli(argv: string[] = hideBin(process.argv)): Promis
             describe: 'write a one-task dispatch brief with --pr; --no-brief skips it',
           }),
       async (a) => {
-        if (!(await paced(a, basename(a.path as string), `cli-file task ${a.path} --pr`))) return;
+        if (!(await paced(a, basename(a.path as string)))) return;
         const r = guard(() =>
-          fileTask(repo, a.path as string, {
-            pr: a.pr as boolean,
-            brief: a.brief as boolean,
-            update: a.update as boolean,
-            ...(a.fixesPr !== undefined ? { fixesPr: a.fixesPr as number } : {}),
-          }),
+          fileTask(
+            repo,
+            a.path as string,
+            {
+              pr: a.pr as boolean,
+              brief: a.brief as boolean,
+              update: a.update as boolean,
+              ...(a.fixesPr !== undefined ? { fixesPr: a.fixesPr as number } : {}),
+            },
+            deps,
+          ),
         );
         if (r) report(r);
       },
@@ -922,17 +989,19 @@ export async function runFileCli(argv: string[] = hideBin(process.argv)): Promis
             .option('pr', { type: 'boolean', default: false }),
         ),
       async (a) => {
-        if (
-          !(await paced(a, a.id as string, `cli-file decision ${a.id} --task-id ${a.taskId} --pr`))
-        )
-          return;
+        if (!(await paced(a, a.id as string))) return;
         const r = guard(() =>
-          fileDecision(repo, a.id as string, {
-            taskId: a.taskId as string,
-            answer: a.answer as string | undefined,
-            rationale: a.rationale as string | undefined,
-            pr: a.pr as boolean,
-          }),
+          fileDecision(
+            repo,
+            a.id as string,
+            {
+              taskId: a.taskId as string,
+              answer: a.answer as string | undefined,
+              rationale: a.rationale as string | undefined,
+              pr: a.pr as boolean,
+            },
+            deps,
+          ),
         );
         if (r) report(r);
       },
@@ -951,12 +1020,17 @@ export async function runFileCli(argv: string[] = hideBin(process.argv)): Promis
             .option('pr', { type: 'boolean', default: false }),
         ),
       async (a) => {
-        if (!(await paced(a, a.id as string, `cli-file rebase ${a.id} --pr`))) return;
+        if (!(await paced(a, a.id as string))) return;
         const r = guard(() =>
-          fileRebase(repo, a.id as string, {
-            pr: a.pr as boolean,
-            source: a.source as string | undefined,
-          }),
+          fileRebase(
+            repo,
+            a.id as string,
+            {
+              pr: a.pr as boolean,
+              source: a.source as string | undefined,
+            },
+            deps,
+          ),
         );
         if (r) report(r);
       },
