@@ -52,7 +52,7 @@ describe('webhook health tick (AISDLC-1157)', () => {
     ];
     let i = 0;
     const filed: { summary: string; body: string; since: string }[] = [];
-    const closed: { id: string; note: string }[] = [];
+    const closed: { id: string | undefined; note: string }[] = [];
     const notices: string[] = [];
     const deps = {
       boardDir: dir,
@@ -62,7 +62,7 @@ describe('webhook health tick (AISDLC-1157)', () => {
         filed.push(input);
         return 'DEC-0900';
       },
-      closeEpisode: (id: string, note: string) => closed.push({ id, note }),
+      closeEpisode: (id: string | undefined, note: string) => closed.push({ id, note }),
       notify: (m: string) => notices.push(m),
     };
     const reports = script.map(() => runWebhookHealthTick(deps).report?.text);
