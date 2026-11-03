@@ -725,3 +725,23 @@ No answer yet.
     expect(result.rfcChecks[0]?.dependencyKind).toBe('reference');
   });
 });
+
+describe('findUnresolvedOqs prose handling (AISDLC-1175)', () => {
+  const head = '# RFC\n\n## 13. Open Questions\n\n';
+  const resolved = (n: number) => `### OQ-${n}: Title\nQuestion?\n\n**Resolution:** yes\n\n`;
+  it('ignores a preamble line starting with an OQ id', () => {
+    const rfc =
+      head +
+      'OQ-8 was walked first because it bounds OQ-1 and OQ-4.\n\n' +
+      [1, 2, 3, 4, 5, 6, 7, 8].map(resolved).join('') +
+      '## 14. Next\n';
+    expect(findUnresolvedOqs(rfc)).toEqual([]);
+  });
+  it('still reports an unresolved heading', () => {
+    expect(findUnresolvedOqs(head + '### OQ-1: Title\nNo answer.\n')).toEqual(['### OQ-1: Title']);
+  });
+  it('keeps a prose OQ line inside the preceding block body', () => {
+    const rfc = head + '### OQ-2: Title\nQ?\nOQ-3 depends on this.\n**Resolution:** done\n';
+    expect(findUnresolvedOqs(rfc)).toEqual([]);
+  });
+});

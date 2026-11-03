@@ -328,6 +328,8 @@ describe('cli-file', () => {
     drift = null;
     dor = 'DoR: not ready';
     expect(() => fileTask(repo, p, { pr: true }, deps)).toThrow(FileRefusal);
+    dor = 'DoR: DoR upstream-OQ gate blocked: RFC-0061: 1 unresolved OQ(s): ### OQ-2';
+    expect(() => fileTask(repo, p, { pr: true }, deps)).toThrow(/RFC-0061: 1 unresolved OQ/);
     expect(sh(remote, 'branch', '--list')).not.toContain('file-aisdlc-900');
   });
 

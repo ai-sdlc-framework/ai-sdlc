@@ -333,6 +333,18 @@ const OQ_SECTION_RE = /^#{2,3}\s+(?:\d+\.\s+)?Open Questions\s*$/im;
 const OQ_QUESTION_RE = /^(?:\*\*)?(?:OQ-\d+|Q\d+|\d+\.)[\s\-—:*]+(.+?)(?:\*\*)?$/im;
 
 /**
+ * AISDLC-1175: a line starts a question block only in heading form: a
+ * Markdown heading, an ordered-list item, or a bold-wrapped line. A plain
+ * prose line that merely starts with `OQ-n` is body text (or preamble).
+ */
+function isQuestionHeading(line: string): boolean {
+  const heading = line.match(/^#{1,6}\s+(.*)$/);
+  if (heading) return OQ_QUESTION_RE.test(heading[1] ?? '');
+  if (!OQ_QUESTION_RE.test(line)) return false;
+  return /^(?:\d+\.\s|\*\*)/.test(line);
+}
+
+/**
  * Resolution marker patterns. An OQ is considered resolved when its
  * associated section contains one of these patterns on a separate line.
  */
@@ -360,7 +372,10 @@ export function findUnresolvedOqs(rfcContent: string): string[] {
 
   // Grab everything after the OQ heading until the next ## heading.
   const after = rfcContent.slice(sectionMatch.index + sectionMatch[0].length);
-  const nextHeadingMatch = after.match(/^#{2,3}\s/m);
+  // The section ends at the next heading of the same or a shallower level, so
+  // `### OQ-n` sub-headings stay inside a `## Open Questions` section.
+  const level = Math.min(3, sectionMatch[0].match(/^#+/)?.[0].length ?? 2);
+  const nextHeadingMatch = after.match(new RegExp(`^#{1,${level}}\\s`, 'm'));
   const oqSectionText = nextHeadingMatch ? after.slice(0, nextHeadingMatch.index) : after;
 
   // Split the OQ section into per-question blocks by finding question
@@ -370,8 +385,7 @@ export function findUnresolvedOqs(rfcContent: string): string[] {
   let current: { heading: string; lines: string[] } | null = null;
 
   for (const line of lines) {
-    const qMatch = line.match(OQ_QUESTION_RE);
-    if (qMatch) {
+    if (isQuestionHeading(line)) {
       if (current) blocks.push(current);
       current = { heading: line.trim(), lines: [] };
     } else if (current) {
