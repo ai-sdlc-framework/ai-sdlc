@@ -48,6 +48,7 @@ import { decideResumeReview } from './resume-decision.js';
 import { bootstrapPromptFor, prepareReview, type ReviewPrepareResult } from './review-prepare.js';
 import {
   aggregateRound,
+  attachVerdictRecordDraft,
   finalizeReview,
   parseReviewReports,
   type ReviewFinalizeResult,
@@ -607,6 +608,7 @@ class Machine {
     state.classifierLine = prep.classifierLine;
     if (prep.kind === 'nothing-to-spawn') {
       state.verdict = await aggregateRound(prep.verdicts, prep.review.harnessNote);
+      await attachVerdictRecordDraft(ctx, state, state.verdict);
       return this.afterVerdict(state);
     }
     await updateSessionState(ctx, state.taskIdLower, '07-reviewers-running');

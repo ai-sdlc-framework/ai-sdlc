@@ -40,6 +40,7 @@ import {
   TRUSTED_MARKER_AUTHOR_LOGINS,
   MARKER_PREFIX,
 } from '../incremental-review/incremental.js';
+import { buildVerdictRefspec } from './verdict-ref-push.js';
 import { checkHeadEnvelope, type HeadEnvelopeOpts } from './head-envelope.js';
 import { markTaskDone } from './task-done.js';
 import { recordSessionPr, updateSessionState } from './session.js';
@@ -562,8 +563,23 @@ async function shipInner(
     allowFailure: true,
   });
   const seenBeforeFetch = seenRef.code === 0 ? seenRef.stdout.trim() : '';
+  const verdictNotes: string[] = [];
   for (let attempt = 0; attempt < PUSH_ATTEMPTS; attempt += 1) {
-    const push = await runner('git', ['push', '-u', 'origin', state.branch], {
+    // RFC-0061 Phase 1: branch and verdict ref in one atomic push (built per attempt: the
+    // pre-push hook can change the head). The v6 envelope path keeps running beside it.
+    const verdictRef = needsHuman
+      ? { refspec: null }
+      : await buildVerdictRefspec(
+          runner,
+          wt,
+          verdict.verdictRecordDraft,
+          `origin/${resolveTargetBranch(ctx.workDir)}`,
+        );
+    if ('note' in verdictRef && verdictRef.note) verdictNotes.push(verdictRef.note);
+    const pushArgs = verdictRef.refspec
+      ? ['push', '-u', '--atomic', 'origin', state.branch, verdictRef.refspec]
+      : ['push', '-u', 'origin', state.branch];
+    const push = await runner('git', pushArgs, {
       cwd: wt,
       allowFailure: true,
       timeout: PUSH_TIMEOUT_MS,
@@ -636,7 +652,7 @@ async function shipInner(
   const existing = await detectDraftPrForBranch(runner, wt, state.branch);
   let prUrl: string | null = existing?.prUrl || null;
   let prNumber: number | null = existing?.prNumber ?? null;
-  const notes: string[] = [];
+  const notes: string[] = [...new Set(verdictNotes)];
   if (existing) {
     notes.push(`reused open PR #${existing.prNumber} for ${state.branch} (already opened)`);
   } else {

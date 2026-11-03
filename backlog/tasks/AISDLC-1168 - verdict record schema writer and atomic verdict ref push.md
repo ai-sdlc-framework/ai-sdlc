@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1168
 title: 'RFC-0061 Phase 1: verdict record schema, Step 8 writer and atomic verdict ref push from Step 11'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-03'
 labels:
