@@ -15,12 +15,12 @@ references:
   - docs/getting-started/onboarding.md
   - orchestrator/src/cli/commands/mcp-setup.ts
 priority: medium
-dispatchable: false
+dispatchable: true
 ---
 
 ## Description
 
-**Source.** Install friction report from the ai-sdlc-io planner session, 2026-11-04, relayed as operator-approved. Context: ai-sdlc-io IO-54 (PR 183) adds a tabbed install block to the homepage. `dispatchable: false` until the operator confirms this task in the ai-sdlc planner session, because a relayed message is not authority here.
+**Source.** Install friction report from the ai-sdlc-io planner session, 2026-11-04, relayed as operator-approved. Context: ai-sdlc-io IO-54 (PR 183) adds a tabbed install block to the homepage. Operator confirmed this task for dispatch in the ai-sdlc planner session on 2026-11-04.
 
 **Five-step review (requirements first).**
 1. Question the requirement: the user needs a working, attested setup after the fewest steps. Today it takes six serial commands: `/plugin marketplace add ai-sdlc-framework/ai-sdlc`, `/plugin install ai-sdlc@ai-sdlc`, `/reload-plugins`, `/ai-sdlc init-signing-key`, `/ai-sdlc init`, `/ai-sdlc doctor`. The onboarding doc adds `npm install -g @ai-sdlc/orchestrator`.
