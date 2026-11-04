@@ -9,7 +9,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { backupMemory, memoryBackupHint, repoIdFor } from './backup.js';
+import { backupMemory, backupRepoMemory, memoryBackupHint, repoIdFor } from './backup.js';
 import { recoverFromTranscripts } from './recover.js';
 import { applyDream } from './apply.js';
 
@@ -202,5 +202,38 @@ describe('cli commands', () => {
     const out2: string[] = [];
     cmdBackup({ dir: join(tmp(), 'none') }, { out: (l) => out2.push(l) });
     expect(out2[0]).toContain('skipped');
+  });
+});
+
+describe('backupRepoMemory (DEC-0370)', () => {
+  it('copies repo .claude/memory to a distinct path, once a day, pruning old copies', () => {
+    const home = tmp();
+    const proj = tmp();
+    const mem = join(proj, '.claude', 'memory');
+    mkdirSync(mem, { recursive: true });
+    writeFileSync(join(mem, 'MEMORY.md'), '- x\n');
+    const r = backupRepoMemory({ projectDir: proj, home, now: new Date('2026-03-01T00:00:00Z') });
+    expect(r.status).toBe('copied');
+    expect(r.dir).toContain('repo-claude-memory');
+    expect(existsSync(join(r.dir as string, 'MEMORY.md'))).toBe(true);
+    expect(
+      backupRepoMemory({ projectDir: proj, home, now: new Date('2026-03-01T10:00:00Z') }).status,
+    ).toBe('already-today');
+    const pruned = backupRepoMemory({
+      projectDir: proj,
+      home,
+      keep: 1,
+      now: new Date('2026-03-02T00:00:00Z'),
+    });
+    expect(pruned.pruned).toEqual(['2026-03-01']);
+  });
+
+  it('skips when the folder is missing or empty', () => {
+    const home = tmp();
+    const proj = tmp();
+    const now = new Date('2026-03-01T00:00:00Z');
+    expect(backupRepoMemory({ projectDir: proj, home, now }).status).toBe('no-memory');
+    mkdirSync(join(proj, '.claude', 'memory'), { recursive: true });
+    expect(backupRepoMemory({ projectDir: proj, home, now }).status).toBe('no-memory');
   });
 });

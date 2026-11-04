@@ -30,8 +30,9 @@
  *   - backlog/completed/**
  *   - .ai-sdlc/attestations/<sha>.dsse.json (chore-commit envelope files)
  *   - .ai-sdlc/_decisions/** (append-only operator governance data; DEC-0010 follow-up)
- *   Root *.md (CLAUDE.md, AGENTS.md), .claude/memory/**, .ai-sdlc/dispatch/briefs/**
+ *   Root *.md (CLAUDE.md, AGENTS.md), .ai-sdlc/dispatch/briefs/**
  *   and .github/** are NOT docs (AISDLC-971): they steer agents or the pipeline.
+ *   (.claude/memory/ is gitignored and untracked since DEC-0370.)
  *
  * CLI usage (for workflow shell-out):
  *   echo "$FILES" | node scripts/is-docs-only-changeset.mjs

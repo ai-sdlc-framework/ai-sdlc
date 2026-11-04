@@ -10,7 +10,7 @@
  * .ai-sdlc/attestations/<sha>.dsse.json, .ai-sdlc/_decisions/,
  * .ai-sdlc/reviews/<x>.jsonl, .ai-sdlc/transcript-leaves/<x>.jsonl (AISDLC-1116),
  * Root markdown (CLAUDE.md, AGENTS.md),
- * .claude/memory/, .ai-sdlc/dispatch/briefs/ and .github/ steer agents or the
+ * .ai-sdlc/dispatch/briefs/ and .github/ steer agents or the
  * pipeline, so they are NOT docs (AISDLC-971); a consumer must also reject
  * `isTrustChainPath` (see `isDocsOnly` in `scripts/is-docs-only-changeset.mjs`).
  */

@@ -14,6 +14,7 @@ const env = { ...process.env };
 for (const k of Object.keys(env)) if (k.startsWith('GIT_')) delete env[k];
 
 const samples = [
+  '.claude/memory/MEMORY.md',
   '.claude/memory/project_planner_handoff_2026_10_31.md',
   '.claude/memory/project_planner_handoff_2026_10_31_archive.md',
   '.claude/memory/handoff_ledger_planner.jsonl',
@@ -30,12 +31,12 @@ describe('AISDLC-1136 ignore rules', () => {
     });
   }
 
-  it('does not ignore durable memory notes', () => {
+  it('ignores durable memory notes (DEC-0370)', () => {
     const r = spawnSync('git', ['check-ignore', '-q', '--no-index', '.claude/memory/MEMORY.md'], {
       cwd: root,
       env,
     });
-    assert.equal(r.status, 1);
+    assert.equal(r.status, 0);
   });
 
   it('tracks .mcp.json.example', () => {

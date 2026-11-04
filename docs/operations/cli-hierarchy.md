@@ -864,9 +864,9 @@ archive touches neither file. Pass `--no-archive` for the old block-only behavio
 file: `read` prints the generated block, then the last 8000 characters (cut at a line boundary)
 of the prose outside the markers, then the file path; `--full` prints the whole file.
 
-**Committed versus regenerated (AISDLC-1136).** Durable memory notes (`.claude/memory/MEMORY.md` and
-the notes it indexes) are committed. The files `handoff write` and `handoff note` regenerate
-(`project_*_handoff_*.md`, `*_archive.md`, `handoff_ledger_*.jsonl`) are gitignored, as are
+**Committed versus regenerated (AISDLC-1136, DEC-0370).** The whole `.claude/memory/` folder is
+gitignored and private: memory notes are not committed. `cli-hierarchy up` copies it once a day to
+`~/.ai-sdlc/memory-backups/<repo-id>/repo-claude-memory/<date>/`. Also gitignored:
 `.claude/settings.local.json`, `.claude/transcripts/` and the project `.mcp.json`. A fresh clone
 copies the template: `cp .mcp.json.example .mcp.json`, then adjust the `backlog-ent` and
 `backlog-io` sibling checkout paths (`../ai-sdlc-enterprise`, `../ai-sdlc-io`) to your machine.
@@ -1448,7 +1448,7 @@ lane of their own:
   naming each offending path.
 - The docs-only list has one definition, `pipeline-cli/attestation-core/docs-only-paths.mjs`
   (`DOCS_ONLY_PATTERN`). It covers the RFC, docs and backlog directories, attestation envelopes,
-  `.ai-sdlc/_decisions/`, `.ai-sdlc/dispatch/briefs/`, `.claude/memory/`,
+  `.ai-sdlc/_decisions/`, `.ai-sdlc/dispatch/briefs/`,
   `.github/dependabot.yml`, `.github/*.md` and root-level `*.md`.
   `scripts/is-docs-only-changeset.mjs` and the reviewer-scope code re-export it.
 

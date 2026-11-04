@@ -84,7 +84,7 @@ import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import { requeueFailed } from '../dispatch/requeue.js';
 import { backupBoard, backupDirFor, boardRecoveryHint } from '../dispatch/board-recovery.js';
-import { backupMemory, memoryBackupHint } from '../memory-dream/backup.js';
+import { backupMemory, backupRepoMemory, memoryBackupHint } from '../memory-dream/backup.js';
 import { resolveMemoryDir } from '../memory-dream/resolve-dir.js';
 import { reenter } from '../hierarchy/reenter.js';
 import { now as clockNow } from '../clock.js';
@@ -741,6 +741,8 @@ export async function runHierarchyCli(
           const lost = memoryBackupHint({ memoryDir, projectDir: deps.cwd });
           if (lost) deps.log(lost);
           else backupMemory({ memoryDir, projectDir: deps.cwd, now: deps.now() });
+          // DEC-0370: the repo's untracked .claude/memory/ notes get their own daily copy.
+          backupRepoMemory({ projectDir: deps.cwd, now: deps.now() });
         } catch {
           /* memory backup is best effort and never blocks up */
         }

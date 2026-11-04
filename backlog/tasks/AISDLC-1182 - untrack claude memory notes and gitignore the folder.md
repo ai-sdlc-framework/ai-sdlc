@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1182
 title: 'Untrack the .claude/memory notes from the public repo and gitignore the folder'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-04'
 labels:
