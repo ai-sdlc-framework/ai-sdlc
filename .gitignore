@@ -185,3 +185,6 @@ ai-sdlc-plugin/.stale-runtime-cache.json
 
 # AISDLC-778 / RFC-0053: evaluator-only quarantine (mined and synthetic questions)
 .ai-sdlc/context/eval-quarantine/
+
+# AISDLC-1166: machine-local usage ledgers written by the pipeline must not block Step 0.5
+.ai-sdlc/usage/

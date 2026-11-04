@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1166
 title: 'Budget override and window tracking survive reset-time jitter; the machine-local usage log is ignored so Step 0.5 stops refusing dispatch'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-03'
 labels:
@@ -35,10 +35,36 @@ Two defects stopped dispatch on 2026-11-03 after the operator raised the executo
 
 ## Acceptance Criteria
 
-- [ ] AC-1: An override recorded for a window still applies when a later sample reports that window's reset time shifted by under a minute; it stops applying once a sample reports a reset more than the tolerance later (a new window). Unit test with the two observed timestamps.
-- [ ] AC-2: Window-start tracking treats the same jittered reset as the same window; the start utilization is kept. Unit test.
-- [ ] AC-3: `.ai-sdlc/usage/` is in `.gitignore`, and a test or check shows a `developer-honesty.jsonl` written by verify-commands does not make Step 0.5 refuse.
+- [x] AC-1: An override recorded for a window still applies when a later sample reports that window's reset time shifted by under a minute; it stops applying once a sample reports a reset more than the tolerance later (a new window). Unit test with the two observed timestamps.
+- [x] AC-2: Window-start tracking treats the same jittered reset as the same window; the start utilization is kept. Unit test.
+- [x] AC-3: `.ai-sdlc/usage/` is in `.gitignore`, and a test or check shows a `developer-honesty.jsonl` written by verify-commands does not make Step 0.5 refuse.
 
 ## Notes
 
 Found by the planner on 2026-11-03 when dispatch reported the cap still at 1 after `resume --budget`. Workarounds in place until this lands: a planner loop re-applying the override until 19:00Z, and two lines in the parent's `.git/info/exclude`, which can be removed after landing.
+
+## Final Summary
+
+## Summary
+Window reset times are now compared as instants within a one-minute tolerance, through one `sameWindow` helper in budget.ts. This covers the override check, window-start tracking, the oldest-sample lookup and the pacer filter. `.ai-sdlc/usage/` is now in .gitignore.
+
+## Changes
+- pipeline-cli/src/hierarchy/budget.ts
+- pipeline-cli/src/hierarchy/budget.test.ts
+- pipeline-cli/src/steps/00-parent-upkeep.test.ts
+- .gitignore
+- backlog/tasks/AISDLC-1166 - budget override and window tracking survive reset-time jitter; machine-local usage log is ignored.md
+
+## Design decisions
+AC-3 is covered by a test that runs `git check-ignore` on `.ai-sdlc/usage/developer-honesty.jsonl`. It does not exercise Step 0.5 itself. The PR is a draft. The commit also includes the backlog task file, which had a one-line change in the worktree.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (246 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+

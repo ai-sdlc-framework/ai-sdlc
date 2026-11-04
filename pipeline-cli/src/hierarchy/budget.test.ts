@@ -12,6 +12,7 @@ import {
   readUsage,
   recordUsage,
   resolveMargins,
+  sameWindow,
   runBudgetPacer,
   type UsageDeps,
 } from './budget.js';
@@ -209,5 +210,49 @@ describe('status BUDGET line', () => {
     await runBudgetPacer(dir, deps());
     expect(formatBudget(budgetStatus(dir, clock)!)).toContain('no projected exhaustion');
     expect(formatBudget({ at: 'x', overridden: false })).toContain('7d unknown');
+  });
+});
+
+describe('reset-time jitter (AISDLC-1166)', () => {
+  const A = '2026-11-03T19:00:00.045334+00:00';
+  const B = '2026-11-03T18:59:59.998738+00:00';
+
+  it('sameWindow tolerates under a minute and rejects a new window', () => {
+    expect(sameWindow(A, B)).toBe(true);
+    expect(sameWindow(A, '2026-11-03T19:02:00+00:00')).toBe(false);
+    expect(sameWindow(undefined, A)).toBe(false);
+    expect(sameWindow('garbage', 'other')).toBe(false);
+  });
+
+  function sampleWith(sevenReset: string, util: number, offsetMs: number) {
+    clock = T0 + offsetMs;
+    recordUsage(
+      dir,
+      {
+        available: true,
+        sample: {
+          at: new Date(clock).toISOString(),
+          sevenDay: { utilization: util, resetsAt: sevenReset },
+        },
+      } as never,
+      new Date(clock),
+    );
+  }
+
+  it('keeps the override across jitter and drops it for a new window', () => {
+    sampleWith(A, 50, 0);
+    overrideBudget(dir, 'planner', new Date(clock).toISOString());
+    sampleWith(B, 51, 60_000);
+    expect(budgetStatus(dir, clock)?.overridden).toBe(true);
+    sampleWith('2026-11-10T19:00:00+00:00', 1, 120_000);
+    expect(budgetStatus(dir, clock)?.overridden).toBe(false);
+  });
+
+  it('keeps the window start utilization across jitter', () => {
+    sampleWith(A, 50, 0);
+    sampleWith(B, 52, 60_000);
+    expect(readUsage(dir).windows.sevenDay?.utilization).toBe(50);
+    sampleWith('2026-11-10T19:00:00+00:00', 1, 120_000);
+    expect(readUsage(dir).windows.sevenDay?.utilization).toBe(1);
   });
 });
