@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-11-04T21:48:45.280Z","decisionId":"DEC-0370","chosenOptionId":"untrack-and-private-backup","rationale":"Operator answer 2026-11-04 in the planner session: untracking is enough; git history is left as is and is not rewritten.","by":"operator"}
