@@ -227,6 +227,14 @@ The `ai-sdlc/decisions-sync` commit written by `remote-persist.ts` uses the oper
 
 ---
 
+## Carry-forward rule if the queue returns (RFC-0061 OQ-5, AISDLC-1170)
+
+`merge_group` is not wired to the review-verdict check. If the merge queue is re-enabled, the queue's synthetic head must be checked with the same function the PR check uses, `cleanReplayCarriesForward` (`pipeline-cli/src/attestation/clean-replay.ts`): a verdict carries forward when the candidate head's tree equals the reviewed head's tree (message-only change), or when `git merge-tree --write-tree --merge-base=<reviewed base> <candidate base> <reviewed head>` is conflict-free and its tree equals the candidate head's tree. It needs git 2.40 or later and refuses with a named error on older git. No path writes a new verdict ref for a carried-forward head.
+
+Why no queue wiring is needed today: a direct squash merge of a head that is behind `main` is a clean three-way replay of the PR's change onto the new tip, and GitHub refuses that merge on conflict. A merge that GitHub accepts is therefore already a clean replay, which is exactly what the carry-forward rule accepts.
+
+---
+
 ## References
 
 - AISDLC-400 — task that dropped the queue
