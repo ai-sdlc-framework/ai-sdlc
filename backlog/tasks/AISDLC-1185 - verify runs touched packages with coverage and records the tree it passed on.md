@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1185
 title: 'Verify runs touched packages with coverage and records the tree it passed on'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-04'
 labels:
