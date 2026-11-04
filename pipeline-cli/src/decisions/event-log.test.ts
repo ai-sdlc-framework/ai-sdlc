@@ -233,3 +233,42 @@ describe('nextDecisionId', () => {
     expect(nextDecisionId({ workDir })).toBe('DEC-0004');
   });
 });
+
+describe('decision-opened id uniqueness (AISDLC-1167)', () => {
+  it('refuses a second decision-opened for an id, so interleaved allocations cannot collide', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { nextDecisionIdDurable } = await import('./remote-persist.js');
+    const wd = mkdtempSync(join(tmpdir(), 'dupid-'));
+    const prev = process.env.AI_SDLC_DECISIONS_NO_REMOTE;
+    process.env.AI_SDLC_DECISIONS_NO_REMOTE = '1';
+    try {
+      const mk = (id: string, summary: string) =>
+        makeDecisionOpenedEvent({
+          decisionId: id,
+          source: 'ad-hoc',
+          scope: 's',
+          summary,
+          body: 'b',
+          reversible: true,
+          options: [{ id: 'a', description: 'x' }],
+          by: 'operator-dispatch',
+        });
+      const idA = nextDecisionIdDurable({ workDir: wd });
+      const idB = nextDecisionIdDurable({ workDir: wd }); // allocated before A appends
+      expect(idB).toBe(idA);
+      appendDecisionEvent(mk(idA, 'first'), { workDir: wd });
+      expect(() => appendDecisionEvent(mk(idB, 'second'), { workDir: wd })).toThrow(
+        /already has a decision-opened/,
+      );
+      const idB2 = nextDecisionIdDurable({ workDir: wd });
+      expect(idB2).not.toBe(idA);
+      appendDecisionEvent(mk(idB2, 'second'), { workDir: wd });
+    } finally {
+      if (prev === undefined) delete process.env.AI_SDLC_DECISIONS_NO_REMOTE;
+      else process.env.AI_SDLC_DECISIONS_NO_REMOTE = prev;
+      rmSync(wd, { recursive: true, force: true });
+    }
+  });
+});

@@ -70,18 +70,22 @@ function syncLedger(): string {
   return names.map((n) => git(parent, 'show', `${ref}:${n}`)).join('\n');
 }
 
-function addDec(workDir: string, id: string, summary = `s ${id}`): void {
-  appendDecisionEvent(
-    makeDecisionOpenedEvent({
-      decisionId: id,
-      source: 'ad-hoc',
-      scope: 't',
-      summary,
-      reversible: true,
-      options: [{ id: 'a', description: 'a' }],
-    }),
-    { workDir },
-  );
+/** `duplicate` writes the event file directly, past the write-time refusal (AISDLC-1167). */
+function addDec(workDir: string, id: string, summary = `s ${id}`, duplicate = false): void {
+  const ev = makeDecisionOpenedEvent({
+    decisionId: id,
+    source: 'ad-hoc',
+    scope: 't',
+    summary,
+    reversible: true,
+    options: [{ id: 'a', description: 'a' }],
+  });
+  if (!duplicate) {
+    appendDecisionEvent(ev, { workDir });
+    return;
+  }
+  const line = JSON.stringify(ev);
+  writeFileSync(join(resolveEventsDir(workDir), eventFileName(ev, line)), line + '\n');
 }
 
 beforeEach(() => {
@@ -192,7 +196,7 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     expect(persistDecisionLog({ workDir: parent, runner }).persisted).toBe(true);
     git(parent, 'push', 'origin', `origin/${DECISIONS_SYNC_BRANCH}:refs/heads/main`);
     git(origin, 'branch', '-D', DECISIONS_SYNC_BRANCH);
-    addDec(parent, 'DEC-0001', 'fixture');
+    addDec(parent, 'DEC-0001', 'fixture', true);
     addDec(parent, 'DEC-0002');
     const warnings: string[] = [];
     const r = persistDecisionLog({ workDir: parent, runner, warn: (m) => warnings.push(m) });
@@ -205,7 +209,7 @@ describe('persistDecisionLog (AISDLC-546)', () => {
 
   it('refuses two decision-opened events for one id in the local log (AISDLC-1135)', () => {
     addDec(parent, 'DEC-0001');
-    addDec(parent, 'DEC-0001', 'other');
+    addDec(parent, 'DEC-0001', 'other', true);
     const r = persistDecisionLog({ workDir: parent, runner, warn: () => {} });
     expect(r.persisted).toBe(false);
     expect(r.reason).toMatch(/DEC-0001/);

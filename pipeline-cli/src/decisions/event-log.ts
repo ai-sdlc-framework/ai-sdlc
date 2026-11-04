@@ -201,6 +201,20 @@ export function appendDecisionEvent(event: DecisionEvent, opts: AppendEventOpts 
   const line = JSON.stringify(event);
   const path = join(resolveEventsDir(opts.workDir), eventFileName(event, line));
   ensureParentDir(path);
+  if (event.type !== 'decision-opened') {
+    writeFileSync(path, line + '\n', { encoding: 'utf8' });
+    return path;
+  }
+  // An id names exactly one decision (AISDLC-1167): refuse a second `decision-opened` for it at
+  // write time. Callers that allocate then append hold `withEventLogLock` around both.
+  const taken = readDecisionEvents({ workDir: opts.workDir }).events.some(
+    (e) => e.type === 'decision-opened' && e.decisionId === event.decisionId,
+  );
+  if (taken) {
+    throw new Error(
+      `[decisions] ${event.decisionId} already has a decision-opened event; refusing to reuse the id`,
+    );
+  }
   writeFileSync(path, line + '\n', { encoding: 'utf8' });
   return path;
 }

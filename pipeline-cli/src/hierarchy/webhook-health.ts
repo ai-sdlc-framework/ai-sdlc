@@ -14,7 +14,9 @@ import {
   appendDecisionEvent,
   makeDecisionOpenedEvent,
   makeOperatorAnsweredEvent,
+  withEventLogLock,
 } from '../decisions/event-log.js';
+import { listDecisions } from '../decisions/projection.js';
 import { nextDecisionIdDurable, persistDecisionLog } from '../decisions/remote-persist.js';
 import { desktopNotice } from './stall-notice.js';
 import type { CommandRunner } from './types.js';
@@ -42,8 +44,8 @@ export interface WebhookHealthTickDeps {
   health: () => WebhookHealth | undefined;
   /** Files the escalation and returns its decision id. */
   escalate?: (input: WebhookEscalationInput) => string | undefined;
-  /** Adds a closing note to the decision of an episode. */
-  closeEpisode?: (decisionId: string, note: string) => void;
+  /** Answers the open webhook-health decisions (the remembered id, if any, is a hint only). */
+  closeEpisode?: (decisionId: string | undefined, note: string) => void;
   /** The stall-notice channel (desktop notification and digest line). */
   notify?: (message: string) => void;
 }
@@ -92,9 +94,8 @@ export function runWebhookHealthTick(deps: WebhookHealthTickDeps): WebhookHealth
   const nowIso = deps.now().toISOString();
   let text: string;
   if (h.class === 'healthy') {
-    if (state.decisionId) {
-      deps.closeEpisode?.(state.decisionId, `webhook health recovered at ${nowIso}`);
-    }
+    // Every open webhook-health record is answered, not only the one this file remembers.
+    deps.closeEpisode?.(state.decisionId, `webhook health recovered at ${nowIso}`);
     text = `webhook health: healthy again (was ${state.class} since ${state.since ?? 'unknown'})`;
   } else {
     next.since = state.since ?? nowIso;
@@ -117,8 +118,20 @@ export function runWebhookHealthTick(deps: WebhookHealthTickDeps): WebhookHealth
   return { health: h, report: { text } };
 }
 
-/** Scope of the escalation; one per episode, keyed by `since`. */
+/** Scope of the escalation; one open record at a time, the episode start lives in the body. */
 export const WEBHOOK_HEALTH_SCOPE = 'webhook-health';
+
+/** Open webhook-health decisions in the store (older records carry `webhook-health:<since>`). */
+function openWebhookDecisionIds(workDir: string): string[] {
+  const out: string[] = [];
+  for (const d of listDecisions({ workDir }).decisions) {
+    const scope = d.metadata.scope ?? '';
+    if (scope !== WEBHOOK_HEALTH_SCOPE && !scope.startsWith(`${WEBHOOK_HEALTH_SCOPE}:`)) continue;
+    if (['answered', 'superseded', 'archived'].includes(d.status.lifecycle)) continue;
+    out.push(d.metadata.id);
+  }
+  return out;
+}
 
 /** File and close the operational escalation in the decision catalog (the `cli-decisions escalate --route operational` record). */
 export function catalogWebhookEscalation(
@@ -126,40 +139,49 @@ export function catalogWebhookEscalation(
 ): Pick<WebhookHealthTickDeps, 'escalate' | 'closeEpisode'> {
   return {
     escalate: (input) => {
-      const decisionId = nextDecisionIdDurable({ workDir });
-      appendDecisionEvent(
-        makeDecisionOpenedEvent({
-          decisionId,
-          source: 'ad-hoc',
-          scope: `${WEBHOOK_HEALTH_SCOPE}:${input.since}`,
-          summary: input.summary,
-          body: input.body,
-          reversible: true,
-          options: [
-            {
-              id: 'restart-feed',
-              description: 'Operator restarts the forwarder or re-registers the hook',
-            },
-            { id: 'accept-poll-only', description: 'Stay poll-only and accept the gh call rate' },
-          ],
-          escalation: { route: 'operational', taskId: WEBHOOK_HEALTH_SCOPE, parked: false },
-          by: 'operator-dispatch',
-        }),
-        { workDir },
-      );
+      // Look up, allocate and append under one lock so two ticks cannot open two records
+      // or take the same id (listDecisions takes no lock, so this is not reentrant-unsafe).
+      const decisionId = withEventLogLock({ workDir }, () => {
+        const existing = openWebhookDecisionIds(workDir);
+        if (existing.length > 0) return existing[0];
+        const id = nextDecisionIdDurable({ workDir });
+        appendDecisionEvent(
+          makeDecisionOpenedEvent({
+            decisionId: id,
+            source: 'ad-hoc',
+            scope: WEBHOOK_HEALTH_SCOPE,
+            summary: input.summary,
+            body: `${input.body} Episode since ${input.since}.`,
+            reversible: true,
+            options: [
+              {
+                id: 'restart-feed',
+                description: 'Operator restarts the forwarder or re-registers the hook',
+              },
+              { id: 'accept-poll-only', description: 'Stay poll-only and accept the gh call rate' },
+            ],
+            escalation: { route: 'operational', taskId: WEBHOOK_HEALTH_SCOPE, parked: false },
+            by: 'operator-dispatch',
+          }),
+          { workDir },
+        );
+        return id;
+      });
       persistDecisionLog({ workDir });
       return decisionId;
     },
-    closeEpisode: (decisionId, note) => {
-      appendDecisionEvent(
-        makeOperatorAnsweredEvent({
-          decisionId,
-          chosenOptionId: 'restart-feed',
-          rationale: note,
-          by: 'operator-dispatch',
-        }),
-        { workDir },
-      );
+    closeEpisode: (_decisionId, note) => {
+      for (const decisionId of openWebhookDecisionIds(workDir)) {
+        appendDecisionEvent(
+          makeOperatorAnsweredEvent({
+            decisionId,
+            chosenOptionId: 'restart-feed',
+            rationale: note,
+            by: 'operator-dispatch',
+          }),
+          { workDir },
+        );
+      }
       persistDecisionLog({ workDir });
     },
   };

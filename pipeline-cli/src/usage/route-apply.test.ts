@@ -210,10 +210,11 @@ function fileCrafted(
   by = 'framework:route-propose',
   source = 'framework-calibration',
   extraOptions: string[] = [],
+  id = 'DEC-0002',
 ): string {
   appendDecisionEvent(
     makeDecisionOpenedEvent({
-      decisionId: 'DEC-0002',
+      decisionId: id,
       source: source as 'framework-calibration',
       scope: 'routing:model-proposal',
       summary: 'crafted',
@@ -229,7 +230,7 @@ function fileCrafted(
     }),
     { workDir: decisions },
   );
-  return 'DEC-0002';
+  return id;
 }
 
 const gitCalls = (name: string) => calls.filter((c) => c.cmd === 'git' && c.args[0] === name);
@@ -377,8 +378,8 @@ describe('cli-usage route apply', () => {
     await run(['apply', '--decision', forged]);
     expect(out.join('')).toContain('not filed by the routing proposal command');
 
-    const framework = fileCrafted((b) => b);
-    expect(framework).toBe('DEC-0002');
+    const framework = fileCrafted((b) => b, undefined, undefined, [], 'DEC-0003');
+    expect(framework).toBe('DEC-0003');
   });
 
   it('refuses an answer recorded as the framework', async () => {
