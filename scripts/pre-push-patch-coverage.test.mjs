@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   packagesToCover,
   main,
+  resolveBoardDir,
   gitSafeEnv,
   sessionScrubbedEnv,
   GIT_REPO_ENV_VARS,
@@ -48,10 +49,11 @@ describe('packagesToCover', () => {
 
 describe('main', () => {
   const ok = { status: 0 };
-  it('prints one skip line and runs nothing for non-code pushes', () => {
+  it('prints one skip line and runs nothing for non-code pushes', async () => {
     const logs = [];
     const calls = [];
-    const code = main({
+    const code = await main({
+      boardDir: null,
       run: (...a) => (calls.push(a), ok),
       changed: () => ['docs/a.md', 'pipeline-cli/src/a.test.ts'],
       log: (m) => logs.push(m),
@@ -60,9 +62,10 @@ describe('main', () => {
     assert.equal(calls.length, 0);
     assert.equal(logs.length, 1);
   });
-  it('runs coverage in the touched package only, then the gate', () => {
+  it('runs coverage in the touched package only, then the gate', async () => {
     const calls = [];
-    const code = main({
+    const code = await main({
+      boardDir: null,
       run: (cmd, args) => (calls.push([cmd, ...args]), ok),
       changed: () => ['pipeline-cli/src/a.ts'],
       log: () => {},
@@ -73,14 +76,20 @@ describe('main', () => {
     assert.match(calls[1][1], /check-pr-patch-coverage\.mjs$/);
     assert.ok(!calls[1].includes('--threshold'));
   });
-  it('fails when coverage run fails or the gate fails', () => {
+  it('fails when coverage run fails or the gate fails', async () => {
     assert.equal(
-      main({ run: () => ({ status: 1 }), changed: () => ['pipeline-cli/src/a.ts'], log: () => {} }),
+      await main({
+        boardDir: null,
+        run: () => ({ status: 1 }),
+        changed: () => ['pipeline-cli/src/a.ts'],
+        log: () => {},
+      }),
       1,
     );
     let n = 0;
     assert.equal(
-      main({
+      await main({
+        boardDir: null,
         run: () => ({ status: n++ === 0 ? 0 : 1 }),
         changed: () => ['pipeline-cli/src/a.ts'],
         log: () => {},
@@ -88,21 +97,25 @@ describe('main', () => {
       1,
     );
   });
-  it('honours the skip env var', () => {
+  it('honours the skip env var', async () => {
     process.env.AI_SDLC_SKIP_PATCH_COVERAGE_GATE = '1';
     try {
-      assert.equal(main({ run: () => assert.fail('no run'), log: () => {} }), 0);
+      assert.equal(
+        await main({ boardDir: null, run: () => assert.fail('no run'), log: () => {} }),
+        0,
+      );
     } finally {
       delete process.env.AI_SDLC_SKIP_PATCH_COVERAGE_GATE;
     }
   });
-  it('spawns every child with the git repository variables stripped (incident 2026-10-30)', () => {
+  it('spawns every child with the git repository variables stripped (incident 2026-10-30)', async () => {
     const saved = { GIT_DIR: process.env.GIT_DIR, GIT_PREFIX: process.env.GIT_PREFIX };
     process.env.GIT_DIR = '/elsewhere/.git/worktrees/x';
     process.env.GIT_PREFIX = '';
     const envs = [];
     try {
-      main({
+      await main({
+        boardDir: null,
         run: (_cmd, _args, opts) => (envs.push(opts.env), ok),
         changed: () => ['pipeline-cli/src/a.ts'],
         log: () => {},
@@ -119,6 +132,168 @@ describe('main', () => {
       for (const k of GIT_REPO_ENV_VARS) assert.ok(!(k in env), `${k} must not be inherited`);
       assert.equal(env.PATH, process.env.PATH);
     }
+  });
+});
+
+describe('main verify slot (AISDLC-1186)', () => {
+  const ok = { status: 0 };
+  const changed = () => ['pipeline-cli/src/a.ts'];
+  function fakeSlots(events, workers = 3) {
+    return async () => ({
+      VERIFY_WORKERS_SHARED: 2,
+      acquireVerifySlot: async (dir) => {
+        events.push(`acquire:${dir}`);
+        return { workers, release: () => events.push('release') };
+      },
+    });
+  }
+  it('holds a slot for the whole run and gives each child its worker cap', async () => {
+    const events = [];
+    const envs = [];
+    const code = await main({
+      boardDir: '/board',
+      loadSlots: fakeSlots(events),
+      run: (_c, _a, o) => (events.push('run'), envs.push(o.env), ok),
+      changed,
+      log: () => {},
+    });
+    assert.equal(code, 0);
+    assert.deepEqual(events, ['acquire:/board', 'run', 'run', 'release']);
+    for (const e of envs) assert.equal(e.AI_SDLC_VITEST_MAX_WORKERS, '3');
+  });
+  it('releases after a failing package', async () => {
+    const events = [];
+    const code = await main({
+      boardDir: '/b',
+      loadSlots: fakeSlots(events),
+      run: () => ({ status: 1 }),
+      changed,
+      log: () => {},
+    });
+    assert.equal(code, 1);
+    assert.equal(events.at(-1), 'release');
+  });
+  it('releases after a failing patch gate', async () => {
+    const events = [];
+    let n = 0;
+    const code = await main({
+      boardDir: '/b',
+      loadSlots: fakeSlots(events),
+      run: () => ({ status: n++ === 0 ? 0 : 1 }),
+      changed,
+      log: () => {},
+    });
+    assert.equal(code, 1);
+    assert.equal(events.at(-1), 'release');
+  });
+  it('releases on SIGTERM and SIGINT before exiting', async () => {
+    for (const [sig, exit] of [
+      ['SIGTERM', 143],
+      ['SIGINT', 130],
+    ]) {
+      const events = [];
+      const realExit = process.exit;
+      process.exit = (c) => events.push(`exit:${c}`);
+      try {
+        await main({
+          boardDir: '/b',
+          loadSlots: fakeSlots(events),
+          run: () => {
+            process.emit(sig);
+            return ok;
+          },
+          changed,
+          log: () => {},
+        });
+      } finally {
+        process.exit = realExit;
+      }
+      assert.ok(events.indexOf('release') < events.indexOf(`exit:${exit}`), sig);
+      assert.equal(events.filter((e) => e === 'release').length, 1);
+    }
+  });
+  it('runs unslotted with one line when there is no board directory', async () => {
+    const logs = [];
+    const envs = [];
+    await main({
+      boardDir: null,
+      run: (_c, _a, o) => (envs.push(o.env), ok),
+      changed,
+      log: (m) => logs.push(m),
+    });
+    assert.equal(logs.filter((l) => /unslotted/.test(l)).length, 1);
+    assert.equal(envs.length, 2);
+  });
+  it('runs unslotted with one line when the module cannot load', async () => {
+    const logs = [];
+    const code = await main({
+      boardDir: '/b',
+      loadSlots: async () => {
+        throw new Error('nope');
+      },
+      run: () => ok,
+      changed,
+      log: (m) => logs.push(m),
+    });
+    assert.equal(code, 0);
+    assert.equal(logs.filter((l) => /unslotted/.test(l)).length, 1);
+  });
+  it('runs unslotted when acquiring throws for another reason', async () => {
+    const logs = [];
+    const code = await main({
+      boardDir: '/b',
+      loadSlots: async () => ({
+        acquireVerifySlot: async () => {
+          throw new Error('mkdir failed');
+        },
+      }),
+      run: () => ok,
+      changed,
+      log: (m) => logs.push(m),
+    });
+    assert.equal(code, 0);
+    assert.equal(logs.filter((l) => /unslotted/.test(l)).length, 1);
+  });
+  it('falls back to the shared worker count after the bounded wait', async () => {
+    let t = 0;
+    const envs = [];
+    const logs = [];
+    const slow = async () => ({
+      VERIFY_WORKERS_SHARED: 2,
+      acquireVerifySlot: async (_d, deps) => {
+        for (;;) await deps.sleep(500);
+      },
+    });
+    const code = await main({
+      boardDir: '/b',
+      loadSlots: slow,
+      now: () => t,
+      sleep: async (ms) => {
+        t += ms * 100;
+      },
+      waitMs: 1000,
+      run: (_c, _a, o) => (envs.push(o.env), ok),
+      changed,
+      log: (m) => logs.push(m),
+    });
+    assert.equal(code, 0);
+    assert.ok(t >= 1000);
+    assert.equal(logs.filter((l) => /unslotted/.test(l)).length, 1);
+    for (const e of envs) assert.equal(e.AI_SDLC_VITEST_MAX_WORKERS, '2');
+  });
+  it('resolveBoardDir honours the env var and existence', () => {
+    assert.equal(
+      resolveBoardDir({ AI_SDLC_DISPATCH_BOARD_DIR: '/x' }, () => true),
+      '/x',
+    );
+    assert.equal(
+      resolveBoardDir({ AI_SDLC_DISPATCH_BOARD_DIR: '/x' }, () => false),
+      null,
+    );
+    assert.match(
+      resolveBoardDir({}, () => true),
+      /\.ai-sdlc.dispatch$/,
+    );
   });
 });
 
