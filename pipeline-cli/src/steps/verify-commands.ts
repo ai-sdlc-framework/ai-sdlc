@@ -43,6 +43,14 @@ export interface VerifyCommandResult {
 
 export interface VerifyRunResult {
   ok: boolean;
+  /** HEAD commit the run started on (AISDLC-1185). */
+  headSha?: string;
+  /** Tree object of `headSha`. */
+  treeSha?: string;
+  /** False when HEAD or the worktree status changed during the run. */
+  clean?: boolean;
+  /** ISO time the run finished. */
+  finishedAt?: string;
   /** `docs-only` when the manifest set `verifyCommands: []`. */
   skipped?: 'docs-only';
   results: VerifyCommandResult[];
@@ -125,6 +133,68 @@ export interface RunVerifyOptions {
   slotDeps?: VerifySlotDeps;
 }
 
+const ROOT_TEST_CHAIN_REST =
+  'pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm git-env-hygiene:check && pnpm lint:publishable && pnpm knowledge:check';
+
+/** Patch gate command, run after the tests (AISDLC-1185). */
+export function patchGateCommand(headSha: string): string {
+  return `node scripts/check-pr-patch-coverage.mjs --base origin/main --head ${headSha}`;
+}
+
+/**
+ * Replace `pnpm test` with: touched packages under `test:coverage` (once each), the untouched
+ * packages' plain tests, the root gate chain, then the patch gate (AISDLC-1185). No touched
+ * package: the commands are returned unchanged and no gate runs.
+ */
+export function expandVerifyCommands(
+  commands: readonly string[],
+  packages: readonly string[],
+  headSha: string,
+): string[] {
+  const i = commands.indexOf('pnpm test');
+  if (i < 0 || packages.length === 0) return [...commands];
+  const excludes = packages.map((p) => `--filter '!./${p}'`).join(' ');
+  return [
+    ...commands.slice(0, i),
+    ...packages.map((p) => `pnpm --filter ./${p} test:coverage`),
+    `pnpm -r --no-bail ${excludes} test`,
+    ROOT_TEST_CHAIN_REST,
+    patchGateCommand(headSha),
+    ...commands.slice(i + 1),
+  ];
+}
+
+async function gitOut(runner: Runner, cwd: string, args: string[]): Promise<string> {
+  try {
+    const r = await runner('git', args, { cwd, allowFailure: true, env: strippedSessionEnv() });
+    return r.code === 0 ? r.stdout.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+async function snapshot(runner: Runner, cwd: string) {
+  const headSha = await gitOut(runner, cwd, ['rev-parse', 'HEAD']);
+  const treeSha = await gitOut(runner, cwd, ['rev-parse', 'HEAD^{tree}']);
+  const status = await gitOut(runner, cwd, ['status', '--porcelain']);
+  return { headSha, treeSha, status };
+}
+
+async function coveragePackages(runner: Runner, cwd: string): Promise<string[]> {
+  try {
+    const r = await runner('node', ['scripts/list-coverage-packages.mjs'], {
+      cwd,
+      allowFailure: true,
+      env: strippedSessionEnv(),
+    });
+    if (r.code !== 0) return [];
+    const parsed: unknown = JSON.parse(r.stdout.trim().split('\n').pop() ?? '');
+    return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Run every command in order, stopping at the first failure. */
 export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyRunResult> {
   const runner = opts.runner ?? defaultRunner;
@@ -148,7 +218,24 @@ export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyR
     }
   }
   try {
-    return await runAll(opts, runner, timeout, verifications, base, slot);
+    const before = await snapshot(runner, opts.cwd);
+    let commands = opts.commands;
+    if (before.headSha && commands.includes('pnpm test')) {
+      commands = expandVerifyCommands(
+        commands,
+        await coveragePackages(runner, opts.cwd),
+        before.headSha,
+      );
+    }
+    const run = await runAll({ ...opts, commands }, runner, timeout, verifications, base, slot);
+    const after = await snapshot(runner, opts.cwd);
+    return {
+      ...run,
+      headSha: before.headSha,
+      treeSha: before.treeSha,
+      clean: before.headSha === after.headSha && before.status === after.status,
+      finishedAt: now().toISOString(),
+    };
   } finally {
     slot?.release();
   }

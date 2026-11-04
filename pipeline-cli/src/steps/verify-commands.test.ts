@@ -7,6 +7,8 @@ import { acquireVerifySlot, listVerifySlots } from '../runtime/verify-slots.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import {
   claimedGreenButRed,
+  expandVerifyCommands,
+  patchGateCommand,
   formatVerifyFeedback,
   recordDeveloperHonestyEvent,
   runVerifyCommands,
@@ -55,7 +57,7 @@ describe('runVerifyCommands', () => {
     expect(run.developerClaimed).toEqual(green);
     expect(claimedGreenButRed(run)).toBe(true);
     expect(formatVerifyFeedback(run)).toContain('pnpm test');
-    expect(fr.calls).toHaveLength(2);
+    expect(fr.calls.filter((c) => c.command === 'sh')).toHaveLength(2);
   });
 
   it('passes when all exit 0', async () => {
@@ -179,6 +181,7 @@ describe('verify slots (AISDLC-1087)', () => {
     let peak = 0;
     const workers: (string | undefined)[] = [];
     const runner = async (_c: string, _a: string[], o?: { env?: NodeJS.ProcessEnv }) => {
+      if (_c !== 'sh') return { stdout: '', stderr: '', code: 0 };
       active++;
       peak = Math.max(peak, active);
       workers.push(o?.env?.AI_SDLC_VITEST_MAX_WORKERS);
@@ -224,5 +227,81 @@ describe('verify slots (AISDLC-1087)', () => {
     slot.release();
     expect(listVerifySlots(board, () => true).map((s) => s.index)).toEqual([1]);
     rmSync(board, { recursive: true, force: true });
+  });
+});
+
+describe('verify with coverage (AISDLC-1185)', () => {
+  const defaults = ['pnpm build', 'pnpm test', 'pnpm lint', 'pnpm format:check'];
+  const base = (fr: FakeRunner, packages: string[], statuses: string[] = ['']) => {
+    let n = 0;
+    return fr
+      .on(/rev-parse HEAD\^\{tree\}/, ok('tree1\n'))
+      .on(/rev-parse HEAD/, ok('head1\n'))
+      .on(/status --porcelain/, () => ok(statuses[Math.min(n++, statuses.length - 1)]!))
+      .on(/list-coverage-packages/, ok(JSON.stringify(packages) + '\n'));
+  };
+  const shellCmds = (fr: FakeRunner) =>
+    fr.calls.filter((c) => c.command === 'sh').map((c) => c.args[1]);
+
+  it('runs a touched package once under test:coverage, then root gates and the patch gate', async () => {
+    const fr = base(new FakeRunner(), ['pipeline-cli']);
+    const run = await runVerifyCommands({ commands: defaults, cwd: '/x', runner: fr.toRunner() });
+    expect(run.ok).toBe(true);
+    expect(shellCmds(fr)).toEqual(expandVerifyCommands(defaults, ['pipeline-cli'], 'head1'));
+    expect(shellCmds(fr)).toEqual([
+      'pnpm build',
+      'pnpm --filter ./pipeline-cli test:coverage',
+      "pnpm -r --no-bail --filter '!./pipeline-cli' test",
+      expect.stringContaining('pnpm test:gates && pnpm rfc:check && pnpm dark-code:check'),
+      patchGateCommand('head1'),
+      'pnpm lint',
+      'pnpm format:check',
+    ]);
+    expect(run.verifications.test).toBe('passed');
+  });
+
+  it('fails verify with the gate output when the patch gate fails', async () => {
+    const fr = base(new FakeRunner(), ['pipeline-cli']).on(
+      /check-pr-patch-coverage/,
+      fail('patch coverage 40% < 90%', 1),
+    );
+    const run = await runVerifyCommands({ commands: defaults, cwd: '/x', runner: fr.toRunner() });
+    expect(run.ok).toBe(false);
+    expect(run.failing?.command).toBe(patchGateCommand('head1'));
+    expect(formatVerifyFeedback(run)).toContain('patch coverage 40% < 90%');
+    expect(shellCmds(fr)).not.toContain('pnpm lint');
+  });
+
+  it('keeps the plain commands and skips the gate when no package is touched', async () => {
+    const fr = base(new FakeRunner(), []);
+    await runVerifyCommands({ commands: defaults, cwd: '/x', runner: fr.toRunner() });
+    expect(shellCmds(fr)).toEqual(defaults);
+  });
+
+  it('records head, tree, clean and finishedAt', async () => {
+    const fr = base(new FakeRunner(), []);
+    const run = await runVerifyCommands({
+      commands: ['pnpm lint'],
+      cwd: '/x',
+      runner: fr.toRunner(),
+    });
+    expect(run).toMatchObject({ headSha: 'head1', treeSha: 'tree1', clean: true });
+    expect(typeof run.finishedAt).toBe('string');
+  });
+
+  it('marks clean false when the worktree changed during the run', async () => {
+    const fr = base(new FakeRunner(), [], ['', ' M a.ts']);
+    const run = await runVerifyCommands({
+      commands: ['pnpm lint'],
+      cwd: '/x',
+      runner: fr.toRunner(),
+    });
+    expect(run.clean).toBe(false);
+  });
+
+  it('falls back to unchanged commands when the package list is unreadable', async () => {
+    const fr = base(new FakeRunner(), []).on(/list-coverage-packages/, fail('nope', 1));
+    await runVerifyCommands({ commands: defaults, cwd: '/x', runner: fr.toRunner() });
+    expect(shellCmds(fr)).toEqual(defaults);
   });
 });
