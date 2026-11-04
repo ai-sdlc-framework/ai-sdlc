@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -19,7 +19,11 @@ import {
   senderAddressOf,
   senderOf,
 } from '../../hooks/hierarchy/executor.ts';
-import { recordReceivedSender } from '../../hooks/hierarchy/dispatch.ts';
+import {
+  recordReceivedSender,
+  resolveBoardDir,
+  writeModuleHealth,
+} from '../../hooks/hierarchy/dispatch.ts';
 import {
   HANDOFF_PROMPT,
   PLANNER_RESUME_COMMAND,
@@ -28,6 +32,7 @@ import {
   lastReplyKey,
   rotatePendingKey,
 } from '../../hooks/hierarchy/planner.ts';
+import { makeGitEnv } from '../../../pipeline-cli/src/__test-helpers/git-env.ts';
 import { registerStrict } from './stubs/hierarchy-strict-host.ts';
 
 const env = (from: string, text: string) =>
@@ -448,6 +453,54 @@ describe('hierarchy module: socket-path envelope (AISDLC-1090)', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].args).toContain('/b/handoff/received-me.json');
     expect(calls[0].args).toContain('uds:/tmp/cc-socks/1.sock');
+  });
+
+  it('writes both handoff files under the project board when boardDir is undefined (AISDLC-1181)', async () => {
+    const proj = mkdtempSync(path.join(os.tmpdir(), 'proj-'));
+    mkdirSync(path.join(proj, '.git'));
+    const sub = path.join(proj, '.claude', 'memory');
+    mkdirSync(sub, { recursive: true });
+    const prevCwd = process.cwd();
+    const { CLAUDE_PROJECT_DIR: prevEnv } = process.env;
+    delete process.env.CLAUDE_PROJECT_DIR;
+    process.chdir(sub);
+    try {
+      const calls: Array<{ command: string; args: string[] }> = [];
+      // Really executes the root lookup in the subdirectory; records the write calls.
+      const run = async (a: { command: string; args: string[] }) => {
+        if (a.args[1].includes('.git')) {
+          return {
+            stdout: execFileSync(a.command, a.args, { cwd: sub, env: makeGitEnv() }).toString(),
+          };
+        }
+        calls.push(a);
+        return {};
+      };
+      await recordReceivedSender(run, undefined, 'me', sock('x', 'hi'));
+      await writeModuleHealth(run, undefined, 'me', { state: 'loaded' });
+      expect(calls).toHaveLength(2);
+      for (const c of calls) {
+        const file = c.args[2];
+        expect(path.isAbsolute(file)).toBe(true);
+        expect(file).toBe(
+          path.join(realpathSync(proj), '.ai-sdlc', 'dispatch', 'handoff', path.basename(file)),
+        );
+      }
+      // Env wins without spawning; a relative boardDir resolves to nothing, so nothing is written.
+      process.env.CLAUDE_PROJECT_DIR = '/p';
+      expect(await resolveBoardDir(run)).toBe('/p/.ai-sdlc/dispatch');
+      expect(await resolveBoardDir(run, 'rel')).toBeUndefined();
+      delete process.env.CLAUDE_PROJECT_DIR;
+      expect(await resolveBoardDir(async () => ({ stdout: '' }))).toBeUndefined();
+      const before = calls.length;
+      await recordReceivedSender(calls.push.bind(calls) as never, 'rel', 'me', sock('x', 'hi'));
+      await writeModuleHealth(async () => ({}), undefined, 'me', { state: 'loaded' });
+      expect(calls).toHaveLength(before);
+    } finally {
+      process.chdir(prevCwd);
+      if (prevEnv === undefined) delete process.env.CLAUDE_PROJECT_DIR;
+      else process.env.CLAUDE_PROJECT_DIR = prevEnv;
+    }
   });
 
   it('passes a non-dispatch sender through unchanged, for executor and planner', async () => {

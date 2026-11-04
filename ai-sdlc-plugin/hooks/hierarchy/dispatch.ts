@@ -84,6 +84,30 @@ export function newDispatchState(options?: DispatchOptions): DispatchState {
   };
 }
 
+/** Prints the nearest ancestor of the cwd holding a `.git` entry (empty when none). */
+const ROOT_SCRIPT =
+  "const fs=require('fs'),p=require('path');let d=process.cwd();for(;;){if(fs.existsSync(p.join(d,'.git'))){process.stdout.write(d);break}const u=p.dirname(d);if(u===d)break;d=u}";
+
+type Run = (a: { command: string; args: string[] }) => Promise<Any>;
+
+/**
+ * AISDLC-1181: the one resolver every handoff writer uses, so the board path handed to `process.run` is
+ * always absolute. A relative `.ai-sdlc/dispatch` followed the session cwd (for example `.claude/memory`)
+ * and left untracked files in the parent checkout. Order: an absolute `boardDir`, `CLAUDE_PROJECT_DIR`,
+ * the project root found from the cwd. Returns `undefined` (the caller writes nothing) when none resolves.
+ * A hooks module may import nothing but local files, so the root lookup runs in a child node process.
+ */
+export async function resolveBoardDir(run: Run, boardDir?: string): Promise<string | undefined> {
+  if (boardDir)
+    return boardDir.startsWith('/') || /^[A-Za-z]:[\\/]/.test(boardDir) ? boardDir : undefined;
+  const env = process.env.CLAUDE_PROJECT_DIR;
+  if (env && (env.startsWith('/') || /^[A-Za-z]:[\\/]/.test(env)))
+    return `${env}/.ai-sdlc/dispatch`;
+  const r = await safe(() => run({ command: NODE, args: ['-e', ROOT_SCRIPT] }));
+  const root = String(((r.value ?? {}) as Any).stdout ?? '').trim();
+  return root ? `${root}/.ai-sdlc/dispatch` : undefined;
+}
+
 /** Writes the file named by argv[1] (creating its directory) with argv[2]. */
 const WRITE_SCRIPT =
   "const fs=require('fs');fs.mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});fs.writeFileSync(process.argv[1],process.argv[2])";
@@ -105,7 +129,9 @@ export async function recordReceivedSender(
 ): Promise<void> {
   const from = senderAddressOf(raw);
   if (!/^uds:\/[A-Za-z0-9._/-]+\.sock$/.test(from)) return;
-  const file = `${boardDir ?? '.ai-sdlc/dispatch'}/handoff/received-${name}.json`;
+  const board = await resolveBoardDir(run, boardDir);
+  if (!board) return;
+  const file = `${board}/handoff/received-${name}.json`;
   await safe(
     () => run({ command: NODE, args: ['-e', RECEIVED_SCRIPT, file, from] }),
     'process.run',
@@ -124,12 +150,14 @@ export async function writeModuleHealth(
   health: { state: 'loaded' | 'refused'; reason?: string; version?: string },
   storeSet?: (k: string, v: unknown) => Promise<Any>,
 ): Promise<void> {
-  const file = `${boardDir ?? '.ai-sdlc/dispatch'}/handoff/module-${name}.json`;
+  const board = await resolveBoardDir(run, boardDir);
   const record = { ...health, at: new Date().toISOString() };
   const body = JSON.stringify(record);
   // AISDLC-1082: the plugin store copy survives a host whose `process.run` cannot write the board file.
   // `readModuleHealth` falls back to this store key when the board file is absent.
   if (storeSet) await safe(() => storeSet(`hierarchy/health/${name}`, record));
+  if (!board) return;
+  const file = `${board}/handoff/module-${name}.json`;
   const r = await safe(() => run({ command: NODE, args: ['-e', WRITE_SCRIPT, file, body] }));
   const v = (r.value ?? {}) as Any;
   const code = v.exitCode ?? v.status ?? v.code;
