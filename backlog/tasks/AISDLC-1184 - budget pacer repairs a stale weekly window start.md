@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1184
 title: 'Budget pacer draws its line from the known window start, not a stored anchor'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-04'
 labels:

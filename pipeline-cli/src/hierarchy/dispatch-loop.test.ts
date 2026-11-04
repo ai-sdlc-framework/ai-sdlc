@@ -185,7 +185,7 @@ describe('auto-brief (AISDLC-930)', () => {
   });
 
   it('the budget pacer holds claims while ahead of the line and lifts, status shows BUDGET (AISDLC-1072)', async () => {
-    let seven = 91;
+    let seven = 43; // the line at this instant is 42.86
     let t = Date.parse('2026-10-23T18:30:00Z');
     const usage = {
       readToken: () => 'tok',
@@ -205,12 +205,12 @@ describe('auto-brief (AISDLC-930)', () => {
     const first = await runDispatchTick(deps({ usage, now: () => new Date(t) }));
     expect(first.held).toBeUndefined();
     t += 3600_000;
-    seven = 92;
+    seven = 44.5;
     const held = await runDispatchTick(deps({ usage, now: () => new Date(t) }));
     expect(held.held?.reason).toMatch(/^budget/);
     expect(held.reports.map((x) => x.text).join('\n')).toContain('budget pacer: board held');
     t += 3600_000;
-    seven = 90;
+    seven = 40;
     const lifted = await runDispatchTick(deps({ usage, now: () => new Date(t) }));
     expect(lifted.held).toBeUndefined();
     expect(lifted.reports.map((x) => x.text).join('\n')).toContain('budget pacer: lifted');
