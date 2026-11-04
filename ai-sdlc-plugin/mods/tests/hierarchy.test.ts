@@ -32,6 +32,7 @@ import {
   lastReplyKey,
   rotatePendingKey,
 } from '../../hooks/hierarchy/planner.ts';
+import { makeGitEnv } from '../../../pipeline-cli/src/__test-helpers/git-env.ts';
 import { registerStrict } from './stubs/hierarchy-strict-host.ts';
 
 const env = (from: string, text: string) =>
@@ -460,7 +461,7 @@ describe('hierarchy module: socket-path envelope (AISDLC-1090)', () => {
     const sub = path.join(proj, '.claude', 'memory');
     mkdirSync(sub, { recursive: true });
     const prevCwd = process.cwd();
-    const prevEnv = process.env.CLAUDE_PROJECT_DIR;
+    const { CLAUDE_PROJECT_DIR: prevEnv } = process.env;
     delete process.env.CLAUDE_PROJECT_DIR;
     process.chdir(sub);
     try {
@@ -468,7 +469,9 @@ describe('hierarchy module: socket-path envelope (AISDLC-1090)', () => {
       // Really executes the root lookup in the subdirectory; records the write calls.
       const run = async (a: { command: string; args: string[] }) => {
         if (a.args[1].includes('.git')) {
-          return { stdout: execFileSync(a.command, a.args, { cwd: sub }).toString() };
+          return {
+            stdout: execFileSync(a.command, a.args, { cwd: sub, env: makeGitEnv() }).toString(),
+          };
         }
         calls.push(a);
         return {};
