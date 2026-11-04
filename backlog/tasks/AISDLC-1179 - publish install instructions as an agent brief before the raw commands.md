@@ -13,12 +13,12 @@ references:
   - docs/getting-started/onboarding.md
   - docs/tutorials/08-claude-code-plugin.md
 priority: medium
-dispatchable: false
+dispatchable: true
 ---
 
 ## Description
 
-**Source.** Install friction report from the ai-sdlc-io planner session, 2026-11-04, relayed as operator-approved. `dispatchable: false` until the operator confirms this task in the ai-sdlc planner session.
+**Source.** Install friction report from the ai-sdlc-io planner session, 2026-11-04, relayed as operator-approved. Operator confirmed this task for dispatch in the ai-sdlc planner session on 2026-11-04.
 
 **Problem.** The install is a command list, so a user runs each command in turn and stops at the first error.
 
