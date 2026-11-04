@@ -70,7 +70,10 @@ export async function cleanReplayCarriesForward(
     treeOf(runner, cwd, candidate.headSha),
   ]);
   if (!reviewedTree || !candidateTree) return false;
-  if (reviewedTree === candidateTree) return true;
+  // The identical-tree shortcut is only valid when the base did not move: after a rebase that
+  // moved the base, an identical tree means main's change was dropped (e.g. a conflict resolved
+  // by taking the PR side), so the three-way replay below must decide.
+  if (reviewedTree === candidateTree && reviewed.baseSha === candidate.baseSha) return true;
   const merged = await runner(
     'git',
     [

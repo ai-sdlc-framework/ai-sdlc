@@ -213,6 +213,18 @@ describe('cleanReplayCarriesForward', () => {
       });
     });
 
+    it('does not shortcut an identical tree when the base moved', async () => {
+      const sameTree: Runner = async (_c, args) => {
+        if (args[0] === '--version') return { stdout: 'git version 2.43.0', stderr: '', code: 0 };
+        if (args[0] === 'rev-parse') return { stdout: 'T1\n', stderr: '', code: 0 };
+        // main changed files, so the clean replay yields a different tree than the candidate's
+        return { stdout: 'T3\n', stderr: '', code: 0 };
+      };
+      await expect(cleanReplayCarriesForward(sameTree, '/x', rev, cand)).resolves.toBe(false);
+      const sameBase = { ...cand, baseSha: rev.baseSha };
+      await expect(cleanReplayCarriesForward(sameTree, '/x', rev, sameBase)).resolves.toBe(true);
+    });
+
     it('does not carry on conflict or a differing tree', async () => {
       await expect(cleanReplayCarriesForward(fake(1, 'T2'), '/x', rev, cand)).resolves.toBe(false);
       await expect(cleanReplayCarriesForward(fake(0, 'T9'), '/x', rev, cand)).resolves.toBe(false);
