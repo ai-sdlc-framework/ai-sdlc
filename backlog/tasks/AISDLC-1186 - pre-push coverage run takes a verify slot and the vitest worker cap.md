@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1186
 title: 'Pre-push coverage run takes a verify slot and the vitest worker cap'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-04'
 labels:
