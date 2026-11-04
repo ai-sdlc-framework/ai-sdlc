@@ -878,7 +878,6 @@ describe('hierarchy status', () => {
       JSON.stringify({
         available: true,
         samples: [],
-        windows: {},
         sample: {
           at: '2026-10-23T18:30:00Z',
           sevenDay: { utilization: 91, resetsAt: '2026-10-27T18:30:00Z' },

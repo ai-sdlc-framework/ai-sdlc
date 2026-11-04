@@ -43,13 +43,6 @@ export interface UsageSample {
 export type UsageFetch =
   { available: true; sample: UsageSample } | { available: false; reason: string };
 
-/** The start of a window as the pacer sees it (first sample of that reset time). */
-export interface WindowStart {
-  resetsAt: string;
-  at: string;
-  utilization: number;
-}
-
 export interface UsageFile {
   available: boolean;
   reason?: string;
@@ -57,7 +50,6 @@ export interface UsageFile {
   sample?: UsageSample;
   lastAttemptAt?: string;
   samples: UsageSample[];
-  windows: Partial<Record<WindowName, WindowStart>>;
 }
 
 export interface UsageDeps {
@@ -137,14 +129,13 @@ export function usagePath(boardDir: string): string {
 }
 
 export function readUsage(boardDir: string): UsageFile {
-  const empty: UsageFile = { available: false, samples: [], windows: {} };
+  const empty: UsageFile = { available: false, samples: [] };
   try {
     const doc = JSON.parse(readFileSync(usagePath(boardDir), 'utf-8')) as Partial<UsageFile>;
     return {
       ...empty,
       ...doc,
       samples: Array.isArray(doc.samples) ? doc.samples : [],
-      windows: doc.windows && typeof doc.windows === 'object' ? doc.windows : {},
     };
   } catch {
     return empty;
@@ -159,7 +150,7 @@ function writeUsage(boardDir: string, file: UsageFile): void {
   renameSync(tmp, target);
 }
 
-/** Fold a fetch into `usage.json`: ring trimmed to 24 hours, window starts recorded. */
+/** Fold a fetch into `usage.json`: ring trimmed to 24 hours. */
 export function recordUsage(boardDir: string, result: UsageFetch, nowDate: Date): UsageFile {
   const prev = readUsage(boardDir);
   const file: UsageFile = { ...prev, lastAttemptAt: nowDate.toISOString() };
@@ -172,16 +163,6 @@ export function recordUsage(boardDir: string, result: UsageFetch, nowDate: Date)
     file.sample = result.sample;
     const cutoff = nowDate.getTime() - USAGE_RING_MS;
     file.samples = [...prev.samples, result.sample].filter((s) => Date.parse(s.at) >= cutoff);
-    for (const name of ['fiveHour', 'sevenDay'] as const) {
-      const r = result.sample[name];
-      if (r && !sameWindow(file.windows[name]?.resetsAt, r.resetsAt)) {
-        file.windows[name] = {
-          resetsAt: r.resetsAt,
-          at: result.sample.at,
-          utilization: r.utilization,
-        };
-      }
-    }
   }
   writeUsage(boardDir, file);
   return file;
@@ -228,16 +209,11 @@ export function paceOf(
   const cur = file.sample?.[name];
   if (!cur) return undefined;
   const resets = Date.parse(cur.resetsAt);
-  const start = file.windows[name];
-  const windowStart = resets - TOTAL_MS[name];
-  const t0 =
-    start && sameWindow(start.resetsAt, cur.resetsAt)
-      ? Math.max(windowStart, Date.parse(start.at))
-      : windowStart;
-  const u0 = start && sameWindow(start.resetsAt, cur.resetsAt) ? start.utilization : 0;
+  // The line runs from 0% at reset minus the window length, never from a stored anchor (AISDLC-1184).
+  const t0 = resets - TOTAL_MS[name];
   const total = resets - t0;
   const elapsed = Math.min(Math.max(nowMs - t0, 0), total);
-  const line = total > 0 ? u0 + ((100 - u0) * elapsed) / total : 100;
+  const line = total > 0 ? (100 * elapsed) / total : 100;
   const pace: WindowPace = {
     name,
     utilization: cur.utilization,

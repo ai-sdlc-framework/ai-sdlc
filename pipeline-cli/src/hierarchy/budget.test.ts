@@ -9,6 +9,7 @@ import {
   fetchUsage,
   formatBudget,
   overrideBudget,
+  paceOf,
   readUsage,
   recordUsage,
   resolveMargins,
@@ -16,6 +17,7 @@ import {
   runBudgetPacer,
   type UsageDeps,
 } from './budget.js';
+import { pacerAllowance } from './executor-cap.js';
 import { readHold, writeHold } from './hold.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -119,16 +121,18 @@ describe('pacer', () => {
     expect((await runBudgetPacer(dir, deps())).sampled).toBe(true);
   });
 
-  it('holds when 92 percent an hour after 91 is ahead of the line, then lifts', async () => {
+  it('holds when 44.5 percent an hour after 43 is ahead of the line, then lifts', async () => {
+    seven = 43; // the line at T0 is 42.86 (72 of 168 hours elapsed)
+    five = 0; // the five-hour window starts at T0
     expect(await runBudgetPacer(dir, deps())).toEqual({ sampled: true });
     clock += 3600_000;
-    seven = 92;
+    seven = 44.5;
     const set = await runBudgetPacer(dir, deps());
     expect(set.set).toContain('budget');
     expect(readHold(dir)?.reason).toMatch(/^budget/);
-    // the line at +2h is ~91.19; 90 is under line minus margin 0.5
+    // the line at +2h is ~44.05; 40 is under line minus margin 0.5
     clock += 3600_000;
-    seven = 90;
+    seven = 40;
     const lifted = await runBudgetPacer(dir, deps());
     expect(lifted.lifted).toContain('budget');
     expect(readHold(dir)).toBeNull();
@@ -137,15 +141,16 @@ describe('pacer', () => {
   it('keeps the hold between the margins and uses default margin 2 without config', async () => {
     rmSync(path.join(dir, 'config.json'));
     expect(resolveMargins(dir)).toEqual({ sevenDay: 2, fiveHour: 10 });
+    seven = 43;
     await runBudgetPacer(dir, deps());
     clock += 3600_000;
-    seven = 92;
+    seven = 44;
     expect((await runBudgetPacer(dir, deps())).set).toBeUndefined();
     clock += 3600_000;
-    seven = 94;
+    seven = 47;
     expect((await runBudgetPacer(dir, deps())).set).toBeDefined();
     clock += 3600_000;
-    seven = 91.5; // inside the band: hold stays
+    seven = 44.5; // inside the band: hold stays
     const r = await runBudgetPacer(dir, deps());
     expect(r.lifted).toBeUndefined();
     expect(readHold(dir)).not.toBeNull();
@@ -193,15 +198,16 @@ describe('pacer', () => {
 describe('status BUDGET line', () => {
   it('prints utilizations, line, ahead and the projected exhaustion', async () => {
     expect(budgetStatus(dir, clock)).toBeUndefined();
+    seven = 43;
     await runBudgetPacer(dir, deps());
     clock += 3600_000;
-    seven = 92;
+    seven = 44;
     await runBudgetPacer(dir, deps());
     const b = budgetStatus(dir, clock);
     const line = formatBudget(b!);
-    expect(line).toMatch(/^BUDGET 7d 92% \(line 91\.1%, ahead 0\.9 points\)/);
+    expect(line).toMatch(/^BUDGET 7d 44% \(line 43\.5%, ahead 0\.5 points\)/);
     expect(line).toContain('projected 100% at');
-    expect(b?.sevenDay?.exhaustsAt).toBe(new Date(clock + 8 * 3600_000).toISOString());
+    expect(b?.sevenDay?.exhaustsAt).toBe(new Date(clock + 56 * 3600_000).toISOString());
   });
 
   it('says no projection for a flat burn and unknown for a missing window', async () => {
@@ -248,11 +254,25 @@ describe('reset-time jitter (AISDLC-1166)', () => {
     expect(budgetStatus(dir, clock)?.overridden).toBe(false);
   });
 
-  it('keeps the window start utilization across jitter', () => {
-    sampleWith(A, 50, 0);
-    sampleWith(B, 52, 60_000);
-    expect(readUsage(dir).windows.sevenDay?.utilization).toBe(50);
-    sampleWith('2026-11-10T19:00:00+00:00', 1, 120_000);
-    expect(readUsage(dir).windows.sevenDay?.utilization).toBe(1);
+  it('draws the line from reset minus the window length, ignoring a stored anchor (AISDLC-1184)', () => {
+    const reset = '2026-11-10T19:00:00Z';
+    const now = Date.parse('2026-11-04T21:53:00Z');
+    writeFileSync(
+      path.join(dir, 'usage.json'),
+      JSON.stringify({
+        available: true,
+        samples: [],
+        windows: { sevenDay: { resetsAt: reset, at: '2026-11-04T21:05:00Z', utilization: 6 } },
+        sample: {
+          at: '2026-11-04T21:53:00Z',
+          sevenDay: { utilization: 7, resetsAt: reset },
+        },
+      }),
+    );
+    const pace = paceOf('sevenDay', readUsage(dir), 2, now);
+    expect(pace?.line).toBeGreaterThan(15.5);
+    expect(pace?.line).toBeLessThan(16.5);
+    expect(pace && pace.ahead < 0).toBe(true);
+    expect(pacerAllowance(budgetStatus(dir, now))).toBe(Number.POSITIVE_INFINITY);
   });
 });
