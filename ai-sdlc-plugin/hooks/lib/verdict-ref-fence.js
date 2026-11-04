@@ -4,7 +4,8 @@
  * Refuses (a) any `git push` naming `refs/ai-sdlc/verdicts/*` and (b) any `gh api` status or
  * check post whose context is a gate context. The one exception is the Step 11 ship step, which
  * pushes the verdict ref from inside the `next-step` process (the hook never sees that push) and
- * is reached through a plain, un-chained `next-step` invocation.
+ * is reached through a plain, un-chained `next-step` invocation. The second sanctioned writer is
+ * the trusted `verdict-writer.yml` workflow_run workflow (OQ-7), which runs in CI, not in a session.
  *
  * evaluateVerdictFence(command) returns { decision: 'none' | 'allow' | 'deny', reason? }.
  */
@@ -38,7 +39,7 @@ function evaluateVerdictFence(command) {
       (pushesVerdict
         ? 'agent sessions may not push refs/ai-sdlc/verdicts/*'
         : 'agent sessions may not post a status or check with a gate context') +
-      ' (RFC-0061 OQ-8: the verdict is issued only by the Step 11 ship step or the CI clean room).',
+      ' (RFC-0061 OQ-8: the verdict is issued only by the Step 11 ship step or the CI verdict-writer workflow for untrusted PRs).',
   };
 }
 

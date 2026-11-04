@@ -1,0 +1,95 @@
+# RFC-0061 OQ-7 (AISDLC-1171): the trusted writer of the verdict record for untrusted PRs.
+#
+# The clean-room job of untrusted-pr-gate.yml uploads a verdict record artifact. This
+# workflow_run workflow always runs the DEFAULT-branch definition, never checks out or reads
+# PR content, validates the artifact as untrusted data (schema, head match, review jobs
+# succeeded, tree match from the API), then writes the verdict ref for the head. It is the
+# second sanctioned writer named by the OQ-8 fence. Only this job holds contents: write; never
+# give contents: write to a job that runs AI reviewers over PR content.
+name: Verdict writer
+
+on:
+  workflow_run:
+    workflows: ['Untrusted-Contributor PR Verification Gate']
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verdict-writer-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  write:
+    name: Write verdict record
+    if: >-
+      github.event.workflow_run.event == 'pull_request_target' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      # Default branch only: scripts and the validator come from trusted code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install and build the validator (default-branch code)
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm --filter @ai-sdlc/pipeline-cli build
+
+      - name: Download the verdict record artifact (DATA only)
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ucvg-verdict-record
+          path: ${{ runner.temp }}/verdict-artifact
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Validate and write the verdict record
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          RUN_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          ARTIFACT_DIR: ${{ runner.temp }}/verdict-artifact
+          JOBS_FILE: ${{ runner.temp }}/jobs.json
+          # The token reaches git only in this final step, as a one-shot extraheader.
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: http.https://github.com/.extraheader
+          GIT_CONFIG_VALUE_0: ''
+        run: |
+          set -euo pipefail
+          # pull_request_target runs report the BASE tip as workflow_run.head_sha, so the PR
+          # head is resolved from the API (trusted), never from the event sha or the artifact.
+          [[ "$RUN_HEAD_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || { echo "::error::invalid head repo"; exit 1; }
+          [[ "$RUN_HEAD_OWNER" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::invalid head owner"; exit 1; }
+          PRS=$(gh api -X GET "repos/${REPO}/pulls" -f state=open -f head="${RUN_HEAD_OWNER}:${RUN_HEAD_BRANCH}" \
+            --jq "[.[] | select(.head.repo.full_name == \"${RUN_HEAD_REPO}\") | .head.sha]")
+          [ "$(jq length <<<"$PRS")" = "1" ] || { echo "::error::expected exactly one open PR for the run branch"; exit 1; }
+          PR_HEAD_SHA=$(jq -r '.[0]' <<<"$PRS")
+          [[ "$PR_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::invalid PR head sha"; exit 1; }
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}/jobs" --paginate --jq '.jobs[] | {name, conclusion}' \
+            | jq -s '{jobs: .}' > "$JOBS_FILE"
+          TREE=$(gh api "repos/${RUN_HEAD_REPO}/git/commits/${PR_HEAD_SHA}" --jq .tree.sha)
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          node pipeline-cli/bin/cli-attestation.mjs verdict-write \
+            --artifact-dir "$ARTIFACT_DIR" \
+            --head "$PR_HEAD_SHA" \
+            --repository "$REPO" \
+            --jobs-file "$JOBS_FILE" \
+            --tree "$TREE"

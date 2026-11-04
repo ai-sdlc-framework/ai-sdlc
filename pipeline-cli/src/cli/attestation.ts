@@ -35,7 +35,12 @@ import {
   pruneVerdictRefs,
 } from '../attestation/verdict-prune.js';
 import { runCatches, runVerdictCheck } from '../attestation/verdict-cli.js';
-import { INDEPENDENCE_TIERS } from '../attestation/verdict-record.js';
+import {
+  INDEPENDENCE_TIERS,
+  verdictRefName,
+  writeVerdictCommit,
+} from '../attestation/verdict-record.js';
+import { validateVerdictArtifact } from '../attestation/verdict-untrusted.js';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import {
@@ -1612,6 +1617,64 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           });
           for (const ref of out.deleted) process.stdout.write(`deleted ${ref}\n`);
           process.stdout.write(`deleted=${out.deleted.length} kept=${out.kept.length}\n`);
+        },
+      )
+      // ── verdict-write (RFC-0061 OQ-7): the trusted workflow_run writer ───────
+      .command(
+        'verdict-write',
+        'Validate a clean-room verdict artifact against the triggering run and write the verdict ref for the head. Reads no PR content.',
+        (y: Argv) =>
+          y
+            .option('artifact-dir', { type: 'string', demandOption: true })
+            .option('head', { type: 'string', demandOption: true })
+            .option('repository', { type: 'string', demandOption: true })
+            .option('jobs-file', { type: 'string', demandOption: true })
+            .option('tree', { type: 'string' })
+            .option('dry-run', { type: 'boolean', default: false }),
+        async (args) => {
+          const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
+          const raw = JSON.parse(readFileSync(args['jobs-file'] as string, 'utf8')) as {
+            jobs?: Array<{ name: string; conclusion: string | null }>;
+          };
+          const checked = validateVerdictArtifact({
+            dir: resolve(args['artifact-dir'] as string),
+            headSha: args['head'] as string,
+            repository: args['repository'] as string,
+            jobs: raw.jobs ?? [],
+            expectedTreeSha: args['tree'] as string | undefined,
+          });
+          if (!checked.ok) {
+            process.stderr.write(`[cli-attestation] verdict-write: rejected: ${checked.reason}\n`);
+            process.exitCode = 1;
+            return;
+          }
+          const ref = verdictRefName(checked.record.subject.headSha);
+          if (args['dry-run']) {
+            process.stdout.write(`valid; would write ${ref}\n`);
+            return;
+          }
+          const commit = await writeVerdictCommit(
+            defaultRunner,
+            repoRoot,
+            checked.record,
+            checked.leavesJsonl,
+          );
+          if (!commit) {
+            process.stderr.write('[cli-attestation] verdict-write: tree write failed\n');
+            process.exitCode = 1;
+            return;
+          }
+          // No force: an issued record for a head is never overwritten.
+          const out = await defaultRunner('git', ['push', 'origin', `${commit}:${ref}`], {
+            cwd: repoRoot,
+            allowFailure: true,
+          });
+          if (out.code !== 0) {
+            process.stderr.write(`[cli-attestation] verdict-write: write failed: ${out.stderr}\n`);
+            process.exitCode = 1;
+            return;
+          }
+          process.stdout.write(`wrote ${ref}\n`);
         },
       )
       // ── verdict-check / catches (RFC-0061 Phase 1, shadow) ───────────────────

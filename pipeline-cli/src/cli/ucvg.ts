@@ -28,7 +28,9 @@
  * @module cli/ucvg
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { buildCleanRoomVerdict, writeVerdictArtifact } from '../attestation/verdict-untrusted.js';
+import { validateReport } from '../pipeline/report-validator.js';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { classifyTrust } from '../pipeline/trust-classifier.js';
@@ -933,6 +935,28 @@ export async function runUcvgCli(argv: string[] = process.argv.slice(2)): Promis
         workflowRef,
         signerKeyId,
       });
+      break;
+    }
+
+    case 'emit-verdict': {
+      const reportPath = flags['report-path'];
+      const outDir = flags['out-dir'];
+      const treeSha = flags['tree-sha'];
+      const repository = flags['repository'];
+      const headSha = flags['head-sha'];
+      if (!reportPath || !existsSync(reportPath))
+        fail('--report-path must name an existing report');
+      if (!outDir) fail('--out-dir is required');
+      if (!treeSha || !/^[0-9a-f]{40,64}$/.test(treeSha)) fail('--tree-sha must be a hex sha');
+      if (!repository) fail('--repository is required');
+      const validated = validateReport(JSON.parse(readFileSync(reportPath, 'utf8')));
+      if (!validated.valid) fail(`report rejected: ${validated.error}`);
+      if (headSha && validated.report.headSha.toLowerCase() !== headSha.toLowerCase()) {
+        fail('report head does not match --head-sha');
+      }
+      const built = buildCleanRoomVerdict(validated.report, { treeSha, repository });
+      writeVerdictArtifact(outDir, built.record, built.leavesJsonl);
+      emit({ ok: true, outDir, verdict: built.record.verdict });
       break;
     }
 
