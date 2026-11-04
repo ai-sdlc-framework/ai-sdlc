@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1181
 title: 'Hierarchy module writes handoff files with a relative board path that follows the session cwd'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-04'
 labels:

@@ -3,6 +3,8 @@
 // `session.receive`, renders the board pane and wakes executors with `$.session.send`. It NEVER submits a
 // prompt to its model: there is no `prompt.submit` port here, so no code path can. Same call-site rule as
 // executor.ts: `$` is only spelled `$.noun.verb(...)` in the handler that builds the ports.
+import { existsSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { innerText, log, readMeasure, safe, senderAddressOf, senderOf } from './executor.ts';
 import type { Ports } from './executor.ts';
 
@@ -84,6 +86,25 @@ export function newDispatchState(options?: DispatchOptions): DispatchState {
   };
 }
 
+/**
+ * AISDLC-1181: the one resolver every handoff writer uses, so the board path is always absolute. A
+ * relative `.ai-sdlc/dispatch` would follow the session cwd (for example `.claude/memory`) and land
+ * untracked files in the parent checkout. Order: explicit `boardDir`, `CLAUDE_PROJECT_DIR`, the nearest
+ * ancestor of the cwd holding a `.git` entry, else the cwd itself.
+ */
+export function resolveBoardDir(boardDir?: string, cwd: string = process.cwd()): string {
+  if (boardDir) return isAbsolute(boardDir) ? boardDir : resolve(cwd, boardDir);
+  const env = process.env.CLAUDE_PROJECT_DIR;
+  if (env && isAbsolute(env)) return join(env, '.ai-sdlc', 'dispatch');
+  let dir = resolve(cwd);
+  for (;;) {
+    if (existsSync(join(dir, '.git'))) return join(dir, '.ai-sdlc', 'dispatch');
+    const up = dirname(dir);
+    if (up === dir) return join(resolve(cwd), '.ai-sdlc', 'dispatch');
+    dir = up;
+  }
+}
+
 /** Writes the file named by argv[1] (creating its directory) with argv[2]. */
 const WRITE_SCRIPT =
   "const fs=require('fs');fs.mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});fs.writeFileSync(process.argv[1],process.argv[2])";
@@ -105,7 +126,7 @@ export async function recordReceivedSender(
 ): Promise<void> {
   const from = senderAddressOf(raw);
   if (!/^uds:\/[A-Za-z0-9._/-]+\.sock$/.test(from)) return;
-  const file = `${boardDir ?? '.ai-sdlc/dispatch'}/handoff/received-${name}.json`;
+  const file = `${resolveBoardDir(boardDir)}/handoff/received-${name}.json`;
   await safe(
     () => run({ command: NODE, args: ['-e', RECEIVED_SCRIPT, file, from] }),
     'process.run',
@@ -124,7 +145,7 @@ export async function writeModuleHealth(
   health: { state: 'loaded' | 'refused'; reason?: string; version?: string },
   storeSet?: (k: string, v: unknown) => Promise<Any>,
 ): Promise<void> {
-  const file = `${boardDir ?? '.ai-sdlc/dispatch'}/handoff/module-${name}.json`;
+  const file = `${resolveBoardDir(boardDir)}/handoff/module-${name}.json`;
   const record = { ...health, at: new Date().toISOString() };
   const body = JSON.stringify(record);
   // AISDLC-1082: the plugin store copy survives a host whose `process.run` cannot write the board file.

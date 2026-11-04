@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -19,7 +19,11 @@ import {
   senderAddressOf,
   senderOf,
 } from '../../hooks/hierarchy/executor.ts';
-import { recordReceivedSender } from '../../hooks/hierarchy/dispatch.ts';
+import {
+  recordReceivedSender,
+  resolveBoardDir,
+  writeModuleHealth,
+} from '../../hooks/hierarchy/dispatch.ts';
 import {
   HANDOFF_PROMPT,
   PLANNER_RESUME_COMMAND,
@@ -448,6 +452,44 @@ describe('hierarchy module: socket-path envelope (AISDLC-1090)', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].args).toContain('/b/handoff/received-me.json');
     expect(calls[0].args).toContain('uds:/tmp/cc-socks/1.sock');
+  });
+
+  it('writes both handoff files under the project board when boardDir is undefined (AISDLC-1181)', async () => {
+    const proj = mkdtempSync(path.join(os.tmpdir(), 'proj-'));
+    mkdirSync(path.join(proj, '.git'));
+    const sub = path.join(proj, '.claude', 'memory');
+    mkdirSync(sub, { recursive: true });
+    const prevCwd = process.cwd();
+    const prevEnv = process.env.CLAUDE_PROJECT_DIR;
+    delete process.env.CLAUDE_PROJECT_DIR;
+    process.chdir(sub);
+    try {
+      const calls: Array<{ command: string; args: string[] }> = [];
+      const run = async (a: { command: string; args: string[] }) => void calls.push(a);
+      await recordReceivedSender(run, undefined, 'me', sock('x', 'hi'));
+      await writeModuleHealth(run, undefined, 'me', { state: 'loaded' });
+      expect(calls).toHaveLength(2);
+      const real = realpathSync(proj);
+      for (const c of calls) {
+        const file = c.args[2];
+        expect(path.isAbsolute(file)).toBe(true);
+        expect(
+          file.startsWith(path.join(real, '.ai-sdlc')) ||
+            file.startsWith(path.join(proj, '.ai-sdlc')),
+        ).toBe(true);
+        expect(file).toContain(
+          `${path.sep}.ai-sdlc${path.sep}dispatch${path.sep}handoff${path.sep}`,
+        );
+        expect(file).not.toContain(`${path.sep}.claude${path.sep}`);
+      }
+      process.env.CLAUDE_PROJECT_DIR = '/p';
+      expect(resolveBoardDir()).toBe('/p/.ai-sdlc/dispatch');
+      expect(resolveBoardDir('rel', '/c')).toBe('/c/rel');
+    } finally {
+      process.chdir(prevCwd);
+      if (prevEnv === undefined) delete process.env.CLAUDE_PROJECT_DIR;
+      else process.env.CLAUDE_PROJECT_DIR = prevEnv;
+    }
   });
 
   it('passes a non-dispatch sender through unchanged, for executor and planner', async () => {
