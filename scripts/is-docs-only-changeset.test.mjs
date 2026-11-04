@@ -127,8 +127,7 @@ describe('isDocsOnly() — path category coverage (AC-3)', () => {
     assert.equal(isDocsOnly(['AGENTS.md']), false);
   });
 
-  it('agent memory, dispatch briefs and dependabot config run the full gate (AISDLC-971)', () => {
-    assert.equal(isDocsOnly(['.claude/memory/x.md']), false);
+  it('dispatch briefs and dependabot config run the full gate (AISDLC-971)', () => {
     assert.equal(isDocsOnly(['.ai-sdlc/dispatch/briefs/b.md']), false);
     assert.equal(isDocsOnly(['.github/dependabot.yml']), false);
     assert.equal(isDocsOnly(['docs/a.md', 'spec/rfcs/RFC-0001.md', 'backlog/tasks/t.md']), true);

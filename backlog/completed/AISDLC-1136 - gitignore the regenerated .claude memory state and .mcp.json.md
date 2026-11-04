@@ -1,6 +1,9 @@
 ---
 id: AISDLC-1136
-title: 'Repo ignore rules for the regenerated .claude/memory state, settings.local.json, .claude/transcripts and the project .mcp.json; commit a .mcp.json.example template'
+title: >-
+  Repo ignore rules for the regenerated .claude/memory state,
+  settings.local.json, .claude/transcripts and the project .mcp.json; commit a
+  .mcp.json.example template
 status: Done
 assignee: []
 created_date: '2026-10-31'
@@ -11,12 +14,18 @@ labels:
 dependencies: []
 references:
   - .gitignore
-  - .claude/memory/MEMORY.md
   - pipeline-cli/src/hierarchy/handoff.ts
   - pipeline-cli/attestation-core/docs-only-paths.mjs
-  - docs/operations/incidents/2026-10-30-parent-checkout-deleted-by-pre-push-coverage-gate.md
+  - >-
+    docs/operations/incidents/2026-10-30-parent-checkout-deleted-by-pre-push-coverage-gate.md
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-11-04'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .claude/memory/MEMORY.md'
+    resolution: flagged
+drift_checked: '2026-11-04'
 ---
 
 ## Description

@@ -60,6 +60,31 @@ export function backupMemory(opts: {
   return { status: 'copied', dir, pruned: drop };
 }
 
+export const REPO_MEMORY_SUBDIR = 'repo-claude-memory';
+
+/**
+ * Daily copy of the repo's gitignored `.claude/memory/` notes (DEC-0370), kept
+ * under `<repo-id>/repo-claude-memory/<date>/` so it never mixes with the
+ * auto-memory backups.
+ */
+export function backupRepoMemory(opts: {
+  projectDir: string;
+  home?: string;
+  now: Date;
+  keep?: number;
+}): BackupResult {
+  const src = join(resolve(opts.projectDir), '.claude', 'memory');
+  if (!existsSync(src) || readdirSync(src).length === 0) return { status: 'no-memory', pruned: [] };
+  const root = join(backupRootFor(opts.projectDir, opts.home), REPO_MEMORY_SUBDIR);
+  const dir = join(root, opts.now.toISOString().slice(0, 10));
+  if (existsSync(dir)) return { status: 'already-today', dir, pruned: [] };
+  cpSync(src, dir, { recursive: true });
+  const all = listBackups(root);
+  const drop = all.slice(0, Math.max(0, all.length - (opts.keep ?? BACKUP_KEEP)));
+  for (const d of drop) rmSync(join(root, d), { recursive: true, force: true });
+  return { status: 'copied', dir, pruned: drop };
+}
+
 /** One-line warning when MEMORY.md is missing but a backup exists; else null. */
 export function memoryBackupHint(opts: {
   memoryDir: string;
