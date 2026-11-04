@@ -465,26 +465,34 @@ describe('hierarchy module: socket-path envelope (AISDLC-1090)', () => {
     process.chdir(sub);
     try {
       const calls: Array<{ command: string; args: string[] }> = [];
-      const run = async (a: { command: string; args: string[] }) => void calls.push(a);
+      // Really executes the root lookup in the subdirectory; records the write calls.
+      const run = async (a: { command: string; args: string[] }) => {
+        if (a.args[1].includes('.git')) {
+          return { stdout: execFileSync(a.command, a.args, { cwd: sub }).toString() };
+        }
+        calls.push(a);
+        return {};
+      };
       await recordReceivedSender(run, undefined, 'me', sock('x', 'hi'));
       await writeModuleHealth(run, undefined, 'me', { state: 'loaded' });
       expect(calls).toHaveLength(2);
-      const real = realpathSync(proj);
       for (const c of calls) {
         const file = c.args[2];
         expect(path.isAbsolute(file)).toBe(true);
-        expect(
-          file.startsWith(path.join(real, '.ai-sdlc')) ||
-            file.startsWith(path.join(proj, '.ai-sdlc')),
-        ).toBe(true);
-        expect(file).toContain(
-          `${path.sep}.ai-sdlc${path.sep}dispatch${path.sep}handoff${path.sep}`,
+        expect(file).toBe(
+          path.join(realpathSync(proj), '.ai-sdlc', 'dispatch', 'handoff', path.basename(file)),
         );
-        expect(file).not.toContain(`${path.sep}.claude${path.sep}`);
       }
+      // Env wins without spawning; a relative boardDir resolves to nothing, so nothing is written.
       process.env.CLAUDE_PROJECT_DIR = '/p';
-      expect(resolveBoardDir()).toBe('/p/.ai-sdlc/dispatch');
-      expect(resolveBoardDir('rel', '/c')).toBe('/c/rel');
+      expect(await resolveBoardDir(run)).toBe('/p/.ai-sdlc/dispatch');
+      expect(await resolveBoardDir(run, 'rel')).toBeUndefined();
+      delete process.env.CLAUDE_PROJECT_DIR;
+      expect(await resolveBoardDir(async () => ({ stdout: '' }))).toBeUndefined();
+      const before = calls.length;
+      await recordReceivedSender(calls.push.bind(calls) as never, 'rel', 'me', sock('x', 'hi'));
+      await writeModuleHealth(async () => ({}), undefined, 'me', { state: 'loaded' });
+      expect(calls).toHaveLength(before);
     } finally {
       process.chdir(prevCwd);
       if (prevEnv === undefined) delete process.env.CLAUDE_PROJECT_DIR;
