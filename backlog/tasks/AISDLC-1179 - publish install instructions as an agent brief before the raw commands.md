@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1179
 title: 'Publish the install as an agent brief a user pastes into Claude Code, with the raw commands second'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-04'
 labels:
