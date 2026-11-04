@@ -1,6 +1,6 @@
 ---
 id: AISDLC-1184
-title: 'Budget pacer repairs a stale weekly window start instead of pacing from it'
+title: 'Budget pacer draws its line from the known window start, not a stored anchor'
 status: To Do
 assignee: []
 created_date: '2026-11-04'
@@ -28,11 +28,13 @@ priority: high
 
 ## Fix
 
-**Five-step review (requirements first).** 1. Requirement questioned: the pacer needs the utilization at the window start only to draw its line. The window start time is already known exactly, as the reset time minus the window length. 2. Deleted: trusting a stored `at` later than the earliest sample in the same window. 3. Simplified: anchor `t0` to the earliest sample in the same window (with its utilization), else the computed window start with utilization 0. 4. Accelerated: no new state. 5. Automated: a test covers the re-anchored file shape.
+**Five-step review (requirements first).** 1. Requirement questioned: the pacer stores a window start so it knows where the line begins. Claude Code's weekly window is fixed: it starts Tuesday at noon Pacific daylight time (19:00 UTC), operator 2026-11-04, and the usage endpoint already reports its reset. The start is therefore always the reset minus the window length, and use at that moment is 0 by definition. 2. Deleted: the stored `windows` anchor in `usage.json` as an input to the line; `paceOf` draws the line from reset minus `TOTAL_MS[name]` at 0%. Keep the stored entry only if another reader needs it; otherwise remove it and its writer. 3. Simplified: no repair logic, no same-window matching for the line (the AISDLC-1166 tolerance stays where samples are grouped for the burn-rate projection). 4. Accelerated: none needed. 5. Automated: tests below.
+
+Do not hard-code the weekday, hour or time zone. Derive the start from the reported reset, so daylight saving changes and any schedule change follow the endpoint.
 
 ## Acceptance Criteria
 
-- [ ] AC-1: `paceOf` never uses a window start later than the earliest retained sample in the same window (same-window comparison within the AISDLC-1166 tolerance); a test reproduces the 2026-11-04 shape (stored start 21:05Z at 6%, samples from 2026-11-03T21:58Z at 2%) and asserts the line is drawn from the earlier sample.
-- [ ] AC-2: `recordUsage` repairs a stored window start that is later than the earliest same-window sample, with a test.
-- [ ] AC-3: `docs/operations/cli-hierarchy.md` states how the window start is chosen.
-- [ ] AC-4: The PR body states whether any running process still loads a pre-AISDLC-1166 build of `budget.ts`, and how to tell from `cli-hierarchy status`.
+- [ ] AC-1: `paceOf` draws the line from reset minus the window length at 0%, ignoring any stored anchor. A test reproduces the 2026-11-04 shape (stored start 2026-11-04T21:05Z at 6%, reset 2026-11-10T19:00Z, 7% used at 21:53Z) and asserts a line of about 16% and the pacer allowance unlimited.
+- [ ] AC-2: The stored `windows` anchor is removed with its writer, or the PR body names the reader that still needs it.
+- [ ] AC-3: `docs/operations/cli-hierarchy.md` states that the line starts at the reset minus the window length, at 0%.
+- [ ] AC-4: The PR body states whether any running process still loads a pre-AISDLC-1166 build of `budget.ts` (the plugin cache copy at `ai-sdlc-local/ai-sdlc/0.40.0` lacks `sameWindow`), and how to tell from `cli-hierarchy status`.
