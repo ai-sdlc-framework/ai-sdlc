@@ -6,7 +6,7 @@
  * not to every task start:
  *
  *   - orchestrator-state recovery (`check-orchestrator-state.sh`, Step 0)
- *   - merged-worktree sweep (Step 0)
+ *   - worktree sweep (Step 0, AISDLC-1108: merged, closed, no-PR and stale worktrees)
  *   - untracked-file sync and stale-debris prune (Step 0.5 / 0.5b)
  *
  * The execute path only {@link assertParentClean}s, unless it runs standalone
@@ -19,6 +19,7 @@
 import { join } from 'node:path';
 import type { Runner } from '../runtime/exec.js';
 import { sweepMergedWorktrees } from './00-sweep.js';
+import type { WorktreeSweepConfig } from './00-worktree-disposition.js';
 import { pruneStaleParentDebris, syncParentUntrackedFiles } from './00-5-sync-parent.js';
 
 export interface UpkeepLogger {
@@ -35,6 +36,10 @@ export interface ParentUpkeepOptions {
   logger?: UpkeepLogger;
   /** Branches the reconciler snapshot already shows with an open PR. */
   knownOpenBranches?: ReadonlySet<string>;
+  /** Worktree sweep windows (AISDLC-1108); defaults apply when absent. */
+  worktreeConfig?: WorktreeSweepConfig;
+  /** Skip the worktree sweep this call (every-N-ticks pacing); the rest of the upkeep runs. */
+  skipSweep?: boolean;
 }
 
 export type ParentUpkeepResult =
@@ -67,12 +72,17 @@ export async function runParentUpkeep(opts: ParentUpkeepOptions): Promise<Parent
       };
     }
   }
-  const sweep = await sweepMergedWorktrees({
-    workDir,
-    runner,
-    ...(opts.knownOpenBranches ? { knownOpenBranches: opts.knownOpenBranches } : {}),
-  });
-  for (const s of sweep.swept) logger?.info(`Sweeping merged worktree: ${JSON.stringify(s)}`);
+  const sweep = opts.skipSweep
+    ? { swept: [] }
+    : await sweepMergedWorktrees({
+        workDir,
+        runner,
+        ...(opts.knownOpenBranches ? { knownOpenBranches: opts.knownOpenBranches } : {}),
+        ...(opts.worktreeConfig ? { config: opts.worktreeConfig } : {}),
+        ...(logger ? { logger } : {}),
+      });
+  for (const s of sweep.swept) logger?.info(`Swept worktree: ${JSON.stringify(s)}`);
+  for (const f of sweep.failed ?? []) logger?.warn(`Worktree removal failed: ${JSON.stringify(f)}`);
 
   // Step 0.5 — non-backlog untracked files in the parent are a hard stop.
   const sync = await syncParentUntrackedFiles({ workDir, runner });

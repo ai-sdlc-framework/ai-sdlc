@@ -271,6 +271,7 @@ describe('runHierarchyCli', () => {
       'no sessions in the roster',
       'webhook: off (no secret)',
       'scheduler: off',
+      expect.stringMatching(/^worktrees: \d+ \(\d+ removable\)$/),
       'last tick: never',
       'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
       'EXECUTOR CAP 3 (executors.max 3, board ceiling none, pacer allowance unlimited, load headroom 4; limited by executors.max)',
@@ -2080,5 +2081,16 @@ describe('scale', () => {
     expect(code).toBe(1);
     expect(String(err.mock.calls[0]?.[0])).toContain('executors.max');
     expect(existsSync(path.join(board(), 'scale.json'))).toBe(false);
+  });
+});
+
+describe('sweep-worktrees (AISDLC-1108)', () => {
+  it('sweeps and dry-runs through the shared disposition rules, deleting no branch', async () => {
+    const cwd = path.join(tmp, 'repo');
+    fs.mkdirSync(path.join(cwd, '.worktrees', 'not-a-git-worktree'), { recursive: true });
+    expect(await runHierarchyCli(['sweep-worktrees', '--dry-run'], overrides({ cwd }))).toBe(0);
+    expect(logs.at(-1)).toBe('would remove 0 worktree(s); branches are never deleted.');
+    expect(await runHierarchyCli(['sweep-worktrees'], overrides({ cwd }))).toBe(0);
+    expect(logs.at(-1)).toBe('removed 0 worktree(s); branches are never deleted.');
   });
 });
