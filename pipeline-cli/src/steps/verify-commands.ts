@@ -45,6 +45,8 @@ export interface VerifyRunResult {
   ok: boolean;
   /** HEAD commit the run started on (AISDLC-1185). */
   headSha?: string;
+  /** `origin/main` at the start of the run; the pre-push hook reuses the run only on a match (AISDLC-1187). */
+  baseSha?: string;
   /** Tree object of `headSha`. */
   treeSha?: string;
   /** False when HEAD or the worktree status changed during the run. */
@@ -251,7 +253,8 @@ async function snapshot(runner: Runner, cwd: string) {
   const headSha = await gitOut(runner, cwd, ['rev-parse', 'HEAD']);
   const treeSha = await gitOut(runner, cwd, ['rev-parse', 'HEAD^{tree}']);
   const status = await gitOut(runner, cwd, ['status', '--porcelain']);
-  return { headSha, treeSha, status };
+  const baseSha = await gitOut(runner, cwd, ['rev-parse', 'origin/main']);
+  return { headSha, treeSha, status, baseSha };
 }
 
 async function coveragePackages(runner: Runner, cwd: string): Promise<string[]> {
@@ -311,6 +314,7 @@ export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyR
       scope: affected ? 'affected' : 'full',
       ...(affected ? { scopePackages: affected } : {}),
       headSha: before.headSha,
+      baseSha: before.baseSha,
       treeSha: before.treeSha,
       clean: before.headSha === after.headSha && before.status === after.status,
       finishedAt: now().toISOString(),

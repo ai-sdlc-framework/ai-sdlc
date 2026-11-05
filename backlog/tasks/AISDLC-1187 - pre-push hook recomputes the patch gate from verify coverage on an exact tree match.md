@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1187
 title: 'Pre-push hook recomputes the patch gate from verify coverage on an exact tree match'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-04'
 labels:
