@@ -296,6 +296,23 @@ describe('Step 11 — composeBody', () => {
     expect(body).toContain('- `pnpm build` - passed');
   });
 
+  it('shows the scope of the last verify run (AISDLC-1188)', () => {
+    const body = composeBody({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: {
+        ...dev,
+        verificationSummaries: { test: 'ok' },
+        verificationScope: 'affected packages: pipeline-cli',
+      },
+      verdict: approved,
+    });
+    expect(body).toContain('Scope of the last verify run: affected packages: pipeline-cli.');
+  });
+
   it('omits the judgment section when there is nothing to report', () => {
     const base = {
       taskId: 'AISDLC-1',

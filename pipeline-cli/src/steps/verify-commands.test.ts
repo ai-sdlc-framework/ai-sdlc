@@ -7,6 +7,7 @@ import { acquireVerifySlot, listVerifySlots } from '../runtime/verify-slots.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import {
   claimedGreenButRed,
+  applyVerifyRun,
   expandVerifyCommands,
   patchGateCommand,
   formatVerifyFeedback,
@@ -303,5 +304,127 @@ describe('verify with coverage (AISDLC-1185)', () => {
     const fr = base(new FakeRunner(), []).on(/list-coverage-packages/, fail('nope', 1));
     await runVerifyCommands({ commands: defaults, cwd: '/x', runner: fr.toRunner() });
     expect(shellCmds(fr)).toEqual(defaults);
+  });
+});
+
+describe('verify narrowing (AISDLC-1188, DEC-0372)', () => {
+  const defaults = ['pnpm build', 'pnpm test', 'pnpm lint', 'pnpm format:check'];
+  const mk = (record: unknown, changed: string[] = ['pipeline-cli/src/a.ts'], broken?: RegExp) => {
+    const dir = mkdtempSync(join(tmpdir(), 'verify-narrow-'));
+    for (const p of ['pipeline-cli', 'orchestrator']) {
+      mkdirSync(join(dir, p, 'src'), { recursive: true });
+      writeFileSync(join(dir, p, 'package.json'), '{}');
+    }
+    const recordFile = join(dir, 'record.json');
+    if (record !== undefined) {
+      writeFileSync(recordFile, typeof record === 'string' ? record : JSON.stringify(record));
+    }
+    const fr = new FakeRunner()
+      .on(broken ?? /^never$/, fail('boom', 1))
+      .on(/rev-parse HEAD\^\{tree\}/, ok('tree1\n'))
+      .on(/rev-parse HEAD/, ok('head2\n'))
+      .on(/status --porcelain/, ok(''))
+      .on(/list-coverage-packages/, ok('["pipeline-cli"]\n'))
+      .on(/diff --name-only/, ok(changed.join('\n') + '\n'))
+      .on(/ls-files/, ok(''))
+      .on(
+        /^pnpm ls /,
+        ok(
+          JSON.stringify([
+            { path: join(dir, 'pipeline-cli') },
+            { path: join(dir, 'orchestrator') },
+          ]),
+        ),
+      );
+    return { dir, recordFile, fr };
+  };
+  const good = { ok: true, clean: true, headSha: 'head1' };
+  const shellCmds = (fr: FakeRunner) =>
+    fr.calls.filter((c) => c.command === 'sh').map((c) => c.args[1]);
+  const run = (m: ReturnType<typeof mk>, narrow = true) =>
+    runVerifyCommands({
+      commands: defaults,
+      cwd: m.dir,
+      runner: m.fr.toRunner(),
+      ...(narrow ? { narrowFrom: m.recordFile } : {}),
+    });
+
+  it('first run is full even with a passing record present', async () => {
+    const m = mk(good);
+    const r = await run(m, false);
+    expect(r.scope).toBe('full');
+    expect(shellCmds(m.fr)).toContain("pnpm -r --no-bail --filter '!./pipeline-cli' test");
+    rmSync(m.dir, { recursive: true, force: true });
+  });
+
+  it('narrows a later round to the touched package plus dependents', async () => {
+    const m = mk(good);
+    const r = await run(m);
+    expect(r.scope).toBe('affected');
+    expect(r.scopePackages).toEqual(['orchestrator', 'pipeline-cli']);
+    expect(shellCmds(m.fr)).toEqual([
+      'pnpm build',
+      'pnpm --filter ./pipeline-cli test:coverage',
+      "pnpm -r --no-bail --filter './orchestrator' test",
+      expect.stringContaining('pnpm test:gates'),
+      patchGateCommand('head2'),
+      'pnpm lint',
+      'pnpm format:check',
+    ]);
+    expect(m.fr.calls.find((c) => c.command === 'pnpm')?.args).toContain(`...[head1]`);
+    rmSync(m.dir, { recursive: true, force: true });
+  });
+
+  it('runs only the gates when nothing changed since the last pass', async () => {
+    const m = mk(good, []);
+    const r = await run(m);
+    expect(r.scope).toBe('affected');
+    expect(shellCmds(m.fr)).not.toContain("pnpm -r --no-bail --filter './orchestrator' test");
+    rmSync(m.dir, { recursive: true, force: true });
+  });
+
+  const fullCases: Array<[string, () => ReturnType<typeof mk>]> = [
+    ['a changed path outside a package', () => mk(good, ['vitest.shared.mjs'])],
+    ['a failed previous record', () => mk({ ...good, ok: false })],
+    ['a dirty previous record', () => mk({ ...good, clean: false })],
+    ['a non-ancestor head', () => mk(good, undefined, /merge-base/)],
+    ['an unreadable record', () => mk('{not json')],
+    ['a missing record', () => mk(undefined)],
+    ['a failed selection', () => mk(good, undefined, /^pnpm ls /)],
+    ['a failed diff', () => mk(good, undefined, /diff --name-only/)],
+  ];
+  it.each(fullCases)('falls back to a full run on %s', async (_n, make) => {
+    const m = make();
+    const r = await run(m);
+    expect(r.scope).toBe('full');
+    expect(shellCmds(m.fr)).toContain("pnpm -r --no-bail --filter '!./pipeline-cli' test");
+    rmSync(m.dir, { recursive: true, force: true });
+  });
+
+  it('carries the scope into the developer return', () => {
+    const dev = { summary: 's', verifications: {} } as never;
+    const full = applyVerifyRun(dev, {
+      ok: true,
+      scope: 'full',
+      results: [],
+      verifications: {} as never,
+    });
+    expect(full.verificationScope).toBe('full');
+    const aff = applyVerifyRun(dev, {
+      ok: true,
+      scope: 'affected',
+      scopePackages: ['a', 'b'],
+      results: [],
+      verifications: {} as never,
+    });
+    expect(aff.verificationScope).toBe('affected packages: a, b');
+    const none = applyVerifyRun(dev, {
+      ok: true,
+      scope: 'affected',
+      scopePackages: [],
+      results: [],
+      verifications: {} as never,
+    });
+    expect(none.verificationScope).toBe('affected packages: none');
   });
 });

@@ -201,7 +201,11 @@ export function composeBody(opts: PushAndPrOptions): string {
           `- \`${command}\` - ${opts.developerReturn.verifications[key]}${
             summaries[key] ? ` (${summaries[key]})` : ''
           }`,
-      ).join('\n')}\n`
+      ).join('\n')}${
+        opts.developerReturn.verificationScope
+          ? `\nScope of the last verify run: ${opts.developerReturn.verificationScope}.`
+          : ''
+      }\n`
     : '';
 
   // AISDLC-1024: the hotfix lane runs on a pinned pipeline build; the PR says which.

@@ -387,6 +387,8 @@ export interface DeveloperReturn {
    * Machine-written one-line summary per verification key (AISDLC-1086): the last output line of
    * the command `next-step` ran itself. Never taken from the developer.
    */
+  /** Scope of the last machine verify run: `full` or `affected packages: ...` (AISDLC-1188). */
+  verificationScope?: string;
   verificationSummaries?: Partial<Record<'build' | 'test' | 'lint' | 'format', string>>;
   /**
    * Free-text notes, or (AISDLC-651.3) a structured object. `parked: true` marks a run that

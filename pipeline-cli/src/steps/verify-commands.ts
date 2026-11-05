@@ -8,8 +8,8 @@
  * @module steps/verify-commands
  */
 
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { now } from '../clock.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { strippedSessionEnv } from '../hierarchy/session-env.js';
@@ -51,6 +51,10 @@ export interface VerifyRunResult {
   clean?: boolean;
   /** ISO time the run finished. */
   finishedAt?: string;
+  /** `full` or `affected` (AISDLC-1188, DEC-0372): what the test step covered. */
+  scope?: 'full' | 'affected';
+  /** Packages whose vitest suites ran when `scope` is `affected`. */
+  scopePackages?: string[];
   /** `docs-only` when the manifest set `verifyCommands: []`. */
   skipped?: 'docs-only';
   results: VerifyCommandResult[];
@@ -131,6 +135,11 @@ export interface RunVerifyOptions {
   /** Board directory holding the shared verify slots; omitted = no cross-run limiting. */
   boardDir?: string;
   slotDeps?: VerifySlotDeps;
+  /**
+   * Path of the previous verify record for this task. Set only on rounds after the first
+   * (AISDLC-1188, DEC-0372); omitted means a full run.
+   */
+  narrowFrom?: string;
 }
 
 const ROOT_TEST_CHAIN_REST =
@@ -150,18 +159,83 @@ export function expandVerifyCommands(
   commands: readonly string[],
   packages: readonly string[],
   headSha: string,
+  affected?: readonly string[],
 ): string[] {
   const i = commands.indexOf('pnpm test');
-  if (i < 0 || packages.length === 0) return [...commands];
-  const excludes = packages.map((p) => `--filter '!./${p}'`).join(' ');
+  if (i < 0 || (packages.length === 0 && !affected)) return [...commands];
+  const filters = (list: readonly string[]) => list.map((p) => `--filter './${p}'`).join(' ');
+  const plain = affected ? affected.filter((p) => !packages.includes(p)) : [];
+  const plainCmd = affected
+    ? plain.length > 0
+      ? [`pnpm -r --no-bail ${filters(plain)} test`]
+      : []
+    : [`pnpm -r --no-bail ${packages.map((p) => `--filter '!./${p}'`).join(' ')} test`];
   return [
     ...commands.slice(0, i),
     ...packages.map((p) => `pnpm --filter ./${p} test:coverage`),
-    `pnpm -r --no-bail ${excludes} test`,
+    ...plainCmd,
     ROOT_TEST_CHAIN_REST,
-    patchGateCommand(headSha),
+    ...(packages.length > 0 ? [patchGateCommand(headSha)] : []),
     ...commands.slice(i + 1),
   ];
+}
+
+/**
+ * Packages to run vitest for on a later round (AISDLC-1188, DEC-0372): those changed since the
+ * previous clean pass plus their dependents. `undefined` means run everything; narrowing fails
+ * closed on every doubt.
+ */
+export async function affectedPackages(
+  runner: Runner,
+  cwd: string,
+  recordFile: string,
+): Promise<string[] | undefined> {
+  let prevSha: string;
+  try {
+    const rec = JSON.parse(readFileSync(recordFile, 'utf8')) as VerifyRunResult;
+    if (rec.ok !== true || rec.clean !== true || !rec.headSha) return undefined;
+    prevSha = rec.headSha;
+  } catch {
+    return undefined;
+  }
+  const git = (args: string[]) =>
+    runner('git', args, { cwd, allowFailure: true, env: strippedSessionEnv() }).catch(() => ({
+      code: 1,
+      stdout: '',
+      stderr: '',
+    }));
+  if ((await git(['merge-base', '--is-ancestor', prevSha, 'HEAD'])).code !== 0) return undefined;
+  const diff = await git(['diff', '--name-only', prevSha]);
+  const untracked = await git(['ls-files', '--others', '--exclude-standard']);
+  if (diff.code !== 0 || untracked.code !== 0) return undefined;
+  const files = `${diff.stdout}\n${untracked.stdout}`
+    .split('\n')
+    .map((f) => f.trim())
+    .filter(Boolean);
+  for (const file of files) {
+    let dir = dirname(file);
+    while (dir !== '.' && !existsSync(join(cwd, dir, 'package.json'))) dir = dirname(dir);
+    if (dir === '.') return undefined;
+  }
+  if (files.length === 0) return [];
+  try {
+    const r = await runner(
+      'pnpm',
+      ['ls', '-r', '--depth', '-1', '--json', '--filter', `...[${prevSha}]`],
+      { cwd, allowFailure: true, env: strippedSessionEnv() },
+    );
+    if (r.code !== 0) return undefined;
+    const parsed: unknown = JSON.parse(r.stdout);
+    if (!Array.isArray(parsed)) return undefined;
+    const out = parsed
+      .map((x) => (x as { path?: unknown }).path)
+      .filter((x): x is string => typeof x === 'string')
+      .map((x) => relative(cwd, x))
+      .filter((x) => x !== '' && !x.startsWith('..'));
+    return out.sort();
+  } catch {
+    return undefined;
+  }
 }
 
 async function gitOut(runner: Runner, cwd: string, args: string[]): Promise<string> {
@@ -220,17 +294,22 @@ export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyR
   try {
     const before = await snapshot(runner, opts.cwd);
     let commands = opts.commands;
+    let affected: string[] | undefined;
     if (before.headSha && commands.includes('pnpm test')) {
+      if (opts.narrowFrom) affected = await affectedPackages(runner, opts.cwd, opts.narrowFrom);
       commands = expandVerifyCommands(
         commands,
         await coveragePackages(runner, opts.cwd),
         before.headSha,
+        affected,
       );
     }
     const run = await runAll({ ...opts, commands }, runner, timeout, verifications, base, slot);
     const after = await snapshot(runner, opts.cwd);
     return {
       ...run,
+      scope: affected ? 'affected' : 'full',
+      ...(affected ? { scopePackages: affected } : {}),
       headSha: before.headSha,
       treeSha: before.treeSha,
       clean: before.headSha === after.headSha && before.status === after.status,
@@ -288,6 +367,14 @@ export function applyVerifyRun(dev: DeveloperReturn, run: VerifyRunResult): Deve
     ...dev,
     verifications: { ...run.verifications },
     verificationSummaries: verifySummaries(run),
+    ...(run.scope
+      ? {
+          verificationScope:
+            run.scope === 'affected'
+              ? `affected packages: ${run.scopePackages?.join(', ') || 'none'}`
+              : 'full',
+        }
+      : {}),
   };
 }
 

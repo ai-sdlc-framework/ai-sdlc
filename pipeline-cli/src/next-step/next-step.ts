@@ -225,13 +225,16 @@ export async function runVerifyGate(
 ): Promise<VerifyGateOutcome> {
   const artifactsDir =
     ctx.env.ARTIFACTS_DIR || defaultArtifactsDir(resolveProjectRoot(state.worktreePath));
+  const recordFile = join(artifactsDir, 'verify-runs', `${state.taskId}.json`);
   const run = await deps.runVerify({
+    ...(state.verifyRan ? { narrowFrom: recordFile } : {}),
     commands: DEFAULT_VERIFY_COMMANDS,
     cwd: state.worktreePath,
     runner: ctx.runner,
     developerClaimed: developer.verifications,
     boardDir: join(state.workDir, '.ai-sdlc', 'dispatch'),
   });
+  state.verifyRan = true;
   writeVerifyRunState(artifactsDir, state.taskId, run);
   if (run.ok) return { kind: 'green', developer: applyVerifyRun(developer, run) };
   if (claimedGreenButRed(run)) recordDeveloperHonestyEvent(state.workDir, state.taskId, run);

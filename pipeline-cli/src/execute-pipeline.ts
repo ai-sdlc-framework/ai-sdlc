@@ -428,8 +428,15 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     let verifyRounds = 0;
     const verifyCommands = claimed?.spec?.verifyCommands;
     if (verifyCommands) {
+      const recordFile = join(
+        routingArtifactsDir(opts.workDir),
+        'verify-runs',
+        `${opts.taskId}.json`,
+      );
+      let firstVerify = true;
       for (;;) {
         const run = await runVerifyCommands({
+          ...(firstVerify ? {} : { narrowFrom: recordFile }),
           commands: verifyCommands,
           cwd: branch.worktreePath,
           developerClaimed: initialDev.verifications,
@@ -437,6 +444,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
           ...(opts.runner ? { runner: opts.runner } : {}),
           ...(opts.verifyTimeoutMs !== undefined ? { timeoutMs: opts.verifyTimeoutMs } : {}),
         });
+        firstVerify = false;
         writeVerifyRunState(routingArtifactsDir(opts.workDir), opts.taskId, run);
         if (run.ok) {
           initialDev = applyVerifyRun(initialDev, run);

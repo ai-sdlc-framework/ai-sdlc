@@ -118,6 +118,7 @@ let counters: {
   rebased: number;
   devPrompts: Array<{ iteration?: number; feedback?: string; resume?: string }>;
   verified: number;
+  narrowFrom: Array<string | undefined>;
 };
 
 function deps(script: Script = {}): Partial<NextStepDeps> {
@@ -174,6 +175,7 @@ function deps(script: Script = {}): Partial<NextStepDeps> {
       return done;
     },
     runVerify: async (o) => {
+      counters.narrowFrom.push(o.narrowFrom);
       const exit = verifyExits[counters.verified++] ?? 0;
       const results = o.commands.map((command) => ({
         command,
@@ -239,7 +241,7 @@ beforeEach(() => {
   worktree = join(h.root, '.worktrees', 'aisdlc-900');
   mkdirSync(worktree, { recursive: true });
   shipped = [];
-  counters = { prepared: 0, finalized: 0, rebased: 0, devPrompts: [], verified: 0 };
+  counters = { prepared: 0, finalized: 0, rebased: 0, devPrompts: [], verified: 0, narrowFrom: [] };
 });
 afterEach(() => h.cleanup());
 
@@ -485,6 +487,12 @@ describe('machine verification (AISDLC-1086)', () => {
     const log = readFileSync(join(h.root, '.ai-sdlc', 'usage', 'developer-honesty.jsonl'), 'utf8');
     expect(log).toContain('"event":"developer-honesty"');
     expect(last.action).toBe('done');
+  });
+
+  it('narrows only rounds after the first verify run (AISDLC-1188)', async () => {
+    await drive(deps({ verifyExits: [1, 0] }));
+    expect(counters.narrowFrom[0]).toBeUndefined();
+    expect(counters.narrowFrom[1]).toMatch(/verify-runs[\\/].+\.json$/);
   });
 
   it('writes the machine result over the claim and its summary lines into the state', async () => {
