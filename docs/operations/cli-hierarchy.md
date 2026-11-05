@@ -260,7 +260,7 @@ When the board directory holds no manifest or verdict but `backlog/completed/` d
 
 ### `status`
 
-Verify slots (AISDLC-1087): the machine verify run takes one of two slots under `<board>/verify-slots/` (a dead holder's slot is reclaimed), so at most two executors run a suite at once; the second concurrent run gets `AI_SDLC_VITEST_MAX_WORKERS=2`, a lone run 4. `status` prints a `verify slot <n>: held by pid <p>` line per held slot and nothing when none are held.
+Verify slots (AISDLC-1087): the machine verify run takes one of two slots under `<board>/verify-slots/` (a dead holder's slot is reclaimed), so at most two executors run a suite at once; the second concurrent run gets `AI_SDLC_VITEST_MAX_WORKERS=2`, a lone run 4. `status` prints a `verify slot <n>: held by pid <p>` line per held slot and nothing when none are held. Pre-push runs share these slots (AISDLC-1186): the hook's `test:coverage` run holds a slot and gets the slot's worker cap, waits at most five minutes, then runs with the shared cap of 2; with no board directory or no built `pipeline-cli`, it runs unslotted and prints one line saying so.
 
 Show the roster with each session's live state (`busy`, `idle`, `starting`, `gone`,
 `unknown`), whether a tmux client is attached, and the board's inflight task, plus the queue

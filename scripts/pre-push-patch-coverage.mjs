@@ -13,7 +13,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isInstrumentableFile, listChangedFiles } from './check-pr-patch-coverage.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -77,7 +77,72 @@ export function sessionScrubbedEnv(env = process.env) {
   return out;
 }
 
-export function main({ run = spawnSync, changed = listChangedFiles, log = console.log } = {}) {
+/** How long the hook waits for a verify slot before running unslotted (AISDLC-1186). */
+export const SLOT_WAIT_MS = 5 * 60 * 1000;
+const SLOTS_MODULE = join(ROOT, 'pipeline-cli', 'dist', 'runtime', 'verify-slots.js');
+
+/** Board directory for the verify slots, or null when there is none. */
+export function resolveBoardDir(env = process.env, exists = existsSync) {
+  const dir = env.AI_SDLC_DISPATCH_BOARD_DIR ?? join(ROOT, '.ai-sdlc', 'dispatch');
+  return exists(dir) ? dir : null;
+}
+
+async function loadSlotsModule() {
+  return import(pathToFileURL(SLOTS_MODULE).href);
+}
+
+/**
+ * Take a verify slot (shared with the machine verify run, AISDLC-1087) for the coverage run.
+ * Returns { env, release } or null (after one log line) when the run must go unslotted.
+ */
+async function takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log }) {
+  if (!boardDir) {
+    log('[patch-coverage] no board directory; running unslotted');
+    return null;
+  }
+  let mod;
+  try {
+    mod = await loadSlots();
+  } catch {
+    log('[patch-coverage] verify-slots module not built; running unslotted');
+    return null;
+  }
+  const started = now();
+  const wait = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  try {
+    const slot = await mod.acquireVerifySlot(boardDir, {
+      ...slotDeps,
+      sleep: async (ms) => {
+        if (now() - started >= waitMs) throw new Error('slot wait timed out');
+        await wait(ms);
+      },
+    });
+    return {
+      env: { AI_SDLC_VITEST_MAX_WORKERS: String(slot.workers) },
+      release: () => slot.release(),
+    };
+  } catch (e) {
+    const timedOut = e instanceof Error && e.message === 'slot wait timed out';
+    log(
+      `[patch-coverage] ${timedOut ? 'no verify slot after the wait' : 'verify slot unavailable'}; running unslotted`,
+    );
+    return timedOut
+      ? { env: { AI_SDLC_VITEST_MAX_WORKERS: String(mod.VERIFY_WORKERS_SHARED) }, release() {} }
+      : null;
+  }
+}
+
+export async function main({
+  run = spawnSync,
+  changed = listChangedFiles,
+  log = console.log,
+  boardDir = resolveBoardDir(),
+  loadSlots = loadSlotsModule,
+  slotDeps = {},
+  now = Date.now,
+  sleep,
+  waitMs = SLOT_WAIT_MS,
+} = {}) {
   if (
     process.env.AI_SDLC_SKIP_PATCH_COVERAGE_GATE === '1' ||
     process.env.AI_SDLC_BYPASS_ALL_GATES === '1'
@@ -86,11 +151,11 @@ export function main({ run = spawnSync, changed = listChangedFiles, log = consol
     return 0;
   }
   // Children get cwd-based repository discovery only; see GIT_REPO_ENV_VARS.
-  const env = sessionScrubbedEnv();
+  const baseEnv = sessionScrubbedEnv();
   const head = execFileSync('git', ['rev-parse', 'HEAD'], {
     cwd: ROOT,
     encoding: 'utf-8',
-    env,
+    env: baseEnv,
   }).trim();
   const base = 'origin/main';
   const packages = packagesToCover(changed({ base, head, cwd: ROOT }));
@@ -98,6 +163,29 @@ export function main({ run = spawnSync, changed = listChangedFiles, log = consol
     log('[patch-coverage] no instrumentable code changed vs origin/main; skipping coverage run');
     return 0;
   }
+  const slot = await takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log });
+  const env = slot ? { ...baseEnv, ...slot.env } : baseEnv;
+  let released = false;
+  const release = () => {
+    if (released || !slot) return;
+    released = true;
+    slot.release();
+  };
+  const onSignal = (sig) => () => {
+    release();
+    process.exit(sig === 'SIGINT' ? 130 : 143);
+  };
+  const handlers = ['SIGINT', 'SIGTERM'].map((sig) => [sig, onSignal(sig)]);
+  if (slot) for (const [sig, h] of handlers) process.on(sig, h);
+  try {
+    return runCoverage({ run, packages, env, base, head, log });
+  } finally {
+    release();
+    for (const [sig, h] of handlers) process.off(sig, h);
+  }
+}
+
+function runCoverage({ run, packages, env, base, head, log }) {
   for (const pkg of packages) {
     log(`[patch-coverage] running test:coverage in ${pkg}`);
     const r = run('pnpm', ['--filter', `./${pkg}`, 'test:coverage'], {
@@ -120,4 +208,4 @@ export function main({ run = spawnSync, changed = listChangedFiles, log = consol
 
 const isMain =
   process.argv[1] != null && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) process.exit(main());
+if (isMain) process.exit(await main());
