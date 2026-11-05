@@ -37,7 +37,15 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, writeFileSync, mkdirSync, rmSync, realpathSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  mkdtempSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+  realpathSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -91,7 +99,7 @@ const ALLOWED_SKIPS = new Set([
   'build-test',
   'pipeline-cli-macos',
   'integration',
-  'attestation-gate',
+  'verdict-check',
   'independence-policy-gate',
   'dependency-review-gate',
   'dor-readiness-gate',
@@ -174,12 +182,11 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'plugin-validate',
       'test-python',
       'test-go',
-      'attestation-gate',
+      // AISDLC-1172: RFC-0061 verdict check replaces the v6 attestation-gate.
+      'verdict-check',
       'independence-policy-gate',
       'dependency-review-gate',
       'dor-readiness-gate',
-      // AISDLC-1169: RFC-0061 shadow verdict check, not in the pr-ready needs list.
-      'review-verdict-shadow',
       // AISDLC-764: changelog, scope-creep, OQ-marker and reviewer-set checks.
       'governance-gate',
       // AISDLC-934: folded in from require-issue-link.yml and rfc-lifecycle-check.yml.
@@ -245,7 +252,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'first-run-smoke',
       'test-python',
       'test-go',
-      'attestation-gate',
+      'verdict-check',
       'independence-policy-gate',
       'dependency-review-gate',
       'dor-readiness-gate',
@@ -277,7 +284,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     for (const job of [
       'build-test',
       'integration',
-      'attestation-gate',
+      'verdict-check',
       'independence-policy-gate',
       'dependency-review-gate',
       'dor-readiness-gate',
@@ -289,24 +296,24 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     }
   });
 
-  it('attestation-gate is skipped for docs-only AND dependabot[bot] PRs (issue #791)', () => {
+  it('verdict-check is skipped for docs-only AND dependabot[bot] PRs (issue #791)', () => {
     // Dependabot can't run the local reviewer+sign flow, so its dependency-bump
     // PRs are exempt from the attestation requirement (gated by build/test +
     // human review instead). The gate skips → and because attestation-gate is
     // listed in allowed-skips, alls-green treats skipped as success → pr-ready
     // passes. If this exemption is removed, every Dependabot PR is permanently
     // blocked on a missing envelope.
-    const gate = workflow.jobs['attestation-gate'];
-    assert.ok(gate?.if, 'attestation-gate must have an if: gating expression');
+    const gate = workflow.jobs['verdict-check'];
+    assert.ok(gate?.if, 'verdict-check must have an if: gating expression');
     assert.match(
       gate.if,
       /needs\.detect\.outputs\.docs_only\s*!=\s*'true'/,
-      'attestation-gate must still skip docs-only PRs',
+      'verdict-check must still skip docs-only PRs',
     );
     assert.match(
       gate.if,
       /github\.event\.pull_request\.user\.login\s*!=\s*'dependabot\[bot\]'/,
-      'attestation-gate must skip dependabot[bot] PRs (issue #791)',
+      'verdict-check must skip dependabot[bot] PRs (issue #791)',
     );
   });
 
@@ -374,7 +381,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       lint: { result: 'success' },
       'build-test': { result: 'skipped' },
       integration: { result: 'skipped' },
-      'attestation-gate': { result: 'skipped' },
+      'verdict-check': { result: 'skipped' },
       'independence-policy-gate': { result: 'skipped' },
       'dependency-review-gate': { result: 'skipped' },
     };
@@ -569,7 +576,7 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       lint: { result: 'success' },
       'build-test': { result: 'skipped' },
       integration: { result: 'skipped' },
-      'attestation-gate': { result: 'skipped' },
+      'verdict-check': { result: 'skipped' },
       'independence-policy-gate': { result: 'skipped' },
       'dependency-review-gate': { result: 'skipped' },
     };
@@ -593,7 +600,7 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       lint: { result: 'success' },
       'build-test': { result: 'success' },
       integration: { result: 'success' },
-      'attestation-gate': { result: 'success' },
+      'verdict-check': { result: 'success' },
       'independence-policy-gate': { result: 'failure' },
       'dependency-review-gate': { result: 'skipped' },
     };
@@ -607,7 +614,7 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       lint: { result: 'success' },
       'build-test': { result: 'success' },
       integration: { result: 'success' },
-      'attestation-gate': { result: 'success' },
+      'verdict-check': { result: 'success' },
       'independence-policy-gate': { result: 'success' },
       'dependency-review-gate': { result: 'skipped' },
     };
@@ -624,7 +631,7 @@ describe('ai-sdlc-gate.yml — aggregator decision logic (AC #4, #5)', () => {
       lint: { result: 'success' },
       'build-test': { result: 'success' },
       integration: { result: 'success' },
-      'attestation-gate': { result: 'success' },
+      'verdict-check': { result: 'success' },
       'dependency-review-gate': { result: 'skipped' },
     };
     const decision = allsGreenDecision(needs);
@@ -931,8 +938,8 @@ describe('governance-gate (AISDLC-764)', () => {
   });
 });
 
-// ── AISDLC-412 (relocated by AISDLC-833, split per DEC-0206): cancelled runs record no verdict ──
-describe('AISDLC-412: attestation-gate does not fail on cancelled runs', () => {
+// ── RFC-0061 Phase 2 (AISDLC-1172): the verdict-check job replaces the v6 attestation gate ──
+describe('AISDLC-1172: verdict-check job feeds pr-ready and posts ai-sdlc/attestation', () => {
   let wf;
   let raw;
   before(() => {
@@ -940,207 +947,65 @@ describe('AISDLC-412: attestation-gate does not fail on cancelled runs', () => {
     raw = readFileSync(WORKFLOW_PATH, 'utf-8');
   });
 
-  const recordCond = () => {
-    const step = (wf.jobs['attestation-gate'].steps ?? []).find(
-      (s) => typeof s.name === 'string' && /Enforce attestation verdict/i.test(s.name),
+  it('the v6 attestation-gate and the shadow job are gone, with attestation-post.yml', () => {
+    assert.equal(wf.jobs['attestation-gate'], undefined);
+    assert.equal(wf.jobs['review-verdict-shadow'], undefined);
+    assert.equal(existsSync(resolve(dirname(WORKFLOW_PATH), 'attestation-post.yml')), false);
+    assert.doesNotMatch(raw, /verify-attestation\.mjs/);
+    assert.doesNotMatch(raw, /ai-sdlc\/review-verdict/);
+  });
+
+  it('is in the pr-ready needs list and allowed-skips (AC-1)', () => {
+    assert.ok(wf.jobs['pr-ready'].needs.includes('verdict-check'));
+    const allowed = String(
+      wf.jobs['pr-ready'].steps.find((st) => /alls-green/.test(String(st.uses ?? ''))).with[
+        'allowed-skips'
+      ],
     );
-    assert.ok(step, 'attestation-gate must declare an "Enforce attestation verdict" step');
-    const cond = String(step.if ?? '');
-    assert.ok(cond, 'Enforce step MUST declare an `if:` condition');
-    return cond;
-  };
-
-  it('declares concurrency.cancel-in-progress (cancels except on ready_for_review)', () => {
-    assert.ok(wf.concurrency, 'workflow must declare a top-level concurrency block');
-    assert.match(String(wf.concurrency['cancel-in-progress']), /ready_for_review/);
+    assert.match(allowed, /verdict-check/);
   });
 
-  it('Enforce step does NOT use always() or cancelled()', () => {
-    const cond = recordCond();
-    assert.doesNotMatch(cond, /\balways\s*\(\s*\)/);
-    assert.doesNotMatch(cond, /\bcancelled\s*\(\s*\)/);
+  it('runs the verdict-check CLI, which fails the job when there is no valid record', () => {
+    const run = wf.jobs['verdict-check'].steps.map((st) => String(st.run ?? '')).join('\n');
+    assert.match(run, /cli-attestation\.mjs verdict-check/);
+    assert.match(run, /--post-status/);
+    assert.doesNotMatch(wf.jobs['verdict-check'].continue_on_error ?? '', /true/);
+    assert.equal(wf.jobs['verdict-check'].permissions.statuses, 'write');
   });
 
-  it('Enforce step uses success() || failure()', () => {
-    const cond = recordCond();
-    assert.match(cond, /\bsuccess\s*\(\s*\)/);
-    assert.match(cond, /\bfailure\s*\(\s*\)/);
+  it('skips docs-only, records-only, draft and dependabot PRs at job level', () => {
+    const cond = String(wf.jobs['verdict-check'].if);
+    assert.match(cond, /docs_only\s*!=\s*'true'/);
+    assert.match(cond, /records_only\s*!=\s*'true'/);
+    assert.match(cond, /dependabot\[bot\]/);
+    assert.match(cond, /draft\s*==\s*false/);
   });
 
-  it('attestation-gate posts no status and holds no write token', () => {
-    const job = wf.jobs['attestation-gate'];
-    assert.equal(job.permissions.statuses, undefined);
-    assert.notEqual(job.permissions['pull-requests'], 'write');
-    assert.doesNotMatch(
-      job.steps.map((s) => String(s.run ?? '')).join('\n'),
-      /repos\/\$\{REPO\}\/statuses/,
-    );
-  });
-
-  it('attestation-gate skips docs-only PRs at job level', () => {
-    assert.match(String(wf.jobs['attestation-gate'].if), /docs_only\s*!=\s*'true'/);
-  });
-
-  it('inline comment documents the AISDLC-412 rationale', () => {
-    assert.match(raw, /AISDLC-412/);
-    assert.match(raw, /cancel/i);
-  });
-});
-
-// ── AISDLC-747 / AISDLC-833 (DEC-0206): status + approving review live in attestation-post.yml ──
-describe('AISDLC-833: attestation-post.yml (workflow_run) posts the status and approving review', () => {
-  let post;
-  let job;
-  let raw;
-  before(() => {
-    const postPath = resolve(dirname(WORKFLOW_PATH), 'attestation-post.yml');
-    post = loadYaml(postPath);
-    job = post.jobs.post;
-    raw = readFileSync(postPath, 'utf-8');
-  });
-
-  it('has exactly one trigger, workflow_run on the gate workflow', () => {
-    const on = post.on ?? post[true];
-    assert.deepEqual(Object.keys(on), ['workflow_run']);
-    assert.deepEqual(on.workflow_run.workflows, [loadYaml(WORKFLOW_PATH).name]);
-  });
-
-  it('gate workflow keeps a single pull_request trigger', () => {
-    const on = loadYaml(WORKFLOW_PATH).on ?? loadYaml(WORKFLOW_PATH)[true];
-    assert.deepEqual(Object.keys(on), ['pull_request']);
-  });
-
-  it('skips cancelled gate runs and non-PR runs', () => {
-    assert.match(String(job.if), /conclusion != 'cancelled'/);
-    assert.match(String(job.if), /event == 'pull_request'/);
-  });
-
-  it('checks out the default branch, never the PR head, with no persisted credentials', () => {
+  it('checks out the BASE sha and fetches the head as data only, validating sha and repo first', () => {
+    const job = wf.jobs['verdict-check'];
     const checkout = job.steps.find((st) => /actions\/checkout/.test(String(st.uses ?? '')));
-    assert.equal(checkout.with.ref, '${{ github.event.repository.default_branch }}');
-    assert.equal(checkout.with['persist-credentials'], false);
-    assert.doesNotMatch(raw, /pull_request\.head\.sha/);
-  });
-
-  it('holds the write scopes the gate job no longer has', () => {
-    assert.equal(job.permissions.statuses, 'write');
-    assert.equal(job.permissions['pull-requests'], 'write');
-  });
-
-  it('posts the ai-sdlc/attestation context and validates the head sha against the run', () => {
-    assert.match(raw, /context='ai-sdlc\/attestation'/);
-    assert.match(raw, /headSha: e\.RUN_HEAD_SHA/);
-  });
-
-  it('approving review only for a valid verdict on a same-repo head', () => {
-    const step = job.steps.find((st) => /post-attestation-review\.mjs/.test(String(st.run ?? '')));
-    assert.ok(step, 'approve step must exist');
-    const clauses = String(step.if)
-      .split('&&')
-      .map((c) => c.trim());
-    assert.deepEqual(clauses, [
-      "steps.post.outputs.status == 'valid'",
-      "steps.post.outputs.pr_number != ''",
-      'github.event.workflow_run.head_repository.full_name == github.repository',
-    ]);
-    const run = String(step.run);
-    assert.match(run, /\[ ! -f scripts\/post-attestation-review\.mjs \]/);
-    assert.match(run, /::notice::/);
-  });
-
-  it('run blocks never interpolate github.event.*', () => {
-    for (const st of job.steps) {
-      assert.doesNotMatch(String(st.run ?? ''), /\$\{\{\s*github\.event\./);
-    }
-  });
-
-  it('takes head repo and PR number from the workflow_run event', () => {
-    const postStep = job.steps.find((st) => st.id === 'post');
-    assert.equal(
-      postStep.env.RUN_HEAD_REPO,
-      '${{ github.event.workflow_run.head_repository.full_name }}',
-    );
-    assert.equal(
-      postStep.env.RUN_PR_NUMBER,
-      '${{ github.event.workflow_run.pull_requests[0].number }}',
-    );
-    const run = String(postStep.run);
-    assert.match(run, /headRepo: e\.RUN_HEAD_REPO/);
-    const approve = job.steps.find((st) =>
-      /post-attestation-review\.mjs/.test(String(st.run ?? '')),
-    );
-    assert.match(String(approve.env.HEAD_REPO), /steps\.post\.outputs\.head_repo/);
-    assert.match(
-      String(approve.if),
-      /workflow_run\.head_repository\.full_name == github\.repository/,
-    );
-  });
-
-  it('resolves the PR base sha via the API so fork PRs (empty pull_requests) still verify', () => {
-    const baseStep = job.steps.find((st) => st.id === 'base');
-    assert.match(String(baseStep.run), /commits\/\$\{HEAD_SHA\}\/pulls/);
-    const verify = job.steps.find((st) => st.id === 'verify');
-    assert.equal(verify.env.PR_BASE_SHA, '${{ steps.base.outputs.base_sha }}');
-  });
-
-  it('does NOT take status or the approving review from the PR-controlled artifact', () => {
-    assert.doesNotMatch(raw, /download-artifact/);
-    assert.doesNotMatch(raw, /verdict\.json|attestation-verdict/);
-    assert.doesNotMatch(raw, /JSON\.parse\(fs\.readFileSync/);
-    const postStep = job.steps.find((st) => st.id === 'post');
-    assert.equal(postStep.env.VERIFY_STATUS, '${{ steps.verify.outputs.status }}');
-    assert.equal(postStep.env.VERIFY_REASON, '${{ steps.verify.outputs.reason }}');
-  });
-
-  it('re-runs the verifier from the default-branch checkout after staging head as data', () => {
-    const names = job.steps.map((st) => String(st.name ?? st.uses ?? ''));
-    const stage = names.findIndex((n) => /Stage head envelope/.test(n));
-    const verify = names.findIndex((n) => /Verify attestation/.test(n));
-    const post = names.findIndex((n) => /Validate verdict and post status/.test(n));
-    assert.ok(stage > 0 && verify > stage && post > verify, 'stage, verify, post in order');
-    assert.match(String(job.steps[stage].run), /scripts\/stage-attestation-data-api\.sh/);
-    assert.match(String(job.steps[verify].run), /node scripts\/verify-attestation\.mjs/);
-    assert.equal(job.steps[verify].env.PR_HEAD_SHA, '${{ github.event.workflow_run.head_sha }}');
-  });
-
-  it('does not word-split the optional target_url argument', () => {
-    assert.doesNotMatch(raw, /\$\{PR_URL:\+/);
-    assert.match(raw, /ARGS\+=\(-f target_url=/);
-  });
-});
-
-describe('AISDLC-833: Stage head envelope step binds head inputs and validates before fetching', () => {
-  it('binds env from the pull_request event and validates sha and repo before git fetch', () => {
-    const gate = loadYaml(WORKFLOW_PATH).jobs['attestation-gate'];
-    const step = gate.steps.find((st) => /Stage head envelope/.test(String(st.name ?? '')));
-    assert.ok(step, 'stage step must exist');
-    assert.equal(step.env.HEAD_SHA, '${{ github.event.pull_request.head.sha }}');
-    assert.equal(step.env.HEAD_REPO_FULL, '${{ github.event.pull_request.head.repo.full_name }}');
+    assert.equal(checkout.with.ref, '${{ github.event.pull_request.base.sha }}');
+    const step = job.steps.find((st) => /head as DATA/.test(String(st.name ?? '')));
+    assert.ok(step);
     const run = String(step.run);
     assert.doesNotMatch(run, /\$\{\{/);
     const shaCheck = run.indexOf('unexpected head sha');
     const repoCheck = run.indexOf('unexpected head repository name');
-    const fetchAt = run.indexOf('git fetch');
-    assert.ok(shaCheck > -1 && repoCheck > shaCheck && fetchAt > repoCheck);
-    assert.ok(run.indexOf('stage-attestation-data.sh') > fetchAt);
+    assert.ok(shaCheck > -1 && repoCheck > shaCheck && run.indexOf('git fetch') > repoCheck);
   });
-});
 
-describe('AISDLC-833: attestation-post.yml never fetches or checks out the PR head (CodeQL untrusted-checkout)', () => {
-  it('checks out the default branch and stages head data through the API only', () => {
-    const post = loadYaml(resolve(dirname(WORKFLOW_PATH), 'attestation-post.yml')).jobs.post;
-    const checkout = post.steps.find((st) => /actions\/checkout/.test(String(st.uses ?? '')));
-    assert.equal(checkout.with.ref, '${{ github.event.repository.default_branch }}');
-    for (const st of post.steps) {
-      assert.doesNotMatch(String(st.run ?? ''), /git (fetch|checkout|cat-file)/);
-    }
-    const stage = post.steps.find((st) => /Stage head envelope/.test(String(st.name ?? '')));
-    assert.match(String(stage.run), /stage-attestation-data-api\.sh/);
+  it('declares concurrency.cancel-in-progress (cancels except on ready_for_review)', () => {
+    assert.match(String(wf.concurrency['cancel-in-progress']), /ready_for_review/);
+  });
+
+  it('gate workflow keeps a single pull_request trigger', () => {
+    const on = wf.on ?? wf[true];
+    assert.deepEqual(Object.keys(on), ['pull_request']);
   });
 });
 
 describe('ai-sdlc-gate.yml — records-only fast lane (AISDLC-867)', () => {
-  const SKIPPED = ['build-test', 'integration', 'attestation-gate', 'independence-policy-gate'];
+  const SKIPPED = ['build-test', 'integration', 'verdict-check', 'independence-policy-gate'];
   const RUNS = ['backlog-drift', 'dor-readiness-gate', 'governance-gate', 'lint'];
 
   it('detect exports records_only', () => {

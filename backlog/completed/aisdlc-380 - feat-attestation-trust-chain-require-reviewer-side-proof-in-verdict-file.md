@@ -1,6 +1,8 @@
 ---
 id: AISDLC-380
-title: 'feat(attestation): require reviewer-side proof of provenance in the verdict file — dev subagent must not be able to forge approval'
+title: >-
+  feat(attestation): require reviewer-side proof of provenance in the verdict
+  file — dev subagent must not be able to forge approval
 status: Done
 assignee: []
 created_date: '2026-05-20'
@@ -14,9 +16,14 @@ priority: critical
 references:
   - .husky/pre-push
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - scripts/check-attestation-sign.sh
   - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-review.yml
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Problem

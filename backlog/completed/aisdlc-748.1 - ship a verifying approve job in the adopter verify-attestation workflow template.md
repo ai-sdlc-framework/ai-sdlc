@@ -1,7 +1,8 @@
 ---
 id: AISDLC-748.1
 title: >-
-  ship a verifying approve job in the adopter verify-attestation workflow template
+  ship a verifying approve job in the adopter verify-attestation workflow
+  template
 status: Done
 assignee: []
 created_date: '2026-10-09'
@@ -13,10 +14,15 @@ dependencies:
 references:
   - orchestrator/src/cli/commands/init-templates.ts
   - .github/workflows/ai-sdlc-gate.yml
-  - scripts/post-attestation-review.mjs
 priority: high
 parentTaskId: AISDLC-748
 updated_date: '2026-10-10 22:09'
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/post-attestation-review.mjs'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

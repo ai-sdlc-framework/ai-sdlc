@@ -1,6 +1,6 @@
 ---
 id: AISDLC-1192
-title: 'Shadow review-verdict status never blocks a merge'
+title: Shadow review-verdict status never blocks a merge
 status: Done
 assignee: []
 created_date: '2026-11-05'
@@ -12,11 +12,18 @@ labels:
 dependencies: []
 references:
   - pipeline-cli/src/attestation/verdict-cli.ts
-  - pipeline-cli/src/attestation/verdict-catches.ts
   - .github/workflows/ai-sdlc-gate.yml
   - spec/rfcs/RFC-0061-review-verdict-gate-outside-the-branch.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/attestation/verdict-catches.ts
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

@@ -1,16 +1,26 @@
 ---
 id: AISDLC-387
-title: "fix: remove AISDLC-215 docs-only auto-approve synthesis (incompatible with v6)"
+title: 'fix: remove AISDLC-215 docs-only auto-approve synthesis (incompatible with v6)'
 status: Done
 priority: high
-labels: [bug, attestation]
+labels:
+  - bug
+  - attestation
 references:
-  - scripts/check-attestation-sign.sh
-  - scripts/check-attestation-sign.test.mjs
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - pipeline-cli/src/attestation/sign-v6.ts
   - CLAUDE.md
-created: "2026-05-22"
+created: '2026-05-22'
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.test.mjs'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Context

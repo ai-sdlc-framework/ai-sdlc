@@ -199,7 +199,7 @@ import {
   writeVerdict,
 } from '../dispatch/index.js';
 import { findTaskFileRelative } from '../dor/dispatch-readiness.js';
-import { computePatchId } from '../attestation/patch-id.js';
+import { checkHeadVerdict } from '../next-step/head-envelope.js';
 import { formatSessionLine, listSessions, recordAgentSession } from '../dispatch/sessions.js';
 import { assertClaimHolder, completeTask, splitIdList } from '../dispatch/complete.js';
 import { guardedRelease } from '../dispatch/release-guard.js';
@@ -425,19 +425,14 @@ function listOpenPrFiles(workDir: string): string[] {
 }
 
 /**
- * AISDLC-849: true when the worktree holds an attestation envelope for the branch's
- * current patch-id (so a push-only resume's content still matches an approval).
+ * AISDLC-849, RFC-0061 Phase 2: true when the worktree's head has a review verdict record, or an
+ * earlier approved record carries forward by the clean-replay rule (AISDLC-1170). No patch-id is
+ * compared; a push-only resume is "carried forward, else review".
  */
-export function approvalEnvelopeMatches(worktree: string, target = 'origin/main'): boolean {
+export async function headVerdictCovers(workDir: string, worktree: string): Promise<boolean> {
   try {
-    const git = (a: string[]): string =>
-      execFileSync('git', a, { cwd: worktree, encoding: 'utf-8', timeout: 30_000 }).trim();
-    const head = git(['rev-parse', 'HEAD']);
-    const base = git(['merge-base', target, 'HEAD']);
-    const pid = computePatchId(base, head, worktree);
-    if (!pid) return false;
-    const dir = path.join(worktree, '.ai-sdlc', 'attestations');
-    return [`${pid}.v6.dsse.json`, `${pid}.dsse.json`].some((f) => existsSync(path.join(dir, f)));
+    const s = await checkHeadVerdict({ workDir, runner: defaultRunner }, worktree);
+    return s.status === 'present' || s.status === 'carried';
   } catch {
     return false;
   }
@@ -1116,8 +1111,9 @@ export async function runDispatchCli(
       // verdict step runs (verdictMissing) instead of a developer rerun.
       const taskId = requireFlag(flags, 'task-id');
       const worktree = path.resolve(flags['worktree'] ?? process.cwd());
-      const decision = evaluatePushOnly(worktree, taskId, {
-        contentMatches: () => approvalEnvelopeMatches(worktree),
+      const decision = await evaluatePushOnly(worktree, taskId, {
+        contentMatches: () =>
+          headVerdictCovers(path.resolve(flags['work-dir'] ?? process.cwd()), worktree),
       });
       out(decision);
       return decision.mode === 'push-only' ? 0 : 1;

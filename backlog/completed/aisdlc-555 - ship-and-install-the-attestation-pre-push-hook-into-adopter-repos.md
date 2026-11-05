@@ -9,14 +9,19 @@ labels:
   - attestation
   - adoption
   - plugin
-  - ci:no-issue-required
+  - 'ci:no-issue-required'
 priority: high
 dependencies:
   - AISDLC-554
 references:
-  - scripts/check-attestation-sign.sh
   - ai-sdlc-plugin/scripts/install-runtime-deps.sh
   - ai-sdlc-plugin/commands/execute.md
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

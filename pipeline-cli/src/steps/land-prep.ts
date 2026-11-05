@@ -1,8 +1,8 @@
 /**
  * land-prep (AISDLC-881, RFC-0054 OQ-7) — the one deterministic runner for the
- * mechanical landing path: fetch + rebase onto the integration branch, drop a
- * stale attestation envelope, lease push so the pre-push hook re-signs, and a
- * guarded draft-to-ready flip. Called by Step 11 (rebase only, before its first
+ * mechanical landing path: fetch + rebase onto the integration branch, lease push,
+ * and a guarded draft-to-ready flip. RFC-0061 Phase 2: no stale-envelope step; the
+ * review verdict is a ref outside the branch. Called by Step 11 (rebase only, before its first
  * push) and by `cli-pr land-prep` (the state machine's skew actions and the
  * executor's last act).
  *
@@ -12,7 +12,7 @@
  * @module steps/land-prep
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { lateRebase } from './11-late-rebase.js';
@@ -38,9 +38,7 @@ export interface LandPrepResult {
   /** True when the rebase changed HEAD. */
   rebased: boolean;
   conflictingFiles: string[];
-  /** Envelope files removed because their subject no longer descends into HEAD. */
-  droppedEnvelopes: string[];
-  /** Mechanically resolved files (non-empty means the envelope content hash shifted). */
+  /** Mechanically resolved files. */
   resolvedFiles: string[];
   reason?: string;
 }
@@ -57,95 +55,12 @@ const fail = (reason: string, extra: Partial<LandPrepResult> = {}): LandPrepResu
   pushed: false,
   rebased: false,
   conflictingFiles: [],
-  droppedEnvelopes: [],
   resolvedFiles: [],
   reason,
   ...extra,
 });
 
-/** Subject commit sha of a DSSE envelope, or null when unreadable. */
-export function envelopeSubjectSha(file: string): string | null {
-  type SubjectEntry = { digest?: { sha1?: string } };
-  // Real v6 envelopes use an object; v5 statements use an array. Accept both.
-  type Subject = SubjectEntry | SubjectEntry[];
-  const shaOf = (s?: Subject): string | null =>
-    (Array.isArray(s) ? s[0]?.digest?.sha1 : s?.digest?.sha1) ?? null;
-  try {
-    const env = JSON.parse(readFileSync(file, 'utf8')) as { payload?: string; subject?: Subject };
-    // v6 envelopes carry the subject at the top level; v5 wraps it in a DSSE payload.
-    const top = shaOf(env.subject);
-    if (top) return top;
-    if (!env.payload) return null;
-    const stmt = JSON.parse(Buffer.from(env.payload, 'base64').toString('utf8')) as {
-      subject?: Subject;
-    };
-    return shaOf(stmt.subject);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Remove (and commit the removal of) envelopes whose subject commit is no longer
- * an ancestor of HEAD, so the pre-push hook signs a fresh one. Returns removed paths.
- */
-async function dropStaleEnvelopes(
-  runner: Runner,
-  cwd: string,
-  targetBranch: string,
-): Promise<string[]> {
-  const dir = join(cwd, '.ai-sdlc', 'attestations');
-  if (!existsSync(dir)) return [];
-  const dropped: string[] = [];
-  // Only envelopes this branch added: earlier PRs' envelopes on main are history, not ours.
-  const added = await runner(
-    'git',
-    [
-      'diff',
-      '--name-only',
-      '--diff-filter=A',
-      `origin/${targetBranch}..HEAD`,
-      '--',
-      '.ai-sdlc/attestations/',
-    ],
-    { cwd, allowFailure: true },
-  );
-  if (added.code !== 0) return [];
-  const ours = new Set(
-    added.stdout
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.endsWith('.dsse.json'))
-      .map((l) => l.slice(l.lastIndexOf('/') + 1)),
-  );
-  for (const name of readdirSync(dir).filter((n) => ours.has(n))) {
-    const sha = envelopeSubjectSha(join(dir, name));
-    if (!sha) continue;
-    const anc = await runner('git', ['merge-base', '--is-ancestor', sha, 'HEAD'], {
-      cwd,
-      allowFailure: true,
-    });
-    if (anc.code === 0) continue;
-    const rel = `.ai-sdlc/attestations/${name}`;
-    const rm = await runner('git', ['rm', '-q', '--', rel], { cwd, allowFailure: true });
-    if (rm.code === 0) dropped.push(rel);
-  }
-  if (dropped.length > 0) {
-    await runner(
-      'git',
-      [
-        'commit',
-        '-q',
-        '-m',
-        'chore(attestation): drop stale envelope after rebase (AISDLC-881)\n\nThe pre-push hook signs a fresh envelope.\n',
-      ],
-      { cwd, allowFailure: true },
-    );
-  }
-  return dropped;
-}
-
-/** Rebase, drop stale envelope, and (optionally) lease push so the hook re-signs. */
+/** Rebase and (optionally) lease push. */
 export async function landPrep(opts: LandPrepOptions): Promise<LandPrepResult> {
   const runner = opts.runner ?? defaultRunner;
   const cwd = opts.worktreePath;
@@ -173,10 +88,7 @@ export async function landPrep(opts: LandPrepOptions): Promise<LandPrepResult> {
   }
   const afterRebase = (await runner('git', ['rev-parse', 'HEAD'], { cwd })).stdout.trim();
   const rebased = afterRebase !== before;
-  const droppedEnvelopes = rebased
-    ? await dropStaleEnvelopes(runner, cwd, opts.targetBranch ?? 'main')
-    : [];
-  const base = { rebased, droppedEnvelopes, resolvedFiles: rebase.resolvedFiles };
+  const base = { rebased, resolvedFiles: rebase.resolvedFiles };
   if (opts.push === false) return { ok: true, pushed: false, conflictingFiles: [], ...base };
 
   const leaseSha = remote.code === 0 ? remote.stdout.trim() : '';
@@ -200,9 +112,9 @@ export async function landPrep(opts: LandPrepOptions): Promise<LandPrepResult> {
     );
   let result = await push();
   if (result.code !== 0) {
-    // The pre-push hook signs, commits the envelope and exits 1 asking for a re-run.
+    // A mechanical pre-push fixup (task-move) commits and exits 1 asking for a re-run.
     const head = (await runner('git', ['rev-parse', 'HEAD'], { cwd })).stdout.trim();
-    const settled = head !== (rebased ? afterRebase : before) || droppedEnvelopes.length > 0;
+    const settled = head !== (rebased ? afterRebase : before);
     if (settled) result = await push();
   }
   if (result.code !== 0) {

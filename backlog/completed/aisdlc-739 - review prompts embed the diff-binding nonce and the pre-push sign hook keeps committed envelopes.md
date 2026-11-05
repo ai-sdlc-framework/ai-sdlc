@@ -1,7 +1,8 @@
 ---
 id: AISDLC-739
 title: >-
-  review prompts embed the diff-binding nonce and the pre-push sign hook keeps committed envelopes
+  review prompts embed the diff-binding nonce and the pre-push sign hook keeps
+  committed envelopes
 status: Done
 assignee: []
 created_date: '2026-10-06'
@@ -11,10 +12,17 @@ dependencies: []
 references:
   - pipeline-cli/src/steps/07-build-review-prompts.ts
   - pipeline-cli/src/cli/attestation.ts
-  - ai-sdlc-plugin/scripts/check-attestation-sign.sh
 priority: high
 dispatchable: true
 updated_date: '2026-10-10 14:58'
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/check-attestation-sign.sh
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

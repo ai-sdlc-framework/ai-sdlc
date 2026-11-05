@@ -17,8 +17,13 @@ references:
   - pipeline-cli/src/cli/
   - ai-sdlc-plugin/skills/
   - spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md
-  - scripts/check-attestation-sign.sh
 priority: high
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

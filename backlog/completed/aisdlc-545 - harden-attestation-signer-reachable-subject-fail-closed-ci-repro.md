@@ -10,13 +10,18 @@ labels:
   - ci
   - security
   - attestation
-  - ci:no-issue-required
+  - 'ci:no-issue-required'
 priority: high
 dependencies: []
 references:
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - scripts/check-attestation-sign.sh
   - scripts/verify-attestation.mjs
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Resolution

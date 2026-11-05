@@ -149,19 +149,10 @@ describe('AISDLC-381: AC #3 — workflow permissions blocks are correct', () => 
   // Comment-posting workflows need `pull-requests:write`. None should
   // declare `contents:write` (which would allow pushing back to main).
 
-  it('attestation-post.yml post job: statuses:write, no contents:write (AISDLC-833)', () => {
-    const wf = loadYaml('attestation-post.yml');
-    const job = wf.jobs.post;
-    assert.equal(
-      job.permissions.statuses,
-      'write',
-      'must have statuses:write to post ai-sdlc/attestation',
-    );
-    assert.notEqual(
-      job.permissions.contents,
-      'write',
-      'must NOT have contents:write (fork-PR safety)',
-    );
+  it('verdict-check job: statuses:write, no contents:write (RFC-0061)', () => {
+    const job = loadYaml('ai-sdlc-gate.yml').jobs['verdict-check'];
+    assert.equal(job.permissions.statuses, 'write');
+    assert.notEqual(job.permissions.contents, 'write', 'must NOT have contents:write');
   });
 
   it('ai-sdlc-review.yml analyze job: read-only for fork content path', () => {
@@ -226,30 +217,10 @@ describe('AISDLC-381 iter-2: release-please short-circuits require fork-source g
   const FORK_SOURCE_GUARD_RE =
     /(head\.repo\.full_name\s*==\s*github\.repository|head\.repo\.full_name\s*==\s*\$\{\{\s*github\.repository\s*\}\}|PR_HEAD_REPO_FULL.*REPO|head\.repo\.full_name|head_repo_full)/i;
 
-  it('ai-sdlc-gate.yml: Detect release-please PR step has fork-source guard', () => {
-    const wf = loadYaml('ai-sdlc-gate.yml');
-    const verifyJob = wf.jobs['attestation-gate'];
-    const detectStep = (verifyJob.steps ?? []).find(
-      (s) => typeof s.name === 'string' && /Detect release-please PR/i.test(s.name),
-    );
-    assert.ok(detectStep, 'attestation-gate must declare a "Detect release-please PR" step');
-
-    // The fork-source guard can live in either the `env:` wiring (where
-    // PR_HEAD_REPO_FULL gets pulled in) AND the inline bash (where the
-    // comparison happens). Both must be present for the guard to be
-    // load-bearing.
-    const envBlob = JSON.stringify(detectStep.env ?? {});
-    const runBlob = String(detectStep.run ?? '');
-    assert.match(
-      envBlob,
-      /head\.repo\.full_name/i,
-      'Detect step env: must wire `github.event.pull_request.head.repo.full_name` so the script can compare it',
-    );
-    assert.match(
-      runBlob,
-      /PR_HEAD_REPO_FULL.*REPO|head_repo_full/i,
-      'Detect step run: must compare PR_HEAD_REPO_FULL against REPO before honoring the release-please prefix (fork-source guard)',
-    );
+  it('ai-sdlc-gate.yml: verdict-check skips release-please PRs only from the same repo', () => {
+    const cond = String(loadYaml('ai-sdlc-gate.yml').jobs['verdict-check'].if);
+    assert.match(cond, /release-please--/);
+    assert.match(cond, /head\.repo\.full_name != github\.repository/);
   });
 
   it('ai-sdlc-review.yml: analyze `if:` includes fork-source guard on the release-please skip', () => {
@@ -629,9 +600,10 @@ describe('AISDLC-381: regression — required statuses still produced for same-r
   // We assert the canonical status contexts are still posted by the
   // expected workflows.
 
-  it('attestation-post.yml posts ai-sdlc/attestation context', () => {
-    const raw = readFileSync(resolve(WORKFLOWS_DIR, 'attestation-post.yml'), 'utf-8');
+  it('ai-sdlc-gate.yml posts ai-sdlc/attestation context via verdict-check', () => {
+    const raw = readFileSync(resolve(WORKFLOWS_DIR, 'ai-sdlc-gate.yml'), 'utf-8');
     assert.match(raw, /ai-sdlc\/attestation/, 'must post ai-sdlc/attestation status');
+    assert.match(raw, /verdict-check/);
   });
 
   it('ai-sdlc-review.yml posts Post Review Results context', () => {

@@ -917,7 +917,7 @@ describe('push-only resume (AISDLC-821)', () => {
     expect(formatResumeFeedback(plain.resume)).not.toContain('RESUME MODE');
   });
 
-  it('cli-dispatch reenter sets push-only for an attestation content mismatch', async () => {
+  it('cli-dispatch reenter orders a normal resume (carried forward, else review) for a failed verdict check', async () => {
     finish('AISDLC-832');
     vi.spyOn(process.stdout, 'write').mockImplementation(
       (() => true) as typeof process.stdout.write,
@@ -938,7 +938,7 @@ describe('push-only resume (AISDLC-821)', () => {
             name: 'ai-sdlc/attestation',
             status: 'COMPLETED',
             conclusion: 'FAILURE',
-            title: 'content hash mismatch',
+            title: 'no-record no verdict ref for this head',
           },
         ],
       }),
@@ -948,7 +948,7 @@ describe('push-only resume (AISDLC-821)', () => {
     const queued = JSON.parse(
       readFileSync(path.join(board, 'queue', 'AISDLC-832.dispatch.json'), 'utf-8'),
     ) as DispatchManifest;
-    expect(queued.resume?.resumeMode).toBe('push-only');
+    expect(queued.resume?.resumeMode).toBeUndefined();
   });
 
   describe('evaluatePushOnly', () => {
@@ -960,37 +960,39 @@ describe('push-only resume (AISDLC-821)', () => {
       );
     };
     const good = { taskId: 'AISDLC-840', approved: true, decision: 'APPROVED' };
-    it('accepts an approval whose content still matches', () => {
+    it('accepts an approval whose head still has a verdict', async () => {
       writeVerdict(root, 'AISDLC-840', good);
-      expect(evaluatePushOnly(root, 'AISDLC-840', { contentMatches: () => true })).toEqual({
+      expect(await evaluatePushOnly(root, 'AISDLC-840', { contentMatches: () => true })).toEqual({
         mode: 'push-only',
       });
     });
-    it('computes the verdict when the file is missing but the content is approved', () => {
-      expect(evaluatePushOnly(root, 'AISDLC-841', { contentMatches: () => true })).toEqual({
+    it('computes the verdict when the file is missing but the head has a verdict', async () => {
+      expect(await evaluatePushOnly(root, 'AISDLC-841', { contentMatches: () => true })).toEqual({
         mode: 'push-only',
         verdictMissing: true,
       });
     });
-    it('falls back when the verdict file is missing and the content is not approved', () => {
-      const d = evaluatePushOnly(root, 'AISDLC-841', { contentMatches: () => false });
+    it('falls back when the verdict file is missing and no verdict carries forward', async () => {
+      const d = await evaluatePushOnly(root, 'AISDLC-841', { contentMatches: () => false });
       expect(d).toMatchObject({ mode: 'normal' });
       expect((d as { reason: string }).reason).toContain('no verdict file');
     });
-    it('falls back when the verdict is unreadable, foreign or not an approval', () => {
+    it('falls back when the verdict is unreadable, foreign or not an approval', async () => {
       writeVerdict(root, 'AISDLC-842', '{nope');
       writeVerdict(root, 'AISDLC-843', { ...good, taskId: 'AISDLC-1' });
       writeVerdict(root, 'AISDLC-844', { ...good, approved: false, decision: 'CHANGES_REQUESTED' });
       for (const id of ['AISDLC-842', 'AISDLC-843', 'AISDLC-844']) {
-        expect(evaluatePushOnly(root, id, { contentMatches: () => true }).mode).toBe('normal');
+        expect((await evaluatePushOnly(root, id, { contentMatches: () => true })).mode).toBe(
+          'normal',
+        );
       }
     });
-    it('falls back when the content no longer matches or cannot be checked', () => {
+    it('falls back when no verdict covers the head or it cannot be checked', async () => {
       writeVerdict(root, 'AISDLC-845', { ...good, taskId: 'AISDLC-845' });
-      expect(evaluatePushOnly(root, 'AISDLC-845', { contentMatches: () => false }).mode).toBe(
-        'normal',
-      );
-      expect(evaluatePushOnly(root, 'AISDLC-845').mode).toBe('normal');
+      expect(
+        (await evaluatePushOnly(root, 'AISDLC-845', { contentMatches: () => false })).mode,
+      ).toBe('normal');
+      expect((await evaluatePushOnly(root, 'AISDLC-845')).mode).toBe('normal');
     });
   });
 });

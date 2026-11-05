@@ -1,7 +1,8 @@
 ---
 id: AISDLC-810
 title: >-
-  pre-push hook must re-sign after a rebase: a stale envelope subject passes locally but fails in CI
+  pre-push hook must re-sign after a rebase: a stale envelope subject passes
+  locally but fails in CI
 status: Done
 assignee: []
 created_date: '2026-10-11'
@@ -12,12 +13,17 @@ labels:
   - root-cause
 dependencies: []
 references:
-  - scripts/check-attestation-sign.sh
   - scripts/verify-attestation.mjs
   - pipeline-cli/attestation-core/verify-core.mjs
   - pipeline-cli/src/attestation/sign-v6.ts
 priority: critical
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

@@ -11,10 +11,15 @@ references:
   - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-gate.yml
   - scripts/is-docs-only-changeset.mjs
-  - scripts/check-attestation-sign.sh
   - docs/operations/quality-gate.md
   - docs/operations/gate-friction-audit-2026.md
 parentTaskId: AISDLC-384
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

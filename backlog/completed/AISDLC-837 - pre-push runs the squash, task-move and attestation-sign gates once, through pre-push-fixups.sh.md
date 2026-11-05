@@ -1,7 +1,8 @@
 ---
 id: AISDLC-837
 title: >-
-  pre-push runs the squash, task-move and attestation-sign gates once, through pre-push-fixups.sh
+  pre-push runs the squash, task-move and attestation-sign gates once, through
+  pre-push-fixups.sh
 status: Done
 assignee: []
 created_date: '2026-10-13'
@@ -15,10 +16,15 @@ references:
   - scripts/pre-push-fixups.sh
   - scripts/squash-attestation-chores.sh
   - scripts/check-task-moved.sh
-  - scripts/check-attestation-sign.sh
   - docs/audits/2026-10-13-cicd-five-step-audit.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

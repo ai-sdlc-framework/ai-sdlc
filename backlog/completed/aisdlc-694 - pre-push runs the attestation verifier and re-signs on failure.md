@@ -1,7 +1,8 @@
 ---
 id: AISDLC-694
 title: >-
-  Pre-push attestation step runs the same verifier CI runs and re-signs when it fails
+  Pre-push attestation step runs the same verifier CI runs and re-signs when it
+  fails
 status: Done
 assignee:
   - dispatch-executor-delta
@@ -12,13 +13,21 @@ labels:
   - security
 dependencies: []
 references:
-  - scripts/check-attestation-sign.sh
-  - scripts/check-attestation-sign.test.mjs
   - scripts/verify-attestation.mjs
   - scripts/pre-push-fixups.sh
   - CLAUDE.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.test.mjs'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

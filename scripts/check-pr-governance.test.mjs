@@ -12,18 +12,14 @@ import { fileURLToPath } from 'node:url';
 
 import {
   checkChangelog,
-  checkReviewers,
   checkScopeCreep,
-  envelopeReviewerNames,
   extractTaskIds,
   isChangelogPath,
   isReleasePleasePr,
   isReviewOrAuditTask,
   parseTaskMeta,
   run,
-  satisfiedReviewerSet,
 } from './check-pr-governance.mjs';
-import { computePatchIdForVerifier } from '../pipeline-cli/attestation-core/verify-core.mjs';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'check-pr-governance.mjs');
 const dirs = [];
@@ -83,30 +79,6 @@ describe('pure helpers', () => {
     assert.ok(!isReviewOrAuditTask({ title: 'Reviewer follow-up: fix', labels: [] }));
     assert.ok(!isReviewOrAuditTask({ title: 'Add a feature', labels: ['governance'] }));
     assert.deepEqual(parseTaskMeta('no frontmatter'), { title: '', labels: [] });
-  });
-  it('classifies reviewer sets', () => {
-    assert.equal(
-      satisfiedReviewerSet(['code-reviewer', 'test-reviewer', 'security-reviewer']),
-      'three',
-    );
-    assert.equal(
-      satisfiedReviewerSet(['code-reviewer-codex', 'test-reviewer-codex', 'security-reviewer']),
-      'three',
-    );
-    assert.equal(satisfiedReviewerSet(['correctness-reviewer', 'security-reviewer']), 'merged');
-    assert.equal(satisfiedReviewerSet(['code-reviewer', 'security-reviewer']), null);
-    assert.equal(satisfiedReviewerSet([]), null);
-  });
-  it('reads reviewer names from v6 leaves and legacy predicates', () => {
-    assert.deepEqual(
-      envelopeReviewerNames(JSON.stringify({ transcriptLeaves: [{ reviewerName: 'a' }] })),
-      ['a'],
-    );
-    const payload = Buffer.from(
-      JSON.stringify({ predicate: { reviewers: [{ agentId: 'b' }] } }),
-    ).toString('base64');
-    assert.deepEqual(envelopeReviewerNames(JSON.stringify({ payload })), ['b']);
-    assert.deepEqual(envelopeReviewerNames('{}'), []);
   });
 });
 
@@ -212,88 +184,6 @@ describe('scope-creep check', () => {
   });
 });
 
-describe('reviewers check', () => {
-  const envelope = (names) =>
-    JSON.stringify({
-      schemaVersion: 'v6',
-      transcriptLeaves: names.map((reviewerName) => ({ reviewerName })),
-    });
-  function codePr(names, { byPatchId = true } = {}) {
-    const r = mkRepo();
-    const code = r.commit({ 'src/a.ts': 'export const a = 1;\n' }, 'feat: code');
-    if (names) {
-      const patchId = computePatchIdForVerifier(r.base, code, r.d);
-      const file = byPatchId ? `${patchId}.v6.dsse.json` : `${code}.v6.dsse.json`;
-      r.commit({ [`.ai-sdlc/attestations/${file}`]: envelope(names) }, 'chore: sign');
-    }
-    const head = r.git(['rev-parse', 'HEAD']).trim();
-    return { ...r, head };
-  }
-  it('passes the full three-reviewer set and the merged set', () => {
-    const a = codePr(['code-reviewer', 'test-reviewer', 'security-reviewer']);
-    assert.deepEqual(checkReviewers({ base: a.base, head: a.head, repoRoot: a.d, git: a.git }), []);
-    const b = codePr(['correctness-reviewer', 'security-reviewer']);
-    assert.deepEqual(checkReviewers({ base: b.base, head: b.head, repoRoot: b.d, git: b.git }), []);
-  });
-  it('fails a code PR missing a reviewer verdict', () => {
-    const a = codePr(['code-reviewer', 'security-reviewer']);
-    const f = checkReviewers({ base: a.base, head: a.head, repoRoot: a.d, git: a.git });
-    assert.equal(f.length, 1);
-    assert.match(f[0], /code-reviewer, security-reviewer/);
-  });
-  it('fails a code PR with no envelope, and an unreadable envelope', () => {
-    const a = codePr(null);
-    assert.match(
-      checkReviewers({ base: a.base, head: a.head, repoRoot: a.d, git: a.git })[0],
-      /no attestation envelope/,
-    );
-    const r = mkRepo();
-    const code = r.commit({ 'src/a.ts': 'x\n' }, 'feat');
-    const patchId = computePatchIdForVerifier(r.base, code, r.d);
-    r.commit({ [`.ai-sdlc/attestations/${patchId}.v6.dsse.json`]: 'not json' }, 'chore');
-    const head = r.git(['rev-parse', 'HEAD']).trim();
-    assert.match(
-      checkReviewers({ base: r.base, head, repoRoot: r.d, git: r.git })[0],
-      /not a readable envelope/,
-    );
-  });
-  it('skips docs-only PRs and explicit skips, and falls back to an envelope the PR adds', () => {
-    const a = codePr(null);
-    assert.deepEqual(
-      checkReviewers({ base: a.base, head: a.head, repoRoot: a.d, git: a.git, docsOnly: true }),
-      [],
-    );
-    assert.deepEqual(
-      checkReviewers({ base: a.base, head: a.head, repoRoot: a.d, git: a.git, recordsOnly: true }),
-      [],
-    );
-    assert.deepEqual(
-      checkReviewers({ base: a.base, head: a.head, repoRoot: a.d, git: a.git, skip: true }),
-      [],
-    );
-    const b = codePr(null);
-    const code = b.head;
-    b.commit(
-      {
-        [`.ai-sdlc/attestations/${code}.v6.dsse.json`]: envelope([
-          'correctness-reviewer',
-          'security-reviewer',
-        ]),
-      },
-      'chore',
-    );
-    const head = b.git(['rev-parse', 'HEAD']).trim();
-    assert.deepEqual(checkReviewers({ base: b.base, head, repoRoot: b.d, git: b.git }), []);
-  });
-  it('fails closed when the merge-base cannot be computed', () => {
-    const a = codePr(null);
-    assert.match(
-      checkReviewers({ base: 'nope', head: a.head, repoRoot: a.d, git: a.git })[0],
-      /merge-base/,
-    );
-  });
-});
-
 describe('run() and CLI', () => {
   const quiet = () => {
     const out = { log: [], error: [] };
@@ -362,30 +252,5 @@ describe('run() and CLI', () => {
       { cwd: d, encoding: 'utf-8' },
     );
     assert.equal(cli.status, 1, cli.stdout + cli.stderr);
-  });
-});
-
-describe('reviewers check on docs plus review metadata (AISDLC-1116)', () => {
-  it('passes a docs-only attestation carrying one reviewer', async () => {
-    const { classifyChangeset } = await import('./is-docs-only-changeset.mjs');
-    const r = mkRepo();
-    const files = {
-      'docs/a.md': 'x\n',
-      '.ai-sdlc/reviews/abc.jsonl': '{}\n',
-      '.ai-sdlc/transcript-leaves/abc.jsonl': '{}\n',
-    };
-    const head = r.commit(files, 'docs: change');
-    const cls = classifyChangeset(Object.keys(files));
-    assert.equal(cls, 'docs-only');
-    assert.deepEqual(
-      checkReviewers({
-        base: r.base,
-        head,
-        repoRoot: r.d,
-        git: r.git,
-        docsOnly: cls === 'docs-only',
-      }),
-      [],
-    );
   });
 });

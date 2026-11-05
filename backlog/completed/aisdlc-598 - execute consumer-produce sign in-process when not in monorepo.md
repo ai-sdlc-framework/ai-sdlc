@@ -1,7 +1,8 @@
 ---
 id: AISDLC-598
 title: >-
-  /ai-sdlc execute — sign the v6 envelope in-process on consumer repos (don't rely on the monorepo pre-push hook)
+  /ai-sdlc execute — sign the v6 envelope in-process on consumer repos (don't
+  rely on the monorepo pre-push hook)
 status: Done
 assignee: []
 created_date: '2026-09-07'
@@ -15,9 +16,14 @@ dependencies: []
 references:
   - ai-sdlc-plugin/commands/execute.md
   - pipeline-cli/bin/cli-attestation.mjs
-  - scripts/check-attestation-sign.sh
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

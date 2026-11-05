@@ -1,6 +1,8 @@
 ---
 id: AISDLC-383.8
-title: 'feat(pipeline): emit transcript leaves during pipeline execution (v6 cutover prerequisite)'
+title: >-
+  feat(pipeline): emit transcript leaves during pipeline execution (v6 cutover
+  prerequisite)
 status: Done
 assignee: []
 created_date: '2026-05-21'
@@ -19,8 +21,13 @@ references:
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
   - pipeline-cli/src/attestation/merkle.ts
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - scripts/check-attestation-sign.sh
   - ai-sdlc-plugin/commands/execute.md
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Scope (RFC-0042 Phase 3 prerequisite — gap identified by AISDLC-383.6 security review)

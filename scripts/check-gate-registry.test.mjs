@@ -108,7 +108,6 @@ const BASELINE_IDS = [
   'gate-job:first-run-smoke',
   'gate-job:test-python',
   'gate-job:test-go',
-  'gate-job:attestation-gate',
   'gate-job:dependency-review-gate',
   'gate-job:dor-readiness-gate',
   'gate-job:independence-policy-gate',

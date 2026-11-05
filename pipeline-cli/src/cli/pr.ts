@@ -57,9 +57,7 @@ export async function runLandPrep(opts: RunLandPrepOptions): Promise<number> {
     out(`land-prep: ${prep.reason ?? 'failed'};${files}`);
     return 1;
   }
-  out(
-    `land-prep: PR #${opts.pr} rebased=${prep.rebased} pushed=${prep.pushed} droppedEnvelopes=${prep.droppedEnvelopes.length}`,
-  );
+  out(`land-prep: PR #${opts.pr} rebased=${prep.rebased} pushed=${prep.pushed}`);
 
   if (opts.flip) {
     const taskId = opts.task ?? /aisdlc-\d+(?:\.\d+)*/i.exec(branch)?.[0];

@@ -1,19 +1,32 @@
 ---
 id: AISDLC-881
-title: 'feat(pipeline): land-prep runner - rebase, drop stale envelope, lease push so the hook re-signs, guarded ready flip; called by Step 11 and by the state machine'
+title: >-
+  feat(pipeline): land-prep runner - rebase, drop stale envelope, lease push so
+  the hook re-signs, guarded ready flip; called by Step 11 and by the state
+  machine
 status: Done
 assignee: []
 created_date: '2026-10-14'
-labels: [rfc-0054, phase-2, pipeline, dispatch]
-dependencies: [AISDLC-829]
+labels:
+  - rfc-0054
+  - phase-2
+  - pipeline
+  - dispatch
+dependencies:
+  - AISDLC-829
 references:
   - spec/rfcs/RFC-0054-pr-lifecycle-event-driven-dispatch.md
-  - scripts/check-attestation-sign.sh
   - pipeline-cli/src/cli/merge-if-eligible.ts
   - pipeline-cli/src/hierarchy/pr-state.ts
   - docs/operations/attestation-reference.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Context

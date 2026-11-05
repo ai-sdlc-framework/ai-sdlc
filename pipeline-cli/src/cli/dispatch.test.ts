@@ -19,12 +19,11 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { computePatchId } from '../attestation/patch-id.js';
 import { dispatchEnsureBoardDirs, dispatchWriteManifest } from '../index.js';
 import type { DispatchManifest } from '../index.js';
 
 import { renderBriefBlock } from '../hierarchy/index.js';
-import { approvalEnvelopeMatches, parseArgv, runDispatchCli } from './dispatch.js';
+import { headVerdictCovers, parseArgv, runDispatchCli } from './dispatch.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 describe('parseArgv', () => {
@@ -2060,19 +2059,21 @@ describe('push-only-check (AISDLC-849)', () => {
     expect(captured.raw).toContain('"mode":"normal"');
   });
 
-  it('approvalEnvelopeMatches is false outside a git repo', () => {
-    expect(approvalEnvelopeMatches(mkdtempSync(path.join(tmpdir(), 'push-only-nogit-')))).toBe(
-      false,
-    );
+  it('headVerdictCovers is false outside a git repo', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'push-only-nogit-'));
+    expect(await headVerdictCovers(dir, dir)).toBe(false);
   });
 
-  it('accepts a missing verdict file when an approval envelope matches the content', async () => {
+  it('accepts a missing verdict file when the head has a verdict ref (no patch-id)', async () => {
     const wt = mkdtempSync(path.join(tmpdir(), 'push-only-'));
-    const sh = (a: string[]): string =>
-      execFileSync('git', a, { cwd: wt, encoding: 'utf-8' }).trim();
+    const origin = mkdtempSync(path.join(tmpdir(), 'push-only-origin-'));
+    const sh = (a: string[], cwd = wt): string =>
+      execFileSync('git', a, { cwd, encoding: 'utf-8' }).trim();
+    sh(['init', '-q', '--bare'], origin);
     sh(['init', '-q', '-b', 'main']);
     sh(['config', 'user.email', 't@t']);
     sh(['config', 'user.name', 't']);
+    sh(['remote', 'add', 'origin', origin]);
     writeFileSync(path.join(wt, 'a.txt'), 'a\n');
     sh(['add', 'a.txt']);
     sh(['commit', '-q', '-m', 'base']);
@@ -2080,16 +2081,10 @@ describe('push-only-check (AISDLC-849)', () => {
     writeFileSync(path.join(wt, 'b.txt'), 'b\n');
     sh(['add', 'b.txt']);
     sh(['commit', '-q', '-m', 'work']);
-    const pid = computePatchId(
-      sh(['merge-base', 'origin/main', 'HEAD']),
-      sh(['rev-parse', 'HEAD']),
-      wt,
-    );
-    expect(pid).toBeTruthy();
-    expect(approvalEnvelopeMatches(wt)).toBe(false);
-    mkdirSync(path.join(wt, '.ai-sdlc', 'attestations'), { recursive: true });
-    writeFileSync(path.join(wt, '.ai-sdlc', 'attestations', `${pid}.v6.dsse.json`), '{}');
-    expect(approvalEnvelopeMatches(wt)).toBe(true);
+    const head = sh(['rev-parse', 'HEAD']);
+    expect(await headVerdictCovers(wt, wt)).toBe(false);
+    sh(['push', '-q', 'origin', `HEAD:refs/ai-sdlc/verdicts/${head}`]);
+    expect(await headVerdictCovers(wt, wt)).toBe(true);
     const { exit, captured } = await captureStdout(() =>
       runDispatchCli(['push-only-check', '--task-id', 'AISDLC-849', '--worktree', wt]),
     );

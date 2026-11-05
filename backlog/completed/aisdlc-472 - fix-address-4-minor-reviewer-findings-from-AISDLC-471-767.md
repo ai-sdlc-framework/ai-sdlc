@@ -12,11 +12,19 @@ labels:
 dependencies:
   - AISDLC-471
 references:
-  - scripts/check-attestation-sign.sh
-  - scripts/check-attestation-sign.test.mjs
   - docs/operations/attestation-troubleshooting.md
 priority: low
 updated_date: '2026-05-31 01:02'
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.test.mjs'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

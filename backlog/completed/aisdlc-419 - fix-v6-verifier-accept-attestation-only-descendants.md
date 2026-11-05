@@ -1,6 +1,8 @@
 ---
 id: AISDLC-419
-title: 'fix(verify-attestation): v6 verifier rejects envelopes whose subject.sha1 is an ancestor of HEAD via attestation-only chore commits'
+title: >-
+  fix(verify-attestation): v6 verifier rejects envelopes whose subject.sha1 is
+  an ancestor of HEAD via attestation-only chore commits
 status: Done
 labels:
   - bug
@@ -11,8 +13,13 @@ references:
   - scripts/verify-attestation.mjs
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - .husky/pre-push
-  - scripts/check-attestation-sign.sh
 priority: critical
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Problem

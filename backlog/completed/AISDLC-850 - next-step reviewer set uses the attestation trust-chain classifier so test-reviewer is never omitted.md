@@ -1,7 +1,8 @@
 ---
 id: AISDLC-850
 title: >-
-  next-step reviewer set uses the attestation trust-chain classifier so test-reviewer is never omitted
+  next-step reviewer set uses the attestation trust-chain classifier so
+  test-reviewer is never omitted
 status: Done
 assignee: []
 created_date: '2026-10-13'
@@ -15,11 +16,16 @@ references:
   - pipeline-cli/src/steps/reviewer-set.ts
   - pipeline-cli/src/attestation/review-scope.ts
   - pipeline-cli/attestation-core/review-scope-core.mjs
-  - scripts/check-attestation-sign.sh
   - scripts/verify-attestation.mjs
   - pipeline-cli/src/next-step/review-prepare.test.ts
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

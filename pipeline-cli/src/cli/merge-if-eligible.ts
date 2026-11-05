@@ -33,7 +33,11 @@ async function checkRebaseOnly(args: {
   prNumber: number;
   runner: Runner;
   cwd: string;
-  check: (a: { previousHead: string; newHead: string; repoRoot: string }) => RebaseOnlyResult;
+  check: (a: {
+    previousHead: string;
+    newHead: string;
+    repoRoot: string;
+  }) => RebaseOnlyResult | Promise<RebaseOnlyResult>;
 }): Promise<string | null> {
   if (!/^[0-9a-f]{40}$/i.test(args.previousHead)) {
     return '--rearm-previous-head must be a 40-char commit SHA; not re-arming';
@@ -47,7 +51,7 @@ async function checkRebaseOnly(args: {
   if (out.code !== 0 || !/^[0-9a-f]{40}$/i.test(newHead)) {
     return 'could not read the PR head commit; not re-arming';
   }
-  const r = args.check({ previousHead: args.previousHead, newHead, repoRoot: args.cwd });
+  const r = await args.check({ previousHead: args.previousHead, newHead, repoRoot: args.cwd });
   return r.rebaseOnly ? null : `not a rebase-only push: ${r.reason}`;
 }
 
@@ -107,7 +111,7 @@ export interface BuildCliOptions {
     previousHead: string;
     newHead: string;
     repoRoot: string;
-  }) => RebaseOnlyResult;
+  }) => RebaseOnlyResult | Promise<RebaseOnlyResult>;
 }
 
 export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
@@ -170,7 +174,7 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
             type: 'string',
             describe:
               'Re-arm after a rebase (AISDLC-872): the head SHA before the force-push. Implies --arm, ' +
-              'and arms only when the patch-id of the PR head equals that of this SHA; a content ' +
+              'and arms only when the PR head is a clean replay of this SHA (AISDLC-1170); a content ' +
               'change is refused. All eligibility checks still apply.',
           })
           .option('dry-run', {
@@ -214,7 +218,7 @@ export function buildMergeIfEligibleCli(opts: BuildCliOptions = {}): Argv {
             prNumber,
             runner,
             cwd,
-            check: opts.rebaseOnlyCheck ?? ((a) => isRebaseOnlyPush(a)),
+            check: opts.rebaseOnlyCheck ?? ((a) => isRebaseOnlyPush({ ...a, runner })),
           });
         }
 

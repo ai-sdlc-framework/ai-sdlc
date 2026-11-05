@@ -22,7 +22,6 @@ const prepOk = {
   pushed: true,
   rebased: true,
   conflictingFiles: [],
-  droppedEnvelopes: ['a'],
   resolvedFiles: [],
 };
 
@@ -93,7 +92,7 @@ describe('runLandPrep', () => {
       out: (l) => lines.push(l),
     });
     expect(code).toBe(0);
-    expect(lines[0]).toContain('rebased=true pushed=true droppedEnvelopes=1');
+    expect(lines[0]).toContain('rebased=true pushed=true');
     expect(landPrep.mock.calls[0]?.[0]).toMatchObject({ env: { FOO: '1' } });
   });
 

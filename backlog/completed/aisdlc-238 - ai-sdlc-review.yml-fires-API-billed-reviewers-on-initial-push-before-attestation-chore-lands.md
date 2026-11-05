@@ -17,7 +17,12 @@ dependencies: []
 priority: high
 references:
   - .github/workflows/ai-sdlc-review.yml
-  - scripts/check-attestation-sign.sh
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

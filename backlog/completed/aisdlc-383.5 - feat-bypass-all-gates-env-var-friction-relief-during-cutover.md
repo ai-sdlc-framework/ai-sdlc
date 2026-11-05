@@ -16,13 +16,16 @@ priority: high
 references:
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
   - scripts/check-task-moved.sh
-  - scripts/check-attestation-sign.sh
 drift_log:
   - date: '2026-10-05'
     type: ref-deleted
     detail: 'Referenced file no longer exists: scripts/check-dor-gate.sh'
     resolution: flagged
-drift_checked: '2026-10-05'
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Scope (RFC-0042 enabler, parallel to Phase 1)

@@ -1,7 +1,9 @@
 ---
 id: AISDLC-1172
-title: 'RFC-0061 Phase 2: cutover, pr-ready requires the verdict check and the v6 gate, hook signing and land-prep step are removed'
-status: To Do
+title: >-
+  RFC-0061 Phase 2: cutover, pr-ready requires the verdict check and the v6
+  gate, hook signing and land-prep step are removed
+status: In Progress
 assignee: []
 created_date: '2026-11-03'
 labels:
@@ -19,7 +21,6 @@ dependencies:
 references:
   - spec/rfcs/RFC-0061-review-verdict-gate-outside-the-branch.md
   - .github/workflows/ai-sdlc-gate.yml
-  - ai-sdlc-plugin/scripts/check-attestation-sign.sh
   - pipeline-cli/src/steps/land-prep.ts
   - pipeline-cli/src/next-step/ship.ts
   - pipeline-cli/src/next-step/head-envelope.ts
@@ -30,6 +31,31 @@ references:
   - pipeline-cli/src/hierarchy/pr-state.ts
 priority: high
 dispatchable: true
+drift_status: flagged
+drift_checked: '2026-11-05'
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/check-attestation-sign.sh
+    resolution: flagged
+  - date: '2026-11-05'
+    type: dep-resolved
+    detail: Dependency AISDLC-1169 has been completed
+    resolution: flagged
+  - date: '2026-11-05'
+    type: dep-resolved
+    detail: Dependency AISDLC-1170 has been completed
+    resolution: flagged
+  - date: '2026-11-05'
+    type: dep-resolved
+    detail: Dependency AISDLC-1171 has been completed
+    resolution: flagged
+  - date: '2026-11-05'
+    type: dep-resolved
+    detail: Dependency AISDLC-1193 has been completed
+    resolution: flagged
 ---
 
 ## Description

@@ -1,13 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fail, ok } from '../__test-helpers/fake-runner.js';
 import { makeHarness, makeState, type Harness } from '../__test-helpers/next-step-fixtures.js';
-import { decideResumeReview } from './resume-decision.js';
+import type { HeadVerdictStatus } from './head-envelope.js';
+import { decideResumeReview, type ResumeDecisionOpts } from './resume-decision.js';
 import { prepareReview } from './review-prepare.js';
 
 const SHA = 'a'.repeat(40);
 const LAST = 'b'.repeat(40);
-const PID = 'c'.repeat(40);
-const ENVELOPE = `.ai-sdlc/attestations/${PID}.v6.dsse.json`;
 
 let h: Harness;
 beforeEach(() => {
@@ -15,139 +14,132 @@ beforeEach(() => {
 });
 afterEach(() => h.cleanup());
 
-function script(delta = 'docs/readme.md\0', envelope: boolean | string = true): void {
-  const r = h.runner;
-  r.on(
-    /log .*--diff-filter=A/,
-    ok(typeof envelope === 'string' ? envelope : envelope ? `${ENVELOPE}\n` : ''),
-  );
-  r.on(/show HEAD:/, ok(JSON.stringify({ subject: { digest: { sha1: LAST } } })));
-  r.on(/cat-file -e/, ok());
-  r.on(/rev-parse HEAD/, ok(`${SHA}\n`));
-  r.on(/-base origin/, ok(`${'d'.repeat(40)}\n`));
-  r.on(/show origin\/.*trusted-reviewers/, ok('reviewers: []\n'));
-  r.on(/diff --name-only/, ok(delta));
+const missing: HeadVerdictStatus = {
+  status: 'missing',
+  headSha: SHA,
+  ref: `refs/ai-sdlc/verdicts/${SHA}`,
+  reason: 'no record',
+};
+
+function opts(
+  status: HeadVerdictStatus,
+  earlier: string[] = [LAST],
+  extra: Partial<ResumeDecisionOpts> = {},
+): ResumeDecisionOpts {
+  return {
+    requireThree: false,
+    headVerdict: async () => status,
+    earlierHeads: async () => earlier,
+    ...extra,
+  };
 }
 
-const opts = (pid: string | null, verified = true) => ({
-  currentPatchId: () => pid,
-  requireThree: false,
-  verifyAt: async () => verified,
-});
+function script(delta = 'docs/readme.md\0'): void {
+  h.runner.on(/cat-file -e/, ok());
+  h.runner.on(/rev-parse HEAD/, ok(`${SHA}\n`));
+  h.runner.on(/diff --name-only/, ok(delta));
+}
 
-describe('decideResumeReview (AISDLC-947)', () => {
-  it('unchanged patch id skips every agent', async () => {
-    script();
-    const d = await decideResumeReview(h.ctx, h.root, opts(PID));
-    expect(d).toEqual({ branch: 'unchanged', note: 'review-skipped: unchanged', lastHead: LAST });
+describe('decideResumeReview (AISDLC-947, RFC-0061 Phase 2)', () => {
+  it('a head with a verdict record skips every agent', async () => {
+    const d = await decideResumeReview(
+      h.ctx,
+      h.root,
+      opts({ status: 'present', headSha: SHA, ref: 'r' }),
+    );
+    expect(d).toEqual({
+      branch: 'unchanged',
+      note: 'review-skipped: verdict record present',
+      lastHead: SHA,
+    });
   });
 
-  it('unchanged patch id with no v6 envelope on the head is routed to re-sign (AISDLC-984)', async () => {
-    h.runner.on(/cat-file -e HEAD:\.ai-sdlc\/attestations\//, fail('missing', 128));
-    script();
-    const d = await decideResumeReview(h.ctx, h.root, opts(PID));
-    expect(d.branch).toBe('unchanged');
-    if (d.branch !== 'unchanged') return;
-    expect(d.resign).toBe(true);
-    expect(d.note).toContain('re-sign required');
-    expect(d.note).toContain(`${PID}.v6.dsse.json`);
+  it('a carried-forward verdict skips every agent and names its source', async () => {
+    const d = await decideResumeReview(
+      h.ctx,
+      h.root,
+      opts({ status: 'carried', headSha: SHA, from: LAST }),
+    );
+    expect(d).toEqual({
+      branch: 'unchanged',
+      note: `review-skipped: verdict carried forward from ${LAST}`,
+      lastHead: LAST,
+    });
   });
 
-  it('developerRound bypasses the unchanged shortcut even with an equal patch id (AISDLC-1053)', async () => {
-    script();
-    const d = await decideResumeReview(h.ctx, h.root, { ...opts(PID), developerRound: true });
+  it('developerRound bypasses the unchanged shortcut even with a record (AISDLC-1053)', async () => {
+    const d = await decideResumeReview(h.ctx, h.root, {
+      ...opts({ status: 'present', headSha: SHA, ref: 'r' }),
+      developerRound: true,
+    });
     expect(d.branch).toBe('developer-round');
   });
 
   it('chore-only delta gets the correctness reviewer alone', async () => {
     script('docs/readme.md\0');
-    const d = await decideResumeReview(h.ctx, h.root, opts('e'.repeat(40)));
+    const d = await decideResumeReview(h.ctx, h.root, opts(missing));
     expect(d.branch).toBe('delta');
     if (d.branch !== 'delta') return;
+    expect(d.lastHead).toBe(LAST);
     expect(d.reviewers).toEqual(['correctness-reviewer']);
     expect(d.note).toBe('review-delta: correctness-reviewer');
   });
 
   it('trust-chain delta brings the security reviewer', async () => {
     script('.github/workflows/ci.yml\0');
-    const d = await decideResumeReview(h.ctx, h.root, opts('e'.repeat(40)));
+    const d = await decideResumeReview(h.ctx, h.root, opts(missing));
     expect(d.branch === 'delta' && d.reviewers.includes('security-reviewer')).toBe(true);
   });
 
   it('reviewerSet three keeps all three on a docs delta', async () => {
     script('docs/readme.md\0');
-    const d = await decideResumeReview(h.ctx, h.root, {
-      currentPatchId: () => 'e'.repeat(40),
-      requireThree: true,
-      verifyAt: async () => true,
-    });
+    const d = await decideResumeReview(
+      h.ctx,
+      h.root,
+      opts(missing, [LAST], { requireThree: true }),
+    );
     expect(d.branch === 'delta' && d.reviewers.includes('security-reviewer')).toBe(true);
   });
 
-  it('no prior attestation runs the full pipeline', async () => {
-    script('docs/readme.md\0', false);
-    expect(await decideResumeReview(h.ctx, h.root, opts(PID))).toEqual({
+  it('no usable earlier record runs the full pipeline (carried forward, else review)', async () => {
+    script();
+    expect(await decideResumeReview(h.ctx, h.root, opts(missing, []))).toEqual({
       branch: 'full',
       note: 'review-full',
     });
   });
 
-  it('falls back to full when the patch id cannot be computed', async () => {
+  it('an earlier head that is not in the worktree is skipped', async () => {
+    h.runner.on(/cat-file -e/, fail('missing', 128));
     script();
-    expect((await decideResumeReview(h.ctx, h.root, opts(null))).branch).toBe('full');
+    expect((await decideResumeReview(h.ctx, h.root, opts(missing))).branch).toBe('full');
   });
 
-  it('falls back to full when the delta cannot be read', async () => {
+  it('an unknown head status falls through to the earlier-head delta or full', async () => {
+    script();
+    const d = await decideResumeReview(h.ctx, h.root, opts({ status: 'unknown', headSha: '' }));
+    expect(d.branch).toBe('delta');
+  });
+
+  it('falls back to full when the delta cannot be read or is empty', async () => {
     h.runner.on(/diff --name-only/, fail('x'));
     script();
-    expect((await decideResumeReview(h.ctx, h.root, opts('e'.repeat(40)))).branch).toBe('full');
+    expect((await decideResumeReview(h.ctx, h.root, opts(missing))).branch).toBe('full');
+    const h2 = makeHarness();
+    h2.runner.on(/cat-file -e/, ok());
+    h2.runner.on(/rev-parse HEAD/, ok(`${SHA}\n`));
+    h2.runner.on(/diff --name-only/, ok(''));
+    expect((await decideResumeReview(h2.ctx, h2.root, opts(missing))).branch).toBe('full');
+    h2.cleanup();
   });
 
-  it('a forged or unverifiable envelope never skips review (unchanged)', async () => {
-    script();
-    expect((await decideResumeReview(h.ctx, h.root, opts(PID, false))).branch).toBe('full');
-  });
-
-  it('a forged or unverifiable envelope never bases a delta', async () => {
-    script();
-    expect((await decideResumeReview(h.ctx, h.root, opts('e'.repeat(40), false))).branch).toBe(
-      'full',
-    );
-  });
-
-  it('verifies the unchanged envelope at HEAD and the delta base at the attested head', async () => {
-    script();
-    const seen: string[] = [];
-    const verifyAt = async (head: string) => (seen.push(head), true);
-    await decideResumeReview(h.ctx, h.root, { ...opts(PID), verifyAt });
-    await decideResumeReview(h.ctx, h.root, { ...opts('e'.repeat(40)), verifyAt });
-    expect(seen).toEqual([SHA, LAST]);
-  });
-
-  it('verifies against trusted-reviewers.yaml from the target ref, not the worktree', async () => {
-    script();
-    const yamls: string[] = [];
-    const verifyAt = async (_h: string, _b: string, _c: string, y: string) => (yamls.push(y), true);
-    await decideResumeReview(h.ctx, h.root, { ...opts(PID), verifyAt });
-    expect(yamls).toEqual(['reviewers: []\n']);
-    expect(
-      h.runner.calls.some((c: { args: string[] }) => c.args.join(' ').includes('show origin/')),
-    ).toBe(true);
-  });
-
-  it('falls back to full when the trusted ref has no trusted-reviewers.yaml', async () => {
-    h.runner.on(/show origin\/.*trusted-reviewers/, fail('missing'));
-    script();
-    expect((await decideResumeReview(h.ctx, h.root, opts(PID))).branch).toBe('full');
-  });
-
-  it('picks the newest of two envelopes on the branch (git log is newest first)', async () => {
-    const OLD = 'f'.repeat(40);
-    script('docs/readme.md\0', `${ENVELOPE}\n.ai-sdlc/attestations/${OLD}.v6.dsse.json\n`);
-    const d = await decideResumeReview(h.ctx, h.root, opts(PID));
-    expect(d.branch).toBe('unchanged');
-    const d2 = await decideResumeReview(h.ctx, h.root, opts(OLD));
-    expect(d2.branch).toBe('delta');
+  it('never throws: a failing verdict lookup is a full review', async () => {
+    const d = await decideResumeReview(h.ctx, h.root, {
+      headVerdict: async () => {
+        throw new Error('boom');
+      },
+    });
+    expect(d.branch).toBe('full');
   });
 
   it('prepareReview spawns nothing and records the note on an unchanged resume', async () => {

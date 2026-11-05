@@ -16,11 +16,16 @@ labels:
 dependencies: []
 references:
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
-  - scripts/check-attestation-sign.sh
   - scripts/verify-attestation.mjs
   - .github/workflows/auto-enable-auto-merge.yml
   - docs/operations/merge-without-queue.md
 priority: high
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ExecResult, Runner } from '../runtime/exec.js';
 import { runLandPrep } from '../cli/pr.js';
-import { envelopeSubjectSha, flipReady, hookSkipVars, landPrep } from './land-prep.js';
+import { flipReady, hookSkipVars, landPrep } from './land-prep.js';
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -97,7 +97,7 @@ describe('landPrep (real git)', () => {
     expect(merged).toContain('- mine');
   });
 
-  it('drops a v6 envelope whose subject is no longer an ancestor and commits the removal', async () => {
+  it('leaves a branch-added envelope alone: there is no stale-envelope step (RFC-0061)', async () => {
     const { root, wt, other } = setup();
     dirs.push(root);
     writeFileSync(join(wt, 'b.txt'), 'mine\n');
@@ -121,47 +121,9 @@ describe('landPrep (real git)', () => {
     const res = await landPrep({ worktreePath: wt, branch: 'feat/x', push: false, env: {} });
     expect(res.ok).toBe(true);
     expect(res.rebased).toBe(true);
-    expect(res.droppedEnvelopes).toEqual(['.ai-sdlc/attestations/abc.v6.dsse.json']);
-    expect(existsSync(envFile)).toBe(false);
-    expect(git(wt, 'log', '-1', '--format=%s')).toMatch(/drop stale envelope/);
+    expect(existsSync(envFile)).toBe(true);
+    expect(git(wt, 'log', '-1', '--format=%s')).not.toMatch(/drop stale envelope/);
     expect(git(wt, 'status', '--porcelain')).toBe('');
-  });
-
-  it('keeps envelopes that came from main (only drops envelopes this branch added)', async () => {
-    const { root, wt, other } = setup();
-    dirs.push(root);
-    // main carries an old PR's envelope whose subject is not an ancestor of the branch
-    const oldEnv = join(other, '.ai-sdlc', 'attestations', 'old.v6.dsse.json');
-    mkdirSync(join(other, '.ai-sdlc', 'attestations'), { recursive: true });
-    writeFileSync(
-      oldEnv,
-      JSON.stringify({ schemaVersion: 'v6', subject: { digest: { sha1: 'a'.repeat(40) } } }),
-    );
-    git(other, 'add', '.');
-    git(other, 'commit', '-q', '-m', 'old pr');
-    git(other, 'push', '-q', 'origin', 'HEAD:main');
-    writeFileSync(join(wt, 'b.txt'), 'mine\n');
-    git(wt, 'add', 'b.txt');
-    git(wt, 'commit', '-q', '-m', 'mine');
-    git(wt, 'push', '-q', '-u', 'origin', 'feat/x');
-    writeFileSync(join(other, 'a.txt'), 'theirs\n');
-    git(other, 'commit', '-q', '-am', 'theirs');
-    git(other, 'push', '-q', 'origin', 'HEAD:main');
-    const res = await landPrep({ worktreePath: wt, branch: 'feat/x', push: false, env: {} });
-    expect(res.ok).toBe(true);
-    expect(res.droppedEnvelopes).toEqual([]);
-    expect(existsSync(join(wt, '.ai-sdlc', 'attestations', 'old.v6.dsse.json'))).toBe(true);
-  });
-
-  it('reads the subject from a v5 DSSE payload and returns null when unreadable', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'env-'));
-    dirs.push(dir);
-    const f = join(dir, 'x.dsse.json');
-    const payload = Buffer.from(JSON.stringify({ subject: [{ digest: { sha1: 'deadbeef' } }] }));
-    writeFileSync(f, JSON.stringify({ payload: payload.toString('base64') }));
-    expect(envelopeSubjectSha(f)).toBe('deadbeef');
-    writeFileSync(f, 'not json');
-    expect(envelopeSubjectSha(f)).toBeNull();
   });
 
   it('refuses with a hook-skip variable set', async () => {
