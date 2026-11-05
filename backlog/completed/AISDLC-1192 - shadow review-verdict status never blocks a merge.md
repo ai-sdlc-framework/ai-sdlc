@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1192
 title: 'Shadow review-verdict status never blocks a merge'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-05'
 labels:
@@ -35,7 +35,36 @@ dispatchable: true
 
 ## Acceptance Criteria
 
-- [ ] AC-1: `verdict-check --post-status` with reason `no-record` posts `success` with the reason code in the description. Test with an injected runner.
-- [ ] AC-2: A non-ok reason never produces `failure` or `error` on `ai-sdlc/review-verdict`. Test across all reason codes.
-- [ ] AC-3: The catch report still counts disagreements correctly from the new post shape. Test.
-- [ ] AC-4: `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` pass; the task file records the test command and its summary line.
+- [x] AC-1: `verdict-check --post-status` with reason `no-record` posts `success` with the reason code in the description. Test with an injected runner.
+- [x] AC-2: A non-ok reason never produces `failure` or `error` on `ai-sdlc/review-verdict`. Test across all reason codes.
+- [x] AC-3: The catch report still counts disagreements correctly from the new post shape. Test.
+- [x] AC-4: `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` pass; the task file records the test command and its summary line.
+
+## Verification
+
+Command: `pnpm build && pnpm test && pnpm lint && pnpm format:check` (exit 0). Targeted: `npx vitest run src/attestation/verdict-check.test.ts` in pipeline-cli: `Tests  18 passed (18)`.
+
+## Final Summary
+
+## Summary
+The `ai-sdlc/review-verdict` shadow status now always posts `success`, with the reason code leading the description, so it no longer makes merges report UNSTABLE. The catch report now derives pass or fail from that reason code. It still treats old `failure` or `error` states as failed.
+
+## Changes
+- pipeline-cli/src/attestation/verdict-cli.ts
+- pipeline-cli/src/attestation/verdict-catches.ts
+- pipeline-cli/src/attestation/verdict-check.test.ts
+- backlog/tasks/AISDLC-1192 - shadow review-verdict status never blocks a merge.md
+
+## Design decisions
+The PR is a draft. The new tests cover no-record, subject-mismatch, replay-dirty, coverage-short and tier-short through an injected runner. They also check that the catch report counts catches and disagreements from the new always-success post shape. The task file records the test command and the targeted summary line `Tests  18 passed (18)`. The pre-push hook's patch-coverage gate ran on the push, and the push went through.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (246 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+

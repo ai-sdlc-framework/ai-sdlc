@@ -186,6 +186,49 @@ describe('runVerdictCheck', () => {
     const post = calls.find((c) => c.includes('POST'));
     expect(post).toContain('state=success');
   });
+  it('posts success with the reason code for every non-ok reason (AISDLC-1192)', async () => {
+    const b = build({});
+    const scenarios: Array<{ code: string; runner: Runner; requiredTier?: 'isolated' }> = [
+      { code: 'no-record', runner: runnerFor(null, null, false) },
+      { code: 'subject-mismatch', runner: runnerFor(JSON.stringify(b.record), b.leaves) },
+      {
+        code: 'replay-dirty',
+        runner: runnerFor(JSON.stringify(b.record), b.leaves + 'tampered\n'),
+      },
+      {
+        code: 'coverage-short',
+        runner: runnerFor(JSON.stringify(build({ satisfied: false }).record), b.leaves),
+      },
+      {
+        code: 'tier-short',
+        runner: runnerFor(JSON.stringify(b.record), b.leaves),
+        requiredTier: 'isolated',
+      },
+    ];
+    for (const sc of scenarios) {
+      const calls: string[][] = [];
+      const runner: Runner = async (cmd, args) => {
+        calls.push([cmd, ...args]);
+        if (cmd === 'git' && args[0] === 'diff') return bad;
+        if (cmd === 'gh') return bad;
+        return sc.runner(cmd, args);
+      };
+      const res = await runVerdictCheck({
+        runner,
+        cwd: '.',
+        repository: 'o/r',
+        headSha: sc.code === 'subject-mismatch' ? 'd'.repeat(40) : HEAD,
+        baseSha: 'c'.repeat(40),
+        requiredTier: sc.requiredTier,
+        postStatus: true,
+      });
+      expect(res.code).toBe(sc.code);
+      const post = calls.find((c) => c.includes('POST'))!;
+      expect(post).toContain('state=success');
+      expect(post.some((a) => a.startsWith(`description=${sc.code}`))).toBe(true);
+      expect(post.some((a) => /state=(failure|error)/.test(a))).toBe(false);
+    }
+  });
   it('fails closed on an unreadable diff and skips posting', async () => {
     const calls: string[][] = [];
     const runner: Runner = async (cmd, args) => {
@@ -213,6 +256,30 @@ const hist = (over: Partial<HeadHistory>): HeadHistory => ({
 });
 
 describe('catches', () => {
+  it('counts disagreements from the always-success post shape (AISDLC-1192)', () => {
+    const rows = compileCatches([
+      hist({
+        headSha: 'n1',
+        statuses: [
+          { context: 'ai-sdlc/review-verdict', state: 'success', description: 'no-record x' },
+          { context: 'ai-sdlc/attestation', state: 'success' },
+          { context: 'ai-sdlc/pr-ready', state: 'success' },
+        ],
+      }),
+      hist({
+        headSha: 'n2',
+        statuses: [
+          { context: 'ai-sdlc/review-verdict', state: 'success', description: 'ok-carried:abc y' },
+          { context: 'ai-sdlc/attestation', state: 'success' },
+        ],
+      }),
+    ]);
+    expect(rows.map((r) => [r.kind, r.headSha])).toEqual([
+      ['catch', 'n1'],
+      ['disagreement', 'n1'],
+    ]);
+    expect(rows[1]!.reason).toContain('verdict fail (no-record)');
+  });
   it('lists catches and disagreements', () => {
     const rows = compileCatches([
       hist({

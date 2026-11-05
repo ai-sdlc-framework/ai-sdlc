@@ -44,11 +44,17 @@ export function compileCatches(heads: readonly HeadHistory[]): CatchRow[] {
   for (const h of heads) {
     const verdict = latest(h, VERDICT_CONTEXT);
     if (!verdict) continue;
-    const verdictOk = verdict.state === 'success';
-    const verdictFailed = verdict.state === 'failure' || verdict.state === 'error';
+    const code = reasonCode(verdict.description);
+    // The shadow posts `success` for every outcome (AISDLC-1192); the reason code carries the
+    // verdict. Legacy `failure`/`error` states from before that change still count as failed.
+    const legacyFailed = verdict.state === 'failure' || verdict.state === 'error';
+    const posted = verdict.state === 'success';
+    const codeOk = code === 'ok' || code.startsWith('ok-carried');
+    const verdictOk = posted && codeOk;
+    const verdictFailed = legacyFailed || (posted && !codeOk);
     const prReady =
       latest(h, PR_READY_CONTEXT)?.state === 'success' || h.prReadyCheckConclusion === 'success';
-    const reason = reasonCode(verdict.description);
+    const reason = code;
     if (verdictFailed && prReady) {
       rows.push({ kind: 'catch', headSha: h.headSha, pullRequest: h.pullRequest, reason });
     }
