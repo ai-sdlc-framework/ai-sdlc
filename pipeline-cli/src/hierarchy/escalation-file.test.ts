@@ -2,9 +2,9 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { writeEscalationFile } from './escalation-file.js';
+import { notifyEscalation, writeEscalationFile } from './escalation-file.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let board: string;
@@ -80,5 +80,30 @@ describe('writeEscalationFile', () => {
       run: () => ok(''),
     });
     expect(JSON.parse(readFileSync(file, 'utf-8')).failureRecord).toEqual({ outcome: 'success' });
+  });
+});
+
+describe('notifyEscalation (AISDLC-1190)', () => {
+  it('sends one line, not a repeat within the hour, and again after it', () => {
+    mkdirSync(path.join(board, 'escalations'), { recursive: true });
+    const notify = vi.fn();
+    const go = (at: Date, msg = 'stuck') =>
+      notifyEscalation(board, 'TICK-1', msg, 'f.json', at, notify);
+    expect(go(now)).toBe(true);
+    expect(go(new Date(now.getTime() + 60_000))).toBe(false);
+    expect(go(new Date(now.getTime() + 60_000), 'other')).toBe(true);
+    expect(go(new Date(now.getTime() + 61 * 60_000))).toBe(true);
+    expect(notify).toHaveBeenCalledTimes(3);
+    expect(notify.mock.calls[0]![0]).toContain('TICK-1');
+  });
+
+  it('does not record a failed send', () => {
+    mkdirSync(path.join(board, 'escalations'), { recursive: true });
+    const bad = vi.fn(() => {
+      throw new Error('no planner');
+    });
+    expect(notifyEscalation(board, 'T', 'm', 'f', now, bad)).toBe(false);
+    const good = vi.fn();
+    expect(notifyEscalation(board, 'T', 'm', 'f', now, good)).toBe(true);
   });
 });

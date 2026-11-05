@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1190
 title: 'PRs routed to the planner reach the planner session'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-05'
 labels:

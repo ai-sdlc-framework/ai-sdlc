@@ -82,3 +82,43 @@ export function writeEscalationFile(inputs: EscalationInputs): { file: string } 
   writeFileSync(file, JSON.stringify(body, null, 2) + '\n', 'utf-8');
   return { file };
 }
+
+/** The same task and message is announced to the planner at most once in this window. */
+export const ESCALATION_NOTIFY_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * AISDLC-1190: tell the planner about a new escalation file, one line. A repeat of the same
+ * task and message inside the window is not sent again; a failed send is not recorded, so a retry goes out.
+ * Returns whether a line was sent.
+ */
+export function notifyEscalation(
+  boardDir: string,
+  taskId: string,
+  message: string,
+  file: string,
+  now: Date,
+  notify: (text: string) => void,
+): boolean {
+  const ledger = path.join(boardDir, 'escalations', '.notified.json');
+  let seen: Record<string, number>;
+  try {
+    seen = JSON.parse(readFileSync(ledger, 'utf-8')) as Record<string, number>;
+  } catch {
+    seen = {};
+  }
+  const key = `${taskId}|${message}`;
+  const at = seen[key];
+  if (typeof at === 'number' && now.getTime() - at < ESCALATION_NOTIFY_WINDOW_MS) return false;
+  try {
+    notify(`Escalation for ${taskId}: ${message.replace(/[\r\n]+/g, ' ')} (see ${file})`);
+  } catch {
+    return false;
+  }
+  const fresh = Object.fromEntries(
+    Object.entries({ ...seen, [key]: now.getTime() }).filter(
+      ([, t]) => now.getTime() - t < ESCALATION_NOTIFY_WINDOW_MS,
+    ),
+  );
+  writeFileSync(ledger, JSON.stringify(fresh) + '\n', 'utf-8');
+  return true;
+}
