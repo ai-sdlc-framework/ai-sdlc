@@ -1021,3 +1021,62 @@ describe('headPatchId (AISDLC-998)', () => {
     expect(headPatchId(dir, 'no-such-ref')).toBeNull();
   });
 });
+
+describe('shipTask: verdict ref on every approved push (AISDLC-1193)', () => {
+  beforeEach(() => {
+    giveKey();
+    writeCodeqlOnPr();
+    writeDemoTaskFile(state.worktreePath);
+    writeFileSync(join(state.worktreePath, '.active-task'), 'AISDLC-900\n');
+  });
+
+  const HEAD40 = 'e'.repeat(40);
+
+  function scriptVerdictGit(remoteUrl: string): void {
+    const r = h.runner;
+    r.on(/^git diff --name-only/, ok('docs/readme.md\n'));
+    r.on(/^git config --get remote\.origin\.url/, ok(`${remoteUrl}\n`));
+    r.on(/^git merge-base HEAD/, ok('b'.repeat(40) + '\n'));
+    r.on(/^git rev-parse HEAD$/, ok(HEAD40 + '\n'));
+    r.on(/^git rev-parse HEAD\^\{tree\}/, ok('f'.repeat(40) + '\n'));
+    r.on(/^git ls-remote/, ok(''));
+    r.on(/^git hash-object/, ok('a'.repeat(40) + '\n'));
+    r.on(/^git write-tree/, ok('c'.repeat(40) + '\n'));
+    r.on(/^git commit-tree/, ok('d'.repeat(40) + '\n'));
+  }
+
+  const pushLine = (): string => cmds().find((c) => c.startsWith('git push')) ?? '';
+
+  it('push-only resume (no reviewers ran, no draft): the push is atomic with a verdict ref', async () => {
+    scriptVerdictGit('https://github.com/o/r.git');
+    scriptShip();
+    expect(state.verdict?.verdictRecordDraft).toBeUndefined();
+    const res = await shipTask(h.ctx, state);
+    expect(res.action).toBe('done');
+    expect(pushLine()).toBe(
+      `git push -u --atomic origin ai-sdlc/aisdlc-900-demo-task ${'d'.repeat(40)}:refs/ai-sdlc/verdicts/${HEAD40}`,
+    );
+  });
+
+  it('review-full resume (reviewers approved, draft never attached): the push carries a verdict ref', async () => {
+    scriptVerdictGit('git@github.com:o/r.git');
+    scriptShip();
+    expect(state.verdict?.verdicts).toHaveLength(2);
+    const res = await shipTask(h.ctx, state);
+    expect(res.action).toBe('done');
+    expect(pushLine()).toContain('--atomic');
+    expect(pushLine()).toContain(`:refs/ai-sdlc/verdicts/${HEAD40}`);
+  });
+
+  it('an approved push with no ref records the reason in the notes', async () => {
+    scriptVerdictGit('/not/a/github/remote');
+    scriptShip();
+    const res = await shipTask(h.ctx, state);
+    expect(res.action).toBe('done');
+    if (res.action !== 'done') return;
+    expect(pushLine()).toBe('git push -u origin ai-sdlc/aisdlc-900-demo-task');
+    expect(res.notes).toContain(
+      'verdict ref not pushed: head, tree, base or repository unresolved',
+    );
+  });
+});

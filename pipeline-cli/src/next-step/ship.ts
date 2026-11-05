@@ -40,6 +40,7 @@ import {
   TRUSTED_MARKER_AUTHOR_LOGINS,
   MARKER_PREFIX,
 } from '../incremental-review/incremental.js';
+import { attachVerdictRecordDraft } from './review-finalize.js';
 import { buildVerdictRefspec } from './verdict-ref-push.js';
 import { checkHeadEnvelope, type HeadEnvelopeOpts } from './head-envelope.js';
 import { markTaskDone } from './task-done.js';
@@ -564,6 +565,11 @@ async function shipInner(
   });
   const seenBeforeFetch = seenRef.code === 0 ? seenRef.stdout.trim() : '';
   const verdictNotes: string[] = [];
+  // AISDLC-1193: every approved push carries a verdict ref. Resumed, re-entered and no-reviewer
+  // rounds never passed through finalizeReview, so build the draft here when it is missing.
+  if (!needsHuman && verdict.approved && !verdict.verdictRecordDraft) {
+    await attachVerdictRecordDraft(ctx, state, verdict);
+  }
   for (let attempt = 0; attempt < PUSH_ATTEMPTS; attempt += 1) {
     // RFC-0061 Phase 1: branch and verdict ref in one atomic push (built per attempt: the
     // pre-push hook can change the head). The v6 envelope path keeps running beside it.
