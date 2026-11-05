@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1192
 title: 'Shadow review-verdict status never blocks a merge'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-05'
 labels:
@@ -35,7 +35,11 @@ dispatchable: true
 
 ## Acceptance Criteria
 
-- [ ] AC-1: `verdict-check --post-status` with reason `no-record` posts `success` with the reason code in the description. Test with an injected runner.
-- [ ] AC-2: A non-ok reason never produces `failure` or `error` on `ai-sdlc/review-verdict`. Test across all reason codes.
-- [ ] AC-3: The catch report still counts disagreements correctly from the new post shape. Test.
-- [ ] AC-4: `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` pass; the task file records the test command and its summary line.
+- [x] AC-1: `verdict-check --post-status` with reason `no-record` posts `success` with the reason code in the description. Test with an injected runner.
+- [x] AC-2: A non-ok reason never produces `failure` or `error` on `ai-sdlc/review-verdict`. Test across all reason codes.
+- [x] AC-3: The catch report still counts disagreements correctly from the new post shape. Test.
+- [x] AC-4: `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` pass; the task file records the test command and its summary line.
+
+## Verification
+
+Command: `pnpm build && pnpm test && pnpm lint && pnpm format:check` (exit 0). Targeted: `npx vitest run src/attestation/verdict-check.test.ts` in pipeline-cli: `Tests  18 passed (18)`.

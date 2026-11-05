@@ -24,7 +24,11 @@ export interface VerdictCheckRun {
   headSha: string;
   baseSha: string;
   requiredTier?: IndependenceTier;
-  /** Post the shadow status (CI only). */
+  /**
+   * Post the shadow status (CI only). Always `success` (RFC-0061 Phase 1: the shadow never gates
+   * a merge; a failing status makes mergeStateStatus UNSTABLE). The verdict is the reason code
+   * leading the description.
+   */
   postStatus: boolean;
   /** Appended to the job summary when given. */
   writeSummary?: (markdown: string) => void;
@@ -68,7 +72,7 @@ export async function runVerdictCheck(run: VerdictCheckRun): Promise<VerdictChec
         'POST',
         `repos/${run.repository}/statuses/${run.headSha}`,
         '-f',
-        `state=${result.ok ? 'success' : 'failure'}`,
+        'state=success',
         '-f',
         `context=${VERDICT_CONTEXT}`,
         '-f',
