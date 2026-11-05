@@ -11,7 +11,7 @@
  * Skip: AI_SDLC_SKIP_PATCH_COVERAGE_GATE=1 (or AI_SDLC_BYPASS_ALL_GATES=1).
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isInstrumentableFile, listChangedFiles } from './check-pr-patch-coverage.mjs';
@@ -132,7 +132,87 @@ async function takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log
   }
 }
 
+/** Coverage files may be at most this old, relative to the record's finishedAt (AISDLC-1187). */
+export const COVERAGE_WINDOW_MS = 30 * 60 * 1000;
+/** Clock slack allowed for a coverage file written just after the record's timestamp. */
+const COVERAGE_SLACK_MS = 60 * 1000;
+
+/**
+ * Why a machine-verify record cannot stand in for the coverage run, or null when it can
+ * (AISDLC-1187, DEC-0371). `facts` = { tree, baseSha, dirty, records, coverageMtimeMs }.
+ * Every condition fails closed: the hook then runs exactly as before.
+ */
+export function reuseMismatch(facts, packages) {
+  if (!facts) return 'no reuse facts';
+  const { tree, baseSha, dirty, records = [], coverageMtimeMs = {} } = facts;
+  if (!tree) return 'tree unknown';
+  const matching = records
+    .filter((r) => r && r.treeSha === tree)
+    .sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)));
+  const rec = matching[0];
+  if (!rec) return 'no verify record for this tree';
+  if (rec.ok !== true) return 'verify record is not ok';
+  if (rec.clean !== true) return 'verify run was not clean';
+  if (!rec.baseSha || rec.baseSha !== baseSha) return 'origin/main moved since the verify run';
+  if (dirty) return 'worktree is dirty';
+  const finished = Date.parse(rec.finishedAt);
+  if (Number.isNaN(finished)) return 'verify record has no finish time';
+  for (const pkg of packages) {
+    const m = coverageMtimeMs[pkg];
+    if (m == null) return `no coverage file for ${pkg}`;
+    if (m > finished + COVERAGE_SLACK_MS || m < finished - COVERAGE_WINDOW_MS) {
+      return `coverage file for ${pkg} is outside the verify window`;
+    }
+  }
+  return null;
+}
+
+function gitOut(args, env) {
+  try {
+    return execFileSync('git', args, { cwd: ROOT, encoding: 'utf-8', env }).trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Read the live facts `reuseMismatch` needs. Never throws. */
+export function gatherReuseFacts(packages, env = sessionScrubbedEnv()) {
+  try {
+    const common = gitOut(['rev-parse', '--path-format=absolute', '--git-common-dir'], env);
+    const roots = new Set([ROOT]);
+    if (common) roots.add(dirname(common));
+    const records = [];
+    for (const root of roots) {
+      const dir = join(root, '.ai-sdlc', 'artifacts', 'verify-runs');
+      if (!existsSync(dir)) continue;
+      for (const f of readdirSync(dir)) {
+        if (!f.endsWith('.json')) continue;
+        try {
+          records.push(JSON.parse(readFileSync(join(dir, f), 'utf-8')));
+        } catch {
+          // unreadable record: ignored
+        }
+      }
+    }
+    const coverageMtimeMs = {};
+    for (const pkg of packages) {
+      const f = join(ROOT, pkg, 'coverage', 'coverage-final.json');
+      coverageMtimeMs[pkg] = existsSync(f) ? statSync(f).mtimeMs : null;
+    }
+    return {
+      tree: gitOut(['rev-parse', 'HEAD^{tree}'], env),
+      baseSha: gitOut(['rev-parse', 'origin/main'], env),
+      dirty: gitOut(['status', '--porcelain'], env) !== '',
+      records,
+      coverageMtimeMs,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function main({
+  reuseFacts = gatherReuseFacts,
   run = spawnSync,
   changed = listChangedFiles,
   log = console.log,
@@ -163,6 +243,12 @@ export async function main({
     log('[patch-coverage] no instrumentable code changed vs origin/main; skipping coverage run');
     return 0;
   }
+  const mismatch = reuseMismatch(reuseFacts(packages, baseEnv), packages);
+  if (mismatch === null) {
+    log('[patch-coverage] matching machine-verify record (DEC-0371); skipping test:coverage');
+    return runCoverage({ run, packages: [], env: baseEnv, base, head, log });
+  }
+  log(`[patch-coverage] no verify reuse: ${mismatch}`);
   const slot = await takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log });
   const env = slot ? { ...baseEnv, ...slot.env } : baseEnv;
   let released = false;

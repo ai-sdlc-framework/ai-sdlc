@@ -237,6 +237,7 @@ describe('verify with coverage (AISDLC-1185)', () => {
     let n = 0;
     return fr
       .on(/rev-parse HEAD\^\{tree\}/, ok('tree1\n'))
+      .on(/rev-parse origin\/main/, ok('base1\n'))
       .on(/rev-parse HEAD/, ok('head1\n'))
       .on(/status --porcelain/, () => ok(statuses[Math.min(n++, statuses.length - 1)]!))
       .on(/list-coverage-packages/, ok(JSON.stringify(packages) + '\n'));
@@ -286,7 +287,12 @@ describe('verify with coverage (AISDLC-1185)', () => {
       cwd: '/x',
       runner: fr.toRunner(),
     });
-    expect(run).toMatchObject({ headSha: 'head1', treeSha: 'tree1', clean: true });
+    expect(run).toMatchObject({
+      headSha: 'head1',
+      baseSha: 'base1',
+      treeSha: 'tree1',
+      clean: true,
+    });
     expect(typeof run.finishedAt).toBe('string');
   });
 

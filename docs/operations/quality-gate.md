@@ -162,6 +162,8 @@ Per Q3 in the AISDLC-140 redesign decision and the industry consensus documented
 
 **Pre-push early copy (AISDLC-1119).** `.husky/pre-push` runs `scripts/pre-push-patch-coverage.mjs`: `test:coverage` only in the packages whose instrumentable files the diff against `origin/main` touches, then `check-pr-patch-coverage.mjs` with the same threshold file, printing uncovered line ranges. Docs-only or test-only pushes print one skip line. Skip: `AI_SDLC_SKIP_PATCH_COVERAGE_GATE=1` (never routine). CI remains the only merge gate.
 
+**Reuse of the machine-verify run (AISDLC-1187, DEC-0371, amends DEC-0282).** When a record at `<project>/.ai-sdlc/artifacts/verify-runs/<task>.json` matches, the hook skips `test:coverage` and recomputes only the patch gate (`check-pr-patch-coverage.mjs`) from the coverage files verify left, so a failing gate still fails the push. The match rule, all required: the record's `treeSha` equals `HEAD^{tree}`; `ok` is true; `clean` is true; its `baseSha` equals the current `origin/main`; the worktree is clean now; and every touched package has a `coverage/coverage-final.json` whose mtime is within 30 minutes before (and 1 minute after) the record's `finishedAt`. Any failed condition makes the hook run exactly as before, and it logs the reason on one line. The latest record for the tree decides.
+
 The CI patch gate runs in two places that both must pass:
 
 1. **`ci.yml` → `Patch coverage gate (≥90%)` step** — runs after `vitest --coverage` has produced `coverage-final.json` fixtures for the affected packages.

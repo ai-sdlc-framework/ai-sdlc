@@ -183,8 +183,8 @@ gates:
     surface: pre-push
     origin: AISDLC-1119
     owner: engineering
-    property: patch coverage of the touched packages meets the CI threshold before the push (early copy of the CI gate, same script and yaml)
-    decision: DEC-0282
+    property: patch coverage of the touched packages meets the CI threshold before the push (early copy of the CI gate, same script and yaml); reuses the machine-verify test:coverage run on an exact tree match and recomputes only the patch gate (DEC-0371)
+    decision: DEC-0282, DEC-0371
   - id: pre-push:scripts/check-governance-on-push.sh
     surface: pre-push
     origin: AISDLC-1123
