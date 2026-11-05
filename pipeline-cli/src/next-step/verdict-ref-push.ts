@@ -36,7 +36,12 @@ export async function buildVerdictRefspec(
   baseRef: string,
   now?: Date,
 ): Promise<VerdictRefspec> {
-  if (!draft) return { refspec: null };
+  if (!draft) {
+    return {
+      refspec: null,
+      note: 'verdict ref not pushed: no verdict record draft for this round',
+    };
+  }
   try {
     const rev = async (args: string[]): Promise<string> => {
       const r = await runner('git', args, { cwd: wt, allowFailure: true });

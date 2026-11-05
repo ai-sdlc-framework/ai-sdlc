@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1193
 title: 'Every pipeline push carries a verdict ref (RFC-0061 cutover prerequisite)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-05'
 labels:
@@ -36,8 +36,14 @@ dispatchable: true
 
 ## Acceptance Criteria
 
-- [ ] AC-1: A resumed round (review-full and push-only) that ends approved pushes a verdict ref for the pushed head. Test per resume kind.
-- [ ] AC-2: When the pre-push hook adds a commit, the ref names the final pushed sha. Test.
-- [ ] AC-3: An approved push without a ref records the reason in the verdict notes. Test.
-- [ ] AC-4: `cli-attestation verdict-check --head <sha>` returns `ok` for a head pushed by a fresh executor round in an integration-style test with a local bare remote.
-- [ ] AC-5: `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` pass; the task file records the test command and its summary line.
+- [x] AC-1: A resumed round (review-full and push-only) that ends approved pushes a verdict ref for the pushed head. Test per resume kind.
+- [x] AC-2: When the pre-push hook adds a commit, the ref names the final pushed sha. Test.
+- [x] AC-3: An approved push without a ref records the reason in the verdict notes. Test.
+- [x] AC-4: `cli-attestation verdict-check --head <sha>` returns `ok` for a head pushed by a fresh executor round in an integration-style test with a local bare remote.
+- [x] AC-5: `pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check` pass; the task file records the test command and its summary line.
+
+## Final Summary
+
+Ship now builds the verdict draft when an approved round reaches Step 11 without one (resumed, push-only and no-reviewer rounds); the execute-host no-reviewer path attaches it too; a missing draft now notes its reason. Tests: ship unit tests per resume kind plus no-ref note, and a local-bare-remote integration test (fresh round gives verdict-check ok; hook-added commit gives a ref for the final sha). Runbook note added in docs/operations/quality-gate.md.
+
+Test command: `cd pipeline-cli && npx vitest run src/next-step src/workflow` -> `Test Files  18 passed (18)`, `Tests  446 passed (446)`. Full `pnpm build && pnpm test && pnpm lint && pnpm format:check` exited 0.
