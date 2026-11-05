@@ -124,6 +124,8 @@ export interface NextStepState {
   maxIterations: number;
   /** AISDLC-1086: developer rounds spent fixing a red machine verify run (capped by `maxIterations`). */
   verifyRounds?: number;
+  /** AISDLC-1188: a verify run already happened for this task, so later rounds may narrow. */
+  verifyRan?: boolean;
   developer: DeveloperReturn | null;
   /** AISDLC-947: the resume review decision, set only when the task resumed. */
   resumeReview?: ResumeReviewDecision;
