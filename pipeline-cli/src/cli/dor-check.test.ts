@@ -54,4 +54,33 @@ describe('cli-dor-check decision-point wiring (AISDLC-785)', () => {
     expect(await runDorCheckCli()).toBe(1);
     expect(route).toHaveBeenCalledTimes(1);
   });
+
+  it('AISDLC-1175: prints the upstream-OQ reason and no empty gate list', async () => {
+    refine.mockResolvedValue({
+      shouldRefuseExecution: true,
+      verdict: { overallVerdict: 'admit' },
+      upstreamOqCheck: {
+        rejected: true,
+        rejectionSummary: 'DoR upstream-OQ gate blocked: RFC-0061',
+        rfcChecks: [
+          {
+            rfcId: 'RFC-0061',
+            rejected: true,
+            unresolvedOqCount: 1,
+            unresolvedOqSample: ['### OQ-2'],
+          },
+        ],
+      },
+    });
+    const out: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
+      out.push(String(c));
+      return true;
+    });
+    process.argv = ['node', 'cli-dor-check', '--task', file];
+    expect(await runDorCheckCli()).toBe(1);
+    const text = out.join('');
+    expect(text).toContain('RFC-0061: 1 unresolved OQ(s): ### OQ-2');
+    expect(text).not.toContain('COMMENT');
+  });
 });

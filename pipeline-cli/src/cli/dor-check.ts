@@ -103,7 +103,21 @@ async function checkOneTaskFile(taskFile: string): Promise<CheckOneResult> {
   }
 
   // Use the same renderer the CI workflow uses so wording is identical
-  const comment = renderClarificationComment(result.verdict, { channel: 'author' });
+  // AISDLC-1175: name the upstream-OQ reason first; omit the gate comment when
+  // no rubric gate failed (it would print "blocked on" an empty list).
+  const oq = result.upstreamOqCheck;
+  let comment = '';
+  if (oq?.rejected) {
+    comment += `${oq.rejectionSummary ?? 'DoR upstream-OQ gate blocked.'}\n`;
+    for (const c of oq.rfcChecks) {
+      if (c.rejected && c.unresolvedOqCount > 0) {
+        comment += `  ${c.rfcId}: ${c.unresolvedOqCount} unresolved OQ(s): ${c.unresolvedOqSample.join('; ')}\n`;
+      }
+    }
+  }
+  if (!(oq?.rejected && result.verdict?.overallVerdict === 'admit')) {
+    comment += renderClarificationComment(result.verdict, { channel: 'author' });
+  }
   return { taskFile: resolved, taskId, blocked: true, comment };
 }
 
