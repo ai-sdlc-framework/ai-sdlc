@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-11-05T04:02:48.289Z","decisionId":"DEC-0373","chosenOptionId":"a","rationale":"Operator answer 2026-11-04 in the planner session: limit follows executors.max, configurable; repairs exempt; land and repair before spawning."}
