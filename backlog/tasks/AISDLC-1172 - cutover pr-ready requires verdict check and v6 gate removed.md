@@ -15,6 +15,7 @@ dependencies:
   - AISDLC-1169
   - AISDLC-1170
   - AISDLC-1171
+  - AISDLC-1193
 references:
   - spec/rfcs/RFC-0061-review-verdict-gate-outside-the-branch.md
   - .github/workflows/ai-sdlc-gate.yml
@@ -28,13 +29,12 @@ references:
   - pipeline-cli/src/dispatch/resume.ts
   - pipeline-cli/src/hierarchy/pr-state.ts
 priority: high
-dispatchable: false
-dispatchableReason: "Pre-condition: operator go on the AISDLC-1169 shadow report before cutover."
+dispatchable: true
 ---
 
 ## Description
 
-**Pre-conditions:** the operator gives the go for cutover after reading the AISDLC-1169 shadow report (`cli-attestation catches`), with no unexplained v6/verdict disagreement. Until then this task is not dispatchable.
+**Cutover go (DEC-0375).** Operator, 2026-11-05: the shadow-report precondition is waived; cut over now. AISDLC-1193 (every pipeline push carries a verdict ref) lands first, so `ai-sdlc/pr-ready` does not fail PRs for a missing record the writer should have produced.
 
 Implements RFC-0061 Migration Path phase 2 and OQ-3 (names kept).
 
