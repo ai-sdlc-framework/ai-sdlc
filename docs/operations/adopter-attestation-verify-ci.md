@@ -4,7 +4,7 @@ RFC-0061 replaced the signed v6 attestation envelope with a review verdict recor
 
 ## Hard cut and kept names
 
-**Release note: hard cut.** From the cutover release the v6 envelope is no longer signed or verified (DEC-0284 precedent). There is no dual-read window. An adopter that upgrades the pin gets the verdict check; `cli-attestation verify` given a v6 envelope fails with `attestation-schema-v6-refused`. Envelopes already on your `main` are ignored.
+**Release note: hard cut.** From release 0.41.0, the first to ship `cli-attestation verdict-check` and `verdict-prune` (and the new default `pipeline-cli-version`), the v6 envelope is no longer signed or verified (DEC-0284 precedent). There is no dual-read window. An adopter that upgrades the pin gets the verdict check; `cli-attestation verify` given a v6 envelope fails with `attestation-schema-v6-refused`. Envelopes already on your `main` are ignored.
 
 The names are kept for branch-protection compatibility (RFC-0061 OQ-3): the workflow file `consumer-verify-attestation.yml`, its inputs (`pipeline-cli-version`, `required-independence-tier`, `ai-sdlc-ref`), the composite action `verify-attestation-base`, the `cli-attestation` entry point, the exit codes (0 pass, 1 fail) and the `ai-sdlc/attestation` status context. Your required-check configuration and your caller workflow keep working unchanged.
 
@@ -30,7 +30,7 @@ jobs:
 
 Pin the SHA in **both** places: the `uses:` ref pins the workflow, and `ai-sdlc-ref` pins the tooling (action, policy-floor check, docs-only classifier) checked out beside it. `ai-sdlc-ref` is required, has no default, and the job fails closed unless it is a full 40-hex commit SHA. The job also fails first unless the caller is triggered by `pull_request_target`.
 
-Optional inputs: `pipeline-cli-version` (an **exact pin**, `x.y.z`, of the installed `@ai-sdlc/pipeline-cli` / `@ai-sdlc/orchestrator`, default `0.31.0`; no caret or range is applied) and `required-independence-tier` (`none|attested|isolated`). The tier is a floor on your base policy's `requiredTier` and is also passed to the verdict check, which fails with `tier-short` when the record's reviewers sit below it.
+Optional inputs: `pipeline-cli-version` (an **exact pin**, `x.y.z`, of the installed `@ai-sdlc/pipeline-cli` / `@ai-sdlc/orchestrator`, default `0.41.0`; no caret or range is applied) and `required-independence-tier` (`none|attested|isolated`). The tier is a floor on your base policy's `requiredTier` and is also passed to the verdict check, which fails with `tier-short` when the record's reviewers sit below it.
 
 **Docs-only exemption set.** Consumers inherit ai-sdlc's docs-only exemption (`scripts/is-docs-only-changeset.mjs` from the pinned tooling): a PR whose every changed path is a root `*.md` (including `CLAUDE.md` and `AGENTS.md`), under `docs/`, `spec/rfcs/`, `backlog/tasks/`, `backlog/completed/` or `.ai-sdlc/_decisions/` skips the check. The changed-path list is the merge-base diff with rename detection off, so renaming a source or workflow file into `docs/` still counts as touching the source path.
 
@@ -82,7 +82,7 @@ jobs:
           home="$RUNNER_TEMP/ai-sdlc-verifier"
           mkdir -p "$home" && cd "$home"
           npm init -y >/dev/null
-          npm install --no-save --save-exact --ignore-scripts '@ai-sdlc/orchestrator@0.31.0' '@ai-sdlc/pipeline-cli@0.31.0'
+          npm install --no-save --save-exact --ignore-scripts '@ai-sdlc/orchestrator@0.41.0' '@ai-sdlc/pipeline-cli@0.41.0'
           echo "AI_SDLC_VERIFIER_HOME=$home" >> "$GITHUB_ENV"
 
       - name: Check the review verdict
