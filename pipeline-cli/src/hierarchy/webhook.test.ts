@@ -228,3 +228,106 @@ describe('webhook health (AISDLC-1157)', () => {
     expect(() => parseFeed('carrier-pigeon')).toThrow(/invalid webhook feed/);
   });
 });
+
+describe('supervised gh forwarder (AISDLC-1207)', () => {
+  let home: string;
+  const calls: string[][] = [];
+  const hooks = [
+    { id: 1, name: 'cli' },
+    { id: 2, name: 'web' },
+  ];
+  const mkRun =
+    (launchAlive = true) =>
+    (file: string, args: readonly string[]) => {
+      calls.push([file, ...args]);
+      if (file === 'gh' && args[0] === 'repo') return { status: 0, stdout: 'o/r\n', stderr: '' };
+      if (file === 'gh' && args[0] === 'api' && args[1] === 'repos/o/r/hooks')
+        return { status: 0, stdout: JSON.stringify(hooks), stderr: '' };
+      if (file === 'launchctl' && args[0] === 'print')
+        return { status: launchAlive ? 0 : 1, stdout: '', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+  const mkd = (env: NodeJS.ProcessEnv, launchAlive = true): HierarchyDeps =>
+    ({ ...mk(env), now: () => new Date(), run: mkRun(launchAlive) }) as unknown as HierarchyDeps;
+
+  beforeEach(() => {
+    calls.length = 0;
+    home = mkdtempSync(path.join(os.tmpdir(), 'wh-home-'));
+  });
+  afterEach(() => removeFixtureDir(home));
+
+  it('refuses without the secret', () => {
+    expect(() =>
+      webhookUp(mkd({ HOME: home }), undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin'),
+    ).toThrow(/AI_SDLC_WEBHOOK_SECRET/);
+  });
+
+  it('deletes only cli hooks, writes the plist with --secret and loads it', () => {
+    const spawner = vi.fn();
+    const deps = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3', AI_SDLC_WEBHOOK_PORT: '9001' });
+    webhookUp(deps, undefined, spawner, { kind: 'gh-forward' }, 'darwin');
+    const deletes = calls.filter((c) => c.includes('DELETE'));
+    expect(deletes).toEqual([['gh', 'api', '-X', 'DELETE', 'repos/o/r/hooks/1']]);
+    const plist = readFileSync(
+      path.join(home, 'Library/LaunchAgents/io.ai-sdlc.webhook-forward.plist'),
+      'utf-8',
+    );
+    expect(plist).toContain('<string>--secret</string>');
+    expect(plist).toContain('<string>s3</string>');
+    expect(plist).toContain('http://127.0.0.1:9001/webhooks/github');
+    expect(calls.some((c) => c[0] === 'launchctl' && c[1] === 'bootstrap')).toBe(true);
+    expect(spawner).toHaveBeenCalledWith(
+      process.execPath,
+      expect.arrayContaining(['--feed-agent', 'io.ai-sdlc.webhook-forward']),
+    );
+  });
+
+  it('prints the command off macOS and loads nothing', () => {
+    const deps = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' });
+    webhookUp(deps, undefined, vi.fn(), { kind: 'gh-forward' }, 'linux');
+    expect(lines.join('\n')).toContain('no launchd here');
+    expect(lines.join('\n')).not.toContain('s3');
+    expect(calls.some((c) => c[0] === 'launchctl')).toBe(false);
+  });
+
+  it('fails when launchctl bootstrap fails or the repo is unresolved', () => {
+    const base = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' });
+    const bad = {
+      ...base,
+      run: (f: string, a: readonly string[]) =>
+        f === 'launchctl' && a[0] === 'bootstrap'
+          ? { status: 1, stdout: '', stderr: 'boom' }
+          : mkRun()(f, a),
+    } as unknown as HierarchyDeps;
+    expect(() => webhookUp(bad, undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin')).toThrow(
+      /boom/,
+    );
+    const norepo = { ...base, run: () => ({ status: 1, stdout: '' }) } as unknown as HierarchyDeps;
+    expect(() => webhookUp(norepo, undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin')).toThrow(
+      /cannot resolve/,
+    );
+  });
+
+  it('status reads the agent label; down unloads and removes leftover hooks', () => {
+    writeFileSync(
+      path.join(dir, 'webhook.json'),
+      JSON.stringify({
+        pid: 99,
+        port: 1,
+        feed: { kind: 'gh-forward', agent: 'io.ai-sdlc.webhook-forward' },
+      }),
+    );
+    const env = { HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' };
+    const up = webhookHealth(mkd(env, true), { probePort: () => true });
+    expect(up.signals.forwarder).toBe('alive');
+    const dead = webhookHealth(mkd(env, false), { probePort: () => true });
+    expect(dead.signals.forwarder).toBe('dead');
+    webhookDown(mkd(env), vi.fn());
+    expect(calls.some((c) => c[0] === 'launchctl' && c[1] === 'bootout')).toBe(true);
+    expect(calls.some((c) => c.includes('DELETE'))).toBe(true);
+  });
+
+  it('parses --feed-agent', () => {
+    expect(parseFeed('gh-forward', undefined, 'x')).toEqual({ kind: 'gh-forward', agent: 'x' });
+  });
+});
