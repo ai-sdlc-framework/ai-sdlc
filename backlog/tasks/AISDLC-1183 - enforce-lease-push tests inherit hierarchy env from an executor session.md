@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1183
 title: 'enforce-lease-push tests fail when hierarchy env vars leak in from an executor session'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-04'
 labels:

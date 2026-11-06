@@ -17,6 +17,26 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const hookScript = join(__dirname, 'enforce-blocked-actions.js');
 
+// AISDLC-1183: hermetic against an executor shell. These session variables decide the
+// lease-push preflight; the suites build every hook env explicitly, so drop any that a
+// runner without `--import vitest.git-env.setup.mjs` (plain `node --test`) inherits.
+const SESSION_ENV_VARS = [
+  'AI_SDLC_HIERARCHY_SESSION',
+  'AI_SDLC_HIERARCHY_ROLE',
+  'AI_SDLC_EXECUTOR_TASK',
+  'AI_SDLC_ACTIVE_TASK_ID',
+  'CLAUDE_PROJECT_DIR',
+  'AI_SDLC_GH_CALL_LOG',
+  'AI_SDLC_WORKFLOW_STATE',
+];
+for (const k of SESSION_ENV_VARS) delete process.env[k];
+
+describe('hermetic env (AISDLC-1183)', () => {
+  it('inherits no executor session variables', () => {
+    for (const k of SESSION_ENV_VARS) assert.equal(process.env[k], undefined, k);
+  });
+});
+
 const BLOCKED = `  constraints:
     blockedActions:
       - 'git push --force*'
