@@ -162,10 +162,12 @@ import {
   runDispatchTick,
   hostTickStale,
   endsWithQuestion,
+  paneHasLiveNextStep,
   clearHold,
   writeHold,
   findOpenPrNumber,
   paneTail,
+  paneInfo,
   fetchHumanAttentionPrs,
   stallThresholdsFromEnv,
   runPlaybook,
@@ -1348,6 +1350,19 @@ export async function runHierarchyCli(
                 endsWithQuestion(paneTail(deps.run, entry.tmuxSession, entry.tmuxWindow))
               );
             },
+            hasLiveNextStep: (name) => {
+              const entry = readRosterChecked(deps.boardDir).roster.sessions.find(
+                (e) => e.name === name,
+              );
+              return (
+                entry !== undefined &&
+                paneHasLiveNextStep(
+                  deps.run,
+                  paneInfo(deps.run, entry.tmuxSession, entry.tmuxWindow).panePid,
+                )
+              );
+            },
+            onSpared: (o) => emit({ type: 'StallSpared', ...o }),
             requeue: (id, note, pr) => {
               if (pr === undefined) {
                 void requeueFailed(

@@ -64,6 +64,13 @@ export interface StallDeps {
    * stalled on the next tick, without the idle grace.
    */
   lastOutputIsQuestion?: (worker: string) => boolean;
+  /**
+   * Whether the named executor has a live `next-step` descendant process (AISDLC-1198): a
+   * backgrounded verification keeps the session idle with an aging heartbeat while real work runs.
+   */
+  hasLiveNextStep?: (worker: string) => boolean;
+  /** Called when a claim that would be reaped is spared, with the reason. */
+  onSpared?: (o: { taskId: string; worker: string; ageMs: number; reason: string }) => void;
   /** Clears (and so restarts) one executor; undefined when the grant is missing. */
   clear?: (o: { executor: string; taskId: string }) => Promise<{ status: string; reason?: string }>;
   /**
@@ -125,6 +132,34 @@ function safeIsQuestion(fn: (worker: string) => boolean, worker: string): boolea
   }
 }
 
+/**
+ * True when a process in the pane's tree (any depth) runs `next-step`, read from `ps` output
+ * (`pid ppid command`). False when `ps` fails or the pane pid is unknown.
+ */
+export function paneHasLiveNextStep(run: CommandRunner, panePid: number): boolean {
+  if (panePid <= 0) return false;
+  const r = run('ps', ['-A', '-o', 'pid=,ppid=,command=']);
+  if (r.status !== 0) return false;
+  const procs: { pid: number; ppid: number; cmd: string }[] = [];
+  for (const line of r.stdout.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (m) procs.push({ pid: Number(m[1]), ppid: Number(m[2]), cmd: m[3] ?? '' });
+  }
+  const seen = new Set<number>([panePid]);
+  let level = [panePid];
+  while (level.length > 0) {
+    const next: number[] = [];
+    for (const p of procs) {
+      if (!level.includes(p.ppid) || seen.has(p.pid)) continue;
+      if (/\bnext-step\b/.test(p.cmd)) return true;
+      seen.add(p.pid);
+      next.push(p.pid);
+    }
+    level = next;
+  }
+  return false;
+}
+
 /** Build the resume note: the stalled step and the existing pull request. */
 export function stallResumeNote(step: string, prNumber?: number): string {
   return (
@@ -180,6 +215,24 @@ export async function reapStalledClaims(
       }
     }
     if (!reason) continue;
+    if (
+      reason !== 'holder-asked-question' &&
+      deps.hasLiveNextStep &&
+      worker !== 'unknown' &&
+      safeIsQuestion(deps.hasLiveNextStep, worker)
+    ) {
+      try {
+        deps.onSpared?.({
+          taskId,
+          worker,
+          ageMs,
+          reason: `heartbeat ${Math.round(ageMs / 1000)}s old but a live next-step process is running under the executor (backgrounded verification)`,
+        });
+      } catch {
+        /* reporting must not break the tick */
+      }
+      continue;
+    }
 
     const step = heartbeat?.currentStep ?? 'unknown';
     snapshotFailedManifest(deps.boardDir, manifest);

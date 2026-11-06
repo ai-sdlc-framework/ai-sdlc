@@ -376,7 +376,12 @@ export type OrchestratorEventType =
    * `tickId`, `startedAt`, `endedAt`, `steps` (`{name, startedAt}` in order),
    * `nextWakeSec`.
    */
-  | 'DispatchTick';
+  | 'DispatchTick'
+  /**
+   * AISDLC-1198 - the stale-worker reaper spared an executor with an aged heartbeat because a
+   * live `next-step` process runs under it. Per-event fields: `taskId`, `worker`, `ageMs`, `reason`.
+   */
+  | 'StallSpared';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional
