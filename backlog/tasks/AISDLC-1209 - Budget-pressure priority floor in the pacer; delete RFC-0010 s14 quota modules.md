@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1209
 title: 'Budget-pressure priority floor in the pacer; delete RFC-0010 s14 quota modules'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:
