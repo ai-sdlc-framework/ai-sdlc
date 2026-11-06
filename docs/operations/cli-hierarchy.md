@@ -704,7 +704,10 @@ tick result the policy tables cannot classify, then announces the file to the pl
 cli-hierarchy escalation-file --task-id <id> --message <text>
 ```
 
-Prints `{"file": "<path>"}`. Exit `2` on a missing flag, `1` on an invalid task id.
+Prints `{"file": "<path>", "notified": <bool>}`. Exit `2` on a missing flag, `1` on an invalid task id.
+
+AISDLC-1190: a new file also sends one line to the running planner session. The same task and message within an
+hour is not sent again (ledger `escalations/.notified.json`); a failed send is not recorded, so a retry goes out.
 
 ### `spawn`
 
@@ -2745,6 +2748,17 @@ history entry) is re-evaluated on the next reconcile pass with fresh facts and i
 Each head gets at most 3 attempts (the first run plus two aged re-runs, counted in `agedAttempts`);
 then one line goes to the planner and the head is not retried. `cli-hierarchy status` lists every
 open PR past the window as `aged PR #N: <age>, lane <owner>, last action <action>`, oldest first.
+
+### Routes to the planner reach the planner (AISDLC-1190)
+
+When reconcile routes a PR to the planner (`no-match`, `real-failure`, a failed action twice, an aged head) or
+finds main red, `cli-dispatch reconcile` types one line into the running planner session through the roster
+guard. A key `pr|headSha|reason` is marked delivered in `landing/planner-routes.json` (`delivered`) only after the
+send succeeded: with no running planner the key stays undelivered and the next pass retries. Keys recorded before
+this change (`sent` only) are delivered once after deploy. A red main sha is recorded in `main-health.json` only
+after delivery. `cli-hierarchy status` lists every open routed PR as
+`held for planner: PR #N waiting <age> (<reason>)` and prints nothing extra when none are open; the planner
+command shows it in its orientation.
 
 ## Drain liveness (AISDLC-1096)
 

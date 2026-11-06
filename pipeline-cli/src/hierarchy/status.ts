@@ -126,6 +126,8 @@ export interface StatusResult {
   /** Open PRs no lane owns (AISDLC-1091); `unowned PRs: N` in the text view. */
   unowned?: number;
   /** AISDLC-1092: open PRs with no state change for the aging window, oldest first. */
+  /** AISDLC-1190: open PRs routed to the planner and not yet landed or closed, with how long each has waited. */
+  routedToPlanner?: { pr: number; waitMs: number; reason: string }[];
   agedPrs?: { pr: number; ageMs: number; lane: string; lastAction: string }[];
   /** AISDLC-1095: every open PR with lane, action, reason, owner and age, as text lines. */
   prTable?: string[];
@@ -367,8 +369,23 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
         : [];
     })
     .sort((a, b) => b.ageMs - a.ageMs);
+  const routedToPlanner = landings
+    .filter((l) => l.action === 'route-to-planner' && !l.landed && !l.closedUnlanded)
+    .map((l) => {
+      let since = recordLastActionAt(l);
+      for (let i = l.history.length - 1; i >= 0 && l.history[i]!.action === 'route-to-planner'; i--)
+        since = l.history[i]!.ts;
+      const at = Date.parse(since ?? '');
+      return {
+        pr: l.pr,
+        waitMs: Number.isFinite(at) ? Math.max(0, nowMs - at) : 0,
+        reason: l.failingLine ?? l.note ?? l.state,
+      };
+    })
+    .sort((a, b) => b.waitMs - a.waitMs);
   return {
     rows,
+    ...(routedToPlanner.length > 0 ? { routedToPlanner } : {}),
     ...(agedPrs.length > 0 ? { agedPrs } : {}),
     prTable: formatPrTable(deps.boardDir, nowMs),
     unowned: landings.filter((l) => l.owner === 'unowned').length,
@@ -448,6 +465,10 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     (a) =>
       `aged PR #${a.pr}: ${formatAge(new Date(0).toISOString(), a.ageMs)}, lane ${a.lane}, last action ${a.lastAction}`,
   );
+  const routedLines = (result.routedToPlanner ?? []).map(
+    (r) =>
+      `held for planner: PR #${r.pr} waiting ${formatAge(new Date(0).toISOString(), r.waitMs)} (${r.reason})`,
+  );
   const blockedLines = (result.blocked ?? []).map((b) => `blocked: ${b.taskId}: ${b.reason}`);
   if (result.rows.length === 0)
     return [
@@ -465,6 +486,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ...stuckLines,
       unownedLine,
       ...agedLines,
+      ...routedLines,
       ...(result.prTable ?? []),
       ...ghLines,
     ];
@@ -549,6 +571,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     ...stallLines,
     unownedLine,
     ...agedLines,
+    ...routedLines,
     ...(result.prTable ?? []),
     ...ghLines,
   ];

@@ -91,7 +91,8 @@ import { resolveMemoryDir } from '../memory-dream/resolve-dir.js';
 import { reenter } from '../hierarchy/reenter.js';
 import { now as clockNow } from '../clock.js';
 import { runDemo, type DemoDeps } from '../hierarchy/demo.js';
-import { writeEscalationFile } from '../hierarchy/escalation-file.js';
+import { createPlannerNotifier } from '../hierarchy/planner-notify.js';
+import { notifyEscalation, writeEscalationFile } from '../hierarchy/escalation-file.js';
 import {
   fetchUsage,
   overrideBudget,
@@ -1175,7 +1176,16 @@ export async function runHierarchyCli(
             now: deps.now(),
             run: extras.ghRun ?? deps.run,
           });
-          deps.log(JSON.stringify({ file }));
+          // AISDLC-1190: one planner line per new escalation; a send failure never fails the write.
+          const notified = notifyEscalation(
+            deps.boardDir,
+            taskId,
+            message,
+            file,
+            deps.now(),
+            createPlannerNotifier(deps.boardDir, deps.run, extras.sendBrief, extras.sendSocket),
+          );
+          deps.log(JSON.stringify({ file, notified }));
           return 0;
         } catch (err) {
           process.stderr.write(

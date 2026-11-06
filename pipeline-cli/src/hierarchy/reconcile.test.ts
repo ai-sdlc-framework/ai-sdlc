@@ -1130,6 +1130,74 @@ describe('route-to-planner dedupe (AISDLC-924)', () => {
   });
 });
 
+describe('planner delivery (AISDLC-1190)', () => {
+  const failing = () =>
+    docsPr({
+      checks: [{ name: 'ai-sdlc/pr-ready', conclusion: 'failure', summary: 'Build failed' }],
+    });
+  const run = (notifyPlanner: (t: string) => void) =>
+    reconcile([failing()], {
+      boardDir: board,
+      execute: () => ({ ran: false }),
+      now: fixedNow,
+      notifyPlanner,
+    });
+
+  it('AC-1: notifies once per key', () => {
+    const notify = vi.fn();
+    run(notify);
+    run(notify);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0]![0]).toContain('needs the planner');
+  });
+
+  it('AC-2: a failed send is retried on the next pass', () => {
+    const notify = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('no planner');
+      })
+      .mockImplementation(() => undefined);
+    run(notify);
+    run(notify);
+    run(notify);
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+
+  it('AC-6: keys recorded before the change are reported once', () => {
+    run(() => undefined);
+    const file = path.join(board, 'landing', 'planner-routes.json');
+    const old = JSON.parse(readFileSync(file, 'utf-8'));
+    delete old.delivered;
+    writeFileSync(file, JSON.stringify(old));
+    const notify = vi.fn();
+    run(notify);
+    run(notify);
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('AC-3: a red main reaches the planner; a failed send retries', () => {
+    const notify = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('x');
+      })
+      .mockImplementation(() => undefined);
+    const pass = () =>
+      reconcile([], {
+        boardDir: board,
+        execute: () => ({ ran: false }),
+        mainHealth: { status: 'red', sha: 'abcdef1234' },
+        notifyPlanner: notify,
+      });
+    pass();
+    pass();
+    pass();
+    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify.mock.calls[1]![0]).toContain('main: RED at abcdef12');
+  });
+});
+
 describe('main health (AISDLC-929)', () => {
   const runner =
     (head: string | number, runs: string | number): CommandRunner =>

@@ -520,6 +520,8 @@ interface PlannerRoutes {
   sent: string[];
   /** Reports withheld since the last tick summary. */
   suppressed: number;
+  /** AISDLC-1190: keys the planner was actually told about; absent on records written before. */
+  delivered?: string[];
 }
 
 function routesPath(boardDir: string): string {
@@ -529,7 +531,11 @@ function routesPath(boardDir: string): string {
 function readRoutes(boardDir: string): PlannerRoutes {
   try {
     const r = JSON.parse(readFileSync(routesPath(boardDir), 'utf-8')) as Partial<PlannerRoutes>;
-    return { sent: r.sent ?? [], suppressed: r.suppressed ?? 0 };
+    return {
+      sent: r.sent ?? [],
+      suppressed: r.suppressed ?? 0,
+      ...(r.delivered ? { delivered: r.delivered } : {}),
+    };
   } catch {
     return { sent: [], suppressed: 0 };
   }
@@ -543,16 +549,43 @@ function writeRoutes(boardDir: string, r: PlannerRoutes): void {
   renameSync(tmp, target);
 }
 
-/** True the first time a (PR, head sha, reason) key is seen; later calls count a suppression. */
-function firstRoute(boardDir: string, pr: number, headSha: string | undefined, reason: string) {
+/**
+ * True the first time a (PR, head sha, reason) key is seen; later calls count a suppression.
+ * AISDLC-1190: with a notifier the key counts as seen only once the planner was told, so a failed
+ * send is retried next pass and keys recorded before the notifier existed are reported once.
+ */
+function firstRoute(
+  boardDir: string,
+  pr: number,
+  headSha: string | undefined,
+  reason: string,
+  notify?: (text: string) => void,
+) {
   const routes = readRoutes(boardDir);
   const key = `${pr}|${headSha ?? ''}|${reason}`;
-  if (routes.sent.includes(key)) {
+  const seen = notify ? (routes.delivered ?? []) : routes.sent;
+  if (seen.includes(key)) {
     writeRoutes(boardDir, { ...routes, suppressed: routes.suppressed + 1 });
     return false;
   }
-  writeRoutes(boardDir, { ...routes, sent: [...routes.sent, key] });
+  const sent = routes.sent.includes(key) ? routes.sent : [...routes.sent, key];
+  if (!notify) {
+    writeRoutes(boardDir, { ...routes, sent });
+    return true;
+  }
+  try {
+    notify(plannerRouteLine(pr, headSha, reason));
+    writeRoutes(boardDir, { ...routes, sent, delivered: [...(routes.delivered ?? []), key] });
+  } catch {
+    /* undelivered: the next pass retries */
+  }
   return true;
+}
+
+/** The line the planner receives for a routed PR. */
+export function plannerRouteLine(pr: number, headSha: string | undefined, reason: string): string {
+  const head = headSha ? ` (head ${headSha.slice(0, 8)})` : '';
+  return `PR #${pr} needs the planner: ${reason}${head}. See cli-hierarchy status.`;
 }
 
 /** Health of main's latest completed monitor run. */
@@ -603,6 +636,7 @@ function mainHealthPath(boardDir: string): string {
 export function reportMainHealth(
   boardDir: string,
   health: MainHealth,
+  notify?: (text: string) => void,
 ): Pick<ReconcileReport, 'main' | 'routed'> {
   if (health.status === 'green') return { main: 'main: green' };
   if (health.status === 'unknown') return { main: 'main: unknown' };
@@ -616,6 +650,14 @@ export function reportMainHealth(
     seen = undefined;
   }
   if (seen === health.sha) return { main: text };
+  if (notify) {
+    // AISDLC-1190: the sha is recorded only after the planner was told; a failed send retries.
+    try {
+      notify(text);
+    } catch {
+      return { main: text, routed: { action: 'route-to-planner', text } };
+    }
+  }
   mkdirSync(boardDir, { recursive: true });
   writeFileSync(mainHealthPath(boardDir), JSON.stringify({ redSha: health.sha }) + '\n', 'utf-8');
   return { main: text, routed: { action: 'route-to-planner', text } };
@@ -687,6 +729,8 @@ export interface ReconcileOpts {
   closeSuperseded?: (pr: number) => number | undefined;
   /** AISDLC-1156: minutes a `route-to-planner` may sit unchanged before it re-escalates as a stall; default 60. */
   stuckAfterMinutes?: number;
+  /** AISDLC-1190: delivers a routed PR or a red main to the planner session; throws when it cannot. */
+  notifyPlanner?: (text: string) => void;
 }
 
 /** Reconcile a set of PR facts: update the records and run the actions. Idempotent. */
@@ -700,9 +744,10 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     stalls: [],
   };
   const stuckMs = (opts.stuckAfterMinutes ?? DEFAULT_ROUTE_STUCK_MINUTES) * 60_000;
-  if (opts.mainHealth) Object.assign(report, reportMainHealth(opts.boardDir, opts.mainHealth));
+  if (opts.mainHealth)
+    Object.assign(report, reportMainHealth(opts.boardDir, opts.mainHealth, opts.notifyPlanner));
   const routeOnce = (pr: number, headSha: string | undefined, reason: string): boolean => {
-    const first = firstRoute(opts.boardDir, pr, headSha, reason);
+    const first = firstRoute(opts.boardDir, pr, headSha, reason, opts.notifyPlanner);
     if (!first) report.suppressed++;
     return first;
   };

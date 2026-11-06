@@ -214,6 +214,7 @@ import {
   gatherMainHealth,
   type ReconcilePr,
 } from '../hierarchy/reconcile.js';
+import { createPlannerNotifier } from '../hierarchy/planner-notify.js';
 import { gatherPrFacts } from '../hierarchy/pr-facts.js';
 import { annotateSnapshot, appendReconcileLog, rowsForOpen } from '../hierarchy/pr-rows.js';
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
@@ -518,6 +519,8 @@ export async function runDispatchCli(
         ).supersededBy;
         return typeof by === 'number' ? by : undefined;
       };
+      // AISDLC-1190: routed PRs and a red main reach the planner session, not only this log.
+      const notifyPlanner = createPlannerNotifier(boardDir, createSystemRunner());
       const only = flags['pr'] === undefined ? undefined : Number.parseInt(flags['pr'], 10);
       if (only !== undefined && Number.isNaN(only)) {
         process.stderr.write('cli-dispatch reconcile: --pr must be a number\n');
@@ -546,6 +549,7 @@ export async function runDispatchCli(
           maxSameHeadActions,
           closeSuperseded,
           stuckAfterMinutes: resolveStuckAfterMinutes(boardDir),
+          notifyPlanner,
         });
         for (const st of report.stalls) {
           try {

@@ -92,6 +92,10 @@ node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" check-repo --board-dir "$BOARD_DIR" |
 node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" status --board-dir "$BOARD_DIR"
 ```
 
+`status` ends with one `held for planner: PR #N waiting <age> (<reason>)` line per open PR the reconciler
+routed to this session. Act on or answer each before filing new work; none is listed when nothing waits.
+The same line is also typed into this session when a PR is first routed, when main goes red and on a new escalation file.
+
 ## Step 3 — Open briefs and pending decisions
 
 ```bash

@@ -959,6 +959,42 @@ describe('hierarchy status', () => {
     );
   });
 
+  it('lists open PRs routed to the planner with their wait, and nothing when none (AISDLC-1190)', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
+    expect(hierarchyStatus(deps).routedToPlanner).toBeUndefined();
+    expect(formatStatus(hierarchyStatus(deps)).some((l) => l.startsWith('held for planner'))).toBe(
+      false,
+    );
+    const dir = path.join(deps.boardDir, 'landing');
+    mkdirSync(dir, { recursive: true });
+    const nowMs = deps.now().getTime();
+    const ago = (h: number) => new Date(nowMs - h * 3_600_000).toISOString();
+    const rec = (pr: number, extra: object) =>
+      writeFileSync(
+        path.join(dir, `${pr}.json`),
+        JSON.stringify({
+          pr,
+          kind: 'task',
+          owner: 'machine',
+          state: 'no-match',
+          action: 'route-to-planner',
+          history: [
+            { ts: ago(30), state: 'no-match', action: 'none' },
+            { ts: ago(26), state: 'no-match', action: 'route-to-planner' },
+            { ts: ago(2), state: 'no-match', action: 'route-to-planner' },
+          ],
+          ...extra,
+        }),
+      );
+    rec(5, { failingLine: 'Build failed' });
+    rec(6, { landed: ago(1) });
+    const result = hierarchyStatus(deps);
+    expect(result.routedToPlanner).toEqual([
+      { pr: 5, waitMs: 26 * 3_600_000, reason: 'Build failed' },
+    ]);
+    expect(formatStatus(result)).toContain('held for planner: PR #5 waiting 26h0m (Build failed)');
+  });
+
   it('reads the double-quote-wrapped pane_start_command tmux returns as ok (AISDLC-791.1)', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1, noPlanner: true }, deps);
     const name = Q('executor-alpha');
