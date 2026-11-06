@@ -8,15 +8,9 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { deriveTaskClass, readTaskFrontmatter } from '../labels/task-file.js';
 import { TASK_CLASSES, type TaskClass } from '../estimation/types.js';
 import { readRecentEvents } from '../orchestrator/events.js';
 import {
@@ -77,29 +71,11 @@ function isTaskClass(v: unknown): v is TaskClass {
   return typeof v === 'string' && (TASK_CLASSES as readonly string[]).includes(v);
 }
 
-/** Frontmatter `class:` for a task, read from the frontmatter block only. */
+/** Class from the task file: frontmatter `class:`, labels, then referenced code areas. */
 function frontmatterClass(repoRoot: string, taskId: string): TaskClass | undefined {
-  const dir = join(repoRoot, 'backlog', 'tasks');
-  let files: string[];
-  try {
-    files = readdirSync(dir);
-  } catch {
-    return undefined;
-  }
-  const prefix = `${taskId.toLowerCase()} `;
-  const file = files.find((f) => f.toLowerCase().startsWith(prefix) && f.endsWith('.md'));
-  if (!file) return undefined;
-  try {
-    const text = readFileSync(join(dir, file), 'utf8');
-    if (!text.startsWith('---')) return undefined;
-    const end = text.indexOf('\n---', 3);
-    const block = end === -1 ? '' : text.slice(0, end);
-    const m = /^class:\s*['"]?([A-Za-z]+)['"]?\s*$/m.exec(block);
-    const v = m?.[1].toLowerCase();
-    return isTaskClass(v) ? v : undefined;
-  } catch {
-    return undefined;
-  }
+  const { fm } = readTaskFrontmatter(repoRoot, taskId);
+  const c = deriveTaskClass(fm).taskClass;
+  return c === 'uncategorized' ? undefined : c;
 }
 
 /**

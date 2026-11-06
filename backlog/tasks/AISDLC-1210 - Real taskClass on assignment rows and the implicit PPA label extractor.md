@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1210
 title: 'Real taskClass on assignment rows and the implicit PPA label extractor'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:

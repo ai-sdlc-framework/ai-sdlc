@@ -33,6 +33,7 @@ import {
 import {
   buildScorecard,
   deriveOutcomes,
+  renderCellsText,
   renderScorecardCsv,
   renderScorecardJson,
   renderScorecardText,
@@ -127,6 +128,11 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
           type: 'string',
           choices: ['text', 'json', 'csv'] as const,
           default: 'text',
+        })
+        .option('cells', {
+          type: 'boolean',
+          default: false,
+          description: 'Print first-pass approval counts per cell and the 200-per-cell gate status',
         })
         .option('replay-results', {
           type: 'string',
@@ -233,6 +239,8 @@ export function registerScorecardCommands(y: Argv, deps: ScorecardDeps, io: Usag
         io.out(renderScorecardCsv(card));
         io.err(`${card.unitsNote}\n`);
         io.err(`Repository ${repoId ?? `${repo} (no repoId)`}. ${legacy}\n`);
+      } else if (argv.cells) {
+        io.out(renderCellsText(card));
       } else {
         io.out(`Artifacts directory: ${artifactsDir}\n`);
         io.out(`Repository: ${repoId ?? `${repo} (no repoId)`}\n${legacy ? `${legacy}\n` : ''}`);

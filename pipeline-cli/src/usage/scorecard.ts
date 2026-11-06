@@ -372,6 +372,34 @@ export function renderScorecardText(card: Scorecard): string {
   return `${lines.join('\n')}\n`;
 }
 
+/** Phase 3 sequencing gate: first-pass-approval labels needed per cell (RFC-0062 OQ-3). */
+export const CELL_GATE = 200;
+
+/** Per-cell first-pass approval counts and the one-line gate status. */
+export function renderCellsText(card: Scorecard, gate = CELL_GATE): string {
+  const scored = card.rows.filter((r) => r.approved !== null);
+  const header = ['role', 'model', 'class', 'tasks', 'approved'];
+  const body = scored.map((r) => [
+    r.role,
+    r.model,
+    r.taskClass,
+    String(r.tasks),
+    String(r.approved),
+  ]);
+  const widths = header.map((h, i) => Math.max(h.length, ...body.map((r) => r[i].length)));
+  const fmt = (r: string[]): string =>
+    r
+      .map((c, i) => c.padEnd(widths[i]))
+      .join('  ')
+      .trimEnd();
+  const ready = scored.filter((r) => r.tasks >= gate).length;
+  const largest = scored.reduce((m, r) => Math.max(m, r.tasks), 0);
+  const status =
+    `Phase 3 gate (${gate} per cell): ${ready} of ${scored.length} cells ready, largest cell ${largest}/${gate}` +
+    `${ready === scored.length && scored.length > 0 ? ' (open)' : ' (closed)'}.`;
+  return `${[fmt(header), ...body.map(fmt), status].join('\n')}\n`;
+}
+
 export function renderScorecardCsv(card: Scorecard): string {
   return `${[HEADER, ...card.rows.map(cells)].map((r) => r.map(csvEscape).join(',')).join('\n')}\n`;
 }
