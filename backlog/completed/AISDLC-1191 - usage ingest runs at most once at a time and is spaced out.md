@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1191
 title: 'Usage ingest runs at most once at a time and is spaced out'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-05'
 labels:
@@ -39,9 +39,31 @@ The load headroom (`hierarchy/executor-cap.ts`, cores minus the 1-minute load av
 
 ## Acceptance Criteria
 
-- [ ] AC-1: Two ingesters started together: one runs, the other exits 0 without reading files. Tested.
-- [ ] AC-2: A stale lock (dead pid or too old) is taken over. Tested.
-- [ ] AC-3: A tick within the interval of the last launch (from tick or hook) does not spawn; one after it does. Tested with an injected clock.
-- [ ] AC-4: The interval comes from `AI_SDLC_USAGE_INGEST_INTERVAL_MS` when set. Tested.
-- [ ] AC-5: A run stops within one file of `--max-seconds` and its cursors are saved. Tested.
-- [ ] AC-6: Docs updated.
+- [x] AC-1: Two ingesters started together: one runs, the other exits 0 without reading files. Tested.
+- [x] AC-2: A stale lock (dead pid or too old) is taken over. Tested.
+- [x] AC-3: A tick within the interval of the last launch (from tick or hook) does not spawn; one after it does. Tested with an injected clock.
+- [x] AC-4: The interval comes from `AI_SDLC_USAGE_INGEST_INTERVAL_MS` when set. Tested.
+- [x] AC-5: A run stops within one file of `--max-seconds` and its cursors are saved. Tested.
+- [x] AC-6: Docs updated.
+
+## Final Summary
+
+## Summary
+I re-verified the existing commit 086ff7b4 and found nothing to fix in the code. The branch is already rebased on origin/main and matches the remote. The failing checks named in the feedback (Review verdict, ai-sdlc/pr-ready, ai-sdlc/attestation) are pipeline review and attestation steps. I made no changes, so they still need to run through the pipeline.
+
+## Changes
+- (none)
+
+## Design decisions
+The PR shows mergeStateStatus BLOCKED, which matches the missing review verdict and attestation. I did not push or sign anything. The next step is the pipeline review, attestation and push from the task worktree. The prUrl above is my assumption about the repository owner from the PR number; I did not read it from gh.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (244 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
