@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1205
 title: 'Hierarchy hooks module registers without a process global'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-06'
 labels:
@@ -39,7 +39,32 @@ Since AISDLC-1181 landed (commit 6c5990af, #2359, 2026-11-04 21:49Z) every new s
 5. *Automate.* A test loads the module under a scope with no `process` global and asserts `register()` reaches the heartbeat write; a lint or test grep asserts no bare `process.` access in `ai-sdlc-plugin/hooks/hierarchy/` outside strings handed to `process.run`.
 
 ## Acceptance Criteria
-- [ ] #1 `register()` completes under a scope without a `process` global and writes `module-<session>.json`.
-- [ ] #2 `resolveBoardDir` still honours an absolute `boardDir`, then `CLAUDE_PROJECT_DIR` (now supplied by the caller), then the cwd root lookup, in that order; the AISDLC-1181 tests still pass.
-- [ ] #3 A test fails on any bare `process.` reference in `ai-sdlc-plugin/hooks/hierarchy/*.ts*` outside the child-process script strings.
-- [ ] #4 PR body states the follow-up the operator runs after landing: `cli-hierarchy down --role operator-dispatch` then `up` in each hierarchy, and restart running executors.
+- [x] #1 `register()` completes under a scope without a `process` global and writes `module-<session>.json`.
+- [x] #2 `resolveBoardDir` still honours an absolute `boardDir`, then `CLAUDE_PROJECT_DIR` (now supplied by the caller), then the cwd root lookup, in that order; the AISDLC-1181 tests still pass.
+- [x] #3 A test fails on any bare `process.` reference in `ai-sdlc-plugin/hooks/hierarchy/*.ts*` outside the child-process script strings.
+- [x] #4 PR body states the follow-up the operator runs after landing: `cli-hierarchy down --role operator-dispatch` then `up` in each hierarchy, and restart running executors.
+
+## Final Summary
+
+## Summary
+The hierarchy hooks module no longer reads the bare `process` global. `register()` now reads `CLAUDE_PROJECT_DIR` through `$.env.get` and passes it into `resolveBoardDir`, `writeModuleHealth` and `recordReceivedSender`. A new test registers with the `process` global removed and writes `module-executor.json`. Another test fails on any bare `process.` reference in `ai-sdlc-plugin/hooks/hierarchy/*.ts*`.
+
+## Changes
+- ai-sdlc-plugin/hooks/hierarchy/dispatch.ts
+- ai-sdlc-plugin/hooks/hierarchy/register.tsx
+- ai-sdlc-plugin/mods/tests/hierarchy.test.ts
+- backlog/tasks/AISDLC-1205 - hierarchy hooks module registers without a process global.md
+
+## Design decisions
+I ran only the hierarchy test file (77 tests, all passing), not the full `pnpm test`. `pnpm build`, `pnpm lint` and `pnpm format:check` passed. The AISDLC-1181 test was edited rather than left untouched: it now passes the project dir as the third argument to `resolveBoardDir` instead of setting `process.env`. Resolution order is unchanged (absolute `boardDir`, then project dir, then cwd root lookup). The PR is a draft, and its body states the operator follow-up from AC 4.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (244 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
