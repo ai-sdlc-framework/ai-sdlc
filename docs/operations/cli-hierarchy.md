@@ -1298,7 +1298,7 @@ questions, the operator answers them, a brief goes to dispatch, an executor open
 lands.
 
 ```bash
-cli-hierarchy demo --scenario pipeline-cli/demo/scenarios/home-page.json --out demo-out
+cli-hierarchy demo --scenario <file> --out demo-out
 cli-hierarchy demo run --scenario <file> --out <dir>
 cli-hierarchy demo cut --cast <dir>/hierarchy.cast --beats <dir>/beats.json --out <dir>/hierarchy.cut.cast
 cli-hierarchy demo render --cast <dir>/hierarchy.cut.cast --out <dir>
@@ -1314,8 +1314,10 @@ answer, rationale }`, `answer` being one of the option ids), `brief` (`{ tasks: 
 
 **Scenario tasks are reserved.** The task a scenario names is held out of every brief until the
 demo run consumes it (the run is what lands it). When a scenario's task has landed by another path,
-retire the scenario in the same PR; the loader test fails until you do. The current scenario is
-`home-page.json` (AISDLC-1106), consumed by ai-sdlc.io (`shorts/scripts/render-demo.mjs`).
+retire the scenario in the same PR; the loader test fails until you do. No scenario ships at present: `home-page.json` was retired because no open `To Do` task was
+free of every brief and queue. Add one under `pipeline-cli/demo/scenarios/` when a reservable task
+exists; the loader test checks every file there. The test fixture is
+`pipeline-cli/src/hierarchy/fixtures/demo-scenario.json`.
 
 **Stages.**
 
