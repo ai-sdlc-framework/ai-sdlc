@@ -10,6 +10,7 @@ targetSpecVersion: v1alpha1
 requires: []
 assumes: [RFC-0042, RFC-0043, RFC-0046, RFC-0052, RFC-0054]
 amends: [RFC-0042]
+runtimeEvidence: []
 requiresDocs:
   - operator-runbook
 ---
