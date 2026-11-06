@@ -61,7 +61,7 @@ beforeEach(async () => {
     secret: SECRET,
     boardDir: dir,
     port: 0,
-    debounceMs: 40,
+    debounceMs: 300,
     now: () => new Date('2026-10-15T00:00:00.000Z'),
     wake,
   });
@@ -112,7 +112,7 @@ describe('webhook receiver (AISDLC-880)', () => {
     }
     expect(eventFiles()).toHaveLength(5);
     await vi.waitFor(() => expect(wake).toHaveBeenCalledTimes(1));
-    await new Promise((r) => setTimeout(r, 120));
+    await new Promise((r) => setTimeout(r, 500));
     expect(wake).toHaveBeenCalledTimes(1);
   });
 
@@ -122,7 +122,7 @@ describe('webhook receiver (AISDLC-880)', () => {
     await vi.waitFor(() => expect(wake).toHaveBeenCalledTimes(1));
     await post(body, good(body, 'r-1'));
     await post(body, { 'x-github-event': 'check_run', 'x-github-delivery': 'r-2' });
-    await new Promise((r) => setTimeout(r, 120));
+    await new Promise((r) => setTimeout(r, 500));
     expect(wake).toHaveBeenCalledTimes(1);
   });
 

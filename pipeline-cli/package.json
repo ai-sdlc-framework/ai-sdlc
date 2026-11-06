@@ -47,6 +47,7 @@
     "cli-estimate": "bin/cli-estimate.mjs",
     "cli-estimate-classes": "bin/cli-estimate-classes.mjs",
     "cli-kpi": "bin/cli-kpi.mjs",
+    "cli-labels": "bin/cli-labels.mjs",
     "cli-quality-corpus": "bin/cli-quality-corpus.mjs",
     "cli-quality": "bin/cli-quality.mjs",
     "cli-dor-check": "bin/cli-dor-check.mjs",
