@@ -12,12 +12,17 @@ labels:
   - attestation
   - dx
 references:
-  - scripts/verify-attestation.mjs
   - .github/workflows/ai-sdlc-gate.yml
   - >-
     backlog/completed/aisdlc-193.1 -
     Stage-2-contentHashV4-base-independent-per-file-hash-plus-envelope-self-exclusion.md
 priority: medium
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

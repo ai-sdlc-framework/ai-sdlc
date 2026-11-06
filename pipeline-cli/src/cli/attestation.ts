@@ -1,31 +1,20 @@
 /**
- * `cli-attestation` — RFC-0042 Phase 1-3 attestation CLI.
- *
- * Operator and slash-command-body surfaces for the proof-of-execution
- * attestation workflow:
- *   - inspecting reviewer-subagent transcript files (Phase 1.1 / 383.1)
- *   - computing Merkle roots and inclusion proofs over the committed
- *     leaf index (Phase 1.2 / 383.2)
- *   - emitting transcript leaves after each reviewer run (Phase 3 / 383.8)
+ * `cli-attestation` — review attestation CLI.
  *
  * Subcommands:
  *   transcripts list [<task-id>]  — list captured transcripts with metadata
- *   merkle-root                   — print current Merkle root + leaf count
- *   merkle-proof <index>          — print inclusion proof for a leaf by index
- *   emit-leaf                     — append a transcript leaf for one reviewer run
- *   print-patch-id-exclusions     — print the canonical patch-id exclusion pathspecs
+ *   emit-leaf                     — record one reviewer run in the reviews ledger
+ *   verify                        — refuses a v6 envelope with a named error (RFC-0061)
+ *   verdict-write / verdict-check — the review verdict gate
  *   reset-stack                   — drop earlier attestation chore commits (AISDLC-999)
  *
- * Output is plain text by default; pass `--json` for machine-readable JSON
- * on the merkle-* subcommands; transcripts list accepts `--json` for the same.
+ * Output is plain text by default; transcripts list accepts `--json`.
  *
  * @module cli/attestation
  */
 
-import { execFile, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, statSync } from 'node:fs';
-import { hostname, userInfo } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { defaultRunner } from '../runtime/exec.js';
 import { repositoryFromRemoteUrl } from '../next-step/verdict-ref-push.js';
@@ -34,6 +23,7 @@ import {
   ghPrStateFor,
   pruneVerdictRefs,
 } from '../attestation/verdict-prune.js';
+import type { IndependenceTier } from '../attestation/independence-policy.js';
 import { runVerdictCheck } from '../attestation/verdict-cli.js';
 import {
   INDEPENDENCE_TIERS,
@@ -44,34 +34,13 @@ import { validateVerdictArtifact } from '../attestation/verdict-untrusted.js';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import {
-  appendLeafForPatchId,
-  computeMerkleRoot,
   generateNonce,
-  hashLeaf,
-  leavesFilePathForPatchId,
-  loadLeaves,
-  loadLeavesForPatchId,
   STAGED_LEAF_STAGES,
   STAGED_REVIEWER_NAME,
   type StagedLeafStage,
-  type TranscriptLeaf,
-  verifyInclusion,
-} from '../attestation/merkle.js';
+} from '../attestation/staged-review.js';
 import { dropAttestationChores, type GitFn } from '../attestation/drop-chores.js';
-import {
-  DEFAULT_FINALIZE_REVIEWERS,
-  defaultTranscriptsDir,
-  finalizeAttestation,
-} from '../attestation/finalize.js';
-import { computeMergeBase, computePatchId, PATCH_ID_EXCLUSIONS } from '../attestation/patch-id.js';
-import {
-  formatV6Envelope,
-  resolveSigningKeyPath,
-  signAndWriteV6Envelope,
-  type AttestationEnvelopeV6,
-} from '../attestation/sign-v6.js';
-import { resolveInstalledPluginAgentDir } from '../attestation/agent-dir-resolver.js';
-import { workflowDigestFromStateFile } from '../workflow/digest.js';
+import { V6_REFUSED_CODE, refuseAttestationEnvelope } from '../attestation/v6-refusal.js';
 import {
   appendReviewLedgerRecord,
   normalizeFindings,
@@ -79,20 +48,10 @@ import {
 } from '../attestation/reviews-ledger.js';
 import { formatTranscriptTable, listTranscripts } from '../attestation/transcript-capture.js';
 import { AGENT_ID_PATTERN } from '../attestation/verdict-class.js';
-import { loadVerifyCore } from '../attestation/verify-core-loader.js';
 import { deriveReviewerSetFromGit } from '../steps/reviewer-set.js';
 import { summarizeComparisonWindow } from '../steps/reviewer-set-comparison.js';
 import { resolveArtifactsDir } from '../routing/artifacts-dir.js';
-import {
-  loadAttestationRuntime,
-  TrustedRuntimeResolutionError,
-} from '../attestation/verify-runtime.js';
 import { bindLeafToReviewerRun, nonceMarkerLiteral } from '../attestation/harness-transcript.js';
-import {
-  evaluateIndependencePolicy,
-  loadIndependencePolicy,
-  type IndependenceTier,
-} from '../attestation/independence-policy.js';
 
 // ── Repo root resolution ──────────────────────────────────────────────────────
 
@@ -262,133 +221,6 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           yargs.demandCommand(1, 'Specify a transcripts subcommand (e.g. list)');
         },
       )
-      // ── merkle-root ─────────────────────────────────────────────────────────────
-      .command(
-        'merkle-root',
-        'Print the current Merkle root and leaf count from .ai-sdlc/transcript-leaves.jsonl.',
-        (y: Argv) =>
-          y.option('json', {
-            type: 'boolean',
-            default: false,
-            describe: 'Emit JSON instead of plain text.',
-          }),
-        (args) => {
-          const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
-          const leaves = loadLeaves(repoRoot);
-          const { root } = computeMerkleRoot(leaves);
-
-          if (args['json']) {
-            emitJson({
-              root: root || null,
-              leafCount: leaves.length,
-              leavesFile: join(repoRoot, '.ai-sdlc/transcript-leaves.jsonl'),
-            });
-          } else {
-            if (leaves.length === 0) {
-              emitText('leaf count: 0\nroot: (no leaves)\n');
-            } else {
-              emitText(`leaf count: ${leaves.length}\nroot: ${root}\n`);
-            }
-          }
-        },
-      )
-      // ── merkle-proof ────────────────────────────────────────────────────────────
-      .command(
-        'merkle-proof <index>',
-        'Print the Merkle inclusion proof for a leaf by its 0-based array position.',
-        (y: Argv) =>
-          y
-            .positional('index', {
-              type: 'number',
-              demandOption: true,
-              describe:
-                'Array position in the JSONL file (0-based line number, skipping invalid lines).',
-            })
-            .option('verify', {
-              type: 'boolean',
-              default: false,
-              describe: 'Also verify the proof and print the result.',
-            })
-            .option('json', {
-              type: 'boolean',
-              default: false,
-              describe: 'Emit JSON instead of plain text.',
-            }),
-        (args) => {
-          const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
-          const leaves = loadLeaves(repoRoot);
-
-          if (leaves.length === 0) {
-            process.stderr.write('[cli-attestation] no leaves found in transcript-leaves.jsonl\n');
-            process.exit(1);
-          }
-
-          const idx = Number(args['index']);
-          if (!Number.isInteger(idx) || idx < 0 || idx >= leaves.length) {
-            process.stderr.write(
-              `[cli-attestation] index ${idx} out of range (0–${leaves.length - 1})\n`,
-            );
-            process.exit(1);
-          }
-
-          const { root, proofs } = computeMerkleRoot(leaves);
-          const proof = proofs[idx];
-          const leaf = leaves[idx];
-          const leafHash = hashLeaf(leaf);
-
-          let verified: boolean | undefined;
-          if (args['verify']) {
-            verified = verifyInclusion(leafHash, proof, root, idx, leaves.length);
-          }
-
-          if (args['json']) {
-            emitJson({
-              leafIndex: idx,
-              leafHash,
-              root,
-              proof,
-              ...(verified !== undefined ? { verified } : {}),
-            });
-          } else {
-            emitText(`leaf index: ${idx}`);
-            emitText(`leaf hash:  ${leafHash}`);
-            emitText(`root:       ${root}`);
-            emitText(`proof (${proof.length} hashes):`);
-            if (proof.length === 0) {
-              emitText('  (empty — single-leaf tree: leaf IS the root)');
-            } else {
-              proof.forEach((h, i) => emitText(`  [${i}] ${h}`));
-            }
-            if (verified !== undefined) {
-              emitText(`verified:   ${verified ? 'OK' : 'FAIL'}`);
-            }
-          }
-        },
-      )
-      // ── print-patch-id-exclusions (AISDLC-618) ────────────────────────────────
-      .command(
-        'print-patch-id-exclusions',
-        'Print the canonical patch-id exclusion pathspecs (PATCH_ID_EXCLUSIONS from ' +
-          'attestation/patch-id.ts), one per line. AISDLC-618: single source of truth ' +
-          'consumed by scripts/check-attestation-sign.sh (the bash pre-push hook) so the ' +
-          "hook's `git diff-tree` invocation can never drift from the TypeScript signer's " +
-          'exclusion list — the failure mode that broke every task-move PR after AISDLC-610 ' +
-          'added backlog/ exclusions to the signer/verifier but not the hook. Pass --json for ' +
-          'a JSON array instead of newline-separated plain text.',
-        (y: Argv) =>
-          y.option('json', {
-            type: 'boolean',
-            default: false,
-            describe: 'Emit a JSON array instead of newline-separated plain text.',
-          }),
-        (args) => {
-          if (args['json']) {
-            emitJson([...PATCH_ID_EXCLUSIONS]);
-          } else {
-            emitText(PATCH_ID_EXCLUSIONS.join('\n'));
-          }
-        },
-      )
       // ── reset-stack (AISDLC-999) ──────────────────────────────────────────────
       .command(
         'reset-stack',
@@ -428,270 +260,12 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           }
         },
       )
-      // ── sign-v6 ─────────────────────────────────────────────────────────────────
-      .command(
-        'sign-v6',
-        'Build and sign a v6 attestation envelope (RFC-0042 Phase 2). ' +
-          'Reads leaves from .ai-sdlc/transcript-leaves.jsonl, selects the PR subset ' +
-          'by --task-id, signs the Merkle root, and writes .ai-sdlc/attestations/<head-sha>.v6.dsse.json.',
-        (y: Argv) =>
-          y
-            .option('task-id', {
-              type: 'string',
-              demandOption: true,
-              describe:
-                'Task ID to select which transcript leaves belong to this PR (e.g. AISDLC-383.3).',
-            })
-            .option('head-sha', {
-              type: 'string',
-              demandOption: true,
-              describe: 'Git commit SHA (40 hex chars) to bind the envelope to.',
-            })
-            .option('key-path', {
-              type: 'string',
-              describe:
-                'Path to the operator ed25519 private key PEM. ' +
-                'Defaults to AISDLC_SIGNING_KEY_PATH env or ~/.ai-sdlc/signing-key.pem.',
-            })
-            .option('patch-id', {
-              type: 'string',
-              describe:
-                'AISDLC-610: 40-char hex patch-id to use VERBATIM instead of ' +
-                'recomputing it. Belt-and-suspenders against recomputation drift — ' +
-                'pass the SAME value already used for `emit-leaf --patch-id` so the ' +
-                'leaf lookup key can never diverge. When omitted, computed via the ' +
-                'same computePatchId(origin/main merge-base, head-sha) emit-leaf uses.',
-            })
-            .option('base-ref', {
-              type: 'string',
-              default: 'origin/main',
-              describe:
-                'AISDLC-610: base ref for the auto-computed patch-id (default: origin/main). ' +
-                'Only consulted when --patch-id is omitted.',
-            })
-            .option('workflow-state', {
-              type: 'string',
-              describe:
-                'RFC-0056: `next-step` state file of the run. When it holds workflow-engine ' +
-                'records the envelope gains workflowDigest { path, sha256, baseSha }. ' +
-                'Defaults to AI_SDLC_WORKFLOW_STATE (set by the engine).',
-            }),
-        (args) => {
-          const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
-          const taskId = args['task-id'] as string;
-          const headSha = args['head-sha'] as string;
-          const keyPathArg = args['key-path'] as string | undefined;
-
-          // Resolve signing key path: CLI arg > env var > default.
-          const keyPath = keyPathArg ?? resolveSigningKeyPath();
-          if (!keyPath) {
-            process.stderr.write(
-              '[cli-attestation] sign-v6: no signing key found. ' +
-                'Set AISDLC_SIGNING_KEY_PATH, --key-path, or run /ai-sdlc init-signing-key.\n',
-            );
-            process.exit(1);
-          }
-          if (!existsSync(keyPath)) {
-            process.stderr.write(`[cli-attestation] sign-v6: key file not found: ${keyPath}\n`);
-            process.exit(1);
-          }
-          const privateKeyPem = readFileSync(keyPath, 'utf8');
-
-          // Build signer identity (informational).
-          const identity =
-            process.env['GIT_AUTHOR_EMAIL'] ||
-            process.env['EMAIL'] ||
-            `${userInfo().username}@local`;
-          const machine = hostname();
-          const signerIdentity = `${identity}:${machine}`;
-
-          // AISDLC-610: resolve patch-id (explicit flag > auto-compute from
-          // git). Explicit --patch-id is used VERBATIM — no recomputation —
-          // so a caller that already ran `emit-leaf --patch-id <x>` gets a
-          // guaranteed-matching lookup key here. When omitted, this computes
-          // the identical key `emit-leaf`'s auto-compute path uses: same
-          // `computeMergeBase` + `computePatchId` functions, same default
-          // base ref (origin/main).
-          let patchId = args['patch-id'] as string | undefined;
-          if (patchId) {
-            if (!/^[0-9a-f]{40}$/i.test(patchId)) {
-              process.stderr.write(
-                `[cli-attestation] sign-v6: --patch-id must be 40 lowercase hex characters ` +
-                  `(got ${patchId.length}-char value: ${JSON.stringify(patchId.slice(0, 80))})\n`,
-              );
-              process.exit(1);
-            }
-            patchId = patchId.toLowerCase();
-          } else {
-            const baseRef = (args['base-ref'] as string | undefined) ?? 'origin/main';
-            const mergeBase = computeMergeBase(baseRef, 'HEAD', repoRoot);
-            if (mergeBase) {
-              patchId = computePatchId(mergeBase, headSha, repoRoot) ?? undefined;
-            }
-          }
-
-          let outPath: string;
-          try {
-            outPath = signAndWriteV6Envelope({
-              repoRoot,
-              headSha,
-              taskId,
-              privateKeyPem,
-              signerIdentity,
-              patchId,
-              workflowDigest: workflowDigestFromStateFile(
-                (args['workflow-state'] as string | undefined) ??
-                  process.env['AI_SDLC_WORKFLOW_STATE'] ??
-                  '',
-              ),
-            });
-          } catch (err) {
-            process.stderr.write(`[cli-attestation] sign-v6: ${(err as Error).message}\n`);
-            process.exit(1);
-          }
-
-          emitText(outPath);
-        },
-      )
-      // ── finalize (AISDLC-615) ───────────────────────────────────────────────────
-      .command(
-        'finalize',
-        'One-shot attestation for a main-session dispatch: persist transcripts -> emit-leaf per ' +
-          'reviewer -> sign-v6 -> verify, with one shared patch-id. Idempotent; fails with a clear ' +
-          'error when a reviewer transcript or verdict file is missing. Expects ' +
-          '<transcripts-dir>/<reviewer>.jsonl and <reviewer>.verdict.json.',
-        (y: Argv) =>
-          y
-            .option('task-id', { type: 'string', demandOption: true, describe: 'Task ID.' })
-            .option('head-sha', { type: 'string', demandOption: true, describe: '40-hex PR head.' })
-            .option('transcripts-dir', {
-              type: 'string',
-              describe:
-                'Directory with <reviewer>.jsonl + <reviewer>.verdict.json (default ' +
-                '.ai-sdlc/transcripts/<task-id>). Override for multi-worktree transcript scatter.',
-            })
-            .option('reviewers', {
-              type: 'string',
-              default: DEFAULT_FINALIZE_REVIEWERS.join(','),
-              describe: 'Comma-separated reviewer names.',
-            })
-            .option('harness', { type: 'string', default: 'claude-code' })
-            .option('model', { type: 'string', default: 'sonnet' })
-            .option('base-ref', { type: 'string', default: 'origin/main' })
-            .option('nonce', { type: 'string' })
-            .option('project-dir', { type: 'string' })
-            .option('claude-session-id', { type: 'string' })
-            .option('key-path', { type: 'string' }),
-        (args) => {
-          const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
-          const taskId = args['task-id'] as string;
-          const headSha = args['head-sha'] as string;
-          if (!isValidHeadSha(headSha)) {
-            process.stderr.write(
-              '[cli-attestation] finalize: --head-sha must be 40 lowercase hex\n',
-            );
-            process.exit(1);
-          }
-          const baseRef = args['base-ref'] as string;
-          const mergeBase = computeMergeBase(baseRef, headSha, repoRoot);
-          const patchId = mergeBase ? computePatchId(mergeBase, headSha, repoRoot) : null;
-          if (!mergeBase || !patchId) {
-            process.stderr.write(
-              `[cli-attestation] finalize: cannot compute patch-id against ${baseRef}\n`,
-            );
-            process.exit(1);
-          }
-          const script = process.argv[1] ?? '';
-          const result = finalizeAttestation({
-            repoRoot,
-            taskId,
-            headSha,
-            patchId,
-            baseSha: mergeBase,
-            reviewers: (args['reviewers'] as string)
-              .split(',')
-              .map((s) => s.trim())
-              .filter(Boolean),
-            transcriptsDir: resolve(
-              (args['transcripts-dir'] as string | undefined) ??
-                defaultTranscriptsDir(repoRoot, taskId),
-            ),
-            harness: args['harness'] as string,
-            model: args['model'] as string,
-            nonce: args['nonce'] as string | undefined,
-            projectDir: args['project-dir'] as string | undefined,
-            claudeSessionId: args['claude-session-id'] as string | undefined,
-            keyPath: args['key-path'] as string | undefined,
-            run: (a) => {
-              const r = spawnSync(process.execPath, [script, ...a], { encoding: 'utf8' });
-              return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
-            },
-          });
-          if (!result.ok) {
-            for (const e of result.errors)
-              process.stderr.write(`[cli-attestation] finalize: ${e}\n`);
-            process.exitCode = 1;
-            return;
-          }
-          emitText(`patch-id=${result.patchId}\nstatus=${result.status}`);
-        },
-      )
-      // ── inspect-v6 ──────────────────────────────────────────────────────────────
-      .command(
-        'inspect-v6 <envelope>',
-        'Pretty-print a v6 attestation envelope from file. ' +
-          'Pass --json to get machine-readable output.',
-        (y: Argv) =>
-          y
-            .positional('envelope', {
-              type: 'string',
-              demandOption: true,
-              describe: 'Absolute or relative path to a .v6.dsse.json envelope file.',
-            })
-            .option('json', {
-              type: 'boolean',
-              default: false,
-              describe: 'Emit the envelope as raw JSON instead of human-readable format.',
-            }),
-        (args) => {
-          const envelopePath = resolve(args['envelope'] as string);
-
-          if (!existsSync(envelopePath)) {
-            process.stderr.write(`[cli-attestation] inspect-v6: file not found: ${envelopePath}\n`);
-            process.exit(1);
-          }
-
-          let envelope: AttestationEnvelopeV6;
-          try {
-            envelope = JSON.parse(readFileSync(envelopePath, 'utf8')) as AttestationEnvelopeV6;
-          } catch (err) {
-            process.stderr.write(
-              `[cli-attestation] inspect-v6: failed to parse envelope: ${(err as Error).message}\n`,
-            );
-            process.exit(1);
-          }
-
-          if (envelope.schemaVersion !== 'v6') {
-            process.stderr.write(
-              `[cli-attestation] inspect-v6: not a v6 envelope (schemaVersion='${envelope.schemaVersion}')\n`,
-            );
-            process.exit(1);
-          }
-
-          if (args['json']) {
-            emitJson(envelope);
-          } else {
-            emitText(formatV6Envelope(envelope));
-          }
-        },
-      )
       // ── emit-leaf ───────────────────────────────────────────────────────────────
       .command(
         'emit-leaf',
-        'Append a transcript leaf to .ai-sdlc/transcript-leaves/<patch-id>.jsonl after a reviewer run. ' +
-          'Idempotent: skips if a leaf with the same (taskId, reviewerName, transcriptHash) already exists. ' +
-          'Required before v6 signing (RFC-0042 Phase 3 / AISDLC-383.8). ' +
-          'AISDLC-421: writes to a per-patch-id file (one file per PR) to eliminate cross-PR rebase conflicts.',
+        "Record one reviewer run after it finishes: bind it to the reviewer's harness run " +
+          '(consuming the SubagentStart marker) and append the verdict to the reviews ledger. ' +
+          'No transcript leaf or Merkle input is written (RFC-0061 phase 3).',
         (y: Argv) =>
           y
             .option('task-id', {
@@ -733,19 +307,6 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
               type: 'string',
               demandOption: true,
               describe: 'LLM model identifier, e.g. sonnet, or a pinned model id.',
-            })
-            .option('patch-id', {
-              type: 'string',
-              describe:
-                'AISDLC-421: 40-char hex patch-id (same as AISDLC-398 envelope filenames). ' +
-                'When omitted, computed automatically via `git merge-base origin/main HEAD` + ' +
-                '`git patch-id --stable`. Required for the per-patch-id transcript-leaves file path.',
-            })
-            .option('base-ref', {
-              type: 'string',
-              default: 'origin/main',
-              describe:
-                'AISDLC-421: base ref for the auto-computed patch-id (default: origin/main).',
             })
             .option('nonce', {
               type: 'string',
@@ -789,26 +350,6 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
                 "but the Claude Code session's transcripts live under the MAIN checkout's " +
                 'slug. When omitted, the main-checkout root is auto-derived via ' +
                 '`git rev-parse --git-common-dir` (falls back to --repo-root if that fails).',
-            })
-            .option('anchor-run-id', {
-              type: 'string',
-              describe:
-                'RFC-0047 Phase 2 (AISDLC-594): AUDIT-ONLY CI run identifier to bind into ' +
-                'the leaf as anchorEvidence.runId. NOT the security anchor (the ci-only root ' +
-                'signature is — see RFC-0047 Design Details 2/OQ-2). Must be passed together ' +
-                'with --anchor-workflow-ref and --anchor-signer-key-id, or omitted entirely.',
-            })
-            .option('anchor-workflow-ref', {
-              type: 'string',
-              describe:
-                'RFC-0047 Phase 2 (AISDLC-594): AUDIT-ONLY CI workflow reference to bind into ' +
-                'the leaf as anchorEvidence.workflowRef. See --anchor-run-id.',
-            })
-            .option('anchor-signer-key-id', {
-              type: 'string',
-              describe:
-                'RFC-0047 Phase 2 (AISDLC-594): AUDIT-ONLY identifier of the ci-only signing ' +
-                'key to bind into the leaf as anchorEvidence.signerKeyId. See --anchor-run-id.',
             })
             .option('stage', {
               type: 'string',
@@ -866,7 +407,6 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           const verdictPath = resolve(args['verdict-path'] as string);
           const headSha = args['head-sha'] as string;
           const harness = args['harness'] as string;
-          const model = args['model'] as string;
 
           // Staged review: --stage labels one stage's leaf and only exists for the
           // staged set, so a stage on any other reviewer is a caller bug.
@@ -956,38 +496,6 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             agentId = readAgentIdSidecar(transcriptPath);
           }
 
-          // RFC-0047 Phase 2 (AISDLC-594): AUDIT-ONLY anchor evidence — carried
-          // through as-is, NEVER defaulted. All three fields must be provided
-          // together (or none), or the object would be a lossy partial record.
-          const anchorRunId = args['anchor-run-id'] as string | undefined;
-          const anchorWorkflowRef = args['anchor-workflow-ref'] as string | undefined;
-          const anchorSignerKeyId = args['anchor-signer-key-id'] as string | undefined;
-          const anchorFieldsProvided = [anchorRunId, anchorWorkflowRef, anchorSignerKeyId].filter(
-            (v) => v !== undefined,
-          ).length;
-          if (anchorFieldsProvided > 0 && anchorFieldsProvided < 3) {
-            process.stderr.write(
-              `[cli-attestation] emit-leaf: --anchor-run-id, --anchor-workflow-ref, and ` +
-                `--anchor-signer-key-id must be passed together (or omitted entirely) — ` +
-                `got ${anchorFieldsProvided} of 3.\n`,
-            );
-            process.exit(1);
-          }
-          const anchorEvidence: TranscriptLeaf['anchorEvidence'] =
-            anchorRunId !== undefined &&
-            anchorWorkflowRef !== undefined &&
-            anchorSignerKeyId !== undefined
-              ? {
-                  runId: anchorRunId,
-                  workflowRef: anchorWorkflowRef,
-                  signerKeyId: anchorSignerKeyId,
-                }
-              : undefined;
-
-          // Compute SHA-256 of the transcript file.
-          const transcriptContent = readFileSync(transcriptPath);
-          const transcriptHash = createHash('sha256').update(transcriptContent).digest('hex');
-
           // Parse verdict JSON. `findings` may be EITHER the aggregated
           // counts-object shape historically consumed here, OR the itemized
           // array shape reviewer subagents actually return
@@ -1020,93 +528,9 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             ? Boolean(verdict.verdictApproved ?? verdict.approved ?? false)
             : false;
 
-          // AISDLC-616: normalize itemized findings for the reviews ledger,
-          // then derive the legacy counts object (Merkle leaf shape) from
-          // whichever verdict shape was given.
+          // AISDLC-616: normalize itemized findings for the reviews ledger.
           if (!carriesVerdict) verdict.findings = [];
           const normalizedFindings = normalizeFindings(verdict.findings);
-          const findings = Array.isArray(verdict.findings)
-            ? {
-                critical: normalizedFindings.filter((f) => f.severity === 'critical').length,
-                major: normalizedFindings.filter((f) => f.severity === 'major').length,
-                minor: normalizedFindings.filter((f) => f.severity === 'minor').length,
-                suggestion: normalizedFindings.filter((f) => f.severity === 'suggestion').length,
-              }
-            : {
-                critical: verdict.findings?.critical ?? 0,
-                major: verdict.findings?.major ?? 0,
-                minor: verdict.findings?.minor ?? 0,
-                suggestion: verdict.findings?.suggestion ?? 0,
-              };
-
-          // AISDLC-421: resolve patch-id (explicit flag > auto-compute from git).
-          //
-          // The per-patch-id file path eliminates cross-PR rebase conflicts on
-          // `.ai-sdlc/transcript-leaves.jsonl`. Each PR writes to its own
-          // `<patch-id>.jsonl`, which is content-addressed and survives rebases
-          // by construction (same diff → same patch-id → same filename).
-          let patchId = args['patch-id'] as string | undefined;
-          if (patchId) {
-            if (!/^[0-9a-f]{40}$/i.test(patchId)) {
-              process.stderr.write(
-                `[cli-attestation] emit-leaf: --patch-id must be 40 lowercase hex characters ` +
-                  `(got ${patchId.length}-char value: ${JSON.stringify(patchId.slice(0, 80))})\n`,
-              );
-              process.exit(1);
-            }
-            patchId = patchId.toLowerCase();
-          } else {
-            // Auto-compute patch-id from git state. This is the canonical path
-            // when the caller is the slash-command body or the reconcile sub-tick;
-            // both run in a worktree where `git merge-base origin/main HEAD` and
-            // `git patch-id --stable` are available and produce a stable
-            // content-addressed identifier.
-            const baseRef = args['base-ref'] as string;
-            const mergeBase = computeMergeBase(baseRef, 'HEAD', repoRoot);
-            if (!mergeBase) {
-              process.stderr.write(
-                `[cli-attestation] emit-leaf: could not compute merge-base for ${baseRef}..HEAD ` +
-                  `in ${repoRoot} — pass --patch-id explicitly.\n`,
-              );
-              process.exit(1);
-            }
-            const computed = computePatchId(mergeBase, headSha, repoRoot);
-            if (!computed) {
-              process.stderr.write(
-                `[cli-attestation] emit-leaf: could not compute patch-id for ${mergeBase}..${headSha} ` +
-                  `in ${repoRoot} — empty diff after attestation exclusion, or git unavailable. ` +
-                  `Pass --patch-id explicitly.\n`,
-              );
-              process.exit(1);
-            }
-            patchId = computed;
-          }
-
-          // Idempotency check: skip if a leaf with this (taskId, reviewerName, transcriptHash) triple
-          // already exists in the per-patch-id file. We ONLY check the per-patch-id file (not the
-          // legacy shared file) because the writer is always per-patch-id post-AISDLC-421; checking
-          // the shared file would cause spurious skips when the per-patch-id file has been deleted
-          // intentionally (e.g. iter-2 re-sign clears it to rebuild from scratch).
-          const existingLeaves = loadLeavesForPatchId(patchId, repoRoot);
-          const alreadyEmitted = existingLeaves.some(
-            (l) =>
-              l.taskId === taskId &&
-              l.reviewerName === reviewerName &&
-              l.transcriptHash === transcriptHash,
-          );
-
-          if (alreadyEmitted) {
-            emitText(
-              `[cli-attestation] emit-leaf: leaf already exists for (${taskId}, ${reviewerName}, ${transcriptHash.slice(0, 8)}...) in patch-id ${patchId.slice(0, 12)}... — skipping (idempotent)`,
-            );
-            return;
-          }
-
-          // Determine next leafIndex (sequential within THIS patch-id file).
-          // AISDLC-421: leafIndex is now per-patch-id, not global. Each PR's
-          // Merkle tree is built from its own file, so 0-based indexing per file
-          // is the right semantic.
-          const leafIndex = existingLeaves.length;
 
           // Nonce bound to this PR's head SHA (replay-resistance per RFC-0042
           // §Nonce binding). AISDLC-570: prefer an explicitly-passed --nonce
@@ -1187,45 +611,6 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             );
             process.exit(1);
           }
-          const reviewRange: TranscriptLeaf['reviewRange'] =
-            reviewMode === 'delta' && reviewBaseSha
-              ? {
-                  mode: 'delta',
-                  baseSha: reviewBaseSha,
-                  headSha: (
-                    (args['review-head-sha'] as string | undefined) ?? headSha
-                  ).toLowerCase(),
-                }
-              : undefined;
-
-          const leaf: TranscriptLeaf = {
-            leafIndex,
-            taskId,
-            reviewerName,
-            transcriptHash,
-            nonce,
-            harness,
-            model,
-            verdictApproved,
-            findings,
-            signedAt,
-            verdictClass,
-            harnessTranscriptHash: harnessResult.harnessTranscriptHash,
-            independenceTier,
-            anchorEvidence,
-            // Never written as null or empty: spread only when a stage was given.
-            ...(stage ? { stage } : {}),
-            reviewRange,
-          };
-
-          // Append atomically via write-to-tmp + renameSync to the per-patch-id file.
-          // Concurrent callers on different reviewer subagents are expected to be
-          // sequential in the slash command body (reviewers complete, THEN emit-leaf
-          // is called per-reviewer) so the TOCTOU window is minimal. On the rare
-          // case of a true race, the last writer wins and the index-mismatch warning
-          // in loadLeavesFromFile() will surface it on the next run.
-          appendLeafForPatchId(leaf, patchId, repoRoot);
-
           // AISDLC-616: append the SAME reviewer verdict to the durable,
           // append-only reviews ledger (.ai-sdlc/reviews/<task-id>.jsonl).
           // This is written EVERY call — including re-review iterations —
@@ -1274,12 +659,10 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             );
           }
 
-          const filePath = leavesFilePathForPatchId(patchId, repoRoot);
           emitText(
-            `[cli-attestation] emit-leaf: leaf #${leafIndex} appended to ${filePath} ` +
-              `(taskId=${taskId}, reviewer=${reviewerName}, ` +
-              `transcriptHash=${transcriptHash.slice(0, 8)}..., approved=${verdictApproved}, ` +
-              `verdictClass=${verdictClass}, independenceTier=${independenceTier}, ` +
+            `[cli-attestation] emit-leaf: recorded ${reviewerName} for ${taskId} ` +
+              `(approved=${verdictApproved}, verdictClass=${verdictClass}, ` +
+              `independenceTier=${independenceTier}, ` +
               `harnessTranscriptHash=${harnessResult.harnessTranscriptHash ? 'set' : 'null'})`,
           );
         },
@@ -1390,199 +773,24 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           emitText(nonceMarkerLiteral(nonce));
         },
       )
-      // ── verify (AISDLC-575) ───────────────────────────────────────────────────
+      // ── verify: v6 is refused (RFC-0061 phase 3, OQ-3 hard cut) ───────────────
       .command(
         'verify',
-        'Run the full v6/v5/v4/v3 DSSE attestation verifier against a PR head/base, ' +
-          'with NO Claude Code plugin required — the plugin-less consumer-CI entrypoint ' +
-          "(AISDLC-575). Mirrors `.github/workflows/verify-attestation.yml`'s " +
-          'PR_HEAD_SHA/PR_BASE_SHA inputs. Resolves the `@ai-sdlc/orchestrator` runtime ' +
-          'ONLY from trusted locations outside the checkout being verified — never from ' +
-          'inside it (AISDLC-566/570 containment preserved) — and FAILS CLOSED (non-zero ' +
-          'exit) when the runtime is unresolvable, too old, or the envelope is invalid/' +
-          'tampered. Prints `status=valid|invalid` + `reason=...` to stdout.',
+        'Refuse a v6 attestation envelope. The signed-envelope gate was retired by the review ' +
+          'verdict check (`verdict-check`); no verifier is left, so every call fails with the ' +
+          `named error ${V6_REFUSED_CODE}. Kept so an old caller gets a reason, not a missing command.`,
         (y: Argv) =>
           y
-            .option('head', {
+            .option('head', { type: 'string', describe: 'Ignored; accepted for old callers.' })
+            .option('base', { type: 'string', describe: 'Ignored; accepted for old callers.' })
+            .option('envelope', {
               type: 'string',
-              demandOption: true,
-              describe: '40-char hex git commit SHA of the PR head being verified.',
-            })
-            .option('base', {
-              type: 'string',
-              demandOption: true,
-              describe:
-                "40-char hex git commit SHA of the PR's base (typically origin/main's tip).",
+              describe: 'Path of an envelope file to refuse; the schema it declares is named.',
             }),
-        async (args) => {
-          const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
-          const headSha = args['head'] as string;
-          const baseSha = args['base'] as string;
-
-          if (!isValidHeadSha(headSha)) {
-            process.stderr.write(
-              `[cli-attestation] verify: --head must be exactly 40 lowercase hex characters ` +
-                `(got ${headSha.length}-char value: ${JSON.stringify(headSha.slice(0, 80))})\n`,
-            );
-            process.exit(2);
-          }
-          if (!isValidHeadSha(baseSha)) {
-            process.stderr.write(
-              `[cli-attestation] verify: --base must be exactly 40 lowercase hex characters ` +
-                `(got ${baseSha.length}-char value: ${JSON.stringify(baseSha.slice(0, 80))})\n`,
-            );
-            process.exit(2);
-          }
-
-          let runtimeMod: unknown;
-          try {
-            runtimeMod = await loadAttestationRuntime(repoRoot);
-          } catch (err) {
-            if (err instanceof TrustedRuntimeResolutionError) {
-              process.stderr.write(`ERROR: ${err.message}\n`);
-              process.exit(2);
-            }
-            throw err;
-          }
-
-          const core = await loadVerifyCore();
-          core.bindRuntime(runtimeMod);
-
-          // AISDLC-583: resolve the installed plugin's agents/ dir from
-          // OUTSIDE the checkout (never from repoRoot, which may be an
-          // untrusted PR checkout with no plugin present at all) and
-          // inject it — mirrors the runtime-binding injection above.
-          // `verify-core.mjs`'s `runVerifier` falls back to the
-          // repo-relative monorepo path, then to a guarded downgrade, so
-          // `agentDir: undefined` here (adopter with no plugin installed
-          // at all) is a supported, non-throwing case.
-          const agentDir = resolveInstalledPluginAgentDir(undefined, repoRoot) ?? undefined;
-
-          const out = core.runVerifier({ headSha, baseSha, repoRoot, agentDir });
-          let output = `status=${out.status}\nreason=${out.reason}\n`;
-          if (out.overallVerdictClass) {
-            output += `verdictClass=${out.overallVerdictClass}\n`;
-          }
-          if (out.overallIndependenceTier) {
-            output += `independenceTier=${out.overallIndependenceTier}\n`;
-          }
-          process.stdout.write(output);
-          if (out.status === 'valid' && out.overallVerdictClass === 'self-authored') {
-            // `verify` checks integrity (signature, Merkle proof, head
-            // binding). It does not require independent review; say so, so a
-            // green `verify` is not read as "independently reviewed".
-            process.stderr.write(
-              '[cli-attestation] verify: NOTE the envelope is valid but at least one leaf is ' +
-                'self-authored (no harness SubagentStart marker matched its reviewer). `verify` ' +
-                'does not enforce independence. To gate on it, set `requiredTier: attested` in ' +
-                '.ai-sdlc/independence-policy.yaml and run `cli-attestation independence-policy` ' +
-                'with the same --head and --base.\n',
-            );
-          }
-          process.exitCode = out.status === 'valid' ? 0 : 1;
-        },
-      )
-      // ── independence-policy (RFC-0046 Phase 4/AISDLC-591, RFC-0047 Phase 5/AISDLC-597) ──
-      .command(
-        'independence-policy',
-        "Run the same verifier as `verify`, then compare the envelope's " +
-          "`overallIndependenceTier` (AISDLC-588) against the repo's " +
-          '`.ai-sdlc/independence-policy.yaml` `requiredTier` (default `none` — no ' +
-          'behavior change). Gate-topology-agnostic (RFC-0046 §Rollout / OQ-5): this is ' +
-          'the SAME comparison invoked both by the `ai-sdlc/pr-ready` rollup ' +
-          '(branch-protection repos) and by a ship-skill (procedural-gate repos, e.g. ' +
-          'local-trades, before shipping). `requiredTier: isolated` is now satisfiable ' +
-          '(RFC-0047 / AISDLC-597 flipped the capability once the isolated producer + ' +
-          'ci-only verifier path landed) — it is compared via the same tier order as ' +
-          '`none`/`attested`. Prints `overallIndependenceTier=`, `requiredTier=`, ' +
-          '`policyOutcome=pass|shortfall|unsatisfiable`, `policyMessage=`. Exits non-zero ' +
-          'when the envelope itself is invalid, the policy config is malformed, OR the ' +
-          'policy outcome is not `pass`.',
-        (y: Argv) =>
-          y
-            .option('head', {
-              type: 'string',
-              demandOption: true,
-              describe: '40-char hex git commit SHA of the PR/ship head being checked.',
-            })
-            .option('base', {
-              type: 'string',
-              demandOption: true,
-              describe:
-                "40-char hex git commit SHA of the head's base (typically origin/main's tip).",
-            }),
-        async (args) => {
-          const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
-          const headSha = args['head'] as string;
-          const baseSha = args['base'] as string;
-
-          if (!isValidHeadSha(headSha)) {
-            process.stderr.write(
-              `[cli-attestation] independence-policy: --head must be exactly 40 lowercase hex ` +
-                `characters (got ${headSha.length}-char value: ${JSON.stringify(headSha.slice(0, 80))})\n`,
-            );
-            process.exit(2);
-          }
-          if (!isValidHeadSha(baseSha)) {
-            process.stderr.write(
-              `[cli-attestation] independence-policy: --base must be exactly 40 lowercase hex ` +
-                `characters (got ${baseSha.length}-char value: ${JSON.stringify(baseSha.slice(0, 80))})\n`,
-            );
-            process.exit(2);
-          }
-
-          let runtimeMod: unknown;
-          try {
-            runtimeMod = await loadAttestationRuntime(repoRoot);
-          } catch (err) {
-            if (err instanceof TrustedRuntimeResolutionError) {
-              process.stderr.write(`ERROR: ${err.message}\n`);
-              process.exit(2);
-            }
-            throw err;
-          }
-
-          const core = await loadVerifyCore();
-          core.bindRuntime(runtimeMod);
-          const agentDir = resolveInstalledPluginAgentDir(undefined, repoRoot) ?? undefined;
-          const out = core.runVerifier({ headSha, baseSha, repoRoot, agentDir });
-
-          // Absent field (legacy pre-AISDLC-588 envelope, or an invalid
-          // envelope) resolves to 'none' — the honest floor, never assume
-          // a higher tier than the verifier actually reported.
-          const overallIndependenceTier = (out.overallIndependenceTier ??
-            'none') as IndependenceTier;
-
-          let policy: ReturnType<typeof loadIndependencePolicy>;
-          try {
-            policy = loadIndependencePolicy({ repoRoot });
-          } catch (err) {
-            // A malformed `.ai-sdlc/independence-policy.yaml` must fail
-            // CLOSED (non-zero exit), never silently downgrade to
-            // `requiredTier: none` — matches `loadIndependencePolicy`'s own
-            // "fail loud" contract for an unrecognized tier value.
-            process.stderr.write(
-              `ERROR: independence-policy: failed to load policy config: ` +
-                `${err instanceof Error ? err.message : String(err)}\n`,
-            );
-            process.exitCode = 1;
-            return;
-          }
-          const outcome = evaluateIndependencePolicy({
-            requiredTier: policy.requiredTier,
-            overallIndependenceTier,
-          });
-
-          let output = `status=${out.status}\nreason=${out.reason}\n`;
-          output += `overallIndependenceTier=${overallIndependenceTier}\n`;
-          output += `requiredTier=${policy.requiredTier}\n`;
-          output += `policyOutcome=${outcome.status}\n`;
-          output += `policyMessage=${outcome.message}\n`;
-          process.stdout.write(output);
-
-          // An invalid envelope can't be trusted to carry an honest tier at
-          // all — fail closed even if the policy itself is `none`.
-          process.exitCode = out.status === 'valid' && outcome.status === 'pass' ? 0 : 1;
+        (args) => {
+          const refusal = refuseAttestationEnvelope(args['envelope'] as string | undefined);
+          process.stdout.write(`status=invalid\nreason=${refusal}\n`);
+          process.exitCode = 1;
         },
       )
       // ── verdict-prune (RFC-0061 Phase 1) ─────────────────────────────────────
@@ -1709,7 +917,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
       )
       .demandCommand(
         1,
-        'Specify a subcommand (e.g. transcripts list, verdict-prune, merkle-root, merkle-proof, sign-v6, finalize, inspect-v6, emit-leaf, generate-nonce, nonce-marker, verify, independence-policy, print-patch-id-exclusions, reset-stack, reviewer-set, reviewer-set-window)',
+        'Specify a subcommand (e.g. transcripts list, verdict-prune, emit-leaf, generate-nonce, nonce-marker, verify, independence-policy, reset-stack, reviewer-set, reviewer-set-window)',
       )
       .help()
       .alias('h', 'help')

@@ -41,7 +41,7 @@ import {
   routingRecordable,
 } from '../routing/artifacts-dir.js';
 import { taskClassOf } from '../routing/task-class.js';
-import { generateNonce } from '../attestation/merkle.js';
+import { generateNonce } from '../attestation/staged-review.js';
 import { nonceMarkerLiteral } from '../attestation/harness-transcript.js';
 import { diffHeaderPaths } from '../classifier/diff-header.js';
 import {

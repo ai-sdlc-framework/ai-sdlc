@@ -1,7 +1,6 @@
 ---
 id: AISDLC-737
-title: >-
-  attestation survives append-only decision-log conflicts in events.jsonl
+title: attestation survives append-only decision-log conflicts in events.jsonl
 status: Done
 assignee: []
 created_date: '2026-10-06'
@@ -11,11 +10,18 @@ dependencies:
   - AISDLC-719
 references:
   - .ai-sdlc/_decisions/events.jsonl
-  - ai-sdlc-plugin/scripts/verify-attestation.mjs
   - pipeline-cli/src/cli/attestation.ts
   - pipeline-cli/src/decisions/event-log.ts
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/verify-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

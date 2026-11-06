@@ -12,10 +12,6 @@ labels:
   - velocity
   - root-cause
 dependencies: []
-references:
-  - scripts/verify-attestation.mjs
-  - pipeline-cli/attestation-core/verify-core.mjs
-  - pipeline-cli/src/attestation/sign-v6.ts
 priority: critical
 dispatchable: true
 drift_log:
@@ -23,7 +19,21 @@ drift_log:
     type: ref-deleted
     detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
     resolution: flagged
-drift_checked: '2026-11-05'
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/attestation-core/verify-core.mjs
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/sign-v6.ts'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

@@ -18,10 +18,22 @@ dependencies: []
 references:
   - orchestrator/src/runtime/attestations.ts
   - orchestrator/src/runtime/attestations.test.ts
-  - scripts/verify-attestation.mjs
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - backlog/completed/aisdlc-193 - Re-enable-attestation-as-required-merge-gate-design-rebase-stable-HEAD-content-binding.md
+  - >-
+    backlog/completed/aisdlc-193 -
+    Re-enable-attestation-as-required-merge-gate-design-rebase-stable-HEAD-content-binding.md
 priority: high
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

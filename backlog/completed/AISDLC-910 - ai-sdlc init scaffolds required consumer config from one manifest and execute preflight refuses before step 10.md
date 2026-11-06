@@ -1,14 +1,35 @@
 ---
 id: AISDLC-910
-title: 'feat: ai-sdlc init scaffolds the required consumer configuration from one manifest; execute preflight and doctor report the same missing entries before any dev budget is spent'
+title: >-
+  feat: ai-sdlc init scaffolds the required consumer configuration from one
+  manifest; execute preflight and doctor report the same missing entries before
+  any dev budget is spent
 status: Done
 assignee: []
 created_date: '2026-10-14'
-labels: [feature, adopters, pipeline-cli, plugin]
+labels:
+  - feature
+  - adopters
+  - pipeline-cli
+  - plugin
 dependencies: []
-references: [ai-sdlc-plugin/commands/doctor.md, docs/operations/doctor.md, ai-sdlc-plugin/commands/init-signing-key.md, ai-sdlc-plugin/hooks/check-plugin-version.js, pipeline-cli/src/steps/01-validate.ts, pipeline-cli/src/steps/reviewer-set.ts, pipeline-cli/src/dor/trusted-reviewers-check.ts]
+references:
+  - ai-sdlc-plugin/commands/doctor.md
+  - docs/operations/doctor.md
+  - ai-sdlc-plugin/hooks/check-plugin-version.js
+  - pipeline-cli/src/steps/01-validate.ts
+  - pipeline-cli/src/steps/reviewer-set.ts
+  - pipeline-cli/src/dor/trusted-reviewers-check.ts
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/commands/init-signing-key.md
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

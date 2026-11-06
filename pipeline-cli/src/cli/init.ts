@@ -9,9 +9,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -33,7 +31,7 @@ function git(projectDir: string, args: string[]): string {
   }
 }
 
-/** Defaults an operator would otherwise type: git remote, git email, local public key. */
+/** Defaults an operator would otherwise type: git remote. */
 export function gatherDefaults(projectDir: string): Record<string, string> {
   const out: Record<string, string> = {};
   const remote = git(projectDir, ['remote', 'get-url', 'origin']);
@@ -42,10 +40,6 @@ export function gatherDefaults(projectDir: string): Record<string, string> {
     out.org = m[1];
     out.repo = m[2];
   }
-  const email = git(projectDir, ['config', 'user.email']);
-  if (email) out.identity = email;
-  const keyPath = join(homedir(), '.ai-sdlc', 'signing-key.pub.pem');
-  if (existsSync(keyPath)) out.pubkey = readFileSync(keyPath, 'utf8');
   return out;
 }
 

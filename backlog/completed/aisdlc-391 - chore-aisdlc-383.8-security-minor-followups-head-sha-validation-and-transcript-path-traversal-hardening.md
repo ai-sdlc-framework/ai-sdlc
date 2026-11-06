@@ -1,6 +1,8 @@
 ---
 id: AISDLC-391
-title: 'chore: AISDLC-383.8 security minor followups — head-sha validation + transcript-path traversal hardening'
+title: >-
+  chore: AISDLC-383.8 security minor followups — head-sha validation +
+  transcript-path traversal hardening
 status: Done
 labels:
   - security
@@ -8,8 +10,13 @@ labels:
   - tech-debt
 references:
   - pipeline-cli/src/cli/attestation.ts
-  - pipeline-cli/src/attestation/merkle.ts
 parentTaskId: AISDLC-383
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/merkle.ts'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

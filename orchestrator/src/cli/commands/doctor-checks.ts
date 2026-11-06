@@ -45,7 +45,6 @@
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
 import { CLIENT_SIDE_ONLY_MESSAGE } from './branch-protection-shared.js';
 import { homedir } from 'node:os';
-import { createPrivateKey, createPublicKey } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { parse as parseYaml } from 'yaml';
@@ -2673,128 +2672,6 @@ export function checkDorConfig(ctx: DoctorRunContext): DoctorCheckResult {
   return { id, severity: 'pass', title: '.ai-sdlc/dor-config.yaml is present and schema-valid' };
 }
 
-// Check 6: trusted-reviewers.yaml + operator signing key
-
-function normalizePem(pem: string): string {
-  return pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
-}
-
-/** Derive the SPKI PEM public key from a private-key PEM; `undefined` when unparseable. */
-function derivePublicKeyPem(privatePem: string): string | undefined {
-  try {
-    return createPublicKey(createPrivateKey(privatePem))
-      .export({ type: 'spki', format: 'pem' })
-      .toString();
-  } catch {
-    return undefined;
-  }
-}
-
-export function checkTrustedReviewers(ctx: DoctorRunContext): DoctorCheckResult[] {
-  const id = 'trusted-reviewers';
-  const { adapters, projectDir } = ctx;
-  const path = join(projectDir, '.ai-sdlc', 'trusted-reviewers.yaml');
-  const workflowPresent = adapters.exists(
-    join(projectDir, '.github', 'workflows', 'verify-attestation.yml'),
-  );
-  const parsed = loadAndValidateYaml(ctx, path, 'trusted-reviewers.schema.json');
-
-  if (parsed.state === 'missing') {
-    if (!workflowPresent) {
-      return [{ id, severity: 'pass', title: 'attestation not enabled — no keyring required' }];
-    }
-    return [
-      {
-        id,
-        severity: 'fail',
-        title: 'verify-attestation.yml is installed but .ai-sdlc/trusted-reviewers.yaml is missing',
-        remediation:
-          'Run `ai-sdlc init --add attestation`, then register a key via `/ai-sdlc init-signing-key`',
-      },
-    ];
-  }
-  if (parsed.state !== 'valid') {
-    return [
-      configFindings(
-        id,
-        '.ai-sdlc/trusted-reviewers.yaml',
-        parsed,
-        'Fix the listed fields against spec/schemas/trusted-reviewers.schema.json',
-      ),
-    ];
-  }
-
-  const reviewers = ((parsed.doc as { reviewers?: Array<{ pubkey: string }> } | null)?.reviewers ??
-    []) as Array<{ pubkey: string }>;
-  if (reviewers.length === 0) {
-    // Fresh `ai-sdlc init` repo: no attestations signed yet, so an empty keyring
-    // is only a warning; it fails once attestations exist that CI would reject.
-    const attestationsDir = join(projectDir, '.ai-sdlc', 'attestations');
-    const hasAttestations = adapters.listDir(attestationsDir).some((n) => n.endsWith('.json'));
-    const severity = hasAttestations ? 'fail' : 'warn';
-    return [
-      {
-        id,
-        severity,
-        title:
-          '.ai-sdlc/trusted-reviewers.yaml lists no public keys — CI rejects every attestation',
-        remediation: 'Run `/ai-sdlc init-signing-key` and open a PR appending the printed entry',
-        anonymizableEvidence: { keyCount: 0 },
-      },
-    ];
-  }
-
-  const results: DoctorCheckResult[] = [
-    {
-      id,
-      severity: 'pass',
-      title: `.ai-sdlc/trusted-reviewers.yaml is schema-valid with ${reviewers.length} key(s)`,
-      anonymizableEvidence: { keyCount: reviewers.length },
-    },
-  ];
-
-  const keyPath = join(adapters.homeDir(), '.ai-sdlc', 'signing-key.pem');
-  const keyPem = adapters.readFile(keyPath);
-  if (keyPem == null) {
-    results.push({
-      id: 'operator-signing-key',
-      severity: 'warn',
-      title: 'operator signing key (~/.ai-sdlc/signing-key.pem) not found on this machine',
-      remediation: 'Run `/ai-sdlc init-signing-key` to generate one',
-    });
-    return results;
-  }
-  const publicPem = derivePublicKeyPem(keyPem);
-  if (!publicPem) {
-    results.push({
-      id: 'operator-signing-key',
-      severity: 'fail',
-      title: '~/.ai-sdlc/signing-key.pem exists but is not a readable private key',
-      remediation:
-        'Regenerate it with `/ai-sdlc init-signing-key` and re-register the new public key',
-    });
-    return results;
-  }
-  const listed = reviewers.some((r) => normalizePem(r.pubkey) === normalizePem(publicPem));
-  results.push(
-    listed
-      ? {
-          id: 'operator-signing-key',
-          severity: 'pass',
-          title: 'operator signing key is registered in trusted-reviewers.yaml',
-        }
-      : {
-          id: 'operator-signing-key',
-          severity: 'warn',
-          title: 'operator signing key public half is NOT listed in trusted-reviewers.yaml',
-          remediation:
-            'Open a PR appending this key (`/ai-sdlc init-signing-key` prints the YAML block); CI rejects attestations signed by an unlisted key',
-          anonymizableEvidence: { listed: false },
-        },
-  );
-  return results;
-}
-
 // ── Check 8: husky pre-push attestation-sign hook ─────────────────────────
 
 const ATTESTATION_SIGN_MARKERS = ['ai-sdlc:attestation-sign-block', 'check-attestation-sign'];
@@ -3113,12 +2990,6 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       '.ai-sdlc/dor-config.yaml is valid against dor-config.v1.schema.json when DoR is enabled (AISDLC-582).',
     run: checkDorConfig,
-  },
-  {
-    id: 'trusted-reviewers',
-    description:
-      'trusted-reviewers.yaml is schema-valid, lists a key, and includes the operator signing key (AISDLC-582).',
-    run: checkTrustedReviewers,
   },
   {
     id: 'husky-pre-push-gate',

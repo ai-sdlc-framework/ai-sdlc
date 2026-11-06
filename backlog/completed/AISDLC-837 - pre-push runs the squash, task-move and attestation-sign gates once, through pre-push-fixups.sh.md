@@ -14,7 +14,6 @@ dependencies: []
 references:
   - .husky/pre-push
   - scripts/pre-push-fixups.sh
-  - scripts/squash-attestation-chores.sh
   - scripts/check-task-moved.sh
   - docs/audits/2026-10-13-cicd-five-step-audit.md
 priority: high
@@ -24,7 +23,11 @@ drift_log:
     type: ref-deleted
     detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
     resolution: flagged
-drift_checked: '2026-11-05'
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/squash-attestation-chores.sh'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

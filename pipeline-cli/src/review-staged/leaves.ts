@@ -12,7 +12,7 @@
  */
 
 import { join } from 'node:path';
-import { STAGED_REVIEWER_NAME, type StagedLeafStage } from '../attestation/merkle.js';
+import { STAGED_REVIEWER_NAME, type StagedLeafStage } from '../attestation/staged-review.js';
 import { safeSegment } from './run-store.js';
 import { DEFAULT_HARNESS } from '../harness-defaults.js';
 

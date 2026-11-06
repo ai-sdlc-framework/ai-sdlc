@@ -32,7 +32,7 @@
  * supports it natively.
  */
 
-import { createHash, generateKeyPairSync } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 import { cleanGitEnv } from './git-env.js';
@@ -312,11 +312,6 @@ export interface TrustedReviewer {
    */
   ciOnly?: boolean;
 }
-
-/** Result of verifying an attestation. */
-export type VerifyResult =
-  | { valid: true; predicate: AttestationPredicate; trustedReviewer: TrustedReviewer }
-  | { valid: false; reason: string };
 
 // ─── Schema validation ────────────────────────────────────────────
 //
@@ -1657,165 +1652,6 @@ export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredica
     }
   }
   return predicate;
-}
-
-/**
- * DSSE Pre-Authentication Encoding. Per the spec
- * (https://github.com/secure-systems-lab/dsse/blob/master/protocol.md):
- *
- *   PAE(type, body) = "DSSEv1" SP LEN(type) SP type SP LEN(body) SP body
- *
- * Lengths are decimal ASCII byte-counts of the UTF-8 encoding. Signing the
- * PAE — not the raw payload — is what gives DSSE its domain separation:
- * a signature over a payload of one `payloadType` cannot be replayed onto
- * a payload of a different type.
- */
-export function paeEncode(payloadType: string, payload: Buffer): Buffer {
-  const typeBuf = Buffer.from(payloadType, 'utf-8');
-  const prefix = Buffer.from(`DSSEv1 ${typeBuf.length} ${payloadType} ${payload.length} `, 'utf-8');
-  return Buffer.concat([prefix, payload]);
-}
-
-/** Generate a fresh ed25519 keypair as PEM strings (for `/ai-sdlc init-signing-key`). */
-export function generateSigningKeyPair(): { privateKeyPem: string; publicKeyPem: string } {
-  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-  return {
-    privateKeyPem: privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
-    publicKeyPem: publicKey.export({ format: 'pem', type: 'spki' }).toString(),
-  };
-}
-
-/**
- * DEC-0284: attestation schema v6 is the only schema signed or verified. The
- * legacy v3/v4/v5 predicate shapes handled by this module are refused on both
- * paths; v6 envelopes are signed and verified by pipeline-cli.
- */
-export const LEGACY_SCHEMA_REFUSAL =
-  'v6 is the only attestation schema signed or verified (DEC-0284)';
-
-/** Sign options. `keyid` is required — verifiers use it to look up the pubkey. */
-export interface SignOptions {
-  predicate: AttestationPredicate;
-  privateKeyPem: string;
-  keyid: string;
-}
-
-/**
- * Refuses every legacy predicate (DEC-0284): v6 is the only schema signed, and
- * it is signed by pipeline-cli (`cli-attestation sign-v6`), never here.
- */
-export function signAttestation(opts: SignOptions): never {
-  throw new Error(
-    `signAttestation: schemaVersion '${String(opts.predicate.schemaVersion)}' refused: ${LEGACY_SCHEMA_REFUSAL}; use cli-attestation sign-v6`,
-  );
-}
-
-/** Verify options. `expected` lets the caller bind verification to a specific PR state. */
-export interface VerifyOptions {
-  envelope: DsseEnvelope;
-  /**
-   * Trusted reviewers from `.ai-sdlc/trusted-reviewers.yaml`. The verifier
-   * tries each pubkey against each signature ("any-of-N") and accepts on
-   * the first match.
-   */
-  trustedReviewers: TrustedReviewer[];
-  /**
-   * What the predicate's `subject.digest.sha1`, `contentHashV3`,
-   * `policyHash`, and `reviewers[].agentFileHash` MUST equal. Mismatch =
-   * invalid.
-   *
-   * `expectedAgentFileHashes` is a map from agentId to its sha256 — we
-   * tolerate the predicate listing fewer or more reviewers than the map,
-   * but every reviewer entry whose agentId IS in the map must hash-match.
-   */
-  expected: {
-    commitSha: string;
-    contentHashV3: string;
-    /**
-     * AISDLC-193.1 base-independent per-file head-blob binding.
-     * Optional — callers that want v4-prefer behavior pass it; callers
-     * that only have v3 (legacy) leave it undefined.
-     *
-     * When BOTH this AND the envelope's `contentHashV4` are present,
-     * the verifier prefers v4 (base-independent → survives queue
-     * rebases). When v4 matches, v3 is NOT consulted (this is the
-     * whole point — v3 will mismatch on a queue rebase even though
-     * the reviewed content is unchanged).
-     *
-     * When the envelope is legacy v3-only (no `contentHashV4`), the
-     * verifier falls back to the v3 check unconditionally regardless
-     * of whether `expected.contentHashV4` is supplied.
-     */
-    contentHashV4?: string;
-    /**
-     * AISDLC-362 frozen-merge-base delta hash. Optional — callers that
-     * want v5-prefer behavior pass it; callers without v5 leave it
-     * undefined (fallback to v4 then v3).
-     *
-     * When BOTH this AND the envelope's `contentHashV5` are present,
-     * the verifier prefers v5 (highest rebase-stability). When v5
-     * matches, v4 and v3 are NOT consulted.
-     */
-    contentHashV5?: string;
-    policyHash: string;
-    expectedAgentFileHashes: Record<string, string>;
-  };
-  /**
-   * Override the accepted-schema-versions allowlist (for tests). Defaults
-   * to `ACCEPTED_SCHEMA_VERSIONS`.
-   */
-  acceptedSchemaVersions?: readonly string[];
-}
-
-/**
- * Verify a DSSE envelope. Returns a discriminated union — `{ valid: true }`
- * with the parsed predicate + matched trusted reviewer, or `{ valid: false }`
- * with a single human-readable reason string.
- *
- * The reason string is what gets posted to the commit status
- * (`ai-sdlc/attestation: invalid (<reason>)`), so keep it short and specific.
- */
-export function verifyAttestation(opts: VerifyOptions): VerifyResult {
-  // ── Parse the envelope ────────────────────────────────────────
-  if (opts.envelope.payloadType !== DSSE_PAYLOAD_TYPE) {
-    return {
-      valid: false,
-      reason: `payloadType mismatch: expected ${DSSE_PAYLOAD_TYPE}, got ${opts.envelope.payloadType}`,
-    };
-  }
-  if (!Array.isArray(opts.envelope.signatures) || opts.envelope.signatures.length === 0) {
-    return { valid: false, reason: 'envelope has no signatures' };
-  }
-
-  // Node's `Buffer.from(s, 'base64')` does NOT throw on invalid input —
-  // it silently drops non-base64 chars. We round-trip through .toString
-  // ('base64') below as part of the JSON-parse step; PAE re-encoding then
-  // catches any tampering at signature-verify time.
-  if (typeof opts.envelope.payload !== 'string' || opts.envelope.payload.length === 0) {
-    return { valid: false, reason: 'envelope payload is empty or non-string' };
-  }
-  const payloadJson = Buffer.from(opts.envelope.payload, 'base64');
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(payloadJson.toString('utf-8'));
-  } catch {
-    return { valid: false, reason: 'payload is not valid JSON' };
-  }
-
-  // ── DEC-0284: v6 is the only schema verified ──────────────────
-  // This predicate path only ever carried legacy v3/v4/v5 shapes; refuse any
-  // envelope here with one fixed reason (the version is echoed only when it
-  // matches a bounded pattern, so no attacker-controlled bytes reach the reason).
-  {
-    const rawVersion = (parsed as { schemaVersion?: unknown } | null)?.schemaVersion;
-    const shown =
-      typeof rawVersion === 'string' && /^v[0-9]{1,2}$/.test(rawVersion) ? rawVersion : 'unknown';
-    return {
-      valid: false,
-      reason: `schemaVersion '${shown}' refused: ${LEGACY_SCHEMA_REFUSAL}`,
-    };
-  }
 }
 
 /**

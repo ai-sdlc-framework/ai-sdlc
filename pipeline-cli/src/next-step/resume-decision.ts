@@ -38,7 +38,6 @@ export type ResumeReviewDecision =
   | { branch: 'developer-round'; note: string };
 
 const FULL: ResumeReviewDecision = { branch: 'full', note: 'review-full' };
-const ATTESTATION_DIR = '.ai-sdlc/attestations/';
 
 /** The slice of the context the decision reads (AISDLC-1053: callers outside next-step pass just these). */
 export type ResumeDecisionCtx = Pick<NextStepContext, 'workDir' | 'runner'>;
@@ -117,7 +116,6 @@ async function decide(
     `${lastHead}..HEAD`,
     '--',
     '.',
-    `:(exclude)${ATTESTATION_DIR}`,
   ]);
   if (names === null) return FULL;
   const deltaPaths = names.split('\0').filter(Boolean);

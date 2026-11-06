@@ -16,10 +16,17 @@ milestone: m-3
 dependencies: []
 references:
   - .husky/pre-push
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - ai-sdlc-plugin/commands/execute.md
   - spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md
 priority: medium
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

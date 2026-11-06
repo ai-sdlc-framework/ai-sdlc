@@ -1,6 +1,8 @@
 ---
 id: AISDLC-989
-title: 'Proof of Execution docs state the v6 rebase behaviour instead of "survives rebases"'
+title: >-
+  Proof of Execution docs state the v6 rebase behaviour instead of "survives
+  rebases"
 status: Done
 assignee: []
 created_date: '2026-10-20'
@@ -12,9 +14,16 @@ references:
   - docs/concepts/proof-of-execution.md
   - docs/whitepapers/proof-of-execution.md
   - docs/operations/attestation-reference.md
-  - pipeline-cli/attestation-core/verify-core.mjs
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/attestation-core/verify-core.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

@@ -1,7 +1,8 @@
 ---
 id: AISDLC-734
 title: >-
-  Reviewer leaf emission and signing are fragile: one-shot emit, patch-id drift, sentinel-only signer, slow local verify
+  Reviewer leaf emission and signing are fragile: one-shot emit, patch-id drift,
+  sentinel-only signer, slow local verify
 status: Done
 assignee: []
 created_date: '2026-10-05'
@@ -11,11 +12,23 @@ labels:
 dependencies: []
 references:
   - pipeline-cli/src/attestation/verdict-class.ts
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - ai-sdlc-plugin/scripts/sign-attestation-if-consumer.sh
   - ai-sdlc-plugin/commands/execute.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation-if-consumer.sh
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

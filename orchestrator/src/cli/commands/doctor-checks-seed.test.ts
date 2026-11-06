@@ -4,7 +4,6 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { generateKeyPairSync } from 'node:crypto';
 import {
   mkdtempSync,
   mkdirSync,
@@ -19,7 +18,6 @@ import { tmpdir } from 'node:os';
 import {
   checkAgentRoleConfig,
   checkDorConfig,
-  checkTrustedReviewers,
   checkHuskyPrePushGate,
   fixHuskyPrePushGate,
   checkFeatureFlags,
@@ -96,13 +94,12 @@ spec:
 `;
 
 describe('registry', () => {
-  it('registers checks 4, 5, 6, 8, 9, 10', () => {
+  it('registers checks 4, 5, 8, 9, 10', () => {
     const ids = DOCTOR_CHECKS.map((c) => c.id);
     expect(ids).toEqual(
       expect.arrayContaining([
         'agent-role-config',
         'dor-config',
-        'trusted-reviewers',
         'husky-pre-push-gate',
         'feature-flags',
         'feature-workflows',
@@ -153,86 +150,6 @@ describe('check 5: dor config', () => {
     const r = checkDorConfig(ctxOf());
     expect(r.severity).toBe('fail');
     expect(r.remediation).toMatch(/dor-config.v1.schema.json/);
-  });
-});
-
-describe('check 6: trusted reviewers + signing key', () => {
-  const pair = generateKeyPairSync('ed25519');
-  const pubPem = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
-  const privPem = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
-  const indent = (pem: string) =>
-    pem
-      .trim()
-      .split('\n')
-      .map((l) => `      ${l}`)
-      .join('\n');
-  const reviewersYaml = (pem: string) =>
-    `reviewers:\n  - identity: 'a@b.com'\n    machine: 'm'\n    pubkey: |\n${indent(pem)}\n`;
-
-  it('passes when attestation is not enabled and the file is absent', () => {
-    expect(checkTrustedReviewers(ctxOf())[0].severity).toBe('pass');
-  });
-  it('fails when the verify workflow exists but the keyring is missing', () => {
-    put('.github/workflows/verify-attestation.yml', 'name: v\n');
-    const r = checkTrustedReviewers(ctxOf());
-    expect(r[0].severity).toBe('fail');
-    expect(r[0].remediation).toMatch(/init --add attestation/);
-  });
-  it('fails an unparseable file', () => {
-    put('.ai-sdlc/trusted-reviewers.yaml', 'reviewers: [unclosed\n');
-    expect(checkTrustedReviewers(ctxOf())[0].severity).toBe('fail');
-  });
-  it('fails a schema violation (entry without pubkey)', () => {
-    put('.ai-sdlc/trusted-reviewers.yaml', "reviewers:\n  - identity: 'a'\n");
-    const r = checkTrustedReviewers(ctxOf());
-    expect(r[0].severity).toBe('fail');
-    expect(r[0].remediation).toMatch(/trusted-reviewers.schema.json/);
-  });
-  it('warns (not fails) on an empty keyring in a fresh repo with no attestations', () => {
-    put('.ai-sdlc/trusted-reviewers.yaml', 'reviewers: []\n');
-    const r = checkTrustedReviewers(ctxOf());
-    expect(r[0].severity).toBe('warn');
-    expect(r[0].title).toMatch(/no public keys/);
-  });
-  it('fails an empty keyring once attestations exist', () => {
-    put('.ai-sdlc/trusted-reviewers.yaml', 'reviewers: []\n');
-    put('.ai-sdlc/attestations/abc.v6.dsse.json', '{}');
-    const r = checkTrustedReviewers(ctxOf());
-    expect(r[0].severity).toBe('fail');
-    expect(r[0].title).toMatch(/no public keys/);
-  });
-  it('warns when the operator signing key is absent', () => {
-    put('.ai-sdlc/trusted-reviewers.yaml', reviewersYaml(pubPem));
-    const r = checkTrustedReviewers(ctxOf());
-    expect(r[0].severity).toBe('pass');
-    expect(r[1]).toMatchObject({ id: 'operator-signing-key', severity: 'warn' });
-  });
-  it('fails an unreadable signing key', () => {
-    put('.ai-sdlc/trusted-reviewers.yaml', reviewersYaml(pubPem));
-    put('__home__/.ai-sdlc/signing-key.pem', 'not a key');
-    expect(checkTrustedReviewers(ctxOf())[1].severity).toBe('fail');
-  });
-  it('passes when the signing key pubkey is listed', () => {
-    put('.ai-sdlc/trusted-reviewers.yaml', reviewersYaml(pubPem));
-    put('__home__/.ai-sdlc/signing-key.pem', privPem);
-    expect(checkTrustedReviewers(ctxOf())[1].severity).toBe('pass');
-  });
-  it('warns when the signing key is not listed', () => {
-    const other = generateKeyPairSync('ed25519')
-      .publicKey.export({ type: 'spki', format: 'pem' })
-      .toString();
-    put('.ai-sdlc/trusted-reviewers.yaml', reviewersYaml(other));
-    put('__home__/.ai-sdlc/signing-key.pem', privPem);
-    const r = checkTrustedReviewers(ctxOf());
-    expect(r[1].severity).toBe('warn');
-    expect(r[1].remediation).toMatch(/init-signing-key/);
-  });
-  it('accepts the repo trusted-reviewers.yaml shape (allowlist + ciOnly)', () => {
-    put(
-      '.ai-sdlc/trusted-reviewers.yaml',
-      `${reviewersYaml(pubPem)}allowlist:\n  authors:\n    - login: dev\n`,
-    );
-    expect(checkTrustedReviewers(ctxOf())[0].severity).toBe('pass');
   });
 });
 

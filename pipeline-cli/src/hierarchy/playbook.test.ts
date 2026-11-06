@@ -188,7 +188,7 @@ describe('mechanical conflict shape: rebase and lease push', () => {
 
   it('does not call attestation artifacts uncommitted changes (AISDLC-1016)', async () => {
     results['status'] = ok(
-      '?? .ai-sdlc/transcript-leaves/abc.json\n M .ai-sdlc/transcript-leaves.jsonl\n?? .ai-sdlc/reviews/AISDLC-9.json\n',
+      '?? .ai-sdlc/reviews/aisdlc-9.jsonl\n M .ai-sdlc/reviews/aisdlc-8.jsonl\n',
     );
     const outcome = await runPlaybook(verdict(), deps());
     expect(outcome).toMatchObject({ action: 'rebase-push', result: 'done' });
@@ -716,8 +716,8 @@ describe('drop-chores (AISDLC-999)', () => {
   };
 
   it('is not refused by a tree dirty only with attestation artifacts (AISDLC-1016)', async () => {
-    scripted('.ai-sdlc/attestations/x.v6.dsse.json\n');
-    results['status'] = ok('?? .ai-sdlc/transcript-leaves/a.json\n?? .ai-sdlc/reviews/r.json\n');
+    scripted('.ai-sdlc/reviews/aisdlc-9.jsonl\n');
+    results['status'] = ok('?? .ai-sdlc/reviews/r.jsonl\n');
     const base = deps();
     const withUntracked: PlaybookDeps = {
       ...base,
@@ -732,7 +732,7 @@ describe('drop-chores (AISDLC-999)', () => {
   });
 
   it('drops the chore commits non-interactively and lease-pushes the task branch', async () => {
-    scripted('.ai-sdlc/attestations/x.v6.dsse.json\n');
+    scripted('.ai-sdlc/reviews/aisdlc-9.jsonl\n');
     const outcome = await runPlaybook(verdict(), deps(), 'drop-chores');
     expect(outcome).toMatchObject({ action: 'drop-chores', result: 'done', branch: BRANCH });
     const rebase = calls.find((c) => c.args.includes('rebase'));

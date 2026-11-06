@@ -1,6 +1,8 @@
 ---
 id: AISDLC-1144
-title: 'Attestation v6 credits the newest leaf per reviewer per patch-id; earlier leaves stay signed as history, never blocking'
+title: >-
+  Attestation v6 credits the newest leaf per reviewer per patch-id; earlier
+  leaves stay signed as history, never blocking
 status: Done
 assignee: []
 created_date: '2026-10-31'
@@ -10,13 +12,26 @@ labels:
   - incident-follow-up
 dependencies: []
 references:
-  - pipeline-cli/src/attestation/sign-v6.ts
-  - pipeline-cli/src/attestation/merkle.ts
-  - pipeline-cli/attestation-core/verify-core.mjs
   - docs/operations/attestation-reference.md
   - .claude/rules/review-attestations.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/sign-v6.ts'
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/merkle.ts'
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/attestation-core/verify-core.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

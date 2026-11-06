@@ -662,16 +662,14 @@ describe('check-task-moved.sh (AISDLC-220)', () => {
 
   // ── (g) Load-bearing order assertion (AC #2) ─────────────────────────
 
-  it('(g) pre-push-fixups.sh invokes squash, then check-task-moved.sh, and never a signer', () => {
+  it('(g) pre-push-fixups.sh invokes check-task-moved.sh, never a squash or a signer', () => {
     // AISDLC-837: the orchestrator is the single caller; order is load-bearing
     // (contentHashV4 binds {path, headBlobSha}; move must happen before sign).
     const content = readFileSync(join(PROJECT_ROOT, 'scripts', 'pre-push-fixups.sh'), 'utf-8');
     const code = content.split('\n').filter((l) => !l.trimStart().startsWith('#'));
     const idx = (name) => code.findIndex((l) => l.includes(name));
-    const squashIdx = idx('squash-attestation-chores.sh');
-    const taskMoveIdx = idx('check-task-moved.sh');
-    assert.ok(squashIdx !== -1 && taskMoveIdx !== -1);
-    assert.ok(squashIdx < taskMoveIdx, 'squash must run before task-move');
+    assert.notEqual(idx('check-task-moved.sh'), -1);
+    assert.equal(idx('squash-attestation-chores.sh'), -1, 'RFC-0061: no chore commits to squash');
     assert.equal(idx('check-attestation-sign.sh'), -1, 'RFC-0061: the hook no longer signs');
   });
 

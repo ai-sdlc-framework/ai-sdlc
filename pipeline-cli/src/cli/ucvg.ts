@@ -432,57 +432,34 @@ async function runReviewDegraded(args: {
 // ── Subcommand: clean-room-sign ───────────────────────────────────────────────
 
 /**
- * Stage 4 — Clean-Room Attestation.
- *
- * This subcommand runs in the SIGNING ENVIRONMENT — the clean room.
- * The signing key is available here. This job MUST run in a separate CI job
- * from Stages 2-3 (enforced by the workflow's job-dependency structure).
+ * Stage 4 — clean-room validation. Runs in a separate CI job from Stages 2-3
+ * (enforced by the workflow's job-dependency structure): Zod-validates the
+ * unsigned report and refuses one that is not fully approved. It signs
+ * nothing; the verdict record is emitted by `emit-verdict` (RFC-0061).
  *
  * Usage: cli-ucvg clean-room-sign --report-path ./report.json
  *          --pr-number N --head-sha SHA --work-dir .
  */
 async function runCleanRoomSignCli(args: {
   reportPath: string;
-  prNumber: number;
   headSha: string;
   workDir: string;
-  patchId?: string;
-  independenceTier?: 'none' | 'attested' | 'isolated';
-  ciOnlyKey?: boolean;
-  runId?: string;
-  workflowRef?: string;
-  signerKeyId?: string;
 }): Promise<void> {
   if (!existsSync(args.reportPath)) {
     fail(`report artifact not found: ${args.reportPath}`);
   }
 
-  // RFC-0047 Phase 4 (AISDLC-596): anchorEvidence is bound ONLY when all
-  // three fields are provided together — a partial triple would be
-  // half-audit-evidence, worse than none (AISDLC-594 precedent: undefined,
-  // never a partial object).
-  const anchorEvidence =
-    args.runId && args.workflowRef && args.signerKeyId
-      ? { runId: args.runId, workflowRef: args.workflowRef, signerKeyId: args.signerKeyId }
-      : undefined;
-
   const result = runCleanRoomSigner({
     reportArtifactPath: args.reportPath,
-    repoRoot: args.workDir,
-    taskId: `ucvg-pr-${args.prNumber}`,
     headSha: args.headSha,
-    patchId: args.patchId,
     workDir: args.workDir,
-    independenceTier: args.independenceTier,
-    ciOnlyKey: args.ciOnlyKey,
-    anchorEvidence,
   });
 
   if (!result.success) {
-    fail(`[stage-4] clean-room signing failed (phase: ${result.phase}): ${result.error}`);
+    fail(`[stage-4] clean-room validation failed (phase: ${result.phase}): ${result.error}`);
   }
 
-  emit({ ok: true, envelopePath: result.envelopePath });
+  emit({ ok: true });
 }
 
 // ── Subcommand: local-review ──────────────────────────────────────────────────
@@ -581,16 +558,7 @@ function computePrDiff(prContentDir: string, baseSha: string, headSha: string): 
 
   return execFileSync(
     'git',
-    [
-      '-C',
-      prContentDir,
-      'diff',
-      '--no-color',
-      `${baseSha}...${headSha}`,
-      '--',
-      '.',
-      ':(exclude).ai-sdlc/attestations/**',
-    ],
+    ['-C', prContentDir, 'diff', '--no-color', `${baseSha}...${headSha}`, '--', '.'],
     { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   );
 }
@@ -901,40 +869,10 @@ export async function runUcvgCli(argv: string[] = process.argv.slice(2)): Promis
       const reportPath = flags['report-path'];
       const prNumber = parseInt(flags['pr-number'] ?? '0', 10);
       const headSha = flags['head-sha'];
-      const patchId = flags['patch-id'];
-      const independenceTierRaw = flags['independence-tier'];
-      if (
-        independenceTierRaw !== undefined &&
-        independenceTierRaw !== 'none' &&
-        independenceTierRaw !== 'attested' &&
-        independenceTierRaw !== 'isolated'
-      ) {
-        fail(
-          `--independence-tier must be 'none', 'attested', or 'isolated' (got: ${independenceTierRaw})`,
-        );
-      }
-      // RFC-0047 Phase 4 (AISDLC-596): `--ci-only-key` selects the ci-only
-      // signing key (AISDLC_CI_SIGNING_KEY_PATH) instead of the operator
-      // key. Only the protected isolated-review CI job should pass this.
-      const ciOnlyKey = flags['ci-only-key'] === 'true';
-      const runId = flags['run-id'];
-      const workflowRef = flags['workflow-ref'];
-      const signerKeyId = flags['signer-key-id'];
       if (!reportPath) fail('--report-path is required');
       if (!prNumber) fail('--pr-number is required');
       if (!headSha) fail('--head-sha is required');
-      await runCleanRoomSignCli({
-        reportPath,
-        prNumber,
-        headSha,
-        workDir,
-        patchId,
-        independenceTier: independenceTierRaw as 'none' | 'attested' | 'isolated' | undefined,
-        ciOnlyKey,
-        runId,
-        workflowRef,
-        signerKeyId,
-      });
+      await runCleanRoomSignCli({ reportPath, headSha, workDir });
       break;
     }
 

@@ -1,6 +1,8 @@
 ---
 id: AISDLC-968
-title: 'Attestation envelope and transcript-leaf growth is a measured row in the tooling-limitations register'
+title: >-
+  Attestation envelope and transcript-leaf growth is a measured row in the
+  tooling-limitations register
 status: Done
 assignee: []
 created_date: '2026-10-17'
@@ -9,11 +11,18 @@ labels:
   - observability
 dependencies:
   - AISDLC-964
-references:
-  - pipeline-cli/src/attestation/merkle.ts
-  - scripts/verify-attestation.mjs
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/merkle.ts'
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

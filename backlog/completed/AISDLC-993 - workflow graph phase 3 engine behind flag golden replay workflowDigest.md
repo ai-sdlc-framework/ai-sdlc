@@ -1,6 +1,9 @@
 ---
 id: AISDLC-993
-title: 'Workflow graph phase 3: engine behind `AI_SDLC_WORKFLOW_ENGINE=1`, golden replay test, `workflowDigest` envelope field, delete the composite landing call and MCP step tools'
+title: >-
+  Workflow graph phase 3: engine behind `AI_SDLC_WORKFLOW_ENGINE=1`, golden
+  replay test, `workflowDigest` envelope field, delete the composite landing
+  call and MCP step tools
 status: Done
 assignee: []
 created_date: '2026-10-20'
@@ -15,11 +18,18 @@ references:
   - spec/rfcs/RFC-0056-composable-workflow-graph.md
   - pipeline-cli/src/next-step/next-step.ts
   - pipeline-cli/src/execute-pipeline.ts
-  - pipeline-cli/attestation-core/verify-core.mjs
   - spec/schemas/attestation-envelope-v6.schema.json
   - pipeline-cli/src/deps/dependency-graph.ts
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/attestation-core/verify-core.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

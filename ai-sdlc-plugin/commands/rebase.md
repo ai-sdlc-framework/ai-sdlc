@@ -1,6 +1,6 @@
 ---
 name: rebase
-description: /ai-sdlc rebase <pr-number> — auto-rebase a PR onto latest main, resolve mechanical conflicts, force-push with --force-with-lease, re-sign attestation if contentHash changed.
+description: /ai-sdlc rebase <pr-number> — auto-rebase a PR onto latest main, resolve mechanical conflicts, force-push with --force-with-lease.
 argument-hint: <pr-number>
 allowed-tools:
   - Read
@@ -37,9 +37,7 @@ command body runs in the main Claude Code session which DOES have
 6. **Edit governance config (`.ai-sdlc/**`) only when the task names the file and the change; never as a side effect.** Runtime artifacts (attestations, reviews, transcript leaves, the decision log, the dispatch board) are written through their CLIs as today. Runs marked untrusted (`AI_SDLC_UNTRUSTED_RUN`) are blocked from `.ai-sdlc/**` and `.github/workflows/**` by the hook; ask a maintainer in the PR instead of retrying. `.github/workflows/**` is only refused when the project's `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths` — not blocked by default.
 7. **Never write GitHub Actions CI-skip magic tokens** (AISDLC-88) — the
    five literal substrings (`[skip ci]`, `[ci skip]`, `[no ci]`,
-   `[skip actions]`, `[actions skip]`) silently disable workflows. The
-   re-attestation chore commit body composed by Step 5 below is
-   sanitised the same way `/ai-sdlc execute` Step 10 sanitises it.
+   `[skip actions]`, `[actions skip]`) silently disable workflows.
 
 ## Step 0 — Validate input
 
@@ -125,8 +123,7 @@ origin/main
 4. Run `pnpm exec prettier --write <file>` on every resolved file before
    `git rebase --continue`
 5. Do NOT push from the subagent. The slash command body (Step 6) owns
-   the single force-with-lease push so re-attestation can be committed
-   atomically with the rebased commits.
+   the single force-with-lease push of the rebased commits.
 
 ## Escalation cases (the 20%)
 1. Modify-vs-delete → escalate with best-guess port location
@@ -140,13 +137,6 @@ origin/main
 - pnpm lint
 - pnpm format:check
 
-## Hash oracle for the orchestrator
-Before AND after rebase, run:
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/sign-attestation.mjs" --print-content-hash
-This is the AISDLC-94 / AISDLC-101 contentHash. Same hash before/after
-means re-attestation is NOT needed; different hash means it is. Report
-both as `preContentHash` / `postContentHash` in your return JSON.
-
 ## Return shape
 {
   "outcome": "success" | "escalated" | "failed",
@@ -154,8 +144,6 @@ both as `preContentHash` / `postContentHash` in your return JSON.
   "escalationReason": "...",
   "verifications": { "build": "passed|failed|skipped", ... },
   "rebaseAttempts": <number>,
-  "preContentHash": "...",
-  "postContentHash": "...",
   "notes": "..."
 }
 ```
@@ -173,15 +161,13 @@ single JSON object — see the rebase-resolver agent's "Return value"
 section). Branch on `outcome`:
 
 - **`escalated`** — print `escalationReason`, `notes`, and tell the
-  operator they need to handle this manually. Do NOT push, do NOT
-  re-sign attestation. Print: "Worktree preserved at `$WORKTREE_PATH`
+  operator they need to handle this manually. Do NOT push. Print: "Worktree preserved at `$WORKTREE_PATH`
   for manual conflict resolution." Stop.
 - **`failed`** — print the failure reason. The subagent already
   rolled back. Stop.
 - **`success`** — persist the structured return JSON to disk so Step 5
   can read it with `jq` (the assistant message itself isn't directly
-  accessible to the bash subshell), then proceed to Step 5
-  (re-attestation).
+  accessible to the bash subshell), then proceed to Step 5.
 
 ```bash
 # Persist the subagent's return JSON before Step 5 reads it. Without
@@ -192,93 +178,12 @@ cat > /tmp/rebase-resolver-${PR}.json <<'REBASE_RESOLVER_JSON'
 REBASE_RESOLVER_JSON
 ```
 
-## Step 5 — Re-sign attestation if contentHash changed (AISDLC-105 + AISDLC-102 + AISDLC-94)
+## Step 5 — No re-signing (RFC-0061)
 
-The rebase changed HEAD, but the AISDLC-94 dual-hash predicate accepts
-envelopes whose `contentHash` is unchanged (rebase didn't touch any blob
-SHA at HEAD). AISDLC-101 further accepts unchanged per-file delta
-hashes. So re-signing is only needed when `contentHash` actually moved.
-
-Use the oracle the subagent already ran. **CRITICAL**: the conditional
-below skips the *signing* logic but MUST fall through to Step 6
-(force-push). Do NOT `exit 0` inside the skip branch — the rebase
-commits still need to be pushed even when no re-attestation is needed.
-
-```bash
-PRE_HASH=$(jq -r '.preContentHash // empty' /tmp/rebase-resolver-${PR}.json)
-POST_HASH=$(jq -r '.postContentHash // empty' /tmp/rebase-resolver-${PR}.json)
-
-if [ -n "$PRE_HASH" ] && [ "$PRE_HASH" = "$POST_HASH" ]; then
-  echo "[ai-sdlc-progress] re-attestation: skipped — contentHash unchanged ($PRE_HASH)"
-  # No re-signing needed; the existing attestation envelope still verifies.
-  # Falls through to Step 6 (push) — the rebased commits MUST still push.
-else
-  echo "[ai-sdlc-progress] re-attestation: contentHash changed ($PRE_HASH → $POST_HASH); re-signing"
-
-  cd "$WORKTREE_PATH"
-
-  if [ ! -f "$HOME/.ai-sdlc/signing-key.pem" ]; then
-    echo "ERROR: No signing key at ~/.ai-sdlc/signing-key.pem."
-    echo "       Re-attestation needed but cannot sign locally."
-    echo "       Run /ai-sdlc init-signing-key once, open the printed onboarding PR,"
-    echo "       then re-run /ai-sdlc rebase $PR."
-    exit 1
-  fi
-
-  # Reuse any review-verdicts from a previous run if present, otherwise
-  # pass an empty verdicts file so the predicate carries the iteration
-  # count + harness note from a normal /ai-sdlc execute Step 10 invocation.
-  VERDICTS=/tmp/review-verdicts-${TASK_ID_LOWER}.json
-  [ -f "$VERDICTS" ] || echo '[]' > "$VERDICTS"
-
-  # Carry the pre-rebase attestation's iterationCount + harnessNote
-  # forward to preserve fidelity. The originals live in the DSSE payload
-  # at `.ai-sdlc/attestations/<pre-rebase-head-sha>.dsse.json`. If we
-  # can't read them (envelope missing or malformed), fall back to the
-  # safe defaults and document the loss in the chore commit body.
-  PRE_HEAD_SHA="$HEAD_SHA"
-  PRE_ATTESTATION=".ai-sdlc/attestations/${PRE_HEAD_SHA}.dsse.json"
-  if [ -f "$PRE_ATTESTATION" ]; then
-    PRE_ITER=$(jq -r '.payload' "$PRE_ATTESTATION" \
-      | base64 -d 2>/dev/null \
-      | jq -r '.iterationCount // 1')
-    PRE_HARNESS_NOTE=$(jq -r '.payload' "$PRE_ATTESTATION" \
-      | base64 -d 2>/dev/null \
-      | jq -r '.harnessNote // ""')
-    FIDELITY_NOTE=""
-  else
-    PRE_ITER=1
-    PRE_HARNESS_NOTE=""
-    FIDELITY_NOTE="(pre-rebase attestation $PRE_ATTESTATION not on disk; iterationCount + harnessNote reset to defaults)"
-  fi
-
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/sign-attestation.mjs" \
-    --review-verdicts "$VERDICTS" \
-    --iteration-count "$PRE_ITER" \
-    --harness-note "$PRE_HARNESS_NOTE"
-
-  # Sanitise CHORE_BODY for AISDLC-88 magic tokens, same as
-  # /ai-sdlc execute Step 10. The chore commit MUST fire
-  # verify-attestation.yml on push.
-  CHORE_BODY="chore: re-sign review attestation after rebase
-
-Auto-generated by /ai-sdlc rebase. Rebase changed HEAD but reviewers'
-approval still binds (re-signed because contentHash changed); the new
-envelope verifies against the rebased HEAD. ${FIDELITY_NOTE}
-
-Co-Authored-By: Claude $(sed -n '/^    developer:/,/model:/s/.*model: *\([A-Za-z0-9._-]*\).*/\1/p' .ai-sdlc/model-routing.yaml | head -1 | awk '{print toupper(substr($0,1,1)) substr($0,2)}') <noreply@anthropic.com>"
-  CHORE_BODY=$(printf '%s' "$CHORE_BODY" | sed -E \
-    -e 's/\[[Ss][Kk][Ii][Pp] [Cc][Ii]\]/(skip ci marker)/g' \
-    -e 's/\[[Cc][Ii] [Ss][Kk][Ii][Pp]\]/(ci skip marker)/g' \
-    -e 's/\[[Nn][Oo] [Cc][Ii]\]/(no ci marker)/g' \
-    -e 's/\[[Ss][Kk][Ii][Pp] [Aa][Cc][Tt][Ii][Oo][Nn][Ss]\]/(skip actions marker)/g' \
-    -e 's/\[[Aa][Cc][Tt][Ii][Oo][Nn][Ss] [Ss][Kk][Ii][Pp]\]/(actions skip marker)/g')
-
-  git add .ai-sdlc/attestations
-  git commit -m "$CHORE_BODY"
-  cd -
-fi
-```
+Nothing is signed any more. The review verdict gate carries an earlier
+approval across a rebase by the clean-replay rule (`cli-attestation
+verdict-check` reports `ok-carried:<sha>`), or asks for a fresh review.
+There is no attestation to re-sign, so proceed straight to Step 6.
 
 ## Step 6 — Force-push with --force-with-lease (AISDLC-105 Hard Rule 2)
 
@@ -336,7 +241,6 @@ Print a tight summary:
 - Rebase attempts: `<N>`
 - Resolved files: `<N>`
 - Verification: `<all clean | failed at <stage>>`
-- Re-attestation: `<skipped (hash unchanged) | re-signed (hash changed) | not applicable (escalated)>`
 - Pushed: `<yes | no — escalation reason: <...>>`
 
 ## What this command DOES NOT do (intentional)
@@ -346,18 +250,15 @@ Print a tight summary:
 - **Never pushes to `main`/`master`.** Hard refused at Step 1 + Step 6.
 - **Never auto-resolves modify-vs-delete or semantic conflicts.** Those
   escalate back to the operator.
-- **Never re-signs attestation when contentHash is unchanged** — the
-  AISDLC-94/101 verifier accepts the existing envelope, so re-signing
-  would only churn commits.
 - **Never deletes the worktree on escalation.** The worktree is left in
   a clean state (rebase aborted) so the operator can inspect.
 
 ## When the operator should invoke this manually
 
 - **A PR's CI status check failed because main moved** (the most common
-  case — `verify-attestation.yml` reports `invalid (diff drift)` because
-  a sibling merged into the PR's files). `/ai-sdlc rebase <pr>` rebases,
-  re-signs if needed, and force-pushes. CI re-runs cleanly.
+  case — the review verdict check reports `replay-dirty` because a sibling
+  merged into the PR's files). `/ai-sdlc rebase <pr>` rebases and
+  force-pushes. CI re-runs cleanly.
 - **A PR is "Update branch" yellow** in the GitHub UI but you don't want
   a merge commit (CLAUDE.md "Always rebase" rule). `/ai-sdlc rebase`
   produces a linear history without `gh api pulls/N/update-branch`.

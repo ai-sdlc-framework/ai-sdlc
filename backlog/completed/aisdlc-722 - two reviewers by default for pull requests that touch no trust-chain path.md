@@ -1,7 +1,6 @@
 ---
 id: AISDLC-722
-title: >-
-  Two reviewers by default for pull requests that touch no trust-chain path
+title: Two reviewers by default for pull requests that touch no trust-chain path
 status: Done
 assignee: []
 created_date: '2026-10-04'
@@ -14,10 +13,15 @@ references:
   - pipeline-cli/src/orchestrator/reconcile.ts
   - ai-sdlc-plugin/commands/execute.md
   - ai-sdlc-plugin/agents/correctness-reviewer.md
-  - scripts/verify-attestation.mjs
   - docs/operations/reviewer-set-flag.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

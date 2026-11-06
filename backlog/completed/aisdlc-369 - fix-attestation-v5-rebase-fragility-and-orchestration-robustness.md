@@ -1,6 +1,8 @@
 ---
 id: AISDLC-369
-title: 'fix(attestation+orchestration): v5 rebase-survives-sibling-merges + auto-rearm + pre-push helpers'
+title: >-
+  fix(attestation+orchestration): v5 rebase-survives-sibling-merges + auto-rearm
+  + pre-push helpers
 status: Done
 assignee: []
 created_date: '2026-05-19'
@@ -12,11 +14,21 @@ labels:
 dependencies: []
 priority: critical
 references:
-  - scripts/verify-attestation.mjs
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - orchestrator/src/runtime/attestations.ts
   - .github/workflows/auto-enable-auto-merge.yml
   - scripts/check-orchestrator-state.sh
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Problem

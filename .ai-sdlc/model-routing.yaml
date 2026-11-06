@@ -95,8 +95,6 @@ spec:
       '*': { model: haiku }
     import-spec:
       '*': { model: haiku }
-    init-signing-key:
-      '*': { model: haiku }
     init:
       '*': { model: haiku }
     memory-dream:

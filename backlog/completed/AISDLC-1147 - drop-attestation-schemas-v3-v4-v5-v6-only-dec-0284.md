@@ -12,11 +12,8 @@ labels:
   - cleanup
 dependencies: []
 references:
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - ai-sdlc-plugin/scripts/sign-attestation.test.mjs
   - orchestrator/src/runtime/attestations.ts
   - orchestrator/src/runtime/attestations.test.ts
-  - pipeline-cli/src/attestation/sign-v6.test.ts
   - pipeline-cli/src/cli/index.ts
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
   - CLAUDE.md
@@ -29,7 +26,25 @@ drift_log:
       Referenced file no longer exists:
       ai-sdlc-plugin/scripts/check-attestation-sign.sh
     resolution: flagged
-drift_checked: '2026-11-05'
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.test.mjs
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/attestation/sign-v6.test.ts
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 ## Description
 DEC-0284 (operator ruling 2026-10-31, option `drop-legacy`) decided that attestation schema v6 is the only format signed and verified: no deprecation window, no backward compatibility, legacy v3/v4/v5 code paths, fixtures and tests deleted. Evidence recorded in the decision: every envelope under `.ai-sdlc/attestations` on main is v6; no v3/v4/v5 envelope exists.

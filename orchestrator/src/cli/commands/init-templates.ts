@@ -463,14 +463,13 @@ fi
 /**
  * `.ai-sdlc/trusted-reviewers.yaml` stub — empty allowlist with operator
  * instructions. The wizard scaffolds this so adopters have a single file
- * to receive contributor pubkey PRs into; bootstrap a contributor with
- * `/ai-sdlc init-signing-key` and append the printed YAML block.
+ * to receive contributor pubkey PRs into (the `init-signing-key` command is gone,
+ * RFC-0061 phase 3; entries are appended by hand).
  */
 export const TRUSTED_REVIEWERS_STUB = `# Trusted contributor signing keys for review attestations.
 #
 # This file is a stub created by \`ai-sdlc init --with-attestation\`. Add
-# entries by running \`/ai-sdlc init-signing-key\` on a contributor's
-# machine and opening a PR that appends the printed YAML block below.
+# entries by opening a PR that appends a YAML block below.
 #
 # Schema:
 #   - identity:  free-form string (typically email or GitHub handle)
@@ -1182,10 +1181,6 @@ export const ATTESTATION_TEMPLATES: FeatureTemplateSet = {
   files: {
     '.ai-sdlc/trusted-reviewers.yaml': TRUSTED_REVIEWERS_STUB,
     '.github/workflows/verify-attestation.yml': VERIFY_ATTESTATION_WORKFLOW,
-    // The .gitkeep ensures the attestations dir is tracked in git so the
-    // first PR's envelope lands cleanly without "directory does not exist"
-    // errors from the signing script.
-    '.ai-sdlc/attestations/.gitkeep': '',
     // AISDLC-555 (partial AC #7): the pre-push hook's gate condition reads
     // `.ai-sdlc/verdicts/<task-id>.json` — tightly coupled to attestation,
     // so it's scaffolded here rather than deferred to a separate

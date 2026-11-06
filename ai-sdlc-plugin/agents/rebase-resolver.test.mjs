@@ -242,14 +242,9 @@ describe('rebase-resolver body — return value contract', () => {
     assert.match(body, /"rebaseAttempts":/);
   });
 
-  it('declares preContentHash + postContentHash for re-attestation oracle', () => {
-    assert.match(body, /"preContentHash":/);
-    assert.match(body, /"postContentHash":/);
-  });
-
-  it('references the AISDLC-94 / AISDLC-101 hash predicate', () => {
-    assert.match(body, /AISDLC-94/);
-    assert.match(body, /AISDLC-101/);
+  it('does not ask for a re-attestation content hash (RFC-0061)', () => {
+    assert.doesNotMatch(body, /"preContentHash":/);
+    assert.doesNotMatch(body, /"postContentHash":/);
   });
 });
 

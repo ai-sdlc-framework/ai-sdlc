@@ -14,7 +14,6 @@ dependencies: []
 references:
   - .github/workflows/ai-sdlc-review.yml
   - .github/workflows/ai-sdlc-gate.yml
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - >-
     backlog/completed/aisdlc-87 -
     CI-side-attestor-GH-Action-signs-attestation-after-duplicate-review-approves-unblocks-remote-agents-external-contributor-PRs.md
@@ -27,7 +26,13 @@ drift_log:
     type: ref-deleted
     detail: 'Referenced file no longer exists: scripts/ci-sign-attestation.mjs'
     resolution: flagged
-drift_checked: '2026-05-03'
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

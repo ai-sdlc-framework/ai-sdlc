@@ -281,8 +281,6 @@ Return a JSON object as your final message (no other text):
     "format": "passed | failed | skipped"
   },
   "rebaseAttempts": 0,
-  "preContentHash": "<sha256 hex from sign-attestation.mjs --print-content-hash, or null>",
-  "postContentHash": "<sha256 hex after rebase, or null>",
   "notes": "anything the operator should know (optional)"
 }
 ```
@@ -291,17 +289,9 @@ Return a JSON object as your final message (no other text):
 
 - `success` — rebase completed (including the no-op case where
   `origin/main` was already ancestor of HEAD), verification passed.
-  The subagent does NOT push; the slash command body owns the push +
-  re-attestation as a single atomic step.
+  The subagent does NOT push; the slash command body owns the push.
 - `escalated` — a 20% case fired (modify-vs-delete, semantic conflict,
   verification failure, iteration cap). The worktree is left in a clean
   state (rebase aborted, no push). Operator owns next steps.
 - `failed` — non-fast-forward push, missing worktree, branch is
   main/master, or other refusal-class error. The worktree is left as-is.
-
-`preContentHash` / `postContentHash` are set when you ran the
-`scripts/sign-attestation.mjs --print-content-hash` oracle. The slash
-command uses these to decide whether re-signing the attestation is needed
-(AISDLC-94 dual-hash, AISDLC-101 per-file delta — same hash means no
-re-attestation needed). If you didn't run the oracle (e.g. the run
-didn't reach the verify stage), set both to `null`.

@@ -343,13 +343,7 @@ function ledgerVerdictsAt(
 }
 
 /** Review bookkeeping committed between rounds is not part of the code delta. */
-const BOOKKEEPING_PREFIXES = [
-  '.ai-sdlc/reviews/',
-  '.ai-sdlc/review-state/',
-  '.ai-sdlc/attestations/',
-  '.ai-sdlc/transcript-leaves/',
-  '.ai-sdlc/transcript-leaves.jsonl',
-];
+const BOOKKEEPING_PREFIXES = ['.ai-sdlc/reviews/', '.ai-sdlc/review-state/'];
 const RUNTIME_PATHSPEC_EXCLUDES = [
   '.',
   ...BOOKKEEPING_PREFIXES.map((p) => `:(exclude)${p.replace(/\/$/, '')}`),

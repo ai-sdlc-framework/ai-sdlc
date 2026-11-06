@@ -14,13 +14,7 @@ import {
   type Harness,
 } from '../__test-helpers/next-step-fixtures.js';
 import { approvedWithoutReviewers } from './review-finalize.js';
-import {
-  choreCommitMessage,
-  headPatchId,
-  preSignRebase,
-  sanitizeCiSkipTokens,
-  shipTask,
-} from './ship.js';
+import { choreCommitMessage, preSignRebase, sanitizeCiSkipTokens, shipTask } from './ship.js';
 import type { NextStepState } from './types.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -131,16 +125,19 @@ describe('sanitizeCiSkipTokens (AISDLC-88 hard rule 7)', () => {
   it('the chore commit message names the task and carries no skip token', () => {
     const msg = choreCommitMessage('AISDLC-900 [skip ci]');
     expect(msg).toContain('chore: mark AISDLC-900 (skip ci marker) complete');
-    expect(msg).toContain('AISDLC-74');
-    expect(msg).toContain('verify-attestation');
+    expect(msg).toContain('RFC-0061');
     expect(msg).not.toMatch(/\[(skip ci|ci skip|no ci|skip actions|actions skip)\]/i);
   });
 });
 
 describe('preSignRebase (AISDLC-102)', () => {
+  // The content hash is taken from the (path, new blob id) pairs of `git diff --raw`.
   const hashes = (...values: string[]): void => {
     let i = 0;
-    h.runner.on(/print-content-hash/, () => ok(`${values[Math.min(i++, values.length - 1)]}\n`));
+    h.runner.on(/git merge-base origin\/main HEAD/, ok('abc123\n'));
+    h.runner.on(/git diff --raw/, () =>
+      ok(`:100644 100644 0000000 ${values[Math.min(i++, values.length - 1)]} M\tfile.ts\n`),
+    );
   };
 
   it('skips (and proceeds to signing) when the fetch fails', async () => {
@@ -161,16 +158,6 @@ describe('preSignRebase (AISDLC-102)', () => {
     expect(indexOfCall(/git rebase/)).toBe(-1);
   });
 
-  it('stages a deleted-unstaged attestation envelope before the rebase (AISDLC-1098)', async () => {
-    hashes('A', 'A');
-    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    h.runner.on(/ls-files --deleted/, ok('.ai-sdlc/attestations/old.v6.dsse.json\n'));
-    await preSignRebase(h.ctx, state);
-    const rmAt = indexOfCall(/git rm --cached -q -- \.ai-sdlc\/attestations\/old\.v6\.dsse\.json/);
-    expect(rmAt).toBeGreaterThanOrEqual(0);
-    expect(rmAt).toBeLessThan(indexOfCall(/git rebase origin\/main/));
-  });
-
   it('does not touch the index when no envelope is deleted (AISDLC-1098)', async () => {
     hashes('A', 'A');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
@@ -184,46 +171,22 @@ describe('preSignRebase (AISDLC-102)', () => {
     expect(h.runner.calls.find((c) => c.args[0] === 'fetch')?.opts?.timeout).toBe(30_000);
   });
 
-  it('drops earlier attestation chore commits before the rebase (AISDLC-999)', async () => {
-    hashes('A', 'A');
-    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    h.runner.on(/merge-base HEAD origin\/main/, ok('b'.repeat(40) + '\n'));
-    h.runner.on(/git log --reverse/, ok(`${'a'.repeat(40)}\tchore: sign attestation for x\n`));
-    h.runner.on(/diff-tree/, ok('.ai-sdlc/attestations/x.v6.dsse.json\n'));
-    await preSignRebase(h.ctx, state);
-    const dropAt = indexOfCall(/sequence\.editor=.* rebase --interactive/);
-    expect(dropAt).toBeGreaterThanOrEqual(0);
-    expect(dropAt).toBeLessThan(indexOfCall(/git rebase origin\/main/));
-  });
-
   it('reuses the approval when the rebase leaves the contentHash unchanged', async () => {
     hashes('A', 'A');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
     const r = await preSignRebase(h.ctx, state);
-    expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
+    expect(r).toEqual({ kind: 'unchanged', hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
   });
 
   it('asks for a re-review when the contentHash changed', async () => {
     hashes('A', 'B');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
     const r = await preSignRebase(h.ctx, state);
-    expect(r).toEqual({ kind: 'changed', before: 'A', after: 'B' });
-  });
-
-  it('signs (unchanged) when the content patch-id survives the rebase (AISDLC-998)', async () => {
-    hashes('A', 'A');
-    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    const r = await preSignRebase(h.ctx, state, () => 'p'.repeat(40));
-    expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
-  });
-
-  it('returns to review naming both patch-ids when the rebase changes it (AISDLC-998)', async () => {
-    hashes('A', 'A');
-    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    const ids = ['1'.repeat(40), '2'.repeat(40)];
-    let i = 0;
-    const r = await preSignRebase(h.ctx, state, () => ids[i++]);
-    expect(r).toEqual({ kind: 'changed', before: ids[0], after: ids[1] });
+    expect(r).toEqual({
+      kind: 'changed',
+      before: expect.stringMatching(/^[0-9a-f]{64}$/),
+      after: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
   });
 
   it('names the conflicting files, aborts, and does not retry', async () => {
@@ -283,68 +246,6 @@ describe('preSignRebase (AISDLC-102)', () => {
     expect((r as { reason: string }).reason).toContain('boom');
   });
 
-  it('commits pending transcript leaves before the rebase (dirty-leaf case)', async () => {
-    hashes('A', 'A');
-    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    h.runner.on(
-      /status --porcelain -- \.ai-sdlc\/transcript-leaves\//,
-      ok('?? .ai-sdlc/transcript-leaves/abc.jsonl\n'),
-    );
-    const r = await preSignRebase(h.ctx, state);
-    expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
-    const commit = indexOfCall(
-      /git commit -m chore: commit pending transcript leaves and review ledger/,
-    );
-    expect(commit).toBeGreaterThan(-1);
-    expect(indexOfCall(/git add -- \.ai-sdlc\/transcript-leaves\//)).toBeLessThan(commit);
-    expect(commit).toBeLessThan(indexOfCall(/git rebase origin\/main/));
-  });
-
-  it('commits a dirty review ledger with the leaves in one commit before the rebase (AISDLC-951)', async () => {
-    hashes('A', 'A');
-    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    h.runner.on(
-      /status --porcelain -- \.ai-sdlc\/transcript-leaves\//,
-      ok(` M .ai-sdlc/reviews/${state.taskId.toLowerCase()}.jsonl\n`),
-    );
-    const r = await preSignRebase(h.ctx, state);
-    expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
-    expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(1);
-    expect(cmds()).toContain(`git add -- .ai-sdlc/reviews/${state.taskId.toLowerCase()}.jsonl`);
-    expect(cmds()).toContain('git add -- .ai-sdlc/transcript-leaves/');
-    expect(indexOfCall(/git commit/)).toBeLessThan(indexOfCall(/git rebase origin\/main/));
-  });
-
-  it('stages each owned path in its own add, even when one add fails (AISDLC-951)', async () => {
-    hashes('A', 'A');
-    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    h.runner.on(/status --porcelain/, ok('?? .ai-sdlc/transcript-leaves/abc.jsonl\n'));
-    h.runner.on(
-      new RegExp(`git add -- \\.ai-sdlc/reviews/${state.taskId.toLowerCase()}\\.jsonl`),
-      fail('fatal: pathspec did not match any files', 128),
-    );
-    const r = await preSignRebase(h.ctx, state);
-    expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
-    expect(cmds().filter((c) => c.startsWith('git add'))).toEqual([
-      'git add -- .ai-sdlc/transcript-leaves/',
-      `git add -- .ai-sdlc/reviews/${state.taskId.toLowerCase()}.jsonl`,
-    ]);
-    expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(1);
-  });
-
-  it('still stages the ledger when the leaves add fails (only-ledger-dirty)', async () => {
-    hashes('A', 'A');
-    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
-    h.runner.on(
-      /status --porcelain/,
-      ok(` M .ai-sdlc/reviews/${state.taskId.toLowerCase()}.jsonl\n`),
-    );
-    h.runner.on(/git add -- \.ai-sdlc\/transcript-leaves\//, fail('no match', 128));
-    await preSignRebase(h.ctx, state);
-    expect(cmds()).toContain(`git add -- .ai-sdlc/reviews/${state.taskId.toLowerCase()}.jsonl`);
-    expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(1);
-  });
-
   it('commits once per dirty state: dirty, clean after commit, dirty again (AISDLC-951)', async () => {
     hashes('A', 'A', 'A', 'A', 'A', 'A');
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
@@ -402,7 +303,7 @@ describe('preSignRebase (AISDLC-102)', () => {
       ok(` M .ai-sdlc/reviews/${state.taskId.toLowerCase()}.jsonl\n`),
     );
     const r = await preSignRebase(h.ctx, state);
-    expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
+    expect(r).toEqual({ kind: 'unchanged', hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(cmds().filter((c) => c.startsWith('git commit'))).toHaveLength(1);
     expect(indexOfCall(/ls-files --error-unmatch/)).toBeLessThan(indexOfCall(/git rebase/));
   });
@@ -415,7 +316,7 @@ describe('preSignRebase (AISDLC-102)', () => {
     h.runner.on(/merge-base --is-ancestor/, fail('', 1));
     h.runner.on(/status --porcelain/, ok(` M ${path}\n`));
     const r = await preSignRebase(h.ctx, state);
-    expect(r).toEqual({ kind: 'unchanged', hash: 'A' });
+    expect(r).toEqual({ kind: 'unchanged', hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(cmds()).toContain(`git add -- ${path}`);
     expect(cmds()).toContain(`git ls-files --error-unmatch -- ${path}`);
     expect(cmds().some((c) => c.includes('AISDLC-900.jsonl'))).toBe(false);
@@ -446,7 +347,11 @@ describe('preSignRebase (AISDLC-102)', () => {
     let revs = 0;
     h.runner.on(/rev-parse origin\/main/, () => ok(revs++ === 0 ? 'old\n' : 'new\n'));
     const r = await preSignRebase(h.ctx, state);
-    expect(r).toEqual({ kind: 'changed', before: 'A', after: 'B' });
+    expect(r).toEqual({
+      kind: 'changed',
+      before: expect.stringMatching(/^[0-9a-f]{64}$/),
+      after: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
     expect(cmds().filter((c) => c === 'git rebase origin/main')).toHaveLength(1);
   });
 });
@@ -532,7 +437,6 @@ describe('preSignRebase against real git and the real ledger writer (AISDLC-1021
     preSignRebase(
       { ...h.ctx, runner: realRunner },
       { ...state, taskId: TASK_ID, taskIdLower: TASK_ID.toLowerCase(), worktreePath: clone },
-      () => null,
     );
 
   afterEach(() => {
@@ -955,28 +859,6 @@ describe('shipTask: failures stop before anything irreversible', () => {
     const res = await shipTask(h2.ctx, s2);
     expect(res.action === 'stop' && res.reason).toContain('cannot locate task file');
     h2.cleanup();
-  });
-});
-
-describe('headPatchId (AISDLC-998)', () => {
-  const git = (cwd: string, ...args: string[]) =>
-    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
-      cwd,
-      encoding: 'utf-8',
-    });
-
-  it('computes a 40-hex patch-id against the base and null for an unknown base', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hpid-'));
-    git(dir, 'init', '-q', '-b', 'main');
-    writeFileSync(join(dir, 'a.txt'), 'a\n');
-    git(dir, 'add', 'a.txt');
-    git(dir, 'commit', '-q', '-m', 'base');
-    git(dir, 'checkout', '-q', '-b', 'feat');
-    writeFileSync(join(dir, 'b.txt'), 'b\n');
-    git(dir, 'add', 'b.txt');
-    git(dir, 'commit', '-q', '-m', 'change');
-    expect(headPatchId(dir, 'main')).toMatch(/^[0-9a-f]{40}$/);
-    expect(headPatchId(dir, 'no-such-ref')).toBeNull();
   });
 });
 

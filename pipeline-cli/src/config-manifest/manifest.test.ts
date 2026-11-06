@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -19,8 +19,7 @@ import { CODE_TEST_MERGED_REVIEWER_SET, classifyReviewerSet } from '../steps/rev
 import { checkReviewerKindCoverage } from '../../attestation-core/review-scope-core.mjs';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
-const PEM = '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAabc=\n-----END PUBLIC KEY-----';
-const answers = { identity: 'a@b.c', pubkey: PEM, org: 'acme', repo: 'widgets' };
+const answers = { org: 'acme', repo: 'widgets' };
 
 let dir: string;
 beforeEach(() => {
@@ -32,7 +31,6 @@ describe('manifest contents (AC1)', () => {
   it('lists every .ai-sdlc path read for attestation and review, each with a since version', () => {
     const paths = REQUIRED_CONFIG_MANIFEST.map((e) => e.path);
     for (const p of [
-      '.ai-sdlc/trusted-reviewers.yaml',
       '.ai-sdlc/review-policy.md',
       '.ai-sdlc/agent-role.yaml',
       '.ai-sdlc/pipeline.yaml',
@@ -50,18 +48,6 @@ describe('manifest contents (AC1)', () => {
     expect(validateWorkflowYaml(e!.render({})).ok).toBe(true);
     expect(missingConfigEntries(dir).map((m) => m.id)).not.toContain('workflow');
   });
-
-  it('the paths the verifier hardcodes are in the manifest', () => {
-    const src = readFileSync(
-      join(__dirname, '..', '..', 'attestation-core', 'verify-core.mjs'),
-      'utf8',
-    );
-    const paths = REQUIRED_CONFIG_MANIFEST.map((e) => e.path);
-    expect(src).toContain("'trusted-reviewers.yaml'");
-    expect(src).toContain("'review-policy.md'");
-    expect(paths).toContain('.ai-sdlc/trusted-reviewers.yaml');
-    expect(paths).toContain('.ai-sdlc/review-policy.md');
-  });
 });
 
 describe('preflight (AC3)', () => {
@@ -72,7 +58,6 @@ describe('preflight (AC3)', () => {
     const r = configPreflight(dir);
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.reason).toContain('.ai-sdlc/trusted-reviewers.yaml');
     expect(r.reason).toContain('.ai-sdlc/review-policy.md');
     expect(r.reason).toContain('/ai-sdlc init');
     expect(r.reason).toBe(formatMissingConfig(r.missing));
@@ -91,24 +76,13 @@ describe('scaffold (AC2)', () => {
     expect(res.failed).toEqual([]);
     expect(res.created).toHaveLength(REQUIRED_CONFIG_MANIFEST.length);
     expect(readConfigVersion(dir)).toBe(newestConfigVersion());
-    expect(readFileSync(join(dir, '.ai-sdlc/trusted-reviewers.yaml'), 'utf8')).toContain(
-      "identity: 'a@b.c'",
-    );
   });
 
   it('non-interactive without defaults fails naming the missing entries and writes no version', async () => {
     const res = await scaffoldConfig({ projectDir: dir });
-    expect(res.failed.map((f) => f.path)).toEqual([
-      '.ai-sdlc/trusted-reviewers.yaml',
-      '.ai-sdlc/pipeline.yaml',
-    ]);
+    expect(res.failed.map((f) => f.path)).toEqual(['.ai-sdlc/pipeline.yaml']);
     expect(res.failed[0].reason).toContain('missing answer');
     expect(existsSync(join(dir, CONFIG_VERSION_PATH))).toBe(false);
-  });
-
-  it('rejects a non-PEM key', async () => {
-    const res = await scaffoldConfig({ projectDir: dir, defaults: { ...answers, pubkey: 'nope' } });
-    expect(res.failed[0].reason).toContain('PEM');
   });
 
   it('re-run is a no-op without force and rewrites with force', async () => {

@@ -41,9 +41,6 @@ export function isAttestationChoreSubject(subject: string): boolean {
 
 /** True when `file` is a path an attestation chore commit may touch. */
 export function isAttestationChorePath(file: string, taskId?: string): boolean {
-  if (file.startsWith('.ai-sdlc/attestations/')) return true;
-  if (file === '.ai-sdlc/transcript-leaves.jsonl') return true;
-  if (file.startsWith('.ai-sdlc/transcript-leaves/')) return true;
   return taskId !== undefined && file === reviewsLedgerRelativePath(taskId);
 }
 
@@ -98,7 +95,7 @@ export async function dropAttestationChores(
     const paths = lines(files.stdout);
     const other = paths.filter((p) => !isAttestationChorePath(p, opts.taskId));
     if (other.length > 0) return { kind: 'refused', sha, paths: other };
-    for (const p of paths) if (!p.startsWith('.ai-sdlc/attestations/')) restore.add(p);
+    for (const p of paths) restore.add(p);
   }
 
   const head = (await git(['rev-parse', 'HEAD'])).stdout.trim();

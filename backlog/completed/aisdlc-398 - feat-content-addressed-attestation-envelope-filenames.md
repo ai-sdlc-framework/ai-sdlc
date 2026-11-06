@@ -1,15 +1,32 @@
 ---
 id: AISDLC-398
-title: 'feat(attestation): content-address envelope filenames via git patch-id (decouple from commit SHA)'
+title: >-
+  feat(attestation): content-address envelope filenames via git patch-id
+  (decouple from commit SHA)
 status: Done
-labels: [attestation, ci, merge-queue, v4-kick, root-cause-fix]
+labels:
+  - attestation
+  - ci
+  - merge-queue
+  - v4-kick
+  - root-cause-fix
 references:
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - scripts/verify-attestation.mjs
   - .github/workflows/ai-sdlc-gate.yml
   - CLAUDE.md
 priority: critical
 permittedExternalPaths: []
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

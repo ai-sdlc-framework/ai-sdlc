@@ -110,7 +110,6 @@ const BASELINE_IDS = [
   'gate-job:test-go',
   'gate-job:dependency-review-gate',
   'gate-job:dor-readiness-gate',
-  'gate-job:independence-policy-gate',
   'gate-job:pr-ready',
   'workflow:ai-sdlc-review.yml',
   'workflow:auto-enable-auto-merge.yml',

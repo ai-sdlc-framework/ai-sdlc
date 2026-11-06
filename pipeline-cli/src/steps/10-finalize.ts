@@ -1,7 +1,7 @@
 /**
  * Step 10 — Finalize task: build acceptanceCriteriaCheck + finalSummary,
  * patch task frontmatter to Done, move file from tasks/ → completed/,
- * sign attestation (if helper available), and create the chore commit.
+ * and create the chore commit.
  *
  * Mirrors `execute-orchestrator.md` Step 10. Skipped entirely if the
  * iteration cap was hit (`needsHumanAttention`) — the human flips Done
@@ -11,12 +11,6 @@
  *   - `acceptanceCriteriaCheck` + `finalSummary` rendering — fully implemented.
  *   - Task frontmatter status flip + filesystem move tasks/→completed/ — fully implemented.
  *   - Chore commit creation — fully implemented (uses injected runner).
- *   - **Attestation signing** is delegated to `ai-sdlc-plugin/scripts/sign-attestation.mjs`
- *     when present (this is the same script `execute-orchestrator.md` invokes).
- *     If the script is absent (running outside a plugin install), we skip
- *     signing and surface that fact in the result. Phase 6 (AISDLC-100.6)
- *     will add a `pipelineVersion` field to the envelope; that change goes
- *     into the helper script, not into this step.
  *
  * @module steps/10-finalize
  */
@@ -33,8 +27,6 @@ import type { DeveloperReturn, FinalizeTaskOptions, FinalizeTaskResult } from '.
 
 export interface FinalizeStepOptions extends FinalizeTaskOptions {
   runner?: Runner;
-  /** Path to sign-attestation.mjs (defaults to detection by env var). */
-  signAttestationScript?: string;
   /** When true, skip the chore commit (useful in tests without a real git repo). */
   skipCommit?: boolean;
   /**
@@ -66,24 +58,6 @@ export interface FinalizeStepOptions extends FinalizeTaskOptions {
    * first PR); attestation signing and the chore commit still run.
    */
   resume?: boolean;
-  /** AISDLC-556 — sink for the no-signer warning (defaults to stderr). */
-  warn?: (message: string) => void;
-}
-
-/** Marker the signer prints when the attestation runtime cannot be resolved (AISDLC-554). */
-const SIGNER_RUNTIME_MISSING = 'Cannot locate the AI-SDLC';
-
-/**
- * AISDLC-556 — adopter-facing warning for verdicts written with no reachable
- * signer. Pure — exported for unit tests.
- */
-export function noSignerWarning(taskId: string, reason: string): string {
-  return (
-    `[finalize] WARNING: verdicts written to .ai-sdlc/verdicts/${taskId.toLowerCase()}.json, ` +
-    `but no attestation signer is available in this repo (${reason}) - the PR will carry no ` +
-    `attestation. verify-attestation CI cannot pass without a signer; see ` +
-    `ai-sdlc-plugin/README.md "Attestation prerequisites for adopters". Continuing (fail open).`
-  );
 }
 
 /**
@@ -215,49 +189,20 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
     parseTaskFile(completedPath);
   }
 
-  // 3. Attestation signing — best-effort. The helper script lives in the
-  //    plugin and isn't always available when running pipeline-cli standalone.
-  const warn = opts.warn ?? ((m: string) => void process.stderr.write(`${m}\n`));
-  let attestationPath: string | null = null;
-  const helperScript =
-    opts.signAttestationScript ??
-    (process.env.CLAUDE_PLUGIN_ROOT
-      ? join(process.env.CLAUDE_PLUGIN_ROOT, 'scripts', 'sign-attestation.mjs')
-      : null);
-  if (helperScript && existsSync(helperScript)) {
-    const signResult = await runner('node', [helperScript], {
-      cwd: opts.worktreePath,
-      allowFailure: true,
-    });
-    if (signResult.code === 0) {
-      // AISDLC-409: v6 envelope filenames have a `.v6` infix (e.g.
-      // `<sha>.v6.dsse.json`) — match both v5 and v6 forms so the chore
-      // commit message names the real envelope path on the v6-default path.
-      const m = signResult.stdout.match(/\.ai-sdlc\/attestations\/[a-f0-9]+(?:\.v6)?\.dsse\.json/);
-      attestationPath = m ? m[0] : null;
-    } else if (`${signResult.stdout}\n${signResult.stderr}`.includes(SIGNER_RUNTIME_MISSING)) {
-      warn(noSignerWarning(opts.taskId, 'attestation runtime not installed'));
-    }
-  } else {
-    warn(noSignerWarning(opts.taskId, 'sign-attestation.mjs not found'));
-  }
-
-  // 4. Chore commit (move + attestation if signed). Skip in tests without a repo.
+  // 3. Chore commit (task move + review records). Skip in tests without a repo.
   //
-  // AISDLC-393 — GH-issue path: no backlog dirs to add. Only the attestation
-  // envelope is staged. If no envelope was signed, there's nothing to commit
-  // and we skip the commit entirely (returning choreCommitSha=null).
+  // AISDLC-393 — GH-issue path: no backlog dirs to add; with no review records
+  // there is nothing to commit and the commit is skipped (choreCommitSha=null).
   let choreCommitSha: string | null = null;
   if (!opts.skipCommit) {
     const addArgs: string[] = ['add'];
     if (opts.sourceKind !== 'gh-issue') {
       addArgs.push('backlog/tasks', 'backlog/completed');
     }
-    if (attestationPath) addArgs.push('.ai-sdlc/attestations');
-    // AISDLC-1016: reviewer transcript leaves and review records written during the review
-    // loop ride in this chore commit, so the tree is clean before the Step 11 rebase.
+    // AISDLC-1016: review records written during the review loop ride in this chore
+    // commit, so the tree is clean before the Step 11 rebase.
     for (const p of ATTESTATION_ARTIFACT_PATHS) {
-      if (p !== '.ai-sdlc/attestations' && existsSync(join(opts.worktreePath, p))) addArgs.push(p);
+      if (existsSync(join(opts.worktreePath, p))) addArgs.push(p);
     }
 
     // For gh-issue with no attestation: skip the commit (nothing to stage).
@@ -265,19 +210,11 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
       await runner('git', addArgs, { cwd: opts.worktreePath, allowFailure: true });
       const message =
         opts.sourceKind === 'gh-issue'
-          ? `chore: sign attestation for ${opts.taskId}\n\n` +
-            `Auto-generated by /ai-sdlc execute (GH-issue path). Reviews approved.\n` +
-            (attestationPath
-              ? `Signed review attestation at ${attestationPath} (AISDLC-74) so CI's ` +
-                `verify-attestation workflow can skip the duplicate review run.\n\n`
-              : `\n`) +
+          ? `chore: commit review records for ${opts.taskId}\n\n` +
+            `Auto-generated by /ai-sdlc execute (GH-issue path). Reviews approved.\n\n` +
             `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n`
           : `chore: mark ${opts.taskId} complete\n\n` +
-            `Auto-generated by /ai-sdlc execute. Reviews approved; task lifecycle landed in this PR.\n` +
-            (attestationPath
-              ? `Signed review attestation included at ${attestationPath} (AISDLC-74) so CI's ` +
-                `verify-attestation workflow can skip the duplicate review run.\n\n`
-              : `\n`) +
+            `Auto-generated by /ai-sdlc execute. Reviews approved; task lifecycle landed in this PR.\n\n` +
             `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n`;
       const commitResult = await runner('git', ['commit', '-m', message], {
         cwd: opts.worktreePath,
@@ -296,7 +233,7 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
   return {
     finalSummary,
     acceptanceCriteriaCheck,
-    attestationPath,
+    attestationPath: null,
     choreCommitSha,
     skipped: false,
   };

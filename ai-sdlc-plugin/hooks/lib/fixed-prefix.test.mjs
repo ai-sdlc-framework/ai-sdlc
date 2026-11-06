@@ -169,7 +169,10 @@ describe('path-bound rules', () => {
 describe('no control lost from the prior CLAUDE.md', () => {
   const before = readFileSync(join(here, 'fixtures/claude-md-before-782.md'), 'utf-8');
   // The old size-budget sentence is obsolete by design (AISDLC-1152 lowered the budget).
-  const controlsBefore = findControlSentences(before).filter((s) => !/budget 15k/.test(s));
+  // The attestation-gate sentences are obsolete too: RFC-0061 replaced that job with the verdict check.
+  const controlsBefore = findControlSentences(before).filter(
+    (s) => !/budget 15k/.test(s) && !/attestation gate job|docs only prs skip it/.test(s),
+  );
   const homes = {
     prefix: normalizeSentence(prefixOf()),
     'CLAUDE.md': normalizeSentence(readFileSync(join(root, 'CLAUDE.md'), 'utf-8')),

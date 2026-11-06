@@ -1,6 +1,9 @@
 ---
 id: AISDLC-1123
-title: pre-push hook runs the deterministic CI governance checks (waived-tests, reviewers, attestation verify, backlog drift, conflict markers) over the push range, so a red that CI would raise is fixed before the push
+title: >-
+  pre-push hook runs the deterministic CI governance checks (waived-tests,
+  reviewers, attestation verify, backlog drift, conflict markers) over the push
+  range, so a red that CI would raise is fixed before the push
 status: Done
 assignee: []
 created_date: '2026-10-30'
@@ -12,9 +15,14 @@ priority: high
 references:
   - .husky/pre-push
   - scripts/check-pr-governance.mjs
-  - scripts/verify-attestation.mjs
   - scripts/run-gate-tests.mjs
   - docs/operations/quality-gate.md
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

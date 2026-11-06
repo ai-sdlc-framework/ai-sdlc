@@ -1,14 +1,49 @@
 ---
 id: AISDLC-916
-title: 'fix: envelope formatter counts the key prefix in its line width and applied reviewers are a set'
+title: >-
+  fix: envelope formatter counts the key prefix in its line width and applied
+  reviewers are a set
 status: Done
 assignee: []
 created_date: '2026-10-15'
-labels: [bug, attestation, pipeline-cli, velocity]
+labels:
+  - bug
+  - attestation
+  - pipeline-cli
+  - velocity
 dependencies: []
-references: [pipeline-cli/src/attestation/format-json.ts, pipeline-cli/src/attestation/format-json.test.ts, pipeline-cli/src/attestation/review-scope.ts, pipeline-cli/src/attestation/review-scope.test.ts, pipeline-cli/src/attestation/sign-v6.ts]
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/attestation/format-json.ts
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/attestation/format-json.test.ts
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/attestation/review-scope.ts
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/attestation/review-scope.test.ts
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/sign-v6.ts'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

@@ -1,6 +1,8 @@
 ---
 id: AISDLC-439
-title: 'feat(release): sign MCP server npm tarball SHA inside DSSE attestation predicate at release time (DEC-0001)'
+title: >-
+  feat(release): sign MCP server npm tarball SHA inside DSSE attestation
+  predicate at release time (DEC-0001)
 status: Done
 assignee: []
 created_date: '2026-05-26'
@@ -14,10 +16,17 @@ references:
   - .github/workflows/release.yml
   - ai-sdlc-plugin/mcp-server/package.json
   - .ai-sdlc/trusted-reviewers.yaml
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - .ai-sdlc/_decisions/events.jsonl
 priority: high
 permittedExternalPaths: []
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

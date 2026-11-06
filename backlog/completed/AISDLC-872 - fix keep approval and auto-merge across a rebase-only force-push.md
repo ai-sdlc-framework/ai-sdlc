@@ -4,16 +4,24 @@ title: 'fix(merge): keep approval and auto-merge across a rebase-only force-push
 status: Done
 assignee: []
 created_date: '2026-10-14'
-labels: [merge, ci, reliability]
+labels:
+  - merge
+  - ci
+  - reliability
 dependencies: []
 references:
   - .github/workflows/auto-enable-auto-merge.yml
   - pipeline-cli/bin/cli-merge-if-eligible.mjs
-  - pipeline-cli/src/attestation/patch-id.ts
   - ai-sdlc-plugin/agents/rebase-resolver.md
   - docs/operations/merge-without-queue.md
 priority: critical
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/patch-id.ts'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Context

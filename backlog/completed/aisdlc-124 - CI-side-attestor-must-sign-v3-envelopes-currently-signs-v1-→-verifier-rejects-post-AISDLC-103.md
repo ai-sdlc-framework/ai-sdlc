@@ -14,7 +14,6 @@ labels:
 milestone: m-3
 dependencies: []
 references:
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - .ai-sdlc/schemas/attestation.v3.schema.json
   - .github/workflows/ai-sdlc-review.yml
 priority: high
@@ -27,7 +26,13 @@ drift_log:
     type: ref-deleted
     detail: 'Referenced file no longer exists: spec/rfcs/RFC-0009-trusted-reviewers.md'
     resolution: flagged
-drift_checked: '2026-05-03'
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

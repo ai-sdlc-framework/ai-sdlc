@@ -7,8 +7,6 @@ labels:
   - bug
   - attestation
 references:
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - pipeline-cli/src/attestation/sign-v6.ts
   - CLAUDE.md
 created: '2026-05-22'
 drift_log:
@@ -20,7 +18,17 @@ drift_log:
     type: ref-deleted
     detail: 'Referenced file no longer exists: scripts/check-attestation-sign.test.mjs'
     resolution: flagged
-drift_checked: '2026-11-05'
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/sign-v6.ts'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Context

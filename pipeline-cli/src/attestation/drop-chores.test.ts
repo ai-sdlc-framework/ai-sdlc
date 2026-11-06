@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -20,7 +20,7 @@ const commit = (file: string, content: string, msg: string): void => {
   g('add', '--', file);
   g('commit', '-q', '-m', msg);
 };
-const envelopes = (): string[] => readdirSync(join(dir, '.ai-sdlc/attestations'));
+const LEDGER = '.ai-sdlc/reviews/aisdlc-1.jsonl';
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'drop-chores-'));
@@ -42,9 +42,9 @@ describe('identification rule', () => {
     ).toBe(true);
     expect(isAttestationChoreSubject('feat: real work')).toBe(false);
   });
-  it('allows attestation and leaf paths only', () => {
-    expect(isAttestationChorePath('.ai-sdlc/attestations/a.dsse.json')).toBe(true);
-    expect(isAttestationChorePath('.ai-sdlc/transcript-leaves.jsonl')).toBe(true);
+  it('allows the task review ledger only (no proof trees remain, RFC-0061)', () => {
+    expect(isAttestationChorePath('.ai-sdlc/attestations/a.dsse.json')).toBe(false);
+    expect(isAttestationChorePath('.ai-sdlc/transcript-leaves.jsonl')).toBe(false);
     expect(isAttestationChorePath('.ai-sdlc/reviews/aisdlc-1.jsonl', 'AISDLC-1')).toBe(true);
     expect(isAttestationChorePath('.ai-sdlc/reviews/aisdlc-1.jsonl', 'aisdlc-1')).toBe(true);
     expect(isAttestationChorePath('.ai-sdlc/reviews/AISDLC-1.jsonl', 'AISDLC-1')).toBe(false);
@@ -59,20 +59,10 @@ describe('dropAttestationChores', () => {
     expect(await dropAttestationChores(gitIn(dir), { target: 'main' })).toEqual({ kind: 'none' });
   });
 
-  it('drops a stale sign + leaves stack, restores the leaves, and a re-sign leaves one envelope on HEAD', async () => {
+  it('drops a stale chore stack and restores the ledger to the index', async () => {
     commit('src/a.ts', 'a', 'feat: work');
-    const stale = g('rev-parse', 'HEAD');
-    commit(
-      '.ai-sdlc/transcript-leaves.jsonl',
-      '{"leaf":1}\n',
-      'chore: commit pending transcript leaves (AISDLC-1)',
-    );
+    commit(LEDGER, '{"v":1}\n', 'chore: commit pending transcript leaves (AISDLC-1)');
     commit('src/b.ts', 'b', 'feat: more work');
-    commit(
-      `.ai-sdlc/attestations/${stale}.v6.dsse.json`,
-      '{}',
-      `chore: sign attestation for ${stale}`,
-    );
 
     const r = await dropAttestationChores(gitIn(dir), { target: 'main', taskId: 'AISDLC-1' });
     expect(r.kind).toBe('dropped');
@@ -80,17 +70,7 @@ describe('dropAttestationChores', () => {
       'feat: more work',
       'feat: work',
     ]);
-    expect(g('status', '--porcelain')).toContain('transcript-leaves.jsonl');
-
-    g('commit', '-q', '-m', 'chore: commit pending transcript leaves (AISDLC-1)');
-    const head = g('rev-parse', 'HEAD');
-    commit(
-      `.ai-sdlc/attestations/${head}.v6.dsse.json`,
-      JSON.stringify({ subject: head }),
-      `chore: sign attestation for ${head}`,
-    );
-    expect(envelopes()).toEqual([`${head}.v6.dsse.json`]);
-    expect(g('rev-parse', 'HEAD~1')).toBe(head);
+    expect(g('status', '--porcelain')).toContain('aisdlc-1.jsonl');
   });
 
   it('refuses and changes nothing when a candidate touches another path', async () => {
@@ -102,9 +82,9 @@ describe('dropAttestationChores', () => {
   });
 
   it('refuses to rewrite a dirty worktree', async () => {
-    commit('.ai-sdlc/attestations/a.dsse.json', '{}', 'chore: sign attestation for x');
+    commit(LEDGER, '{}', 'chore: commit pending transcript leaves (AISDLC-1)');
     writeFileSync(join(dir, 'README.md'), 'dirty');
-    const r = await dropAttestationChores(gitIn(dir), { target: 'main' });
+    const r = await dropAttestationChores(gitIn(dir), { target: 'main', taskId: 'AISDLC-1' });
     expect(r.kind).toBe('failed');
   });
 });

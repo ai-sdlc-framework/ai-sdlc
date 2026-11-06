@@ -97,7 +97,7 @@ The PR exists. Print the summary below and stop. `outcome: needs-human-attention
 
 ### `stop`
 
-Print `reason` (it names the next step: a worktree preserved at `worktreePath`, `/ai-sdlc cleanup <task-id>`, a rebase to resolve by hand, a missing signing key and `/ai-sdlc init-signing-key`, ...) and stop. Do not retry blindly, do not work around a refusal, and never resolve a rebase conflict yourself.
+Print `reason` (it names the next step: a worktree preserved at `worktreePath`, `/ai-sdlc cleanup <task-id>`, a rebase to resolve by hand, ...) and stop. Do not retry blindly, do not work around a refusal, and never resolve a rebase conflict yourself.
 
 If you ever need the pending instruction again, run the same `reply` command as-is with `</dev/null` as its input: an empty result re-emits it. Orchestration budget: a normal run is 3-7 `next-step` calls plus the agents (AC-2 allows 15).
 

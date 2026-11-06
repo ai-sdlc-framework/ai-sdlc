@@ -13,8 +13,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PATCH_ID_EXCLUSIONS } from './patch-id.js';
-
 import {
   buildMarkerClaim,
   consumeSubagentMarker,
@@ -256,9 +254,5 @@ describe('AISDLC-734 round 2 constraints', () => {
     }
     expect(existsSync(file)).toBe(false);
     expect(writes.join('')).toContain('could not bind marker');
-  });
-
-  it('PATCH_ID_EXCLUSIONS covers .ai-sdlc/reviews/', () => {
-    expect(PATCH_ID_EXCLUSIONS.some((e) => e.includes('.ai-sdlc/reviews'))).toBe(true);
   });
 });

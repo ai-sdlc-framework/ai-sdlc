@@ -19,14 +19,17 @@ references:
   - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/ai-sdlc-review.yml
   - .github/workflows/untrusted-pr-gate.yml
-  - scripts/verify-attestation.mjs
 priority: medium
 drift_log:
   - date: '2026-10-13'
     type: ref-deleted
     detail: 'Referenced file no longer exists: .github/workflows/isolated-review.yml'
     resolution: flagged
-drift_checked: '2026-10-13'
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

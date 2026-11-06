@@ -1,7 +1,8 @@
 ---
 id: AISDLC-848
 title: >-
-  step 10.5 commits pending transcript leaves before the pre-sign rebase and names the git refusal instead of conflict unknown
+  step 10.5 commits pending transcript leaves before the pre-sign rebase and
+  names the git refusal instead of conflict unknown
 status: Done
 assignee: []
 created_date: '2026-10-13'
@@ -14,9 +15,14 @@ references:
   - pipeline-cli/src/next-step/next-step.ts
   - pipeline-cli/src/next-step/ship.test.ts
   - pipeline-cli/src/steps/07-build-review-prompts.ts
-  - pipeline-cli/src/attestation/patch-id.ts
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/patch-id.ts'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

@@ -466,8 +466,6 @@ describe('Stage 4 signer — approved report passes all pre-key gates', () => {
       // Real runCleanRoomSigner — not mocked
       const result = runCleanRoomSigner({
         reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'ucvg-pr-101',
         headSha: APPROVED_REPORT.headSha,
         workDir: tmpDir,
       });
@@ -504,8 +502,6 @@ describe('Stage 4 signer — unapproved report refused (phase: consensus-rejecte
 
       const result = runCleanRoomSigner({
         reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'ucvg-pr-101',
         headSha: UNAPPROVED_REPORT.headSha,
         workDir: tmpDir,
       });
@@ -528,8 +524,6 @@ describe('Stage 4 signer — unapproved report refused (phase: consensus-rejecte
 
       const result = runCleanRoomSigner({
         reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'ucvg-pr-101',
         headSha: UNAPPROVED_REPORT.headSha,
         workDir: tmpDir,
       });
@@ -551,8 +545,6 @@ describe('Stage 4 signer — unapproved report refused (phase: consensus-rejecte
 
       const result = runCleanRoomSigner({
         reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'ucvg-pr-101',
         headSha: INJECTION_REPORT.headSha,
         workDir: tmpDir,
       });
@@ -598,8 +590,6 @@ describe('Stage 4 signer — unapproved report refused (phase: consensus-rejecte
 
       const result = runCleanRoomSigner({
         reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'ucvg-pr-101',
         headSha: APPROVED_REPORT.headSha,
         workDir: tmpDir,
       });
@@ -624,8 +614,6 @@ describe('Stage 4 signer — fail-closed on missing artifact', () => {
     try {
       const result = runCleanRoomSigner({
         reportArtifactPath: join(tmpDir, 'nonexistent.unsigned.json'),
-        repoRoot: tmpDir,
-        taskId: 'ucvg-pr-999',
         headSha: 'a'.repeat(40),
         workDir: tmpDir,
       });
@@ -648,8 +636,6 @@ describe('Stage 4 signer — fail-closed on missing artifact', () => {
 
       const result = runCleanRoomSigner({
         reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'ucvg-pr-999',
         headSha: 'a'.repeat(40),
         workDir: tmpDir,
       });
@@ -706,8 +692,6 @@ describe('Stage 4 signer — isolation invariant (refuses when sandbox sentinels
 
       const result = runCleanRoomSigner({
         reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'ucvg-pr-101',
         headSha: APPROVED_REPORT.headSha,
         workDir: tmpDir,
       });
@@ -731,8 +715,6 @@ describe('Stage 4 signer — isolation invariant (refuses when sandbox sentinels
 
       const result = runCleanRoomSigner({
         reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'ucvg-pr-101',
         headSha: APPROVED_REPORT.headSha,
         workDir: tmpDir,
       });
@@ -755,8 +737,6 @@ describe('Stage 4 signer — isolation invariant (refuses when sandbox sentinels
 
       const result = runCleanRoomSigner({
         reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'ucvg-pr-101',
         headSha: APPROVED_REPORT.headSha,
         workDir: tmpDir,
       });
@@ -783,8 +763,6 @@ describe('Stage 4 signer — tampered report rejected at Zod boundary (before ke
 
       const result = runCleanRoomSigner({
         reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'ucvg-pr-101',
         headSha: APPROVED_REPORT.headSha,
         workDir: tmpDir,
       });
@@ -808,8 +786,6 @@ describe('Stage 4 signer — tampered report rejected at Zod boundary (before ke
       // Pass a different headSha than what's in the report
       const result = runCleanRoomSigner({
         reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'ucvg-pr-101',
         headSha: 'c'.repeat(40), // different from APPROVED_REPORT.headSha ('a' * 40)
         workDir: tmpDir,
       });
@@ -833,8 +809,6 @@ describe('Stage 4 signer — tampered report rejected at Zod boundary (before ke
 
       const result = runCleanRoomSigner({
         reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'ucvg-pr-101',
         headSha: APPROVED_REPORT.headSha,
         workDir: tmpDir,
       });

@@ -1,6 +1,8 @@
 ---
 id: AISDLC-999
-title: 'Drop this task''s earlier attestation chore commits before re-signing, as a non-interactive playbook action'
+title: >-
+  Drop this task's earlier attestation chore commits before re-signing, as a
+  non-interactive playbook action
 status: Done
 assignee: []
 created_date: '2026-10-20'
@@ -11,14 +13,24 @@ labels:
 dependencies: []
 references:
   - pipeline-cli/src/next-step/ship.ts
-  - scripts/squash-attestation-chores.sh
   - scripts/pre-push-fixups.sh
-  - ai-sdlc-plugin/scripts/sign-attestation-if-consumer.sh
   - pipeline-cli/src/hierarchy/playbook.ts
   - pipeline-cli/src/dispatch/types.ts
   - docs/operations/attestation-troubleshooting.md
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/squash-attestation-chores.sh'
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation-if-consumer.sh
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

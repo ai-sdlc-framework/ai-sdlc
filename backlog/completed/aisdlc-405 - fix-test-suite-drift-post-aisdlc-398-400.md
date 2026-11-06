@@ -1,13 +1,23 @@
 ---
 id: AISDLC-405
-title: 'fix(test): clean up test suite drift from AISDLC-398 (patch-id) + AISDLC-400 (queue drop)'
+title: >-
+  fix(test): clean up test suite drift from AISDLC-398 (patch-id) + AISDLC-400
+  (queue drop)
 status: Done
-labels: [test, ci, operator-merge]
+labels:
+  - test
+  - ci
+  - operator-merge
 references:
   - .github/workflows/__tests__/ai-sdlc-review.test.mjs
-  - scripts/verify-attestation.test.mjs
 priority: high
 permittedExternalPaths: []
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.test.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

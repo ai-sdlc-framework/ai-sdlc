@@ -442,7 +442,7 @@ describe('/ai-sdlc execute — next-step implements what the body used to narrat
 
   it('the pre-sign rebase, signing and push stay on the sanctioned paths', () => {
     const ship = src('ship.ts');
-    assert.match(ship, /print-content-hash/);
+    assert.doesNotMatch(ship, /print-content-hash/, 'RFC-0061 phase 3: no content-hash oracle');
     assert.doesNotMatch(
       ship,
       /sign-attestation-if-consumer\.sh/,

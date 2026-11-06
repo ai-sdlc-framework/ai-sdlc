@@ -1,7 +1,8 @@
 ---
 id: AISDLC-534.1
 title: >-
-  docs-only pattern duplicated in is-docs-only-changeset.mjs and review-scope-core.mjs: make one source of truth
+  docs-only pattern duplicated in is-docs-only-changeset.mjs and
+  review-scope-core.mjs: make one source of truth
 status: Done
 assignee: []
 created_date: '2026-10-11'
@@ -14,10 +15,22 @@ dependencies:
 references:
   - scripts/is-docs-only-changeset.mjs
   - pipeline-cli/attestation-core/review-scope-core.mjs
-  - pipeline-cli/src/attestation/review-scope.ts
-  - pipeline-cli/src/attestation/review-scope.test.ts
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/attestation/review-scope.ts
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/attestation/review-scope.test.ts
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

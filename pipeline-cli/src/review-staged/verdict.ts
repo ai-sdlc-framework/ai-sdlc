@@ -9,7 +9,7 @@
  * @module review-staged/verdict
  */
 
-import { STAGED_REVIEWER_NAME } from '../attestation/merkle.js';
+import { STAGED_REVIEWER_NAME } from '../attestation/staged-review.js';
 import type { ReviewerFinding, ReviewerVerdict } from '../types.js';
 import type { StagedVerdict } from '../review-synth/types.js';
 import { DEFAULT_HARNESS } from '../harness-defaults.js';
