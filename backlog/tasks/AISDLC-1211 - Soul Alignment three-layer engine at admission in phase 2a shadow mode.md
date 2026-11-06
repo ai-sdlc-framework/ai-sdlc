@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1211
 title: 'Soul Alignment three-layer engine at admission in phase 2a shadow mode'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:
