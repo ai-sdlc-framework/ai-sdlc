@@ -30,6 +30,7 @@ export {
   ensureBoardDirs,
   isOnBoard,
   listBoard,
+  rankingShadow,
   listResumeSignals,
   loadEligibilityContext,
   OneClaimPerWorkerError,

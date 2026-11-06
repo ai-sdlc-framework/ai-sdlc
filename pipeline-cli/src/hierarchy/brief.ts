@@ -75,10 +75,16 @@ const FIXED_GROUPS: { match: (file: string) => boolean; name: string }[] = [
 
 /**
  * Backlog priority word to the integer the dispatch manifest carries.
- * Lower runs earlier (claim order: wave, then priority, then enqueue time).
+ * Lower runs earlier (claim order: wave, then priority, then enqueue time);
+ * `critical` is first.
  * Any other value yields no priority.
  */
-export const PRIORITY_RANK: Readonly<Record<string, number>> = { high: 1, medium: 2, low: 3 };
+export const PRIORITY_RANK: Readonly<Record<string, number>> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
 
 /** Control, bidi-override and line-separator characters that must not reach the Markdown. */
 const UNSAFE_TEXT =

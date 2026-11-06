@@ -36,6 +36,7 @@ import path from 'node:path';
 
 import { buildDependencyGraph } from '../deps/dependency-graph.js';
 import { activeClaimFloor, PRIORITY_RANK } from '../hierarchy/budget.js';
+import { buildRankKeys, compareRankKeys, readRankingMode, shadowLine } from './ranking.js';
 
 import { now as clockNow } from '../clock.js';
 import { reportCapabilityOutcome } from '@ai-sdlc/reference';
@@ -1061,14 +1062,61 @@ function orderEligible(
     eligible.push({ fullPath: candidate.fullPath, manifest, mtimeMs: candidate.mtimeMs });
   }
 
-  // Array.prototype.sort is stable; candidates already arrive oldest-first.
+  if (rankingModeOf(boardDir) === 'effective-priority') sortEffective(boardDir, eligible, wallNow);
+  else sortLegacy(eligible);
+  return eligible;
+}
+
+type Ranked = { fullPath: string; manifest: DispatchManifest; mtimeMs: number };
+
+/** Legacy order: wave, manifest priority, then enqueue time (stable sort, oldest first). */
+function sortLegacy(eligible: Ranked[]): void {
   eligible.sort(
     (a, b) =>
       (a.manifest.wave ?? 0) - (b.manifest.wave ?? 0) ||
       comparePriority(a.manifest.priority, b.manifest.priority) ||
       a.mtimeMs - b.mtimeMs,
   );
-  return eligible;
+}
+
+function rankingModeOf(boardDir: string): 'legacy' | 'effective-priority' {
+  return readRankingMode(repoRootOfBoard(boardDir));
+}
+
+/** RFC-0062 order: wave, effective priority, critical-path length, age bonus, id. No mtime. */
+function sortEffective(boardDir: string, eligible: Ranked[], nowMs: number): void {
+  const keyOf = buildRankKeys(repoRootOfBoard(boardDir), nowMs);
+  const keyed = eligible.map((e) => ({
+    e,
+    k: keyOf({
+      taskId: e.manifest.taskId,
+      ...(e.manifest.wave !== undefined ? { wave: e.manifest.wave } : {}),
+      ...(typeof e.manifest.priority === 'number' ? { priority: e.manifest.priority } : {}),
+      dispatchedAt: e.manifest.dispatchedAt,
+    }),
+  }));
+  keyed.sort((a, b) => compareRankKeys(a.k, b.k));
+  eligible.splice(0, eligible.length, ...keyed.map((x) => x.e));
+}
+
+/**
+ * Shadow comparison (legacy mode only): one line naming the first divergence
+ * between the legacy and effective-priority orders, or `ranking: identical`.
+ * Returns undefined when the board runs `effective-priority` already.
+ */
+export function rankingShadow(
+  boardDir: string,
+  now: () => Date = () => clockNow(),
+): string | undefined {
+  if (rankingModeOf(boardDir) !== 'legacy') return undefined;
+  const candidates = listManifestCandidates(path.join(boardDir, 'queue'));
+  const legacy = orderEligible(boardDir, candidates, undefined, now);
+  const alt = [...legacy];
+  sortEffective(boardDir, alt, now().getTime());
+  return shadowLine(
+    legacy.map((e) => e.manifest.taskId),
+    alt.map((e) => e.manifest.taskId),
+  );
 }
 
 /** One row of `peek --order` (AISDLC-904). */

@@ -1786,7 +1786,7 @@ describe('runDispatchCli ordering commands', () => {
     const { captured } = await captureStdout(() =>
       runDispatchCli(['board', '--board-dir', boardDir]),
     );
-    expect(captured.raw).toBe('board is empty\n');
+    expect(captured.raw).toBe('board is empty\nranking: identical\n');
   });
 
   it('unblocks a parked manifest', async () => {

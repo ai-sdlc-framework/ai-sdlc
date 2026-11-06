@@ -171,6 +171,7 @@ import {
   formatResumeFeedback,
   MAX_NOTE_CHARS,
   listBoard,
+  rankingShadow,
   loadEligibilityContext,
   listResumeSignals,
   OneClaimPerWorkerError,
@@ -1524,6 +1525,8 @@ export async function runDispatchCli(
         return 0;
       }
       process.stdout.write(formatBoard(entries));
+      const shadow = rankingShadow(boardDir);
+      if (shadow) process.stdout.write(`${shadow}\n`);
       return 0;
     }
 
