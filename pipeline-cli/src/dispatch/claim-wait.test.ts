@@ -114,7 +114,8 @@ describe('claimWithWait', () => {
       },
     });
     expect(attempts).toBeGreaterThanOrEqual(2);
-    expect(attempts).toBeLessThanOrEqual(5);
+    // fs.watch can add spurious wake-ups under load; a busy loop would be hundreds.
+    expect(attempts).toBeLessThanOrEqual(10);
   });
 });
 

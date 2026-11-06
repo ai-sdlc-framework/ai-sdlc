@@ -28,6 +28,7 @@ function opts(
 ): ResumeDecisionOpts {
   return {
     requireThree: false,
+    pullRequest: 7,
     headVerdict: async () => status,
     earlierHeads: async () => earlier,
     ...extra,
@@ -36,6 +37,7 @@ function opts(
 
 function script(delta = 'docs/readme.md\0'): void {
   h.runner.on(/cat-file -e/, ok());
+  h.runner.on(/merge-base --is-ancestor/, ok());
   h.runner.on(/rev-parse HEAD/, ok(`${SHA}\n`));
   h.runner.on(/diff --name-only/, ok(delta));
 }
@@ -81,8 +83,79 @@ describe('decideResumeReview (AISDLC-947, RFC-0061 Phase 2)', () => {
     expect(d.branch).toBe('delta');
     if (d.branch !== 'delta') return;
     expect(d.lastHead).toBe(LAST);
-    expect(d.reviewers).toEqual(['correctness-reviewer']);
-    expect(d.note).toBe('review-delta: correctness-reviewer');
+    expect(d.reviewers).toEqual(['correctness-reviewer', 'security-reviewer']);
+    expect(d.note).toBe('review-delta: correctness-reviewer, security-reviewer');
+  });
+
+  it('three-reviewer mode on a delta runs code, test and security', async () => {
+    script('docs/readme.md\0');
+    const d = await decideResumeReview(
+      h.ctx,
+      h.root,
+      opts(missing, [LAST], { requireThree: true }),
+    );
+    expect(d.branch === 'delta' && d.reviewers).toEqual([
+      'code-reviewer',
+      'test-reviewer',
+      'security-reviewer',
+    ]);
+  });
+
+  it('no PR number means FULL and the lookup is never made (AISDLC-1220)', async () => {
+    script();
+    let called = false;
+    const d = await decideResumeReview(
+      h.ctx,
+      h.root,
+      opts(missing, [LAST], {
+        pullRequest: null,
+        earlierHeads: async () => {
+          called = true;
+          return [LAST];
+        },
+      }),
+    );
+    expect(d.branch).toBe('full');
+    expect(called).toBe(false);
+  });
+
+  it('earlier heads are looked up for the PR number given', async () => {
+    script();
+    let seen = 0;
+    await decideResumeReview(
+      h.ctx,
+      h.root,
+      opts(missing, [LAST], {
+        earlierHeads: async (_c, _d, _h, pr) => {
+          seen = pr;
+          return [LAST];
+        },
+      }),
+    );
+    expect(seen).toBe(7);
+  });
+
+  it('resolves the PR number from gh when not injected', async () => {
+    script();
+    h.runner.on(/pr view/, ok('42\n'));
+    let seen = 0;
+    const o = opts(missing, [LAST], {
+      earlierHeads: async (_c, _d, _h, pr) => {
+        seen = pr;
+        return [LAST];
+      },
+    });
+    delete o.pullRequest;
+    await decideResumeReview(h.ctx, h.root, o);
+    expect(seen).toBe(42);
+  });
+
+  it('a failing gh lookup is FULL', async () => {
+    script();
+    h.runner.on(/pr view/, fail('no pr', 1));
+    const o = opts(missing);
+    delete o.pullRequest;
+    expect((await decideResumeReview(h.ctx, h.root, o)).branch).toBe('full');
   });
 
   it('trust-chain delta brings the security reviewer', async () => {
@@ -115,6 +188,12 @@ describe('decideResumeReview (AISDLC-947, RFC-0061 Phase 2)', () => {
     expect((await decideResumeReview(h.ctx, h.root, opts(missing))).branch).toBe('full');
   });
 
+  it('an earlier head that is not an ancestor of HEAD is never the baseline', async () => {
+    h.runner.on(/merge-base --is-ancestor/, fail('not ancestor', 1));
+    script();
+    expect((await decideResumeReview(h.ctx, h.root, opts(missing))).branch).toBe('full');
+  });
+
   it('an unknown head status falls through to the earlier-head delta or full', async () => {
     script();
     const d = await decideResumeReview(h.ctx, h.root, opts({ status: 'unknown', headSha: '' }));
@@ -127,6 +206,7 @@ describe('decideResumeReview (AISDLC-947, RFC-0061 Phase 2)', () => {
     expect((await decideResumeReview(h.ctx, h.root, opts(missing))).branch).toBe('full');
     const h2 = makeHarness();
     h2.runner.on(/cat-file -e/, ok());
+    h2.runner.on(/merge-base --is-ancestor/, ok());
     h2.runner.on(/rev-parse HEAD/, ok(`${SHA}\n`));
     h2.runner.on(/diff --name-only/, ok(''));
     expect((await decideResumeReview(h2.ctx, h2.root, opts(missing))).branch).toBe('full');

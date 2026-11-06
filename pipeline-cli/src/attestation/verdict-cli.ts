@@ -71,7 +71,9 @@ export async function listEarlierSubjects(
       const parsed = VerdictRecordSchema.parse(JSON.parse(rec.stdout));
       if (parsed.verdict !== 'approved' || !parsed.coverage.satisfied) continue;
       const pr = parsed.subject.pullRequest;
-      if (pullRequest !== undefined && pr !== 0 && pr !== pullRequest) continue;
+      if (pullRequest !== undefined && pr !== pullRequest && pr !== 0) {
+        continue;
+      }
       found.push({
         headSha: parsed.subject.headSha,
         baseSha: parsed.subject.baseSha,
