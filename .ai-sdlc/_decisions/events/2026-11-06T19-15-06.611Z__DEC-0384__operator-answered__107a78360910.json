@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-11-06T19:15:06.611Z","decisionId":"DEC-0384","chosenOptionId":"pinned-build-reentry","rationale":"Same ruling as DEC-0383 re-scoped to task:AISDLC-1196 for the loop guard; class (a)","by":"planner"}
