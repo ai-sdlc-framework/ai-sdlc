@@ -1312,6 +1312,19 @@ export function writeVerdict(boardDir: string, verdict: DispatchVerdict): string
 }
 
 /**
+ * Move a task's failed verdict to `failed/history/` (AISDLC-1156): a repaired and delivered task keeps the
+ * failure as history, and the failed verdict stops being the live state. A no-op when there is none.
+ */
+export function archiveFailedVerdict(boardDir: string, taskId: string, now: Date): void {
+  if (!TASK_ID_RE.test(taskId)) return;
+  const from = boardFile(boardDir, 'failed', taskId, VERDICT_SUFFIX);
+  if (!existsSync(from)) return;
+  const dir = path.join(boardDir, 'failed', 'history');
+  mkdirSync(dir, { recursive: true });
+  renameSync(from, path.join(dir, `${taskId}.${now.getTime()}${VERDICT_SUFFIX}`));
+}
+
+/**
  * Worker-side: write/update the heartbeat state file at
  * `inflight/<task-id>.state.json`. Atomic write — partial heartbeats are
  * never visible to the sweeper.

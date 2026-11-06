@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1156
 title: 'Every failed verdict ends in a repair, a timeboxed decision or an operator notification: the dispatch playbook finishes a repaired push (verify, mark ready, delivered verdict), a stuck signed PR opens a stall that escalates and notifies, and route-to-planner stops being a terminal state'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-02'
 labels:
@@ -46,13 +46,36 @@ Velocity impact: a successful repair lands without a human; the two incidents ea
 
 ## Acceptance Criteria
 
-- [ ] AC-1: In `playbook.ts`, after a successful `rebase-push` (or any repair that pushes), the step verifies the attestation at the pushed head, runs the shared mark-ready path (AISDLC-1149 detection), writes a `delivered` verdict carrying `signedAt` and `prNumber`, and moves the task to the landing lane; the failed verdict is kept as history, not as the live state. Tests cover success and each refusal (verify fails, mark-ready refused) with a scripted runner.
-- [ ] AC-2: `reconcile.ts`: `route-to-planner` is no longer exempt from aging; a routing with no state change for `stuckAfterMinutes` (config, default 60) re-escalates once per threshold window as a stall, not as a repeated message. A routing record is written on every first route (the #2282 case where none was written is covered by a regression test).
-- [ ] AC-3: `drain-stall.ts` gains the stuck-PR signature: a failed verdict with `signedAt` or a review record and no delivered PR for `stuckAfterMinutes` opens a stall of kind `stuck-pr` with the PR number, head sha and cause; closing happens when the PR is delivered or landed. The hooks module sends the stall to the planner as today AND calls the stall-notice channel (`stall-notice.ts`) once per open stall.
-- [ ] AC-4: On opening a `stuck-pr` stall the tick files one `cli-decisions escalate` with `--route operational`, a timebox from config (default 4 h) and the repair command as the autonomous fallback; a second open on the same PR and head is a no-op. Covered by a test on the tick with a recording decision client.
-- [ ] AC-5: `status.ts` prints a `stuck` section (PR, cause, age, which of the three terminal states is missing) and `cli-hierarchy status --check` exits 1 when any entry is older than the threshold; `docs/operations/cli-hierarchy.md` documents the invariant, the config key and the exit code.
-- [ ] AC-6: The RFC-0051 §8 amendment paragraph (filed by the planner under DEC-0291 in a docs-lane PR) is referenced from the code comment at the invariant check, and the regression tests name the two incidents (#2246, #2282).
+- [x] AC-1: In `playbook.ts`, after a successful `rebase-push` (or any repair that pushes), the step verifies the attestation at the pushed head, runs the shared mark-ready path (AISDLC-1149 detection), writes a `delivered` verdict carrying `signedAt` and `prNumber`, and moves the task to the landing lane; the failed verdict is kept as history, not as the live state. Tests cover success and each refusal (verify fails, mark-ready refused) with a scripted runner.
+- [x] AC-2: `reconcile.ts`: `route-to-planner` is no longer exempt from aging; a routing with no state change for `stuckAfterMinutes` (config, default 60) re-escalates once per threshold window as a stall, not as a repeated message. A routing record is written on every first route (the #2282 case where none was written is covered by a regression test).
+- [x] AC-3: `drain-stall.ts` gains the stuck-PR signature: a failed verdict with `signedAt` or a review record and no delivered PR for `stuckAfterMinutes` opens a stall of kind `stuck-pr` with the PR number, head sha and cause; closing happens when the PR is delivered or landed. The hooks module sends the stall to the planner as today AND calls the stall-notice channel (`stall-notice.ts`) once per open stall.
+- [x] AC-4: On opening a `stuck-pr` stall the tick files one `cli-decisions escalate` with `--route operational`, a timebox from config (default 4 h) and the repair command as the autonomous fallback; a second open on the same PR and head is a no-op. Covered by a test on the tick with a recording decision client.
+- [x] AC-5: `status.ts` prints a `stuck` section (PR, cause, age, which of the three terminal states is missing) and `cli-hierarchy status --check` exits 1 when any entry is older than the threshold; `docs/operations/cli-hierarchy.md` documents the invariant, the config key and the exit code.
+- [x] AC-6: The RFC-0051 §8 amendment paragraph (filed by the planner under DEC-0291 in a docs-lane PR) is referenced from the code comment at the invariant check, and the regression tests name the two incidents (#2246, #2282).
 
 ## Notes
 
 Origin: operator ruling 2026-11-02 ~16:00Z ("the whole pipeline is dependent on a human to notice a failure... how can we stop this from happening in the future?"), planner trace of `playbook.ts`, `reconcile.ts`, `drain-stall.ts`, `human-attention.ts`, `stall-notice.ts` and the hooks module. Decision: DEC-0291. Depends on AISDLC-1154 (fast-forward fallback in Step 11) so the first repair shape needs no playbook push at all; the playbook path stays for the real-rebase shapes. Related: AISDLC-1155 (verify failures named), AISDLC-1149 (shared mark-ready detection), AISDLC-1150 (dispatch restart ordering).
+
+## Final Summary
+
+## Summary
+Fixed the round-1 review finding: `formatStatus` in `status.ts` spread the stuck lines twice, so a stuck PR printed the `stuck:` block twice. The duplicate spread is removed. I added an assertion in `stuck-pr.test.ts` that the PR #2282 line appears exactly once.
+
+## Changes
+- pipeline-cli/src/hierarchy/status.ts
+- pipeline-cli/src/hierarchy/stuck-pr.test.ts
+
+## Design decisions
+I rebased onto origin/main (already up to date). The lease push of the fix commit went through, and the pre-push hooks passed. PR #2308 was already open as a draft. The first push attempts were blocked by the governance hook because of the `cd &&` prefix, so I pushed with `git -C <worktree> push --force-with-lease`.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (246 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+

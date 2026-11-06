@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -1298,5 +1298,64 @@ describe('open PR aging sweep (AISDLC-1092)', () => {
     const report = reconcile([red()], { boardDir: board, execute, now: at(42) });
     expect(report.acted).toHaveLength(0);
     expect(execute).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('route-to-planner is not a terminal state (AISDLC-1156, DEC-0291)', () => {
+  const unowned = () =>
+    docsPr({
+      unownedReason: 'draft task PR with no live manifest on the board and no done verdict',
+    });
+  const at = (iso: string) => () => new Date(iso);
+  const run = (nowIso: string, extra: { stuckAfterMinutes?: number } = {}) =>
+    reconcile([unowned()], {
+      boardDir: board,
+      execute: () => ({ ran: false }),
+      now: at(nowIso),
+      ...extra,
+    });
+
+  it('writes a routing record on the first route (#2282 had none)', () => {
+    const r = run('2026-11-02T10:00:00.000Z');
+    expect(r.acted.filter((a) => a.action === 'route-to-planner')).toHaveLength(1);
+    const routes = JSON.parse(
+      readFileSync(path.join(board, 'landing', 'planner-routes.json'), 'utf-8'),
+    ) as { sent: string[] };
+    expect(routes.sent).toHaveLength(1);
+  });
+
+  it('routes an existing unchanged record that has no routing key yet (#2282)', () => {
+    run('2026-11-02T10:00:00.000Z');
+    rmSync(path.join(board, 'landing', 'planner-routes.json'));
+    const r = run('2026-11-02T10:01:00.000Z');
+    expect(r.acted.filter((a) => a.action === 'route-to-planner')).toHaveLength(1);
+    expect(r.stalls).toEqual([]);
+  });
+
+  it('re-escalates as a stall once per threshold window, not as a repeated message', () => {
+    run('2026-11-02T10:00:00.000Z');
+    const early = run('2026-11-02T10:30:00.000Z');
+    expect(early.stalls).toEqual([]);
+    expect(early.acted).toEqual([]);
+    const late = run('2026-11-02T11:01:00.000Z');
+    expect(late.stalls).toHaveLength(1);
+    expect(late.stalls[0]).toMatchObject({ ageMinutes: 61 });
+    expect(late.acted).toEqual([
+      {
+        pr: 20,
+        action: 'route-to-planner',
+        ran: false,
+        note: expect.stringContaining('stalled 61 min'),
+      },
+    ]);
+    // The window restarts: the next pass inside it stalls nothing, the one after it stalls again.
+    expect(run('2026-11-02T11:30:00.000Z').stalls).toEqual([]);
+    expect(run('2026-11-02T12:02:00.000Z').stalls).toHaveLength(1);
+    expect(readLanding(board, 20)?.stalledRoutes).toBe(2);
+  });
+
+  it('honours stuckAfterMinutes from the options', () => {
+    run('2026-11-02T10:00:00.000Z', { stuckAfterMinutes: 5 });
+    expect(run('2026-11-02T10:06:00.000Z', { stuckAfterMinutes: 5 }).stalls).toHaveLength(1);
   });
 });

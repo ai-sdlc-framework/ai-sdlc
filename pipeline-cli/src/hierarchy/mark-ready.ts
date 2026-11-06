@@ -209,3 +209,41 @@ export function markReadyAfterCodeql(
   }
   return report;
 }
+
+/**
+ * Flip one named draft PR ready (AISDLC-1156): the playbook's finishing step after a repair push.
+ * Applies the same refusals as the sweep: a superseded or conflicting PR is never flipped. An already
+ * ready PR is a success. This module never runs a merge command.
+ */
+export function markPrReady(
+  run: CommandRunner,
+  cwd: string,
+  pr: number,
+): { ok: boolean; reason?: string } {
+  const view = run(
+    'gh',
+    ['pr', 'view', String(pr), '--json', 'isDraft,mergeStateStatus,body,comments'],
+    { cwd },
+  );
+  const detail =
+    view.status === 0
+      ? parseJson<{
+          isDraft?: boolean;
+          mergeStateStatus?: string;
+          body?: string;
+          comments?: { body?: string }[];
+        }>(view.stdout)
+      : undefined;
+  if (!detail) return { ok: false, reason: 'the PR could not be read' };
+  if (detail.isDraft === false) return { ok: true };
+  if (SUPERSEDED_RE.test(detail.body ?? ''))
+    return { ok: false, reason: 'the body marks it superseded' };
+  if ((detail.comments ?? []).some((c) => SUPERSEDED_RE.test(c.body ?? ''))) {
+    return { ok: false, reason: 'a comment marks it superseded' };
+  }
+  if (detail.mergeStateStatus === 'DIRTY') {
+    return { ok: false, reason: 'the branch conflicts with main' };
+  }
+  const ready = run('gh', ['pr', 'ready', String(pr)], { cwd });
+  return ready.status === 0 ? { ok: true } : { ok: false, reason: 'gh pr ready failed' };
+}

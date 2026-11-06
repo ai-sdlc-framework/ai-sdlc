@@ -18,6 +18,10 @@
  * `-<slug>` suffix). `main`, `master` and every other ref are unreachable, in any
  * refspec spelling.
  *
+ * After a repair that pushed a signed, reviewed head, the playbook finishes the job without a model
+ * (AISDLC-1156, DEC-0291): it verifies the attestation at the pushed head, marks the PR ready, writes a
+ * `delivered` (success) verdict carrying `signedAt` and `prNumber`, and keeps the failed verdict as history.
+ *
  * A lease push also needs the trusted policy's `allowForcePush: leaseOnOwnBranch`,
  * a branch that is not on the policy's protected list, and a worktree that
  * verifies as a genuine one of this repository (checked before git runs in it).
@@ -151,7 +155,32 @@ const GIT_SUBCOMMANDS = new Set([
   'commit',
   'push',
   'log',
+  'rev-parse',
 ]);
+
+/** Result of one finishing step after a repair push. */
+export interface FinishStepResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * Steps that deliver a repaired push (AISDLC-1156). Absent means the playbook stops at the push, as before.
+ */
+export interface RepairFinishDeps {
+  /** Verifies the attestation at the pushed head against the base. `signedAt` is the envelope's signing time. */
+  verify: (a: {
+    worktree: string;
+    headSha: string;
+    baseSha: string;
+  }) =>
+    (FinishStepResult & { signedAt?: string }) | Promise<FinishStepResult & { signedAt?: string }>;
+  /** The shared mark-ready path: flips the draft PR ready, or refuses with a reason. */
+  markReady: (pr: number) => FinishStepResult | Promise<FinishStepResult>;
+  /** Writes the delivered verdict and moves the failed one to history. */
+  deliver: (delivered: DispatchVerdict) => void;
+  now: () => Date;
+}
 
 /** Collaborators of {@link runPlaybook}; every one is injected in tests. */
 export interface PlaybookDeps {
@@ -181,6 +210,8 @@ export interface PlaybookDeps {
    * worktree's branch is on origin but the recorded one differs.
    */
   correctBranch?: (taskId: string, branch: string) => void;
+  /** Finishes a repaired push of a signed task PR (AISDLC-1156). */
+  finish?: RepairFinishDeps;
 }
 
 /** What the playbook did with one failure. */
@@ -191,6 +222,8 @@ export interface PlaybookOutcome {
   result: 'done' | 'refused' | 'failed' | 'escalated';
   reason: string;
   branch?: string;
+  /** True when the repaired push was verified, marked ready and written as a delivered verdict. */
+  delivered?: boolean;
   /** Present when the failure goes to the planner. */
   escalation?: { taskId: string; message: string };
 }
@@ -329,6 +362,68 @@ export async function runPlaybook(
     return { taskId, action: 'escalate', result: 'escalated', reason };
   }
 
+  /**
+   * A repair pushed `branch`: record it and, for a signed task PR, verify, mark ready and deliver
+   * (the failed verdict stays as history). Any refusal escalates; nothing is left unowned (DEC-0291).
+   */
+  const finishPush = async (
+    action: 'rebase-push' | 'drop-chores',
+    reason: string,
+    worktree: string,
+    branch: string,
+  ): Promise<PlaybookOutcome> => {
+    record(action, 'done', reason, branch);
+    const fin = deps.finish;
+    const pr = verdict.prNumber;
+    if (
+      !fin ||
+      typeof verdict.signedAt !== 'string' ||
+      !verdict.signedAt ||
+      typeof pr !== 'number'
+    ) {
+      return { taskId, action, result: 'done', reason, branch };
+    }
+    const head = await git(['rev-parse', 'HEAD'], worktree);
+    const base = await git(['rev-parse', 'origin/main'], worktree);
+    const headSha = head.status === 0 ? head.stdout.trim() : '';
+    const baseSha = base.status === 0 ? base.stdout.trim() : '';
+    if (!/^[0-9a-f]{40}$/.test(headSha) || !/^[0-9a-f]{40}$/.test(baseSha)) {
+      return giveUp(action, 'failed', 'could not read the pushed head and origin/main', branch);
+    }
+    const verified = await fin.verify({ worktree, headSha, baseSha });
+    if (!verified.ok) {
+      const why = `the attestation does not verify at the pushed head: ${oneLine(verified.reason ?? 'no reason', 160)}`;
+      return giveUp(action, 'refused', why, branch);
+    }
+    const ready = await fin.markReady(pr);
+    if (!ready.ok) {
+      const why = `mark-ready refused: ${oneLine(ready.reason ?? 'no reason', 160)}`;
+      return giveUp(action, 'refused', why, branch);
+    }
+    const nowIso = fin.now().toISOString();
+    fin.deliver({
+      schemaVersion: 'v1',
+      taskId,
+      outcome: 'success',
+      commitSha: headSha,
+      pushedBranch: branch,
+      ...(verdict.prUrl ? { prUrl: verdict.prUrl } : {}),
+      prNumber: pr,
+      ...(verdict.verifications ? { verifications: verdict.verifications } : {}),
+      ...(verdict.acceptanceCriteriaMet
+        ? { acceptanceCriteriaMet: verdict.acceptanceCriteriaMet }
+        : {}),
+      notes: `delivered by the playbook after a repair push (${oneLine(String(verdict.cause ?? verdict.outcome), 60)}); the failed verdict is kept as history`,
+      completedAt: nowIso,
+      workerId: deps.workerId,
+      signedAt: verified.signedAt ?? verdict.signedAt,
+      prOpenedAt: nowIso,
+    });
+    const done = `${reason}; verified, marked #${pr} ready and wrote a delivered verdict`;
+    record(action, 'done', done, branch);
+    return { taskId, action, result: 'done', reason: done, branch, delivered: true };
+  };
+
   const c: Classification =
     forced === undefined
       ? classifyFailure(verdict)
@@ -434,8 +529,7 @@ export async function runPlaybook(
       return giveUp('drop-chores', 'failed', why, branch);
     }
     const reason = `dropped ${r.dropped.length} earlier attestation chore commit(s) and lease-pushed`;
-    record('drop-chores', 'done', reason, branch);
-    return { taskId, action: 'drop-chores', result: 'done', reason, branch };
+    return await finishPush('drop-chores', reason, worktree, branch);
   }
 
   // rebase-push
@@ -485,6 +579,5 @@ export async function runPlaybook(
     return giveUp('rebase-push', 'failed', `push failed: ${oneLine(pushed.stderr, 200)}`, branch);
   }
   const reason = `rebased onto origin/main (${c.shape})${droppedEnvelope ? ', dropped the stale envelope commit' : ''} and lease-pushed`;
-  record('rebase-push', 'done', reason, branch);
-  return { taskId, action: 'rebase-push', result: 'done', reason, branch };
+  return await finishPush('rebase-push', reason, worktree, branch);
 }

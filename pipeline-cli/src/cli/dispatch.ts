@@ -223,6 +223,8 @@ import { defaultRunner } from '../runtime/exec.js';
 import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
 import { startHostWatch } from '../hierarchy/host-liveness.js';
 import { startScheduler } from '../hierarchy/scheduler.js';
+import { resolveStuckAfterMinutes } from '../hierarchy/drain-stall.js';
+import { desktopNotice } from '../hierarchy/stall-notice.js';
 import { now as clockNow } from '../clock.js';
 import { closeSupersededPr } from '../hierarchy/superseded.js';
 import { createSystemRunner } from '../hierarchy/system-runner.js';
@@ -535,6 +537,28 @@ export async function runDispatchCli(
           /* observability must never stop the scheduler */
         }
       };
+      // AISDLC-1156: a routing unchanged past the threshold re-escalates as a stall and notifies the operator.
+      const runReconcile = (facts: ReconcilePr[]) => {
+        const report = reconcile(facts, {
+          boardDir,
+          execute,
+          mainHealth: gatherMainHealth(createSystemRunner(), cwd),
+          maxSameHeadActions,
+          closeSuperseded,
+          stuckAfterMinutes: resolveStuckAfterMinutes(boardDir),
+        });
+        for (const st of report.stalls) {
+          try {
+            desktopNotice(
+              createSystemRunner(),
+              `PR #${st.pr} routed to the planner ${st.ageMinutes} min ago and unchanged: ${st.note}`,
+            );
+          } catch {
+            /* a notifier failure must not stop the reconcile pass */
+          }
+        }
+        return report;
+      };
       const pass = (): ReconcilePr[] | undefined => {
         let facts: ReconcilePr[] | undefined;
         if (flags['facts']) {
@@ -580,15 +604,7 @@ export async function runDispatchCli(
           reconcile: () => {
             const facts = pass();
             if (!facts) return listLanding(boardDir).filter((r) => !r.landed).length;
-            out(
-              reconcile(facts, {
-                boardDir,
-                execute,
-                mainHealth: gatherMainHealth(createSystemRunner(), cwd),
-                maxSameHeadActions,
-                closeSuperseded,
-              }),
-            );
+            out(runReconcile(facts));
             logRows(facts);
             return listLanding(boardDir).filter((r) => !r.landed).length;
           },
@@ -600,15 +616,7 @@ export async function runDispatchCli(
         process.stderr.write('cli-dispatch reconcile: could not read the open PRs\n');
         return 1;
       }
-      out(
-        reconcile(facts, {
-          boardDir,
-          execute,
-          mainHealth: gatherMainHealth(createSystemRunner(), cwd),
-          maxSameHeadActions,
-          closeSuperseded,
-        }),
-      );
+      out(runReconcile(facts));
       logRows(facts);
       return 0;
     }
