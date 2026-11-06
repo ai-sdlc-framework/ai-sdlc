@@ -1,8 +1,8 @@
 ---
 id: RFC-0062
 title: Algorithm improvement directions, wire what exists, then calibrate, then learn
-status: Ready for Review
-lifecycle: Ready for Review
+status: Signed Off
+lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-11-06
 updated: 2026-11-06
@@ -15,8 +15,8 @@ requiresDocs: []
 
 # RFC-0062: Algorithm improvement directions, wire what exists, then calibrate, then learn
 
-**Status:** Ready for Review (v0.2, 2026-11-06): all six Open Questions resolved by operator walkthrough through the decision rubric and recorded as DEC-0385 to DEC-0390 (this PR). OQ-1 deletes the RFC-0010 §14 modules and adds a budget-pressure priority floor to the pacer; OQ-2 settles RFC-0014 on `max` and fixes the live rank as bucket, then critical path; OQ-3 sources labels from implicit outcomes with logged propensity; OQ-4 makes JCS canonicalisation and a cross-SDK fixture a Phase 1 task; OQ-5 scopes packing to one host and names the RFC-0060 dependencies; OQ-6 chooses a bounded native consistency check over Z3.
-**Lifecycle:** Ready for Review
+**Status:** Signed Off, Engineering + Operator (v0.2, 2026-11-06): all six Open Questions resolved by operator walkthrough through the decision rubric and recorded as DEC-0385 to DEC-0390 (this PR). OQ-1 deletes the RFC-0010 §14 modules and adds a budget-pressure priority floor to the pacer; OQ-2 settles RFC-0014 on `max` and fixes the live rank as bucket, then critical path; OQ-3 sources labels from implicit outcomes with logged propensity; OQ-4 makes JCS canonicalisation and a cross-SDK fixture a Phase 1 task; OQ-5 scopes packing to one host and names the RFC-0060 dependencies; OQ-6 chooses a bounded native consistency check over Z3.
+**Lifecycle:** Signed Off (Engineering + Operator, 2026-11-06; Product and Design pending)
 **Author:** Dominique Legault
 **Created:** 2026-11-06
 **Updated:** 2026-11-06
@@ -513,8 +513,8 @@ artefact against a heavy dependency in a CLI that adopters install.
 
 | Role | Owner | Status | Date |
 |---|---|---|---|
-| Engineering | Dominique Legault | pending | |
-| Operator | Dominique Legault | pending | |
+| Engineering | Dominique Legault | ✅ Signed (six OQs resolved through the full rubric; Phase 1 wires engines that exist before any new theory, with the three corrected premises built in) | 2026-11-06 |
+| Operator | Dominique Legault | ✅ Signed (every resolution recorded as a Decision record DEC-0385 to DEC-0390; Phase 3 start remains gated on the 200-per-cell count that OQ-3 now gives a clock) | 2026-11-06 |
 | Product | | pending | |
 | Design | | pending | |
 
