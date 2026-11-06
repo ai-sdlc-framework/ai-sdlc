@@ -155,8 +155,10 @@ describe('prepareReview with reviewerSet staged', () => {
     h.ctx.env.ARTIFACTS_DIR = artifacts;
     mkdirSync(artifacts, { recursive: true });
     scriptReviewPlumbing();
+    h.runner.on(/ls-remote/, ok('abc\trefs/ai-sdlc/verdicts/headsha\n'));
     const res = await prepareReview(h.ctx, state, 1, {
       planRound: () => ({
+        skipRoles: ['code', 'test', 'security', 'correctness', 'staged'],
         round: 2,
         mode: 'skip',
         reason: 'unchanged',

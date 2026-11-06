@@ -38,6 +38,8 @@ import { tmpdir } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(__dirname, 'resolve-pipeline-cli.sh');
+// Hermetic base env: the executor shell exports AI_SDLC_PIPELINE_REF, which would pin the build.
+const { AI_SDLC_PIPELINE_REF: _leakedPipelineRef, ...CLEAN_ENV } = process.env;
 const PIPELINE_CLI_REL = 'node_modules/@ai-sdlc/pipeline-cli/bin';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -709,7 +711,7 @@ describe('AISDLC-716: repo-own build preferred over plugin cache', () => {
       const r = spawnSync('bash', [SCRIPT], {
         cwd: repo,
         encoding: 'utf-8',
-        env: { ...process.env, HOME: cacheHome(base), PATH: fakePnpm(base, { ok: true }) },
+        env: { ...CLEAN_ENV, HOME: cacheHome(base), PATH: fakePnpm(base, { ok: true }) },
       });
       assert.equal(r.status, 0, r.stderr);
       assert.equal(normPath(r.stdout), normPath(join(repo, 'pipeline-cli', 'bin')));
@@ -726,7 +728,7 @@ describe('AISDLC-716: repo-own build preferred over plugin cache', () => {
       const r = spawnSync('bash', [SCRIPT, ...args], {
         cwd: repo,
         encoding: 'utf-8',
-        env: { ...process.env, HOME: cacheHome(base), PATH: fakePnpm(base, { ok: false }) },
+        env: { ...CLEAN_ENV, HOME: cacheHome(base), PATH: fakePnpm(base, { ok: false }) },
       });
       assert.equal(r.status, 1);
       assert.equal(r.stdout, '');
@@ -743,7 +745,7 @@ describe('AISDLC-716: repo-own build preferred over plugin cache', () => {
     const r = spawnSync('bash', [SCRIPT, '--strict'], {
       cwd: repo,
       encoding: 'utf-8',
-      env: { ...process.env, HOME: cacheHome(base) },
+      env: { ...CLEAN_ENV, HOME: cacheHome(base) },
     });
     assert.equal(r.status, 0);
     assert.equal(normPath(r.stdout), normPath(join(repo, 'pipeline-cli', 'bin')));

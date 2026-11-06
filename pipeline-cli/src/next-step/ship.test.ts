@@ -908,6 +908,34 @@ describe('shipTask: verdict ref on every approved push (AISDLC-1193)', () => {
     expect(pushLine()).toContain(`:refs/ai-sdlc/verdicts/${HEAD40}`);
   });
 
+  it('re-entered round after main moves: the lease push carries the verdict refspec (AISDLC-1196)', async () => {
+    scriptVerdictGit('https://github.com/o/r.git');
+    const sha = 'a'.repeat(40);
+    h.runner.on(/rev-parse refs\/remotes\/origin\//, ok(`${sha}\n`));
+    h.runner.on(/^git push -u --atomic --force-with-lease=/, ok(''));
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(/^git push -u --atomic origin/, fail('! [rejected] non-fast-forward', 1));
+    scriptShip();
+    const res = await shipTask(h.ctx, state);
+    expect(res.action).toBe('done');
+    const lease = cmds().find((c) => c.includes('--force-with-lease='));
+    expect(lease).toContain('--atomic');
+    expect(lease).toContain(`${'d'.repeat(40)}:refs/ai-sdlc/verdicts/${HEAD40}`);
+  });
+
+  it('lease push with no buildable refspec says the verdict ref was not pushed (AISDLC-1196)', async () => {
+    scriptVerdictGit('not-a-github-url');
+    const sha = 'a'.repeat(40);
+    h.runner.on(/rev-parse refs\/remotes\/origin\//, ok(`${sha}\n`));
+    h.runner.on(/^git push -u --force-with-lease=/, ok(''));
+    h.runner.on(/merge-base --is-ancestor/, fail('', 1));
+    h.runner.on(/^git push -u origin/, fail('! [rejected] non-fast-forward', 1));
+    scriptShip();
+    const res = await shipTask(h.ctx, state);
+    expect(res.action).toBe('done');
+    expect(res.action === 'done' && String(res.notes)).toContain('verdict ref not pushed');
+  });
+
   it('an approved push with no ref records the reason in the notes', async () => {
     scriptVerdictGit('/not/a/github/remote');
     scriptShip();

@@ -356,6 +356,7 @@ async function leasePushOwnRebaseShip(
   branch: string,
   env: NodeJS.ProcessEnv | undefined,
   seenBeforeFetch?: string,
+  verdictRefspec?: string | null,
 ): Promise<Awaited<ReturnType<NextStepContext['runner']>> | null> {
   const policy = loadOperationalPolicy(ctx.workDir, ctx.workDir);
   if (policy.forcePushMode === 'never') return null;
@@ -384,9 +385,11 @@ async function leasePushOwnRebaseShip(
     [
       'push',
       '-u',
+      ...(verdictRefspec ? ['--atomic'] : []),
       `--force-with-lease=refs/heads/${branch}:${recorded}`,
       'origin',
       `HEAD:refs/heads/${branch}`,
+      ...(verdictRefspec ? [verdictRefspec] : []),
     ],
     { cwd: wt, allowFailure: true, timeout: PUSH_TIMEOUT_MS, env },
   );
@@ -534,7 +537,13 @@ async function shipInner(
         state.branch,
         pushEnv,
         seenBeforeFetch,
+        verdictRef.refspec,
       );
+      if (!verdictRef.refspec && !needsHuman) {
+        verdictNotes.push(
+          'verdict ref not pushed on the lease fallback push: no verdict refspec could be built',
+        );
+      }
       if (lease) {
         pushRc = lease.code;
         pushErr = (lease.stderr || lease.stdout).trim();

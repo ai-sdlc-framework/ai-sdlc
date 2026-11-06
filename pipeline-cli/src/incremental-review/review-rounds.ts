@@ -263,6 +263,8 @@ export interface ReviewRoundPlan {
    * full diff, whatever `mode` says. Empty unless `mode` is `delta`.
    */
   deltaReviewers: string[];
+  /** Roles the anchor round covered; set only when `mode` is `skip` (AISDLC-1196). */
+  skipRoles?: string[];
 }
 
 export interface PlanReviewRoundInputs {
@@ -457,7 +459,12 @@ export function planReviewRound(inputs: PlanReviewRoundInputs): ReviewRoundPlan 
     const corroborated =
       roles.length > 0 && roles.every((role) => role !== null && ledgerAtAnchor.get(role) === true);
     if (!corroborated) return fullPlan(withHashes, 'review-uncorroborated');
-    return { ...fullPlan(withHashes, 'unchanged'), mode: 'skip', baseSha: anchor.sha };
+    return {
+      ...fullPlan(withHashes, 'unchanged'),
+      mode: 'skip',
+      baseSha: anchor.sha,
+      skipRoles: roles.filter((r): r is NonNullable<typeof r> => r !== null),
+    };
   }
 
   // Reachability: the last-reviewed commit must still be an ancestor of HEAD.
@@ -573,6 +580,27 @@ export function planReviewRound(inputs: PlanReviewRoundInputs): ReviewRoundPlan 
     deltaSize: decision.deltaSize,
     deltaDiff,
   };
+}
+
+/**
+ * AISDLC-1196: a `skip` plan only stands when the anchor covered every required reviewer and
+ * the head already has a verdict ref; otherwise the round runs `full`, with the reason named.
+ */
+export function guardSkipPlan(
+  plan: ReviewRoundPlan,
+  requiredRoles: string[],
+  verdictRefExists: boolean,
+): ReviewRoundPlan {
+  if (plan.mode !== 'skip') return plan;
+  const covered = new Set(plan.skipRoles ?? []);
+  const required = requiredRoles.map((r) => normalizeReviewerRole(r) ?? r);
+  if (required.some((r) => !covered.has(r))) {
+    return { ...plan, mode: 'full', reason: 'reviewer-missing', baseSha: null, skipRoles: [] };
+  }
+  if (!verdictRefExists) {
+    return { ...plan, mode: 'full', reason: 'no-verdict-ref', baseSha: null, skipRoles: [] };
+  }
+  return plan;
 }
 
 /** Default git runner for the review paths (`execFileSync`, large buffer). */
