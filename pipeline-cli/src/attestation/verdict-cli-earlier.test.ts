@@ -50,15 +50,8 @@ describe('listEarlierSubjects pull-request scoping (AISDLC-1220)', () => {
   const C = 'e'.repeat(40);
   const records = { [A]: rec(A, 7), [B]: rec(B, 0), [C]: rec(C, 9) };
 
-  it('lenient mode keeps same-PR and unscoped (0) records', async () => {
+  it('keeps same-PR and unscoped (0) records, drops other PRs', async () => {
     const r = await listEarlierSubjects(runnerWith(records), '/x', 'f'.repeat(40), 7);
     expect(r.map((x) => x.headSha).sort()).toEqual([A, B].sort());
-  });
-
-  it('strict mode keeps only records of the same PR', async () => {
-    const r = await listEarlierSubjects(runnerWith(records), '/x', 'f'.repeat(40), 7, {
-      strictPullRequest: true,
-    });
-    expect(r.map((x) => x.headSha)).toEqual([A]);
   });
 });

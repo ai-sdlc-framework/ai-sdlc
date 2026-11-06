@@ -37,6 +37,7 @@ function opts(
 
 function script(delta = 'docs/readme.md\0'): void {
   h.runner.on(/cat-file -e/, ok());
+  h.runner.on(/merge-base --is-ancestor/, ok());
   h.runner.on(/rev-parse HEAD/, ok(`${SHA}\n`));
   h.runner.on(/diff --name-only/, ok(delta));
 }
@@ -187,6 +188,12 @@ describe('decideResumeReview (AISDLC-947, RFC-0061 Phase 2)', () => {
     expect((await decideResumeReview(h.ctx, h.root, opts(missing))).branch).toBe('full');
   });
 
+  it('an earlier head that is not an ancestor of HEAD is never the baseline', async () => {
+    h.runner.on(/merge-base --is-ancestor/, fail('not ancestor', 1));
+    script();
+    expect((await decideResumeReview(h.ctx, h.root, opts(missing))).branch).toBe('full');
+  });
+
   it('an unknown head status falls through to the earlier-head delta or full', async () => {
     script();
     const d = await decideResumeReview(h.ctx, h.root, opts({ status: 'unknown', headSha: '' }));
@@ -199,6 +206,7 @@ describe('decideResumeReview (AISDLC-947, RFC-0061 Phase 2)', () => {
     expect((await decideResumeReview(h.ctx, h.root, opts(missing))).branch).toBe('full');
     const h2 = makeHarness();
     h2.runner.on(/cat-file -e/, ok());
+    h2.runner.on(/merge-base --is-ancestor/, ok());
     h2.runner.on(/rev-parse HEAD/, ok(`${SHA}\n`));
     h2.runner.on(/diff --name-only/, ok(''));
     expect((await decideResumeReview(h2.ctx, h2.root, opts(missing))).branch).toBe('full');
