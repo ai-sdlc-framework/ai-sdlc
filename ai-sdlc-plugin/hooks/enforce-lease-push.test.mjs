@@ -25,23 +25,26 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const hookScript = join(__dirname, 'enforce-blocked-actions.js');
 
-// AISDLC-1183: hermetic against an executor shell. These session variables decide the
-// lease-push preflight; the suites build every hook env explicitly, so drop any that a
-// runner without `--import vitest.git-env.setup.mjs` (plain `node --test`) inherits.
-const SESSION_ENV_VARS = [
-  'AI_SDLC_HIERARCHY_SESSION',
-  'AI_SDLC_HIERARCHY_ROLE',
-  'AI_SDLC_EXECUTOR_TASK',
-  'AI_SDLC_ACTIVE_TASK_ID',
-  'CLAUDE_PROJECT_DIR',
-  'AI_SDLC_GH_CALL_LOG',
-  'AI_SDLC_WORKFLOW_STATE',
-];
-for (const k of SESSION_ENV_VARS) delete process.env[k];
+// AISDLC-1183: the suite must pass from an executor shell. Every child process here gets an
+// explicit env (gitEnv plus per-test extras), so session variables cannot reach the hook through
+// spawn; the only carriers are the runner's own process.env (scrubbed by vitest.git-env.setup.mjs
+// under `pnpm test`) and files. This test re-runs the file with the variables exported and
+// asserts it still passes, so a regression in either path fails here.
+const SESSION_ENV = {
+  AI_SDLC_HIERARCHY_SESSION: 'ai-sdlc-executor-leak-probe',
+  AI_SDLC_HIERARCHY_ROLE: 'executor',
+  AI_SDLC_EXECUTOR_TASK: 'AISDLC-9999',
+  AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-9999',
+};
 
-describe('hermetic env (AISDLC-1183)', () => {
-  it('inherits no executor session variables', () => {
-    for (const k of SESSION_ENV_VARS) assert.equal(process.env[k], undefined, k);
+describe('executor session env does not leak (AISDLC-1183)', () => {
+  it('suite passes with hierarchy and task variables exported', { timeout: 170_000 }, () => {
+    if (process.env.AI_SDLC_LEAK_PROBE === '1') return; // inner run: do not recurse
+    const r = spawnSync(process.execPath, ['--test', fileURLToPath(import.meta.url)], {
+      env: { ...process.env, ...SESSION_ENV, AI_SDLC_LEAK_PROBE: '1' },
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, (r.stdout || '') + (r.stderr || ''));
   });
 });
 
