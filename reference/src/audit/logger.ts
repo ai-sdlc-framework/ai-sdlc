@@ -6,6 +6,7 @@
 
 import { createHash } from 'node:crypto';
 import { canonicalize } from './canonical.js';
+import { AUDIT_SCHEMA_VERSION } from './types.js';
 import type { AuditEntry, AuditFilter, AuditLog, AuditSink, IntegrityResult } from './types.js';
 
 let counter = 0;
@@ -24,8 +25,7 @@ function matchesFilter(entry: AuditEntry, filter: AuditFilter): boolean {
   return true;
 }
 
-/** Current audit entry schema version (RFC 8785 JCS canonical hashing). */
-export const AUDIT_SCHEMA_VERSION = '2';
+export { AUDIT_SCHEMA_VERSION };
 
 /**
  * Compute a SHA-256 hash for an audit entry, chaining to the previous hash.
