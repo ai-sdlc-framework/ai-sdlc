@@ -1,12 +1,4 @@
 export {
-  runWorkerPool,
-  type WorkItem,
-  type WorkerPoolDeps,
-  type WorkerPoolEvent,
-  type WorkerPoolResult,
-} from './worker-pool.js';
-
-export {
   withMergeGate,
   forceReleaseMergeGate,
   isBranchUpToDate,

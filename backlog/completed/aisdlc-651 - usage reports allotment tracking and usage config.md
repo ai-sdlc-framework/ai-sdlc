@@ -1,7 +1,8 @@
 ---
 id: AISDLC-651
 title: >-
-  RFC-0050 Part A: cli-usage report, window/task/context views, weighted units, snapshots, allotment change detection
+  RFC-0050 Part A: cli-usage report, window/task/context views, weighted units,
+  snapshots, allotment change detection
 status: Done
 assignee: []
 created_date: '2026-09-30'
@@ -17,13 +18,18 @@ dependencies:
 references:
   - spec/rfcs/RFC-0050-usage-ledger-and-model-routing.md
   - pipeline-cli/src/cli/cost-report.ts
-  - orchestrator/src/scheduling/ledger.ts
   - orchestrator/src/scheduling/tier-analysis.ts
   - pipeline-cli/src/orchestrator/events.ts
   - spec/schemas/orchestrator-events.v1.schema.json
   - orchestrator/src/cli/commands/doctor-checks.ts
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: orchestrator/src/scheduling/ledger.ts'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

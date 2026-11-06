@@ -35,6 +35,7 @@ import {
 import path from 'node:path';
 
 import { buildDependencyGraph } from '../deps/dependency-graph.js';
+import { activeClaimFloor, PRIORITY_RANK } from '../hierarchy/budget.js';
 
 import { now as clockNow } from '../clock.js';
 import { reportCapabilityOutcome } from '@ai-sdlc/reference';
@@ -1024,6 +1025,10 @@ function orderEligible(
 ): { fullPath: string; manifest: DispatchManifest; mtimeMs: number }[] {
   const wallNow = now().getTime();
   const ctx = loadEligibilityContext(boardDir);
+  // Budget-pressure floor (RFC-0062 OQ-1): below the floor nothing is claimed while the pacer projects past 100%.
+  const floor = activeClaimFloor(boardDir, wallNow);
+  const floorRoot = floor ? repoRootOfBoard(boardDir) : undefined;
+  const floorGraph = floorRoot ? buildDependencyGraph({ workDir: floorRoot }) : undefined;
   const eligible: { fullPath: string; manifest: DispatchManifest; mtimeMs: number }[] = [];
   for (const candidate of candidates) {
     const manifest = readManifest(candidate.fullPath);
@@ -1048,6 +1053,11 @@ function orderEligible(
     }
 
     if (!checkEligibility(manifest, ctx).eligible) continue;
+    if (floor && floorGraph) {
+      const rank =
+        PRIORITY_RANK[floorGraph.nodes.get(manifest.taskId.toLowerCase())?.priority ?? ''];
+      if (rank === undefined || rank > PRIORITY_RANK[floor]) continue;
+    }
     eligible.push({ fullPath: candidate.fullPath, manifest, mtimeMs: candidate.mtimeMs });
   }
 
