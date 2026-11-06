@@ -443,7 +443,11 @@ describe('/ai-sdlc execute — next-step implements what the body used to narrat
   it('the pre-sign rebase, signing and push stay on the sanctioned paths', () => {
     const ship = src('ship.ts');
     assert.match(ship, /print-content-hash/);
-    assert.match(ship, /sign-attestation-if-consumer\.sh/);
+    assert.doesNotMatch(
+      ship,
+      /sign-attestation-if-consumer\.sh/,
+      'RFC-0061 Phase 2: ship never signs',
+    );
     assert.match(ship, /sanitizeCiSkipTokens/);
     assert.doesNotMatch(
       ship,

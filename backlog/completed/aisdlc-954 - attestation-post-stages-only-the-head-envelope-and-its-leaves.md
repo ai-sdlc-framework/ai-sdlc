@@ -1,6 +1,8 @@
 ---
 id: AISDLC-954
-title: 'attestation-post stages only the head envelope, the leaf index and the leaves it references, under one concurrency group per PR'
+title: >-
+  attestation-post stages only the head envelope, the leaf index and the leaves
+  it references, under one concurrency group per PR
 status: Done
 assignee: []
 created_date: '2026-10-16'
@@ -10,11 +12,19 @@ labels:
   - cost
 dependencies: []
 references:
-  - .github/workflows/attestation-post.yml
-  - scripts/stage-attestation-data-api.sh
   - docs/operations/attestation-reference.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .github/workflows/attestation-post.yml'
+    resolution: flagged
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/stage-attestation-data-api.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

@@ -32,7 +32,6 @@ describe('main-health-monitor gate-scripts job (AISDLC-797)', () => {
     assert.match(gate, /scripts\/is-docs-only-changeset\.mjs/);
     assert.match(gate, /dor-pr-has-violations/);
     assert.match(gate, /node scripts\/check-dark-code\.mjs/);
-    assert.match(gate, /scripts\/check-attestation-sign\.test\.mjs/);
   });
 
   it('never captures tool JSON through a command substitution', () => {
@@ -40,13 +39,7 @@ describe('main-health-monitor gate-scripts job (AISDLC-797)', () => {
   });
 
   it('records each gate outcome without fail-fast and fails the job when any failed', () => {
-    for (const id of [
-      'gate-drift',
-      'gate-docs-only',
-      'gate-dor',
-      'gate-dark-code',
-      'gate-patch-id',
-    ]) {
+    for (const id of ['gate-drift', 'gate-docs-only', 'gate-dor', 'gate-dark-code']) {
       assert.match(gate, new RegExp(`id: ${id}\\n\\s+continue-on-error: true`));
       assert.match(gate, new RegExp(`steps\\.${id}\\.outcome`));
     }

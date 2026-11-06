@@ -1,5 +1,5 @@
 /**
- * RFC-0061 Phase 1 (shadow): the verdict check. Fetches `refs/ai-sdlc/verdicts/<head>`, validates
+ * RFC-0061: the verdict check. Fetches `refs/ai-sdlc/verdicts/<head>`, validates
  * the record, and returns one reason code. Coverage uses the shared rule from `review-coverage`;
  * the independence tier is read from the record (OQ-6), never recomputed.
  *
@@ -114,25 +114,4 @@ export async function checkVerdict(opts: VerdictCheckOpts): Promise<VerdictCheck
     return fail('tier-short', `lowest reviewer tier ${lowest} is below required ${need}`);
   }
   return { code: 'ok', ok: true, detail: 'valid record' };
-}
-
-export interface ShadowComparison {
-  agreed: boolean | null;
-  line: string;
-}
-
-/** Compare the verdict result with the v6 `ai-sdlc/attestation` status state (null = absent). */
-export function compareShadow(verdictOk: boolean, v6State: string | null): ShadowComparison {
-  if (v6State === null || v6State === 'pending') {
-    return {
-      agreed: null,
-      line: `v6 attestation result not available yet (${v6State ?? 'absent'})`,
-    };
-  }
-  const v6Ok = v6State === 'success';
-  const agreed = v6Ok === verdictOk;
-  return {
-    agreed,
-    line: `${agreed ? 'AGREE' : 'DISAGREE'}: verdict ${verdictOk ? 'pass' : 'fail'}, v6 attestation ${v6State}`,
-  };
 }

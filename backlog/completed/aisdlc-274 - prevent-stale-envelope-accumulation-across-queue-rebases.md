@@ -15,7 +15,6 @@ dependencies: []
 priority: high
 references:
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - scripts/check-attestation-sign.sh
   - scripts/verify-attestation.mjs
   - orchestrator/src/runtime/attestations.ts
 drift_log:
@@ -25,7 +24,11 @@ drift_log:
       Referenced file no longer exists:
       docs/operations/merge-queue-rebase-recovery.md
     resolution: flagged
-drift_checked: '2026-05-25'
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Bug

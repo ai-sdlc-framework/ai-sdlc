@@ -4,15 +4,23 @@ title: 'fix(attestation): the signed envelope always passes the prettier format 
 status: Done
 assignee: []
 created_date: '2026-10-14'
-labels: [attestation, ci, reliability]
+labels:
+  - attestation
+  - ci
+  - reliability
 dependencies: []
 references:
   - pipeline-cli/src/attestation/format-json.ts
   - pipeline-cli/src/attestation/sign-v6.ts
-  - scripts/check-attestation-sign.sh
   - .prettierignore
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Context

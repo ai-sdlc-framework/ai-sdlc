@@ -1,6 +1,9 @@
 ---
 id: AISDLC-1164
-title: 'next-step ship: the push after Step 10.6 signing must not be re-signed by the pre-push hook, and a hook refusal must not be reported as push-non-fast-forward'
+title: >-
+  next-step ship: the push after Step 10.6 signing must not be re-signed by the
+  pre-push hook, and a hook refusal must not be reported as
+  push-non-fast-forward
 status: Done
 assignee: []
 created_date: '2026-11-03'
@@ -14,9 +17,14 @@ references:
   - pipeline-cli/src/next-step/ship.ts
   - pipeline-cli/src/steps/11-push-and-pr.ts
   - .husky/pre-push
-  - scripts/check-attestation-sign.sh
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

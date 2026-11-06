@@ -575,7 +575,7 @@ describe('shipTask: approved path', () => {
     writeFileSync(join(state.worktreePath, '.active-task'), 'AISDLC-900\n');
   });
 
-  it('marks Done, writes verdicts, commits, signs, pushes, opens a DRAFT PR, flips ready - in order', async () => {
+  it('marks Done, writes verdicts, commits, pushes, opens a DRAFT PR, flips ready - in order', async () => {
     scriptShip();
     const res = await shipTask(h.ctx, state);
     expect(res.action).toBe('done');
@@ -603,7 +603,6 @@ describe('shipTask: approved path', () => {
     const order = [
       indexOfCall(/^git add backlog\/tasks backlog\/completed$/),
       indexOfCall(/^git commit -m chore: mark AISDLC-900 complete/),
-      indexOfCall(/sign-attestation-if-consumer\.sh/),
       indexOfCall(/^git push -u origin ai-sdlc\/aisdlc-900-demo-task$/),
       indexOfCall(/^gh pr create --draft/),
       indexOfCall(/format-marker/),
@@ -611,11 +610,12 @@ describe('shipTask: approved path', () => {
     ];
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    // Staged files never include the attestation directory (the hook owns that commit).
+    // Staged files never include the attestation directory (RFC-0061: no envelope is produced).
+    expect(indexOfCall(/sign-attestation/)).toBe(-1);
     expect(cmds().find((c) => c.startsWith('git add'))).not.toContain('attestations');
   });
 
-  it('never force-pushes or merges, and exports iteration count + harness note to the hook', async () => {
+  it('never force-pushes or merges, and exports iteration count + harness note to the push', async () => {
     scriptShip();
     await shipTask(h.ctx, state);
     const push = h.runner.calls.find((c) => c.command === 'git' && c.args[0] === 'push')!;
@@ -623,22 +623,9 @@ describe('shipTask: approved path', () => {
     expect(push.opts?.env).toMatchObject({
       AI_SDLC_ITERATION_COUNT: '2',
       AI_SDLC_HARNESS_NOTE: '',
-      AI_SDLC_WORKFLOW_STATE: h.ctx.statePath,
     });
     expect(cmds().some((c) => /--force|\s-f(\s|$)/.test(c))).toBe(false);
     expect(cmds().some((c) => RAW_MERGE.test(c))).toBe(false);
-  });
-
-  it('exports iteration count + harness note to the Step 10.6 signer too', async () => {
-    scriptShip();
-    await shipTask(h.ctx, state);
-    const sign = h.runner.calls.find((c) =>
-      /sign-attestation-if-consumer\.sh/.test(c.args.join(' ')),
-    )!;
-    expect(sign.opts?.env).toMatchObject({
-      AI_SDLC_ITERATION_COUNT: '2',
-      AI_SDLC_HARNESS_NOTE: '',
-    });
   });
 
   it('skips the chore commit when nothing is staged (task file already pre-moved)', async () => {
@@ -759,35 +746,28 @@ describe('shipTask: approved path', () => {
   });
 });
 
-describe('shipTask: head envelope (AISDLC-984)', () => {
-  const PID = 'a'.repeat(40);
-  const patchId = (): string => PID;
+describe('shipTask: never stops for attestation reasons (RFC-0061 Phase 2, AISDLC-1172)', () => {
   beforeEach(() => {
-    giveKey();
     writeDemoTaskFile(state.worktreePath);
   });
 
-  it('returns the sign step, never done, when the head has no v6 envelope', async () => {
+  it('AC-2: ships with no signing key and no envelope on the head', async () => {
+    // No giveKey(): there is no ~/.ai-sdlc/signing-key.pem, and no envelope exists anywhere.
     scriptShip();
     h.runner.on(/cat-file -e HEAD:\.ai-sdlc\/attestations\//, fail('missing', 128));
-    h.runner.on(/-base origin\/main HEAD/, ok('b'.repeat(40) + '\n'));
-    const res = await shipTask(h.ctx, state, { patchId });
-    expect(res.action).toBe('stop');
-    if (res.action !== 'stop') return;
-    expect(res.reason).toContain('Sign step required');
-    expect(res.reason).toContain('headsha');
-    expect(res.reason).toContain(`${PID}.v6.dsse.json`);
-    expect(indexOfCall(/gh pr create/)).toBe(-1);
+    const res = await shipTask(h.ctx, state);
+    expect(res.action).toBe('done');
+    expect(cmds().some((c) => /sign-attestation|HEAD:\.ai-sdlc\/attestations/.test(c))).toBe(false);
+    expect(indexOfCall(/^git push/)).toBeGreaterThan(-1);
+    expect(indexOfCall(/gh pr create/)).toBeGreaterThan(-1);
   });
 
-  it('reports done when the matching v6 envelope is on the head', async () => {
+  it('a push failure stops for git reasons only', async () => {
+    h.runner.on(/^git push/, fail('network down', 128));
     scriptShip();
-    h.runner.on(/-base origin\/main HEAD/, ok('b'.repeat(40) + '\n'));
-    const res = await shipTask(h.ctx, state, { patchId });
-    expect(res.action).toBe('done');
-    expect(cmds().some((c) => c.includes(`HEAD:.ai-sdlc/attestations/${PID}.v6.dsse.json`))).toBe(
-      true,
-    );
+    const res = await shipTask(h.ctx, state);
+    expect(res.action === 'stop' && res.reason).toContain('push to');
+    expect(res.action === 'stop' && res.reason).not.toMatch(/attestation|envelope|Sign step/i);
   });
 });
 
@@ -819,18 +799,6 @@ describe('shipTask: failures stop before anything irreversible', () => {
     writeFileSync(join(state.worktreePath, '.active-task'), 'AISDLC-900\n');
   });
 
-  it('refuses without a signing key and touches nothing', async () => {
-    scriptShip();
-    const res = await shipTask(h.ctx, state);
-    expect(res).toMatchObject({ action: 'stop', outcome: 'aborted', prUrl: null });
-    expect(res.action === 'stop' && res.reason).toMatch(/signing-key\.pem[\s\S]*init-signing-key/);
-    expect(h.runner.calls).toHaveLength(0);
-    expect(
-      existsSync(join(state.worktreePath, 'backlog', 'tasks', 'aisdlc-900 - demo-task.md')),
-    ).toBe(true);
-    expect(existsSync(join(state.worktreePath, '.active-task'))).toBe(false);
-  });
-
   it('stops when the chore commit fails', async () => {
     giveKey();
     h.runner.on(/^git commit/, fail('hook rejected', 1));
@@ -838,16 +806,6 @@ describe('shipTask: failures stop before anything irreversible', () => {
     const res = await shipTask(h.ctx, state);
     expect(res.action === 'stop' && res.reason).toContain('chore commit failed');
     expect(indexOfCall(/^git push/)).toBe(-1);
-  });
-
-  it('does not push when in-process signing fails self-verification (AISDLC-598)', async () => {
-    giveKey();
-    h.runner.on(/sign-attestation-if-consumer\.sh/, fail('verify: invalid', 1));
-    scriptShip();
-    const res = await shipTask(h.ctx, state);
-    expect(res.action === 'stop' && res.reason).toContain('Step 10.6');
-    expect(indexOfCall(/^git push/)).toBe(-1);
-    expect(indexOfCall(/gh pr create/)).toBe(-1);
   });
 
   it('gives up after two push attempts and never force-pushes', async () => {

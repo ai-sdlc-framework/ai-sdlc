@@ -1,6 +1,8 @@
 ---
 id: AISDLC-1147
-title: 'Implement DEC-0284: drop attestation schemas v3/v4/v5 outright, v6 is the only schema signed and verified (supersedes the warn-only #2171)'
+title: >-
+  Implement DEC-0284: drop attestation schemas v3/v4/v5 outright, v6 is the only
+  schema signed and verified (supersedes the warn-only #2171)
 status: Done
 assignee: []
 created_date: '2026-11-01'
@@ -12,7 +14,6 @@ dependencies: []
 references:
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - ai-sdlc-plugin/scripts/sign-attestation.test.mjs
-  - ai-sdlc-plugin/scripts/check-attestation-sign.sh
   - orchestrator/src/runtime/attestations.ts
   - orchestrator/src/runtime/attestations.test.ts
   - pipeline-cli/src/attestation/sign-v6.test.ts
@@ -21,6 +22,14 @@ references:
   - CLAUDE.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/check-attestation-sign.sh
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 ## Description
 DEC-0284 (operator ruling 2026-10-31, option `drop-legacy`) decided that attestation schema v6 is the only format signed and verified: no deprecation window, no backward compatibility, legacy v3/v4/v5 code paths, fixtures and tests deleted. Evidence recorded in the decision: every envelope under `.ai-sdlc/attestations` on main is v6; no v3/v4/v5 envelope exists.

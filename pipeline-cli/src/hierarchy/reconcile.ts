@@ -39,7 +39,7 @@ export const TASK_ACTIONS: Record<PrState, string> = {
   'manifest-branch-mismatch': 'rewrite-manifest',
   // `land-prep` (AISDLC-881) is not built yet: `reenter` runs its rebase for a BEHIND PR.
   'behind-or-dirty': 'land-prep',
-  'attestation-content-hash-mismatch': 'push-only-resign',
+  'needs-re-review': 'review-resume',
   'rate-limited': 'wait-and-rerun',
   'real-failure': 'reenter',
   'cancelled-or-infra': 'retrigger-once',
@@ -54,7 +54,7 @@ export const DOCS_ACTIONS: Record<PrState, string> = {
   merged: 'mark-landed',
   'manifest-branch-mismatch': 'none',
   'behind-or-dirty': 'rebase-in-place',
-  'attestation-content-hash-mismatch': 'none',
+  'needs-re-review': 'none',
   'rate-limited': 'wait-and-rerun',
   'real-failure': 'route-to-planner',
   'cancelled-or-infra': 'retrigger-once',
@@ -362,7 +362,7 @@ export function actionCommands(ctx: ActionContext, cliBin: string): ActionComman
     case 'push-only-reenter':
       return [dispatch('reenter', String(ctx.pr), '--push-only')];
     case 'land-prep':
-    case 'push-only-resign':
+    case 'review-resume':
       return [reenter()];
     case 'rewrite-manifest':
       return [dispatch('write-manifest', '--task-id', ctx.taskId, '--from-pr', String(ctx.pr))];

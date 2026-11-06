@@ -1,33 +1,31 @@
 /**
- * Resume review decision (AISDLC-947).
+ * Resume review decision (AISDLC-947, RFC-0061 Phase 2).
  *
- * One decision at the top of a resume: compare the patch id of the current tree with the
- * patch id of the newest attestation envelope on the branch (the envelope filename is the
- * attested patch id; `subject.digest.sha1` is the attested head). No new state file.
+ * One decision at the top of a resume, from the review verdict ref outside the branch. No
+ * patch-id comparison and no envelope read remain here.
  *
- *   - `unchanged`: equal patch ids. No developer and no reviewer runs; the pipeline goes
- *     straight to reconcile and re-sign (rebase, re-sign, task-file move, red-check rerun).
- *   - `delta`: the patch id changed. The reviewer set is chosen from the diff between the
- *     last attested head and the current head, not the whole PR.
- *   - `full`: no usable prior attestation; today's behaviour.
+ *   - `unchanged`: the head has a verdict record, or an earlier approved record carries forward
+ *     by the clean-replay rule (AISDLC-1170). No developer and no reviewer runs; the pipeline
+ *     goes straight to reconcile and push.
+ *   - `delta`: no record for the head, but an earlier approved head is reachable. The reviewer
+ *     set is chosen from the diff between that head and the current head, not the whole PR.
+ *   - `full`: no usable earlier record; today's behaviour ("carried forward, else review").
  *   - `developer-round` (AISDLC-1053): `reenter --developer-round` set the manifest flag; the
- *     developer runs with the resume note, then the delta review takes the new patch id.
+ *     developer runs with the resume note, then the delta review takes the new head.
  *
  * @module next-step/resume-decision
  */
 
 import { requiredReviewerKind } from '../../attestation-core/review-scope-core.mjs';
-import { computePatchId } from '../attestation/patch-id.js';
-import { loadVerifyCore } from '../attestation/verify-core-loader.js';
-import { loadAttestationRuntime } from '../attestation/verify-runtime.js';
-import { checkHeadEnvelope } from './head-envelope.js';
+import { listEarlierSubjects } from '../attestation/verdict-cli.js';
+import { checkHeadVerdict, type HeadVerdictStatus } from './head-envelope.js';
 import { resolveTargetBranch } from '../steps/02-compute-branch.js';
 import { explicitReviewerSetMode } from '../steps/reviewer-set.js';
 import type { ReviewerType } from '../types.js';
 import type { NextStepContext } from './types.js';
 
 export type ResumeReviewDecision =
-  | { branch: 'unchanged'; note: string; lastHead: string; resign?: true }
+  | { branch: 'unchanged'; note: string; lastHead: string }
   | {
       branch: 'delta';
       note: string;
@@ -40,7 +38,6 @@ export type ResumeReviewDecision =
   | { branch: 'developer-round'; note: string };
 
 const FULL: ResumeReviewDecision = { branch: 'full', note: 'review-full' };
-const ENVELOPE_RE = /^(?:.*\/)?([0-9a-f]{40})(?:\.v\d+)?\.dsse\.json$/i;
 const ATTESTATION_DIR = '.ai-sdlc/attestations/';
 
 /** The slice of the context the decision reads (AISDLC-1053: callers outside next-step pass just these). */
@@ -49,42 +46,12 @@ export type ResumeDecisionCtx = Pick<NextStepContext, 'workDir' | 'runner'>;
 export interface ResumeDecisionOpts {
   /** `resume.developerRound` of the inflight manifest: force the developer branch (AISDLC-1053). */
   developerRound?: boolean;
-  /** Test injection: current patch id (default: computed against the target branch merge-base). */
-  currentPatchId?: (base: string, head: string, cwd: string) => string | null;
   /** Test injection: true when the repository requires the three-reviewer set. */
   requireThree?: boolean;
-  /**
-   * Test injection: verify the signed attestation for `headSha` (signature against the trusted
-   * reviewers, Merkle proof, patch-id binding, review scope). Default: the trusted verifier core.
-   */
-  verifyAt?: (
-    headSha: string,
-    baseSha: string,
-    cwd: string,
-    trustedReviewersYaml: string,
-  ) => Promise<boolean>;
-}
-
-/**
- * Run the same verifier CI runs (`cli-attestation verify`) against `headSha`. The runtime is
- * resolved from OUTSIDE the checkout, so a forged envelope committed on the branch cannot
- * vouch for itself. Any failure (including an unresolvable runtime) is "not verified".
- */
-async function verifyAttestationAt(
-  headSha: string,
-  baseSha: string,
-  cwd: string,
-  trustedReviewersYaml: string,
-): Promise<boolean> {
-  try {
-    const core = await loadVerifyCore();
-    core.bindRuntime(await loadAttestationRuntime(cwd));
-    return (
-      core.runVerifier({ headSha, baseSha, repoRoot: cwd, trustedReviewersYaml }).status === 'valid'
-    );
-  } catch {
-    return false;
-  }
+  /** Test injection: the head's verdict status (default: remote ref, else clean-replay carry). */
+  headVerdict?: (ctx: ResumeDecisionCtx, cwd: string) => Promise<HeadVerdictStatus>;
+  /** Test injection: earlier approved heads, newest first (default: the remote verdict refs). */
+  earlierHeads?: (ctx: ResumeDecisionCtx, cwd: string, head: string) => Promise<string[]>;
 }
 
 /** Decide what a resumed task's review does. Never throws: any doubt returns `full`. */
@@ -113,56 +80,35 @@ async function decide(
     return r.code === 0 ? r.stdout : null;
   };
   const target = `origin/${resolveTargetBranch(ctx.workDir)}`;
-  const added = await git([
-    'log',
-    `${target}..HEAD`,
-    '--diff-filter=A',
-    '--name-only',
-    '--format=',
-    '--',
-    ATTESTATION_DIR,
-  ]);
-  const file = added
-    ?.split('\n')
-    .map((l) => l.trim())
-    .find((l) => ENVELOPE_RE.test(l));
-  if (!file) return FULL;
-  const attestedPatchId = ENVELOPE_RE.exec(file)![1].toLowerCase();
-  const raw = await git(['show', `HEAD:${file}`]);
-  if (raw === null) return FULL;
-  const lastHead = (JSON.parse(raw) as { subject?: { digest?: { sha1?: string } } }).subject?.digest
-    ?.sha1;
-  if (typeof lastHead !== 'string' || !/^[0-9a-f]{40}$/i.test(lastHead)) return FULL;
-  if ((await git(['cat-file', '-e', `${lastHead}^{commit}`])) === null) return FULL;
-
-  const head = (await git(['rev-parse', 'HEAD']))?.trim() ?? '';
-  const base = (await git(['merge-base', target, 'HEAD']))?.trim() ?? '';
-  if (!base) return FULL;
-  const current = (opts.currentPatchId ?? computePatchId)(base, head, cwd);
-  if (current === null) return FULL;
-  // SECURITY: the signer allowlist comes from the target branch, never the worktree copy a PR
-  // could edit to trust its own forged key.
-  const trustedYaml = await git(['show', `${target}:.ai-sdlc/trusted-reviewers.yaml`]);
-  if (trustedYaml === null) return FULL;
-  const verify = (h: string, b: string, c: string): Promise<boolean> =>
-    (opts.verifyAt ?? verifyAttestationAt)(h, b, c, trustedYaml);
-  if (current.toLowerCase() === attestedPatchId) {
-    if (!(await verify(head, base, cwd))) return FULL;
-    // AISDLC-984: the same predicate ship uses; a head without its v6 envelope goes to re-sign.
-    const env = await checkHeadEnvelope(ctx, cwd, { patchId: () => current });
-    if (env.status === 'missing') {
-      return {
-        branch: 'unchanged',
-        note: `review-skipped: unchanged; re-sign required: ${env.reason}`,
-        lastHead,
-        resign: true,
-      };
-    }
-    return { branch: 'unchanged', note: 'review-skipped: unchanged', lastHead };
+  const verdict = await (opts.headVerdict ?? checkHeadVerdict)(ctx, cwd);
+  if (verdict.status === 'present') {
+    return {
+      branch: 'unchanged',
+      note: 'review-skipped: verdict record present',
+      lastHead: verdict.headSha,
+    };
+  }
+  if (verdict.status === 'carried') {
+    return {
+      branch: 'unchanged',
+      note: `review-skipped: verdict carried forward from ${verdict.from}`,
+      lastHead: verdict.from,
+    };
   }
 
-  // The delta base (`lastHead`) comes from the envelope, so the envelope must verify first.
-  if (!(await verify(lastHead, base, cwd))) return FULL;
+  const head = verdict.headSha || ((await git(['rev-parse', 'HEAD']))?.trim() ?? '');
+  const earlierHeads =
+    opts.earlierHeads ??
+    (async (c, d, h) =>
+      (await listEarlierSubjects(c.runner, d, h, undefined)).map((x) => x.headSha));
+  let lastHead: string | null = null;
+  for (const candidate of await earlierHeads(ctx, cwd, head)) {
+    if ((await git(['cat-file', '-e', `${candidate}^{commit}`])) !== null) {
+      lastHead = candidate;
+      break;
+    }
+  }
+  if (!lastHead) return FULL;
   const names = await git([
     'diff',
     '--name-only',

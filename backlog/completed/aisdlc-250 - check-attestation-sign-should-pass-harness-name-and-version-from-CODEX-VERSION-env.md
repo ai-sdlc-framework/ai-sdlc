@@ -1,6 +1,8 @@
 ---
 id: AISDLC-250
-title: check-attestation-sign.sh should pass --harness-name and --harness-version from CODEX_VERSION env
+title: >-
+  check-attestation-sign.sh should pass --harness-name and --harness-version
+  from CODEX_VERSION env
 status: Done
 assignee: []
 created_date: '2026-05-09'
@@ -13,10 +15,15 @@ parentTaskId: AISDLC-202
 dependencies:
   - AISDLC-202.3
 references:
-  - scripts/check-attestation-sign.sh
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - docs/operations/cross-harness-review.md
 priority: medium
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Problem

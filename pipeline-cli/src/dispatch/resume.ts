@@ -431,23 +431,23 @@ export type PushOnlyDecision =
 /** Collaborators of {@link evaluatePushOnly}. */
 export interface PushOnlyDeps {
   /**
-   * True when the branch content (after the rebase) still matches what the verdict
-   * approved, e.g. an envelope exists for the current patch-id. Treated as a
-   * mismatch when omitted.
+   * True when the head (after the rebase) has a review verdict record or an earlier approved
+   * record carries forward (AISDLC-1170 clean-replay rule); no patch-id is compared. Treated as
+   * "needs review" when omitted.
    */
-  contentMatches?: () => boolean;
+  contentMatches?: () => boolean | Promise<boolean>;
 }
 
 /**
  * Decide, after the rebase, whether a push-only resume may run. Fails closed: the
- * verdict file (when present) must be an approval for this task, and the content must
- * still match, a missing verdict file being recomputed (`verdictMissing`); otherwise the run is a normal resume and `reason` says why. Writes nothing.
+ * verdict file (when present) must be an approval for this task, and the head must
+ * still be covered by a verdict (carried forward, else review), a missing verdict file being recomputed (`verdictMissing`); otherwise the run is a normal resume and `reason` says why. Writes nothing.
  */
-export function evaluatePushOnly(
+export async function evaluatePushOnly(
   worktree: string,
   taskId: string,
   deps: PushOnlyDeps = {},
-): PushOnlyDecision {
+): Promise<PushOnlyDecision> {
   assertId(taskId);
   const file = path.join(worktree, '.ai-sdlc', 'verdicts', `${taskId.toLowerCase()}.json`);
   const fallback = (why: string): PushOnlyDecision => ({
@@ -456,10 +456,12 @@ export function evaluatePushOnly(
   });
   if (!existsSync(file)) {
     // AISDLC-849: no verdict file is not a reason to re-run the developer. The
-    // content check (an approval envelope for the current patch-id) is the
+    // verdict check (a record for the head, or one carried forward) is the
     // fail-closed gate; when it holds, the caller computes the verdict.
-    if (deps.contentMatches?.()) return { mode: 'push-only', verdictMissing: true };
-    return fallback('no verdict file in the worktree and the branch content is not approved');
+    if (await deps.contentMatches?.()) return { mode: 'push-only', verdictMissing: true };
+    return fallback(
+      'no verdict file in the worktree and the head has no verdict that carries forward',
+    );
   }
   const v = readJson<{ taskId?: string; approved?: boolean; decision?: string }>(file);
   if (!v) return fallback('the verdict file is unreadable');
@@ -469,8 +471,8 @@ export function evaluatePushOnly(
   if (v.approved !== true || (v.decision !== undefined && v.decision !== 'APPROVED')) {
     return fallback('the verdict is not an approval');
   }
-  if (!deps.contentMatches || !deps.contentMatches()) {
-    return fallback('the branch content no longer matches the approved verdict after the rebase');
+  if (!deps.contentMatches || !(await deps.contentMatches())) {
+    return fallback('the head has no verdict record and none carries forward after the rebase');
   }
   return { mode: 'push-only' };
 }

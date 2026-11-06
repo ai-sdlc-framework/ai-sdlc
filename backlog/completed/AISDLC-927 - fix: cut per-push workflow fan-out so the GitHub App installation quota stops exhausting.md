@@ -15,7 +15,6 @@ labels:
 dependencies: []
 references:
   - .github/workflows/codeql.yml
-  - .github/workflows/attestation-post.yml
   - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/main-health-monitor.yml
   - docs/operations/quality-gate.md
@@ -26,7 +25,11 @@ drift_log:
     type: ref-deleted
     detail: 'Referenced file no longer exists: .github/workflows/require-issue-link.yml'
     resolution: flagged
-drift_checked: '2026-10-17'
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .github/workflows/attestation-post.yml'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

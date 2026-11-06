@@ -1,51 +1,45 @@
 /**
- * One predicate for ship and resume (AISDLC-984): the head's patch id has a v6
- * attestation envelope under `.ai-sdlc/attestations/`. A head that fails it is never
- * "done"; the caller routes to the sign step.
+ * One predicate for resume (AISDLC-984, RFC-0061 Phase 2): the head has a review verdict, either
+ * a record under `refs/ai-sdlc/verdicts/<head>` on the remote or an earlier approved record the
+ * clean-replay rule carries forward (AISDLC-1170). A head with neither needs review, never a
+ * signing step: nothing on this path produces or demands a v6 envelope.
  *
  * @module next-step/head-envelope
  */
 
-import { computePatchId } from '../attestation/patch-id.js';
+import { makeCarryForward } from '../attestation/verdict-cli.js';
+import { verdictRefName } from '../attestation/verdict-record.js';
 import { resolveTargetBranch } from '../steps/02-compute-branch.js';
 import type { NextStepContext } from './types.js';
 
-export type HeadEnvelopeStatus =
-  | { status: 'present'; headSha: string; patchId: string; file: string }
-  | { status: 'missing'; headSha: string; patchId: string; file: string; reason: string }
-  /** The patch id cannot be computed (empty diff, shallow clone): legacy per-SHA naming applies. */
+export type HeadVerdictStatus =
+  | { status: 'present'; headSha: string; ref: string }
+  | { status: 'carried'; headSha: string; from: string }
+  | { status: 'missing'; headSha: string; ref: string; reason: string }
+  /** HEAD or the merge-base cannot be resolved: the caller treats the head as needing review. */
   | { status: 'unknown'; headSha: string };
 
-export interface HeadEnvelopeOpts {
-  /** Test injection: the head's patch id (default: computed against the target merge-base). */
-  patchId?: (base: string, head: string, cwd: string) => string | null;
-}
-
-export async function checkHeadEnvelope(
+export async function checkHeadVerdict(
   ctx: Pick<NextStepContext, 'workDir' | 'runner'>,
   cwd: string,
-  opts: HeadEnvelopeOpts = {},
-): Promise<HeadEnvelopeStatus> {
+  opts: { pullRequest?: number } = {},
+): Promise<HeadVerdictStatus> {
   const git = async (args: string[]): Promise<string | null> => {
-    const r = await ctx.runner('git', args, { cwd, allowFailure: true });
+    const r = await ctx.runner('git', args, { cwd, allowFailure: true, timeout: 60_000 });
     return r.code === 0 ? r.stdout.trim() : null;
   };
   const headSha = (await git(['rev-parse', 'HEAD'])) ?? '';
   const target = `origin/${resolveTargetBranch(ctx.workDir)}`;
   const base = await git(['merge-base', target, 'HEAD']);
-  const patchId = base ? (opts.patchId ?? computePatchId)(base, headSha, cwd) : null;
-  if (!patchId) return { status: 'unknown', headSha };
-  const file = `.ai-sdlc/attestations/${patchId}.v6.dsse.json`;
-  if ((await git(['cat-file', '-e', `HEAD:${file}`])) !== null) {
-    return { status: 'present', headSha, patchId, file };
-  }
+  if (!headSha || !base) return { status: 'unknown', headSha };
+  const ref = verdictRefName(headSha);
+  if (await git(['ls-remote', 'origin', ref])) return { status: 'present', headSha, ref };
+  const carried = await makeCarryForward(ctx.runner, cwd, base, opts.pullRequest)(headSha);
+  if (carried) return { status: 'carried', headSha, from: carried.from };
   return {
     status: 'missing',
     headSha,
-    patchId,
-    file,
-    reason:
-      `head ${headSha} has no v6 attestation envelope: looked for ${file} (patch id ${patchId}). ` +
-      `Re-sign: run the sign step (sign-attestation-if-consumer.sh, or push so the pre-push hook signs), then re-run.`,
+    ref,
+    reason: `head ${headSha} has no verdict record (${ref}) and no earlier approved record carries forward; it needs review`,
   };
 }

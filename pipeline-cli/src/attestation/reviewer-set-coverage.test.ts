@@ -83,7 +83,6 @@ describe('trust-chain path list', () => {
     '.github/actions/foo/action.yml',
     'packages/x/.github/workflows/ci.yml',
     'scripts/is-docs-only-changeset.mjs',
-    'scripts/stage-attestation-data.sh',
     'scripts/drop-stale-attestation-envelope.mjs',
     'scripts/squash-attestation-chores.sh',
     'scripts/pre-push-fixups.sh',

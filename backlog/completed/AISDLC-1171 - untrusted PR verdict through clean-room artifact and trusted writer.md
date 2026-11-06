@@ -1,6 +1,8 @@
 ---
 id: AISDLC-1171
-title: 'RFC-0061 Phase 1: untrusted PRs get a verdict record through a clean-room artifact and a trusted workflow_run writer'
+title: >-
+  RFC-0061 Phase 1: untrusted PRs get a verdict record through a clean-room
+  artifact and a trusted workflow_run writer
 status: Done
 assignee: []
 created_date: '2026-11-03'
@@ -18,10 +20,15 @@ dependencies:
 references:
   - spec/rfcs/RFC-0061-review-verdict-gate-outside-the-branch.md
   - .github/workflows/untrusted-pr-gate.yml
-  - .github/workflows/attestation-post.yml
   - pipeline-cli/src/pipeline/clean-room-signer.ts
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .github/workflows/attestation-post.yml'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

@@ -42,7 +42,6 @@ import {
 } from '../incremental-review/incremental.js';
 import { attachVerdictRecordDraft } from './review-finalize.js';
 import { buildVerdictRefspec } from './verdict-ref-push.js';
-import { checkHeadEnvelope, type HeadEnvelopeOpts } from './head-envelope.js';
 import { markTaskDone } from './task-done.js';
 import { recordSessionPr, updateSessionState } from './session.js';
 import type { DoneInstruction, NextStepContext, NextStepState, StopInstruction } from './types.js';
@@ -397,10 +396,9 @@ const PUSH_TIMEOUT_MS = 30 * 60_000;
 export async function shipTask(
   ctx: NextStepContext,
   state: NextStepState,
-  opts: HeadEnvelopeOpts = {},
 ): Promise<DoneInstruction | StopInstruction> {
   try {
-    return await shipInner(ctx, state, opts);
+    return await shipInner(ctx, state);
   } finally {
     try {
       await cleanupTask({ taskId: state.taskId, worktreePath: state.worktreePath });
@@ -461,7 +459,6 @@ async function leasePushOwnRebaseShip(
 async function shipInner(
   ctx: NextStepContext,
   state: NextStepState,
-  envelopeOpts: HeadEnvelopeOpts,
 ): Promise<DoneInstruction | StopInstruction> {
   const { runner } = ctx;
   const wt = state.worktreePath;
@@ -474,19 +471,8 @@ async function shipInner(
   const pushEnv = {
     AI_SDLC_ITERATION_COUNT: String(state.iteration),
     AI_SDLC_HARNESS_NOTE: verdict.harnessNote,
-    // AISDLC-1155: the signing hook reads the run's digest from this state file; passed to the
-    // sign and push spawns only, never written into the live process env.
-    AI_SDLC_WORKFLOW_STATE: ctx.statePath,
   };
   if (!needsHuman) {
-    // Step 10 — refuse early when the contributor has no signing key (the hook would fail loudly).
-    if (!ctx.exists(join(ctx.homeDir, '.ai-sdlc', 'signing-key.pem'))) {
-      return stop(
-        state,
-        'aborted',
-        'No signing key at ~/.ai-sdlc/signing-key.pem. Run /ai-sdlc init-signing-key once, open the printed onboarding PR adding your pubkey to .ai-sdlc/trusted-reviewers.yaml, then re-run. (The pre-push hook refuses to sign without this key.)',
-      );
-    }
     const { finalSummary, acceptanceCriteriaCheck } = buildFinalSummary({
       taskId: state.taskId,
       workDir: ctx.workDir,
@@ -537,23 +523,10 @@ async function shipInner(
         `Step 10 chore commit failed: ${(commit.stderr || commit.stdout).trim()}`,
       );
     }
-
-    // Step 10.6 — consumer repos have no hook that signs; the script no-ops in the monorepo.
-    const sign = await runner(
-      'bash',
-      [join(ctx.pluginScriptsDir, 'sign-attestation-if-consumer.sh')],
-      { cwd: wt, allowFailure: true, timeout: 600_000, env: pushEnv },
-    );
-    if (sign.code !== 0) {
-      return stop(
-        state,
-        'aborted',
-        `Step 10.6 in-process attestation signing failed self-verification or the signer failed; aborting before push. ${(sign.stderr || sign.stdout).trim()}`,
-      );
-    }
   }
 
-  // Step 11a — push. The pre-push hook may sign, commit the envelope and exit 1 once.
+  // Step 11a — push. RFC-0061 Phase 2: no signing and no envelope check; the push fails for git
+  // reasons only, and the verdict ref rides the same atomic push.
   let pushRc = 1;
   let pushErr = '';
   let diverged = false;
@@ -571,8 +544,8 @@ async function shipInner(
     await attachVerdictRecordDraft(ctx, state, verdict);
   }
   for (let attempt = 0; attempt < PUSH_ATTEMPTS; attempt += 1) {
-    // RFC-0061 Phase 1: branch and verdict ref in one atomic push (built per attempt: the
-    // pre-push hook can change the head). The v6 envelope path keeps running beside it.
+    // RFC-0061: branch and verdict ref in one atomic push (built per attempt: a pre-push fixup
+    // can change the head).
     const verdictRef = needsHuman
       ? { refspec: null }
       : await buildVerdictRefspec(
@@ -645,13 +618,6 @@ async function shipInner(
         : `push to '${state.branch}' failed after ${PUSH_ATTEMPTS} attempts (last exit ${pushRc}); git output:\n${lastLines}`,
       { cause: diverged ? PUSH_NON_FAST_FORWARD_CAUSE : PUSH_FAILED_CAUSE },
     );
-  }
-
-  // Step 11a.1 — fail closed (AISDLC-984): a pushed head with no v6 envelope is never done.
-  if (!needsHuman) {
-    const env = await checkHeadEnvelope(ctx, wt, envelopeOpts);
-    if (env.status === 'missing')
-      return stop(state, 'aborted', `Sign step required: ${env.reason}`);
   }
 
   // Step 11b — DRAFT PR (CI must not fire until Step 13).

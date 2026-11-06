@@ -14,10 +14,18 @@ labels:
 dependencies:
   - AISDLC-133
 references:
-  - scripts/check-attestation-sign.sh
-  - scripts/check-attestation-sign.test.mjs
   - .husky/pre-push
 priority: high
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.test.mjs'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

@@ -45,7 +45,7 @@ export const PR_STATES = [
   'merged',
   'manifest-branch-mismatch',
   'behind-or-dirty',
-  'attestation-content-hash-mismatch',
+  'needs-re-review',
   'rate-limited',
   'real-failure',
   'cancelled-or-infra',
@@ -61,7 +61,7 @@ export const PR_ACTIONS: Record<PrState, string> = {
   merged: 'mark-done-sync-parent-start-next',
   'manifest-branch-mismatch': 'write-manifest-with-pr-head-ref-and-requeue',
   'behind-or-dirty': 'requeue-hand-review-path-resume',
-  'attestation-content-hash-mismatch': 'push-only-resign-resume',
+  'needs-re-review': 'review-resume',
   'rate-limited': 'wait-and-rerun',
   'real-failure': 'full-fix-resume-with-failing-line',
   'cancelled-or-infra': 'rerun-workflow',
@@ -81,6 +81,8 @@ export interface PrClassification {
 }
 
 const ATTESTATION = 'ai-sdlc/attestation';
+const VERDICT_FAILURE_RE =
+  /^\s*(no-record|subject-mismatch|coverage-short|replay-dirty|tier-short)\b|content[- ]?hash/i;
 const PR_READY = 'ai-sdlc/pr-ready';
 
 /** Checks that fail on every PR when the App installation rate limit is exhausted. */
@@ -181,9 +183,11 @@ export function classifyPr(f: PrFacts): PrClassification {
   if (f.mergeStateStatus === 'BEHIND' || f.mergeStateStatus === 'DIRTY') {
     return mk('behind-or-dirty');
   }
+  // RFC-0061 Phase 2: a failed verdict check (reason code leading the description) or a legacy
+  // content-hash failure means the head needs re-review; the resume carries forward, else reviews.
   const att = checks.find((c) => c.name === ATTESTATION && failed(c));
-  if (att && /content[- ]?hash/i.test(att.summary ?? '')) {
-    return mk('attestation-content-hash-mismatch');
+  if (att && VERDICT_FAILURE_RE.test(att.summary ?? '')) {
+    return mk('needs-re-review');
   }
   const failedChecks = checks.filter(failed);
   if (

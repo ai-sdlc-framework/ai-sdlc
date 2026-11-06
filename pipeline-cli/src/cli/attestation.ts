@@ -34,7 +34,7 @@ import {
   ghPrStateFor,
   pruneVerdictRefs,
 } from '../attestation/verdict-prune.js';
-import { runCatches, runVerdictCheck } from '../attestation/verdict-cli.js';
+import { runVerdictCheck } from '../attestation/verdict-cli.js';
 import {
   INDEPENDENCE_TIERS,
   verdictRefName,
@@ -1677,15 +1677,16 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           process.stdout.write(`wrote ${ref}\n`);
         },
       )
-      // ── verdict-check / catches (RFC-0061 Phase 1, shadow) ───────────────────
+      // ── verdict-check (RFC-0061 Phase 2: the required check) ─────────────────
       .command(
         'verdict-check',
-        'Check refs/ai-sdlc/verdicts/<head> and print a reason code (ok, ok-carried:<sha>, no-record, subject-mismatch, coverage-short, replay-dirty, tier-short). Shadow: --post-status posts the shadow status.',
+        'Check refs/ai-sdlc/verdicts/<head> and print a reason code (ok, ok-carried:<sha>, no-record, subject-mismatch, coverage-short, replay-dirty, tier-short). --post-status posts the ai-sdlc/attestation status; exits 1 unless the result is ok.',
         (y: Argv) =>
           y
             .option('head', { type: 'string', demandOption: true })
             .option('base', { type: 'string', demandOption: true })
             .option('repository', { type: 'string', demandOption: true })
+            .option('pull-request', { type: 'number' })
             .option('required-tier', { type: 'string', choices: [...INDEPENDENCE_TIERS] })
             .option('post-status', { type: 'boolean', default: false }),
         async (args) => {
@@ -1697,32 +1698,13 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             repository: args['repository'] as string,
             headSha: args['head'] as string,
             baseSha: args['base'] as string,
+            pullRequest: args['pull-request'] as number | undefined,
             requiredTier: args['required-tier'] as IndependenceTier | undefined,
             postStatus: args['post-status'] as boolean,
             writeSummary: summaryFile ? (md) => appendFileSync(summaryFile, md + '\n') : undefined,
           });
-          // Shadow mode: the exit code never fails the job on a verdict failure.
           process.stdout.write(`${result.code} ${result.detail}\n`);
-        },
-      )
-      .command(
-        'catches',
-        'Compile, from GitHub status history, every head where the verdict check failed while ai-sdlc/pr-ready passed, plus every v6/verdict disagreement. Writes no file.',
-        (y: Argv) =>
-          y
-            .option('since', { type: 'string', describe: 'ISO date lower bound on PR update time' })
-            .option('repository', { type: 'string', demandOption: true }),
-        async (args) => {
-          const out = await runCatches(
-            args['repository'] as string,
-            args['since'] as string | undefined,
-            async (path) => {
-              const r = await defaultRunner('gh', ['api', path], { allowFailure: true });
-              if (r.code !== 0) throw new Error(`gh api ${path} failed: ${r.stderr.trim()}`);
-              return JSON.parse(r.stdout);
-            },
-          );
-          process.stdout.write(out);
+          if (!result.ok) process.exitCode = 1;
         },
       )
       .demandCommand(

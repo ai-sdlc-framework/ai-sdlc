@@ -196,7 +196,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build pipeline-cli (patch-id parity and DoR need dist)
+      - name: Build pipeline-cli (DoR needs dist)
         run: pnpm --filter @ai-sdlc/pipeline-cli... build
 
       - name: Gate - backlog drift
@@ -244,11 +244,6 @@ jobs:
         continue-on-error: true
         run: node scripts/check-dark-code.mjs
 
-      - name: Gate - patch-id exclusions parity
-        id: gate-patch-id
-        continue-on-error: true
-        run: node --import ./vitest.git-env.setup.mjs --test scripts/check-attestation-sign.test.mjs
-
       - name: Determine gate outcome
         run: |
           fail=0
@@ -256,8 +251,7 @@ jobs:
             "backlog-drift=${{ steps.gate-drift.outcome }}" \
             "docs-only-classifier=${{ steps.gate-docs-only.outcome }}" \
             "dor-violations=${{ steps.gate-dor.outcome }}" \
-            "dark-code=${{ steps.gate-dark-code.outcome }}" \
-            "patch-id-parity=${{ steps.gate-patch-id.outcome }}"; do
+            "dark-code=${{ steps.gate-dark-code.outcome }}"; do
             echo "[gate-scripts] ${pair}"
             case "$pair" in *=success) ;; *) fail=1 ;; esac
           done

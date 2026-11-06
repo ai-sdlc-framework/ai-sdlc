@@ -19,13 +19,10 @@
  *                 task id in a commit subject, the title or the branch) and
  *                 adds a new file under backlog/tasks/ (AISDLC-308). A PR that
  *                 hides its task id defeats it; reviewers still check.
- *   reviewers     fail when a code PR's attestation envelope lacks the full
- *                 reviewer set: code + test + security, or the merged
- *                 correctness + security set (AISDLC-617). This reads reviewer
- *                 NAMES only and is NOT an independent control: signature and
- *                 transcript verification belong to verify-attestation and
- *                 the attestation-gate job. It catches a missing reviewer, not
- *                 a forged one.
+ *
+ * RFC-0061 Phase 2 (AISDLC-1172): the `reviewers` check read attestation envelopes, which are no
+ * longer produced; reviewer coverage is the `verdict-check` job's job. `--skip-reviewers` is
+ * accepted and ignored so an older workflow definition keeps working.
  *
  * Usage:
  *   node scripts/check-pr-governance.mjs <check|all> --base <sha> --head <sha>
@@ -36,8 +33,6 @@
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-
-import { computePatchIdForVerifier } from '../pipeline-cli/attestation-core/verify-core.mjs';
 
 export const RELEASE_BRANCH_PREFIX = 'release-please--branches--';
 export const RELEASE_BRANCH = `${RELEASE_BRANCH_PREFIX}main`;
@@ -56,15 +51,6 @@ export function isReleasePleasePr({ branch, headRepo, baseRepo }) {
     headRepo === baseRepo
   );
 }
-
-const REVIEWER_VARIANTS = {
-  three: [
-    ['code-reviewer', 'code-reviewer-codex'],
-    ['test-reviewer', 'test-reviewer-codex'],
-    ['security-reviewer'],
-  ],
-  merged: [['correctness-reviewer'], ['security-reviewer']],
-};
 
 function defaultGit(repoRoot) {
   return (args) =>
@@ -200,94 +186,6 @@ export function checkScopeCreep({ base, head, branch, title, git }) {
   return failures;
 }
 
-/** Which required reviewer set the envelope's reviewer names satisfy, or null. */
-export function satisfiedReviewerSet(names) {
-  const present = new Set(names);
-  for (const [set, roles] of Object.entries(REVIEWER_VARIANTS)) {
-    if (roles.every((variants) => variants.some((v) => present.has(v)))) return set;
-  }
-  return null;
-}
-
-/** Reviewer names recorded in an envelope (v6 leaves, or a v5/v4 predicate). */
-export function envelopeReviewerNames(envelopeText) {
-  const env = JSON.parse(envelopeText);
-  if (Array.isArray(env.transcriptLeaves)) {
-    return env.transcriptLeaves.map((l) => l.reviewerName).filter(Boolean);
-  }
-  if (typeof env.payload === 'string') {
-    const predicate = JSON.parse(Buffer.from(env.payload, 'base64').toString('utf-8'))?.predicate;
-    if (Array.isArray(predicate?.reviewers)) {
-      return predicate.reviewers.map((r) => r.agentId).filter(Boolean);
-    }
-  }
-  return [];
-}
-
-/**
- * Fail a code PR whose attestation lacks the full reviewer set. Names only:
- * this is a completeness check, NOT an independent control. Whether the
- * envelope is genuine (signature, Merkle transcript) is verify-attestation's
- * and the attestation-gate job's job.
- */
-export function checkReviewers({ base, head, repoRoot, git, docsOnly, recordsOnly, skip }) {
-  if (docsOnly || recordsOnly || skip) return [];
-  let mergeBase;
-  try {
-    mergeBase = git(['merge-base', base, head]).trim();
-  } catch (err) {
-    return [`reviewers: cannot compute merge-base: ${err.message}`];
-  }
-  const candidates = [];
-  const patchId = computePatchIdForVerifier(mergeBase, head, repoRoot);
-  if (patchId) {
-    candidates.push(`.ai-sdlc/attestations/${patchId}.v6.dsse.json`);
-    candidates.push(`.ai-sdlc/attestations/${patchId}.dsse.json`);
-  }
-  // The per-SHA bridge file is named for the signed commit, which is an
-  // ancestor of head once the chore commit lands, so fall back to the
-  // envelopes this PR adds (newest first by path order is irrelevant: the
-  // patch-id file above is the authoritative one).
-  try {
-    candidates.push(
-      ...lines(
-        git([
-          'diff',
-          '--name-only',
-          '--no-renames',
-          '--diff-filter=A',
-          `${mergeBase}..${head}`,
-          '--',
-          '.ai-sdlc/attestations/',
-        ]),
-      ).filter((f) => f.endsWith('.dsse.json')),
-    );
-  } catch (err) {
-    return [`reviewers: cannot list envelopes: ${err.message}`];
-  }
-  for (const path of candidates) {
-    let text;
-    try {
-      text = git(['show', `${head}:${path}`]);
-    } catch {
-      continue;
-    }
-    let names;
-    try {
-      names = envelopeReviewerNames(text);
-    } catch (err) {
-      return [`reviewers: ${path} is not a readable envelope: ${err.message}`];
-    }
-    if (satisfiedReviewerSet(names)) return [];
-    return [
-      `reviewers: ${path} carries reviewers [${names.join(', ') || 'none'}]; a code PR needs code-reviewer + test-reviewer + security-reviewer (or correctness-reviewer + security-reviewer). Run all reviewers and re-sign the attestation.`,
-    ];
-  }
-  return [
-    `reviewers: no attestation envelope found for this code PR (looked for ${candidates.join(', ')}); the three reviewer verdicts are recorded in it. Run the reviewers and sign.`,
-  ];
-}
-
 function parseArgs(argv) {
   const args = { check: argv[0], flags: {} };
   for (let i = 1; i < argv.length; i++) {
@@ -309,7 +207,7 @@ export function run(
     return 2;
   }
   const { check, flags } = args;
-  const names = ['changelog', 'scope-creep', 'reviewers'];
+  const names = ['changelog', 'scope-creep'];
   if (!['all', ...names].includes(check)) {
     log.error(
       `[pr-governance] usage: check-pr-governance.mjs <${names.join('|')}|all> --base <sha> --head <sha>`,
@@ -332,14 +230,6 @@ export function run(
   const results = {
     changelog: () => checkChangelog(common),
     'scope-creep': () => checkScopeCreep({ ...common, title: flags.title ?? '' }),
-    reviewers: () =>
-      checkReviewers({
-        ...common,
-        docsOnly: flags['docs-only'] === 'true',
-        recordsOnly: flags['records-only'] === 'true',
-        // The release-please rolling PR carries no envelope (same-repo guard).
-        skip: flags['skip-reviewers'] === 'true' || isReleasePleasePr(common),
-      }),
   };
   let failed = 0;
   for (const name of check === 'all' ? names : [check]) {

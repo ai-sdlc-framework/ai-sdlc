@@ -3,10 +3,12 @@
 # AISDLC-386: Orchestrator hook — collapse pre-push "re-push required" chain
 # into a single pass.
 #
-# Problem: the pre-push chain has up to two hooks that each exit-1 with
-# "re-run git push" after doing mechanical work:
+# RFC-0061 Phase 2 (AISDLC-1172): the pre-push hook no longer signs or verifies attestation
+# envelopes; the review verdict lives in a git ref outside the branch. Only the mechanical
+# task-move fixup remains.
+#
+# Problem: a pre-push hook that does mechanical work exits 1 with "re-run git push":
 #   1. check-task-moved.sh  — auto-mv + chore commit
-#   2. check-attestation-sign.sh — sign + chore commit
 #
 # (check-mcp-bundle-sync.sh was DELETED by AISDLC-385 — the mcp-server bundle
 # is now distributed via the @ai-sdlc/plugin-mcp-server npm package and is no
@@ -17,7 +19,7 @@
 # trigger fixups, one to actually send.
 #
 # How it works:
-#   1. Invoke each sub-hook in dependency order (task-move → attestation-sign)
+#   1. Invoke each sub-hook in dependency order (squash → task-move)
 #      with AI_SDLC_INTERNAL_NO_EXIT_1=1 set. That env var suppresses the
 #      exit-1-after-fixup in each sub-hook but still does the work.
 #   2. Track whether any fixup made changes (via its stdout sentinel or exit code).
@@ -29,21 +31,15 @@
 #
 # Sub-hook output is prefixed with [<hook-name>] for debuggability (AC-6).
 #
-# Order is load-bearing (per AISDLC-220):
-#   task-move MUST run before attestation-sign because the attestation envelope
-#   binds {path, headBlobSha} per file — if task-move happens AFTER sign, the
-#   envelope hashes the old path → verify-attestation rejects.
-#
 # Activation:
 #   Invoked once from `.husky/pre-push` (AISDLC-837): it is the only caller of
-#   squash-attestation-chores, check-task-moved and check-attestation-sign.
-#   Order: squash → task-move → attestation-sign.
+#   squash-attestation-chores and check-task-moved. Order: squash → task-move.
 #
 # Bypass:
 #   AI_SDLC_BYPASS_ALL_GATES=1 git push — skips this orchestrator and all sub-hooks.
 #
 # Individual sub-hook bypasses:
-#   AI_SDLC_SKIP_SQUASH_CHORES=1, AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_ATTESTATION_SIGN=1 — forwarded to sub-hooks as-is.
+#   AI_SDLC_SKIP_SQUASH_CHORES=1, AI_SDLC_SKIP_TASK_MOVE=1 — forwarded to sub-hooks as-is.
 #
 # Exit codes:
 #   0 — no fixups were needed (sub-hooks all exited 0)
@@ -115,7 +111,7 @@ run_sub_hook() {
 FIXED=()
 
 # ── Step 0: squash stacked chore-sign commits (AISDLC-369, AISDLC-837) ──
-# Runs first so the squashed HEAD is the one attestation-sign signs. A squash
+# Runs first so the pushed HEAD is the squashed one. A squash
 # is not counted as a fixup (it never required a re-push on its own).
 if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
   SQUASH_EXIT=0
@@ -127,7 +123,6 @@ if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
 fi
 
 # ── Sub-hook 1: task-move ─────────────────────────────────────────────
-# Dependency: MUST run before attestation-sign (contentHashV4 binding).
 HEAD_BEFORE_TASK_MOVE=$(git rev-parse HEAD 2>/dev/null || echo '')
 TASK_MOVE_EXIT=0
 run_sub_hook "task-move" "$SCRIPT_DIR/check-task-moved.sh" || TASK_MOVE_EXIT=$?
@@ -140,24 +135,6 @@ fi
 HEAD_AFTER_TASK_MOVE=$(git rev-parse HEAD 2>/dev/null || echo '')
 if [ "$HEAD_BEFORE_TASK_MOVE" != "$HEAD_AFTER_TASK_MOVE" ]; then
   FIXED+=("task-move")
-fi
-
-# ── Sub-hook 2: attestation-sign ─────────────────────────────────────
-# (Sub-hook "mcp-bundle-sync" was here — deleted by AISDLC-385. The mcp-server
-# bundle is now distributed via the @ai-sdlc/plugin-mcp-server npm package.)
-# Dependency: MUST run AFTER task-move so the envelope hashes the moved path.
-HEAD_BEFORE_ATTEST=$(git rev-parse HEAD 2>/dev/null || echo '')
-ATTEST_EXIT=0
-run_sub_hook "attestation-sign" "$SCRIPT_DIR/check-attestation-sign.sh" || ATTEST_EXIT=$?
-
-if [ "$ATTEST_EXIT" -ge 2 ]; then
-  echo "[pre-push-fixups] attestation-sign hard-failed (exit $ATTEST_EXIT) — aborting push" >&2
-  exit "$ATTEST_EXIT"
-fi
-
-HEAD_AFTER_ATTEST=$(git rev-parse HEAD 2>/dev/null || echo '')
-if [ "$HEAD_BEFORE_ATTEST" != "$HEAD_AFTER_ATTEST" ]; then
-  FIXED+=("attestation-sign")
 fi
 
 # ── Exit determination ────────────────────────────────────────────────

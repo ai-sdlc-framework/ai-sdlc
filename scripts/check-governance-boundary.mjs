@@ -34,8 +34,6 @@ export const GOVERNANCE_PATTERNS = [
   'pipeline-cli/attestation-core/docs-only-paths.mjs', // AISDLC-878: single docs-only classifier source
   'pipeline-cli/attestation-core/review-scope-core.mjs',
   'scripts/check-pr-patch-coverage.mjs',
-  'scripts/post-attestation-review.mjs',
-  'scripts/check-attestation-sign.sh',
   'scripts/check-skip-ci-marker.sh',
   'scripts/pre-push-fixups.sh',
   'scripts/check-dark-code.mjs',

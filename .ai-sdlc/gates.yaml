@@ -83,18 +83,12 @@ gates:
     owner: engineering
     property: Go SDK tests
     baseline: true
-  - id: gate-job:attestation-gate
+  - id: gate-job:verdict-check
     surface: pr-ready-job
-    origin: AISDLC-388 (attestation feeds the rollup, not branch protection)
+    origin: AISDLC-1172, RFC-0061 Phase 2 (replaces gate-job:attestation-gate and the shadow check)
     owner: security
-    property: code PRs carry a valid DSSE review attestation
-    baseline: true
-  - id: gate-job:review-verdict-shadow
-    surface: pr-ready-job
-    origin: AISDLC-1169, RFC-0061 Phase 1 (shadow, non-required, not in the pr-ready needs list)
-    owner: security
-    property: shadow check that refs/ai-sdlc/verdicts/<head> holds a valid record; posts ai-sdlc/review-verdict with a reason code
-    decision: DEC-0287
+    property: code PRs carry a valid or carried-forward review verdict record (refs/ai-sdlc/verdicts/<head>); posts ai-sdlc/attestation
+    decision: DEC-0375
   - id: gate-job:dependency-review-gate
     surface: pr-ready-job
     origin: AISDLC-712.1

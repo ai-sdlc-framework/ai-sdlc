@@ -175,7 +175,7 @@ describe('reenter, a real failure on the head', () => {
     expect(failedFiles()).toEqual([]);
   });
 
-  it('an attestation content mismatch orders a push-only round', () => {
+  it('a failed verdict check orders a resume that carries forward, else reviews (RFC-0061)', () => {
     failTask();
     const r = reenter(
       { target: '7' },
@@ -186,13 +186,15 @@ describe('reenter, a real failure on the head', () => {
               name: 'ai-sdlc/attestation',
               status: 'COMPLETED',
               conclusion: 'FAILURE',
-              title: 'content hash mismatch',
+              title: 'no-record no verdict record for this head',
             },
           ],
         }),
       ),
     );
-    expect(r.kind === 'manifest' && r.resume.resumeMode).toBe('push-only');
+    expect(r.kind).toBe('manifest');
+    expect(r.kind === 'manifest' && r.state).toBe('needs-re-review');
+    expect(r.kind === 'manifest' && r.resume.resumeMode).toBeUndefined();
   });
 
   it('--push-only orders a push-only round on a green PR with no note (AISDLC-1139)', () => {

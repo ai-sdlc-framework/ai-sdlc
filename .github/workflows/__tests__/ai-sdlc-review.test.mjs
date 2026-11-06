@@ -203,54 +203,10 @@ describe('Patch 2: budget circuit breaker (AC-1, AC-2, AC-3, AC-4)', () => {
   });
 });
 
-describe('AISDLC-193/833: attestation-gate job posts ai-sdlc/attestation as required gate', () => {
-  it('attestation-gate job ends with status-posting step (NOT audit-only)', () => {
-    const verify = loadYaml(resolve(__dirname, '..', 'attestation-post.yml'));
-    const verifyJob = verify.jobs.post;
-    const lastStep = verifyJob.steps.find((s) => s.id === 'post');
-    assert.ok(lastStep, 'status-posting step must exist');
-    // AISDLC-193 stage 1 (reverses AISDLC-140 sub-4 audit-only demotion):
-    // the verifier MUST post ai-sdlc/attestation as a commit status so
-    // branch protection can require it. The audit-only "Log audit result"
-    // step is replaced by the status-posting step below.
-    assert.match(
-      lastStep.name,
-      /Validate verdict and post status/i,
-      'attestation-post job must end with the status-posting step (AISDLC-193)',
-    );
-    // Sanity: the run script must invoke `gh api .../statuses/...` with the
-    // ai-sdlc/attestation context so a typo in the step name doesn't silently
-    // bypass the gate.
-    const runScript = String(lastStep.run || '');
-    assert.match(
-      runScript,
-      /repos\/\$\{REPO\}\/statuses/,
-      'status-posting step must POST to /statuses/ endpoint',
-    );
-    assert.match(runScript, /-X POST/, 'status-posting step must use HTTP POST');
-    assert.match(
-      runScript,
-      /ai-sdlc\/attestation/,
-      'status-posting step must use ai-sdlc/attestation as the context',
-    );
-    // Defense vs hardcoded-success regression: both branches MUST exist so
-    // a verifier-invalid result correctly fails the gate.
-    assert.match(runScript, /state = "success"/, 'status-posting step must have a success branch');
-    assert.match(
-      runScript,
-      /state = "failure"/,
-      'status-posting step must have a failure branch (else verifier-invalid silently passes)',
-    );
-  });
-
-  it('attestation-post grants statuses:write permission', () => {
-    const verify = loadYaml(resolve(__dirname, '..', 'attestation-post.yml'));
-    const verifyJob = verify.jobs.post;
-    assert.equal(
-      verifyJob.permissions?.statuses,
-      'write',
-      'verify job must have statuses:write permission to post ai-sdlc/attestation',
-    );
+describe('AISDLC-1172: the verdict-check job posts ai-sdlc/attestation', () => {
+  it('verdict-check grants statuses:write permission', () => {
+    const gate = loadYaml(resolve(__dirname, '..', 'ai-sdlc-gate.yml'));
+    assert.equal(gate.jobs['verdict-check'].permissions?.statuses, 'write');
   });
 
   it('ai-sdlc-gate.yml has one trigger set (AISDLC-833)', () => {
@@ -320,25 +276,13 @@ describe('AISDLC-214: docs-only short-circuit eliminates fallback workflow race 
 
   // AC-5: No regression — code PRs still require valid envelope
   describe('no regression: code PRs still require valid envelope (AC-5)', () => {
-    it('attestation-gate job still runs the full envelope check (AISDLC-833)', () => {
-      const verifyJob = gateWorkflow.jobs['attestation-gate'];
-      const verifyStep = verifyJob.steps.find((s) => s.id === 'verify');
-      assert.ok(verifyStep, 'verify step must still exist for code PRs');
-      assert.match(String(verifyStep.run), /node scripts\/verify-attestation\.mjs/);
-      // docs-only PRs skip the whole job via the detect gate.
-      assert.match(String(verifyJob.if), /docs_only\s*!=\s*'true'/);
-    });
-
-    it('Post ai-sdlc/attestation status step still posts failure when verifier finds invalid envelope', () => {
-      const postWorkflow = loadYaml(resolve(__dirname, '..', 'attestation-post.yml'));
-      const postStep = postWorkflow.jobs.post.steps.find((s) => s.id === 'post');
-      assert.ok(postStep, 'status-posting step must still exist');
-      const run = String(postStep.run ?? '');
+    it('verdict-check still gates code PRs and skips docs-only (AISDLC-1172)', () => {
+      const job = gateWorkflow.jobs['verdict-check'];
       assert.match(
-        run,
-        /state = "failure"/,
-        'status-posting step must still have a failure branch for invalid envelopes',
+        String(job.steps.map((s) => s.run ?? '').join('\n')),
+        /cli-attestation\.mjs verdict-check/,
       );
+      assert.match(String(job.if), /docs_only\s*!=\s*'true'/);
     });
   });
 });

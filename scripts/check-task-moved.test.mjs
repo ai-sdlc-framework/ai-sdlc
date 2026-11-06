@@ -662,7 +662,7 @@ describe('check-task-moved.sh (AISDLC-220)', () => {
 
   // ── (g) Load-bearing order assertion (AC #2) ─────────────────────────
 
-  it('(g) pre-push-fixups.sh invokes squash, then check-task-moved.sh, then check-attestation-sign.sh', () => {
+  it('(g) pre-push-fixups.sh invokes squash, then check-task-moved.sh, and never a signer', () => {
     // AISDLC-837: the orchestrator is the single caller; order is load-bearing
     // (contentHashV4 binds {path, headBlobSha}; move must happen before sign).
     const content = readFileSync(join(PROJECT_ROOT, 'scripts', 'pre-push-fixups.sh'), 'utf-8');
@@ -670,10 +670,9 @@ describe('check-task-moved.sh (AISDLC-220)', () => {
     const idx = (name) => code.findIndex((l) => l.includes(name));
     const squashIdx = idx('squash-attestation-chores.sh');
     const taskMoveIdx = idx('check-task-moved.sh');
-    const attestationIdx = idx('check-attestation-sign.sh');
-    assert.ok(squashIdx !== -1 && taskMoveIdx !== -1 && attestationIdx !== -1);
+    assert.ok(squashIdx !== -1 && taskMoveIdx !== -1);
     assert.ok(squashIdx < taskMoveIdx, 'squash must run before task-move');
-    assert.ok(taskMoveIdx < attestationIdx, 'task-move must run before attestation-sign');
+    assert.equal(idx('check-attestation-sign.sh'), -1, 'RFC-0061: the hook no longer signs');
   });
 
   // ── Extra: chore commit must not carry CI-skip tokens (AISDLC-88) ────

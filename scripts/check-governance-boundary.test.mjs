@@ -47,7 +47,6 @@ test('AISDLC-740: boundary script and trusted-context scripts cover themselves',
     'pipeline-cli/attestation-core/docs-only-paths.mjs',
     'pipeline-cli/attestation-core/review-scope-core.mjs',
     'scripts/check-pr-patch-coverage.mjs',
-    'scripts/post-attestation-review.mjs',
   ])
     assert.equal(isGovernancePath(p), true, p);
 });

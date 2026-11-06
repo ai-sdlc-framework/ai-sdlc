@@ -21,7 +21,7 @@ const rows: Array<[PrState, PrFacts]> = [
   ['behind-or-dirty', { ...base, checks: green, mergeStateStatus: 'BEHIND' }],
   ['behind-or-dirty', { ...base, mergeStateStatus: 'DIRTY' }],
   [
-    'attestation-content-hash-mismatch',
+    'needs-re-review',
     {
       ...base,
       checks: [
@@ -52,6 +52,19 @@ const rows: Array<[PrState, PrFacts]> = [
   ],
   ['manifest-branch-mismatch', { ...base, manifestBranch: 'feat/other' }],
   ['no-match', { ...base, checks: green, draft: true }],
+  [
+    'needs-re-review',
+    {
+      ...base,
+      checks: [
+        {
+          name: 'ai-sdlc/attestation',
+          conclusion: 'failure',
+          summary: 'no-record no verdict ref for this head',
+        },
+      ],
+    },
+  ],
 ];
 
 describe('classifyPr (AISDLC-823)', () => {

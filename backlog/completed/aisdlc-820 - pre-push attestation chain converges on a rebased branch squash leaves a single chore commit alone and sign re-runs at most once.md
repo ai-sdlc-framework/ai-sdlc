@@ -1,7 +1,8 @@
 ---
 id: AISDLC-820
 title: >-
-  pre-push attestation chain converges on a rebased branch: squash leaves a single chore commit alone and sign re-runs at most once
+  pre-push attestation chain converges on a rebased branch: squash leaves a
+  single chore commit alone and sign re-runs at most once
 status: Done
 assignee: []
 created_date: '2026-10-12'
@@ -12,12 +13,20 @@ labels:
 dependencies: []
 references:
   - scripts/squash-attestation-chores.sh
-  - scripts/check-attestation-sign.sh
   - scripts/pre-push-fixups.sh
-  - scripts/check-attestation-sign.test.mjs
   - .husky/pre-push
 priority: critical
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.test.mjs'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

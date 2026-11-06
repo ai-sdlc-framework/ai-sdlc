@@ -245,7 +245,7 @@ describe('action table (AC2)', () => {
     merged: taskPr({ merged: true }),
     'manifest-branch-mismatch': taskPr({ manifestBranch: 'other' }),
     'behind-or-dirty': taskPr({ mergeStateStatus: 'BEHIND' }),
-    'attestation-content-hash-mismatch': taskPr({
+    'needs-re-review': taskPr({
       checks: [
         { name: 'ai-sdlc/attestation', conclusion: 'failure', summary: 'content hash mismatch' },
       ],
@@ -323,7 +323,7 @@ describe('action table (AC2)', () => {
     );
     expect(actionCommands({ ...base }, '/bin')![0]!.args).not.toContain('--developer-round');
     expect(
-      actionCommands({ ...base, action: 'push-only-resign', failingLine: 'coverage' }, '/bin')![0]!
+      actionCommands({ ...base, action: 'review-resume', failingLine: 'coverage' }, '/bin')![0]!
         .args,
     ).not.toContain('--developer-round');
   });
@@ -533,7 +533,7 @@ describe('helpers', () => {
       expect(cmds.flatMap((c) => (c.args[1] === 'rerun' ? c.args : []))).not.toContain('--commit');
     }
     expect(run('rerun-dor', { headSha: undefined })).toBeNull();
-    for (const a of ['land-prep', 'push-only-resign', 'reenter']) {
+    for (const a of ['land-prep', 'review-resume', 'reenter']) {
       expect(run(a)![0]!.args.slice(1, 3)).toEqual(['reenter', '3']);
     }
     expect(run('none')).toBeNull();

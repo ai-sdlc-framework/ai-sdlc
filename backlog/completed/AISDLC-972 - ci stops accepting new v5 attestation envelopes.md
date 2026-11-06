@@ -1,6 +1,8 @@
 ---
 id: AISDLC-972
-title: 'CI rejects v5 attestation envelopes signed after the v6 cutover; v5 stays read-only for history'
+title: >-
+  CI rejects v5 attestation envelopes signed after the v6 cutover; v5 stays
+  read-only for history
 status: Done
 assignee: []
 created_date: '2026-10-17'
@@ -11,10 +13,15 @@ dependencies: []
 references:
   - orchestrator/src/runtime/attestations.ts
   - pipeline-cli/attestation-core/verify-core.mjs
-  - scripts/check-attestation-sign.sh
   - docs/operations/attestation-reference.md
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-11-05'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
+    resolution: flagged
+drift_checked: '2026-11-05'
 ---
 
 ## Description

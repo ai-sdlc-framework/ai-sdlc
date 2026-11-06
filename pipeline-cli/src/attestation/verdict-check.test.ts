@@ -1,14 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ExecResult, Runner } from '../runtime/exec.js';
-import { compareShadow, checkVerdict } from './verdict-check.js';
-import {
-  collectHistory,
-  compileCatches,
-  formatCatches,
-  reasonCode,
-  type HeadHistory,
-} from './verdict-catches.js';
-import { runCatches, runVerdictCheck } from './verdict-cli.js';
+import { checkVerdict } from './verdict-check.js';
+import { runVerdictCheck } from './verdict-cli.js';
 import { finalizeVerdictRecord, type VerdictRecord } from './verdict-record.js';
 
 const HEAD = 'a'.repeat(40);
@@ -149,44 +142,36 @@ describe('checkVerdict', () => {
   });
 });
 
-describe('compareShadow', () => {
-  it('agrees, disagrees, or is unavailable', () => {
-    expect(compareShadow(true, 'success').agreed).toBe(true);
-    expect(compareShadow(false, 'failure').agreed).toBe(true);
-    const d = compareShadow(true, 'failure');
-    expect(d.agreed).toBe(false);
-    expect(d.line).toContain('DISAGREE');
-    expect(compareShadow(true, null).agreed).toBeNull();
-    expect(compareShadow(true, 'pending').agreed).toBeNull();
-  });
-});
-
 describe('runVerdictCheck', () => {
-  it('posts the status and writes the summary', async () => {
-    const b = build({});
-    const calls: string[][] = [];
-    const runner: Runner = async (cmd, args) => {
-      calls.push([cmd, ...args]);
-      if (cmd === 'git' && args[0] === 'diff') return bad;
-      if (cmd === 'gh' && args[1]?.includes('/commits/')) return ok('success\n');
-      return runnerFor(JSON.stringify(b.record), b.leaves)(cmd, args);
-    };
-    let summary = '';
-    const res = await runVerdictCheck({
+  const run = async (runner: Runner, over: Partial<Parameters<typeof runVerdictCheck>[0]> = {}) =>
+    runVerdictCheck({
       runner,
       cwd: '.',
       repository: 'o/r',
       headSha: HEAD,
       baseSha: 'c'.repeat(40),
       postStatus: true,
-      writeSummary: (m) => (summary = m),
+      ...over,
     });
+
+  it('posts success on ai-sdlc/attestation for a valid record and writes the summary', async () => {
+    const b = build({});
+    const calls: string[][] = [];
+    const runner: Runner = async (cmd, args) => {
+      calls.push([cmd, ...args]);
+      if (cmd === 'git' && args[0] === 'diff') return bad;
+      return runnerFor(JSON.stringify(b.record), b.leaves)(cmd, args);
+    };
+    let summary = '';
+    const res = await run(runner, { writeSummary: (m) => (summary = m) });
     expect(res.code).toBe('ok');
-    expect(summary).toContain('AGREE');
-    const post = calls.find((c) => c.includes('POST'));
+    expect(summary).toContain('ai-sdlc/attestation');
+    const post = calls.find((c) => c.includes('POST'))!;
     expect(post).toContain('state=success');
+    expect(post).toContain('context=ai-sdlc/attestation');
   });
-  it('posts success with the reason code for every non-ok reason (AISDLC-1192)', async () => {
+
+  it('AC-1: posts failure with the reason code for every non-ok reason', async () => {
     const b = build({});
     const scenarios: Array<{ code: string; runner: Runner; requiredTier?: 'isolated' }> = [
       { code: 'no-record', runner: runnerFor(null, null, false) },
@@ -210,143 +195,85 @@ describe('runVerdictCheck', () => {
       const runner: Runner = async (cmd, args) => {
         calls.push([cmd, ...args]);
         if (cmd === 'git' && args[0] === 'diff') return bad;
+        if (cmd === 'git' && args[0] === 'ls-remote') return bad;
         if (cmd === 'gh') return bad;
         return sc.runner(cmd, args);
       };
-      const res = await runVerdictCheck({
-        runner,
-        cwd: '.',
-        repository: 'o/r',
+      const res = await run(runner, {
         headSha: sc.code === 'subject-mismatch' ? 'd'.repeat(40) : HEAD,
-        baseSha: 'c'.repeat(40),
         requiredTier: sc.requiredTier,
-        postStatus: true,
       });
       expect(res.code).toBe(sc.code);
+      expect(res.ok).toBe(false);
       const post = calls.find((c) => c.includes('POST'))!;
-      expect(post).toContain('state=success');
+      expect(post).toContain('state=failure');
       expect(post.some((a) => a.startsWith(`description=${sc.code}`))).toBe(true);
-      expect(post.some((a) => /state=(failure|error)/.test(a))).toBe(false);
     }
   });
+
+  it('AC-1: passes a carried-forward record (clean replay of an earlier approved head)', async () => {
+    const earlier = build({});
+    const earlierHead = 'e'.repeat(40);
+    const rec = {
+      ...earlier.record,
+      subject: { ...earlier.record.subject, headSha: earlierHead },
+    };
+    const refLine = `${'1'.repeat(40)}\trefs/ai-sdlc/verdicts/${earlierHead}\n`;
+    const runner: Runner = async (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'diff') return bad;
+      if (cmd === 'git' && args[0] === 'ls-remote') return ok(refLine);
+      if (cmd === 'git' && args[0] === 'fetch') return args[3]?.endsWith(HEAD) ? bad : ok();
+      if (cmd === 'git' && args[0] === 'show') return ok(JSON.stringify(rec));
+      if (cmd === 'git' && args[0] === '--version') return ok('git version 2.43.0');
+      if (cmd === 'git' && args[0] === 'rev-parse') return ok('T1\n');
+      return ok();
+    };
+    const res = await run(runner, { pullRequest: 1 });
+    expect(res.code).toBe(`ok-carried:${earlierHead}`);
+    expect(res.ok).toBe(true);
+  });
+
+  it('declines to carry from unusable earlier records (other PR, unapproved, malformed, git too old)', async () => {
+    const b = build({});
+    const other = {
+      ...b.record,
+      subject: { ...b.record.subject, headSha: 'f'.repeat(40), pullRequest: 9 },
+    };
+    const unapproved = {
+      ...b.record,
+      subject: { ...b.record.subject, headSha: '9'.repeat(40) },
+      verdict: 'changes_requested',
+    };
+    const refs = ['f', '9', '8', '7']
+      .map((c) => `${'1'.repeat(40)}\trefs/ai-sdlc/verdicts/${c.repeat(40)}\n`)
+      .join('');
+    const bodies = [
+      JSON.stringify(other),
+      JSON.stringify(unapproved),
+      '{bad',
+      JSON.stringify({ ...b.record, subject: { ...b.record.subject, headSha: '7'.repeat(40) } }),
+    ];
+    let shown = 0;
+    const runner: Runner = async (cmd, args) => {
+      if (cmd === 'git' && args[0] === 'diff') return bad;
+      if (cmd === 'git' && args[0] === 'ls-remote') return ok(refs);
+      if (cmd === 'git' && args[0] === 'fetch') return args[3]?.endsWith(HEAD) ? bad : ok();
+      if (cmd === 'git' && args[0] === 'show') return ok(bodies[shown++] ?? '{}');
+      if (cmd === 'git' && args[0] === '--version') return ok('git version 2.30.0');
+      return ok();
+    };
+    const res = await run(runner, { pullRequest: 1, postStatus: false });
+    expect(res.code).toBe('no-record');
+  });
+
   it('fails closed on an unreadable diff and skips posting', async () => {
     const calls: string[][] = [];
     const runner: Runner = async (cmd, args) => {
       calls.push([cmd, ...args]);
       return bad;
     };
-    const res = await runVerdictCheck({
-      runner,
-      cwd: '.',
-      repository: 'o/r',
-      headSha: HEAD,
-      baseSha: 'c'.repeat(40),
-      postStatus: false,
-    });
+    const res = await run(runner, { postStatus: false });
     expect(res.code).toBe('no-record');
     expect(calls.some((c) => c.includes('POST'))).toBe(false);
-  });
-});
-
-const hist = (over: Partial<HeadHistory>): HeadHistory => ({
-  headSha: 'h1',
-  pullRequest: 5,
-  statuses: [],
-  ...over,
-});
-
-describe('catches', () => {
-  it('counts disagreements from the always-success post shape (AISDLC-1192)', () => {
-    const rows = compileCatches([
-      hist({
-        headSha: 'n1',
-        statuses: [
-          { context: 'ai-sdlc/review-verdict', state: 'success', description: 'no-record x' },
-          { context: 'ai-sdlc/attestation', state: 'success' },
-          { context: 'ai-sdlc/pr-ready', state: 'success' },
-        ],
-      }),
-      hist({
-        headSha: 'n2',
-        statuses: [
-          { context: 'ai-sdlc/review-verdict', state: 'success', description: 'ok-carried:abc y' },
-          { context: 'ai-sdlc/attestation', state: 'success' },
-        ],
-      }),
-    ]);
-    expect(rows.map((r) => [r.kind, r.headSha])).toEqual([
-      ['catch', 'n1'],
-      ['disagreement', 'n1'],
-    ]);
-    expect(rows[1]!.reason).toContain('verdict fail (no-record)');
-  });
-  it('lists catches and disagreements', () => {
-    const rows = compileCatches([
-      hist({
-        statuses: [
-          { context: 'ai-sdlc/review-verdict', state: 'failure', description: 'coverage-short x' },
-          { context: 'ai-sdlc/attestation', state: 'success' },
-        ],
-        prReadyCheckConclusion: 'success',
-      }),
-      hist({
-        headSha: 'h2',
-        statuses: [
-          { context: 'ai-sdlc/review-verdict', state: 'failure', description: 'no-record' },
-          { context: 'ai-sdlc/pr-ready', state: 'failure' },
-        ],
-      }),
-      hist({
-        headSha: 'h3',
-        statuses: [
-          { context: 'ai-sdlc/review-verdict', state: 'success', description: 'ok' },
-          { context: 'ai-sdlc/attestation', state: 'failure' },
-        ],
-      }),
-      hist({ headSha: 'h4', statuses: [{ context: 'ai-sdlc/attestation', state: 'success' }] }),
-      hist({
-        headSha: 'h5',
-        statuses: [
-          { context: 'ai-sdlc/review-verdict', state: 'success', description: 'ok' },
-          { context: 'ai-sdlc/attestation', state: 'success' },
-        ],
-      }),
-    ]);
-    expect(rows.map((r) => `${r.kind}:${r.headSha}`)).toEqual([
-      'catch:h1',
-      'disagreement:h1',
-      'disagreement:h3',
-    ]);
-    expect(rows[0]!.reason).toBe('coverage-short');
-    expect(formatCatches(rows)).toContain('catch\tPR #5\th1\tcoverage-short');
-    expect(formatCatches([])).toContain('no catches');
-    expect(reasonCode(null)).toBe('unknown');
-    expect(reasonCode('ok-carried:abc x')).toBe('ok-carried:abc');
-  });
-
-  it('collects history from mocked GitHub and writes no file', async () => {
-    const seen: string[] = [];
-    const ghJson = async (path: string) => {
-      seen.push(path);
-      if (path.includes('/pulls')) {
-        return [
-          { number: 1, updated_at: '2026-11-02T00:00:00Z', head: { sha: 'h1' } },
-          { number: 2, updated_at: '2026-01-01T00:00:00Z', head: { sha: 'h2' } },
-        ];
-      }
-      if (path.includes('check-runs')) return { check_runs: [{ conclusion: 'success' }] };
-      return [{ context: 'ai-sdlc/review-verdict', state: 'failure', description: 'tier-short' }];
-    };
-    const out = await runCatches('o/r', '2026-10-01', ghJson);
-    expect(out).toContain('catch\tPR #1\th1\ttier-short');
-    expect(seen.some((p) => p.includes('h2'))).toBe(false);
-    const all = await collectHistory('o/r', undefined, async (p) =>
-      p.includes('/pulls')
-        ? [{ number: 3, updated_at: '2020-01-01T00:00:00Z', head: { sha: 'h3' } }]
-        : p.includes('check-runs')
-          ? {}
-          : [],
-    );
-    expect(all[0]!.prReadyCheckConclusion).toBeNull();
   });
 });

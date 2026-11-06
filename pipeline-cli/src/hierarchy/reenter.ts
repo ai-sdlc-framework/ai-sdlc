@@ -285,7 +285,7 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
     // `gh run rerun` takes a run id, not a commit: resolve the gate run for this head.
     rerunId = resolveGateRunId(deps.run, deps.cwd, headSha);
     route = rerunId ? 'rerun' : 'executor';
-  } else if (c.state === 'real-failure' || c.state === 'attestation-content-hash-mismatch') {
+  } else if (c.state === 'real-failure' || c.state === 'needs-re-review') {
     route = 'executor';
   } else if (note || input.pushOnly) {
     route = 'executor';
@@ -353,9 +353,11 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
   const reason =
     c.state === 'behind-or-dirty'
       ? CONFLICT_ROUND
-      : c.state === 'attestation-content-hash-mismatch' || input.pushOnly
-        ? 're-sign the attestation and push only'
-        : (failingLine ?? 'a required check failed');
+      : c.state === 'needs-re-review'
+        ? 'the head has no verdict record: carry one forward or review'
+        : input.pushOnly
+          ? 'push only'
+          : (failingLine ?? 'a required check failed');
   const text = note ?? proseLine(`${reason} (head ${short(headSha)})`);
   const resumed = resumeDone(
     deps.boardDir,
@@ -367,7 +369,7 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
       headSha,
       ...(failingLine ? { failingLine: proseLine(failingLine).slice(5) } : {}),
       failingChecks: failedChecks.map((k) => `${k.name}${k.summary ? `: ${k.summary}` : ''}`),
-      pushOnly: c.state === 'attestation-content-hash-mismatch' || input.pushOnly === true,
+      pushOnly: input.pushOnly === true,
       ...(input.developerRound ? { developerRound: true } : {}),
     },
     {
