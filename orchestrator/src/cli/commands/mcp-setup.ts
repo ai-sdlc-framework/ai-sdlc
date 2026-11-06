@@ -23,6 +23,8 @@ export interface DetectedAgent {
   configPath: string; // relative path to MCP config file
   configKey: string; // "mcpServers" or "servers" (VS Code)
   serverEntry: Record<string, unknown>; // the ai-sdlc server config object
+  /** File format of the config; defaults to JSON. Codex uses TOML. */
+  format?: 'json' | 'toml';
 }
 
 /**
@@ -66,7 +68,54 @@ function vscodeEntry(
   return entry;
 }
 
+/**
+ * Render the ai-sdlc server as a Codex `config.toml` table. Documented in
+ * docs/getting-started/mcp-advisor-setup.md; a test keeps both in sync.
+ */
+export function renderCodexToml(entry: Record<string, unknown>): string {
+  const q = (v: unknown) => JSON.stringify(String(v));
+  const args = ((entry.args as unknown[]) ?? []).map(q).join(', ');
+  let out = `[mcp_servers.ai-sdlc]\ncommand = ${q(entry.command)}\nargs = [${args}]\n`;
+  const env = entry.env as Record<string, string> | undefined;
+  if (env && Object.keys(env).length > 0) {
+    out += `\n[mcp_servers.ai-sdlc.env]\n`;
+    for (const [k, v] of Object.entries(env)) out += `${k} = ${q(v)}\n`;
+  }
+  return out;
+}
+
+const CODEX_TOML_HEADER = /^\s*\[mcp_servers\.(?:ai-sdlc|"ai-sdlc")(?:\.[^\]]*)?\]/m;
+
+function installTomlMcpServer(
+  projectDir: string,
+  agent: DetectedAgent,
+  dryRun: boolean,
+): 'created' | 'merged' | 'skipped' {
+  const fullPath = join(projectDir, agent.configPath);
+  const block = renderCodexToml(agent.serverEntry);
+  if (existsSync(fullPath)) {
+    const existing = readFileSync(fullPath, 'utf-8');
+    if (CODEX_TOML_HEADER.test(existing)) return 'skipped';
+    if (!dryRun) {
+      const sep =
+        existing.length === 0 || existing.endsWith('\n\n')
+          ? ''
+          : existing.endsWith('\n')
+            ? '\n'
+            : '\n\n';
+      writeFileSync(fullPath, existing + sep + block, 'utf-8');
+    }
+    return 'merged';
+  }
+  if (!dryRun) {
+    mkdirSync(dirname(fullPath), { recursive: true });
+    writeFileSync(fullPath, `# ${PIN_OPT_OUT_COMMENT}\n${block}`, 'utf-8');
+  }
+  return 'created';
+}
+
 interface AgentSpec {
+  format?: 'json' | 'toml';
   name: string;
   configPath: string;
   configKey: string;
@@ -111,6 +160,15 @@ const AGENT_SPECS: AgentSpec[] = [
     entryFn: standardEntry,
     configDir: '.windsurf',
     binary: 'windsurf',
+  },
+  {
+    name: 'Codex',
+    configPath: '.codex/config.toml',
+    configKey: 'mcp_servers',
+    format: 'toml',
+    entryFn: standardEntry,
+    configDir: '.codex',
+    binary: 'codex',
   },
 ];
 
@@ -163,6 +221,7 @@ export function detectAgentsDetailed(
         configPath: spec.configPath,
         configKey: spec.configKey,
         serverEntry: spec.entryFn(pinVersion, env),
+        ...(spec.format ? { format: spec.format } : {}),
       });
       continue;
     }
@@ -182,6 +241,7 @@ export function detectAgentsDetailed(
           configPath: spec.configPath,
           configKey: spec.configKey,
           serverEntry: spec.entryFn(pinVersion, env),
+          ...(spec.format ? { format: spec.format } : {}),
         });
       } else {
         skipped.push({
@@ -199,6 +259,7 @@ export function detectAgentsDetailed(
         configPath: spec.configPath,
         configKey: spec.configKey,
         serverEntry: spec.entryFn(pinVersion, env),
+        ...(spec.format ? { format: spec.format } : {}),
       });
     }
   }
@@ -218,6 +279,7 @@ export function installMcpServer(
   agent: DetectedAgent,
   dryRun: boolean,
 ): 'created' | 'merged' | 'skipped' {
+  if (agent.format === 'toml') return installTomlMcpServer(projectDir, agent, dryRun);
   const fullPath = join(projectDir, agent.configPath);
 
   if (existsSync(fullPath)) {

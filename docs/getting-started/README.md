@@ -11,6 +11,8 @@ Get up and running with the AI-SDLC Framework.
 > End-to-end validation on a clean, non-author repository is pending (AC#2 —
 > see the guide for details).
 
+> **Using Codex, Cursor, VS Code Copilot or Windsurf?** See [MCP advisor setup](mcp-advisor-setup.md) for per-client config snippets.
+
 ## What is AI-SDLC?
 
 AI-SDLC is a **Decision Engine** for autonomous AI software development. It's the **contract-to-shipped** half of a spec-driven development stack: you (or a front-of-funnel tool like [GitHub Spec Kit](https://github.com/github/spec-kit)) hand it a well-specified contract; AI-SDLC dispatches autonomous agents, enforces quality gates, attests every change, and routes every decision to the right human actor. It provides:
