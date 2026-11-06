@@ -49,6 +49,7 @@ import { bootstrapPromptFor, prepareReview, type ReviewPrepareResult } from './r
 import {
   aggregateRound,
   attachVerdictRecordDraft,
+  enforceReviewerCoverage,
   finalizeReview,
   parseReviewReports,
   type ReviewFinalizeResult,
@@ -612,6 +613,7 @@ class Machine {
     if (prep.kind === 'nothing-to-spawn') {
       state.verdict = await aggregateRound(prep.verdicts, prep.review.harnessNote);
       await attachVerdictRecordDraft(ctx, state, state.verdict);
+      if (!prep.review.staged) await enforceReviewerCoverage(ctx, state, state.verdict);
       return this.afterVerdict(state);
     }
     await updateSessionState(ctx, state.taskIdLower, '07-reviewers-running');

@@ -41,6 +41,7 @@ import { bootstrapPromptFor } from '../next-step/review-prepare.js';
 import {
   aggregateRound,
   attachVerdictRecordDraft,
+  enforceReviewerCoverage,
   parseReviewReports,
   type ReviewerReport,
 } from '../next-step/review-finalize.js';
@@ -384,6 +385,7 @@ class ExecuteHost implements EngineHost {
     if (prep.kind === 'nothing-to-spawn') {
       state.verdict = await aggregateRound(prep.verdicts, prep.review.harnessNote);
       await attachVerdictRecordDraft(ctx, state, state.verdict);
+      if (!prep.review.staged) await enforceReviewerCoverage(ctx, state, state.verdict);
       run.scratch.nothingToSpawn = true;
       return { kind: 'ok', output: { reviewers: [] } };
     }

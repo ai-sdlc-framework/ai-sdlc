@@ -322,6 +322,35 @@ describe('happy path', () => {
     expect(shipped[0].classifierLine).toBe('Classifier decision: []');
   });
 
+  it('iterates a resumed round whose only approval leaves a required reviewer uncovered (AISDLC-1197)', async () => {
+    h.runner.on(/^git diff --name-only/, { code: 0, stdout: 'docs/readme.md\n', stderr: '' });
+    const base = deps();
+    const { instructions } = await drive({
+      ...base,
+      prepareReview: async (c, s, round, o) => {
+        if (round > 1) return base.prepareReview!(c, s, round, o);
+        return {
+          kind: 'nothing-to-spawn',
+          review: { ...reviewRound(round), spawned: [] },
+          classifierLine: 'Classifier decision: []',
+          verdicts: [
+            {
+              agentId: 'correctness-reviewer',
+              harness: 'claude-code',
+              approved: true,
+              findings: [],
+            },
+          ],
+        };
+      },
+    });
+    expect(instructions.map((i) => i.action).slice(0, 2)).toEqual([
+      'spawn-developer',
+      'spawn-developer',
+    ]);
+    expect(counters.devPrompts[0].feedback).toContain('security-reviewer');
+  });
+
   it('accepts a developer envelope wrapped in prose and a code fence', async () => {
     const wrapped = `All done!\n\`\`\`json\n${DEV_JSON}\n\`\`\`\nThanks.`;
     const { last } = await drive(deps(), { devResult: () => wrapped });
