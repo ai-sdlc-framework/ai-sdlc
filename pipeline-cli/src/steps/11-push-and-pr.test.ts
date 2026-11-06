@@ -258,20 +258,12 @@ describe('Step 11 — composeBody', () => {
     expect(composeBody({ ...base, pipelineRef: 'abc1234' })).toContain(
       'pinned pipeline-cli build abc1234',
     );
-<<<<<<< HEAD
     const saved = process.env.AI_SDLC_PIPELINE_REF;
     delete process.env.AI_SDLC_PIPELINE_REF;
     try {
       expect(composeBody(base)).not.toContain('Pipeline build');
     } finally {
       if (saved !== undefined) process.env.AI_SDLC_PIPELINE_REF = saved;
-=======
-    vi.stubEnv('AI_SDLC_PIPELINE_REF', '');
-    try {
-      expect(composeBody(base)).not.toContain('Pipeline build');
-    } finally {
-      vi.unstubAllEnvs();
->>>>>>> ac201932 (test: make composeBody no-pin test hermetic against AI_SDLC_PIPELINE_REF (AISDLC-1210))
     }
   });
 
