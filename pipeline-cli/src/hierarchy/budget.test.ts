@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  activeClaimFloor,
   budgetStatus,
   fetchUsage,
   formatBudget,
@@ -215,7 +216,9 @@ describe('status BUDGET line', () => {
     clock += 6 * 60_000;
     await runBudgetPacer(dir, deps());
     expect(formatBudget(budgetStatus(dir, clock)!)).toContain('no projected exhaustion');
-    expect(formatBudget({ at: 'x', overridden: false })).toContain('7d unknown');
+    expect(
+      formatBudget({ at: 'x', overridden: false, floor: 'none', floorActive: false }),
+    ).toContain('7d unknown');
   });
 });
 
@@ -274,5 +277,55 @@ describe('reset-time jitter (AISDLC-1166)', () => {
     expect(pace?.line).toBeLessThan(16.5);
     expect(pace && pace.ahead < 0).toBe(true);
     expect(pacerAllowance(budgetStatus(dir, now))).toBe(Number.POSITIVE_INFINITY);
+  });
+});
+
+describe('priority floor (RFC-0062 OQ-1)', () => {
+  const setFloor = (f: string | undefined): void =>
+    writeFileSync(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ budget: f ? { priorityFloor: f } : {} }),
+    );
+
+  /** Two samples one hour apart so the burn projects exhaustion; `now` is the second. */
+  async function burn(first: number, second: number): Promise<number> {
+    seven = first;
+    await runBudgetPacer(dir, deps());
+    clock = T0 + 3600_000;
+    seven = second;
+    await runBudgetPacer(dir, { ...deps(), now: () => new Date(clock + 6 * 60_000) });
+    return clock + 6 * 60_000;
+  }
+
+  it('defaults to none: the line carries FLOOR none and no claim floor', async () => {
+    const now = await burn(50, 60);
+    expect(formatBudget(budgetStatus(dir, now)!)).toMatch(/; FLOOR none$/);
+    expect(activeClaimFloor(dir, now)).toBeUndefined();
+  });
+
+  it('activates when the projection passes 100% before reset and lifts on recovery', async () => {
+    setFloor('high');
+    const now = await burn(50, 60);
+    const b = budgetStatus(dir, now)!;
+    expect(b.floorActive).toBe(true);
+    expect(formatBudget(b)).toMatch(/; FLOOR high \(active\)$/);
+    expect(activeClaimFloor(dir, now)).toBe('high');
+    // Utilization falls back under the first sample: no projection, the floor lifts.
+    seven = 40;
+    clock = now + 3600_000;
+    await runBudgetPacer(dir, { ...deps(), now: () => new Date(clock) });
+    clock += 6 * 60_000;
+    await runBudgetPacer(dir, { ...deps(), now: () => new Date(clock) });
+    expect(activeClaimFloor(dir, clock)).toBeUndefined();
+  });
+
+  it('stays inactive when the projection resets first, or on an unknown value', async () => {
+    setFloor('high');
+    const now = await burn(50, 50.1);
+    expect(budgetStatus(dir, now)!.floorActive).toBe(false);
+    setFloor('bogus');
+    expect(budgetStatus(dir, now)!.floor).toBe('none');
+    writeFileSync(path.join(dir, 'config.json'), '{bad');
+    expect(activeClaimFloor(dir, now)).toBeUndefined();
   });
 });

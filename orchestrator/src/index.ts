@@ -984,12 +984,8 @@ export {
 
 // RFC-0010 subscription scheduling
 export {
-  SubscriptionLedger,
-  validateTenantShares,
-  evaluateSchedule,
   CalibrationStore,
   COLD_START_DEFAULT,
-  buildBurnDownReport,
   analyzeTier,
   PLAN_COSTS_USD,
   isOffPeakAt,
@@ -1012,11 +1008,7 @@ export {
   type BillingMode,
   type QuotaSource,
   type OffPeakSchedule,
-  type BurnDownInput,
   type CalibrationStoreDeps,
-  type LedgerDeps,
-  type ScheduleDecision,
-  type ScheduleEvaluationContext,
   type Confidence,
   type ContentionEvent,
   type TierAnalysisInput,
@@ -1138,19 +1130,14 @@ export {
   type StageStatus,
 } from './artifacts/index.js';
 
-// RFC-0010 dispatch (worker pool + merge gate + requeue)
+// RFC-0010 dispatch (merge gate + requeue)
 export {
-  runWorkerPool,
   withMergeGate,
   forceReleaseMergeGate,
   isBranchUpToDate,
   MergeGateLockTimeoutError,
   decideRequeue,
   appendTriageHistory,
-  type WorkItem,
-  type WorkerPoolDeps,
-  type WorkerPoolEvent,
-  type WorkerPoolResult,
   type FailureEvent,
   type RequeueTrigger,
   type RequeueDecision,

@@ -234,11 +234,57 @@ export function paceOf(
   return pace;
 }
 
+/** Lowest task priority still claimed while the budget projects past 100% (RFC-0062 OQ-1, DEC-0385). */
+export type PriorityFloor = 'none' | 'high' | 'medium';
+
+export const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+
 export interface BudgetStatus {
   at: string;
   sevenDay?: WindowPace;
   fiveHour?: WindowPace;
   overridden: boolean;
+  /** Configured `budget.priorityFloor` (default `none`). */
+  floor: PriorityFloor;
+  /** True when the floor is set and a window projects 100% before its reset. */
+  floorActive: boolean;
+}
+
+/** `budget.priorityFloor` from `<board>/config.json`: `none` (default), `high` or `medium`. */
+export function resolvePriorityFloor(boardDir: string): PriorityFloor {
+  try {
+    if (!existsSync(configPath(boardDir))) return 'none';
+    const doc = JSON.parse(readFileSync(configPath(boardDir), 'utf-8')) as {
+      budget?: { priorityFloor?: unknown };
+    };
+    const f = doc.budget?.priorityFloor;
+    return f === 'high' || f === 'medium' ? f : 'none';
+  } catch {
+    return 'none';
+  }
+}
+
+/** True when a window (not overridden) projects 100% strictly before it resets. */
+function projectsPastReset(p: WindowPace | undefined): boolean {
+  return p?.exhaustsAt !== undefined && Date.parse(p.exhaustsAt) < Date.parse(p.resetsAt);
+}
+
+/**
+ * The floor claims must honour at `nowMs`, or undefined when claims are unrestricted: the floor
+ * is configured, no override is active and a window projects past 100% before its reset.
+ */
+export function activeClaimFloor(
+  boardDir: string,
+  nowMs: number,
+): Exclude<PriorityFloor, 'none'> | undefined {
+  const floor = resolvePriorityFloor(boardDir);
+  if (floor === 'none') return undefined;
+  try {
+    const b = budgetStatus(boardDir, nowMs);
+    return b?.floorActive ? floor : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function readOverride(boardDir: string): { sevenDay?: string; fiveHour?: string } {
@@ -271,14 +317,21 @@ export function budgetStatus(boardDir: string, nowMs: number): BudgetStatus | un
   const ov = readOverride(boardDir);
   const sevenDay = paceOf('sevenDay', file, margins.sevenDay, nowMs);
   const fiveHour = paceOf('fiveHour', file, margins.fiveHour, nowMs);
+  const overridden = Boolean(
+    (sevenDay && sameWindow(ov.sevenDay, sevenDay.resetsAt)) ||
+    (fiveHour && sameWindow(ov.fiveHour, fiveHour.resetsAt)),
+  );
+  const floor = resolvePriorityFloor(boardDir);
   return {
     at: file.sample.at,
     ...(sevenDay ? { sevenDay } : {}),
     ...(fiveHour ? { fiveHour } : {}),
-    overridden: Boolean(
-      (sevenDay && sameWindow(ov.sevenDay, sevenDay.resetsAt)) ||
-      (fiveHour && sameWindow(ov.fiveHour, fiveHour.resetsAt)),
-    ),
+    overridden,
+    floor,
+    floorActive:
+      floor !== 'none' &&
+      !overridden &&
+      (projectsPastReset(sevenDay) || projectsPastReset(fiveHour)),
   };
 }
 
@@ -369,5 +422,5 @@ export function formatBudget(b: BudgetStatus): string {
     : w
       ? `, no projected exhaustion (resets ${w.resetsAt})`
       : '';
-  return `BUDGET ${part('7d', b.sevenDay)}; ${part('5h', b.fiveHour)}${proj}${b.overridden ? ' [override active]' : ''}`;
+  return `BUDGET ${part('7d', b.sevenDay)}; ${part('5h', b.fiveHour)}${proj}${b.overridden ? ' [override active]' : ''}; FLOOR ${b.floor}${b.floorActive ? ' (active)' : ''}`;
 }
