@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1197
 title: 'Resumed review path never signs a verdict that misses required reviewers'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:

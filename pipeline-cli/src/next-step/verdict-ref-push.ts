@@ -35,6 +35,7 @@ export async function buildVerdictRefspec(
   draft: VerdictRecordDraft | undefined,
   baseRef: string,
   now?: Date,
+  pullRequest = 0,
 ): Promise<VerdictRefspec> {
   if (!draft) {
     return {
@@ -66,7 +67,7 @@ export async function buildVerdictRefspec(
       return { refspec: null, note: `verdict ref ${ref} already issued; left unchanged` };
     }
     const { record, leavesJsonl } = finalizeVerdictRecord(draft, {
-      subject: { headSha, treeSha, baseSha, repository, pullRequest: 0 },
+      subject: { headSha, treeSha, baseSha, repository, pullRequest },
       now,
     });
     const commit = await writeVerdictCommit(runner, wt, record, leavesJsonl);
