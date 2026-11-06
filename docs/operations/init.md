@@ -120,6 +120,12 @@ git add .ai-sdlc .github .husky CLAUDE.md
 git commit -m "chore: bootstrap AI-SDLC config"
 ```
 
+### First run after installing the plugin
+
+```bash
+/ai-sdlc setup   # init + MCP advisor + doctor, idempotent, one report
+```
+
 ### First-time setup, non-interactive (CI / Terraform / scripts)
 
 ```bash
