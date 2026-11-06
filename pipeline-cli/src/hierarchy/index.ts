@@ -298,6 +298,7 @@ export {
   DEFAULT_STALL_STALE_MS,
   endsWithQuestion,
   findOpenPrNumber,
+  paneHasLiveNextStep,
   reapStalledClaims,
   STALE_WORKER_CAUSE,
   stallResumeNote,
@@ -310,7 +311,7 @@ export {
   desktopNotice,
   type StallNoticeResult,
 } from './stall-notice.js';
-export { paneTail } from './tmux.js';
+export { paneInfo, paneTail } from './tmux.js';
 export {
   DEFAULT_WEBHOOK_PORT,
   WEBHOOK_PORT_ENV,

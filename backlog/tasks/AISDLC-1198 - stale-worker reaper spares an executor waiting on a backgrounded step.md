@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1198
 title: 'Stale-worker reaper spares an executor waiting on a backgrounded step'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:

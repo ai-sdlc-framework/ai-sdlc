@@ -10,6 +10,7 @@ import {
   DEFAULT_STALL_GRACE_MS,
   DEFAULT_STALL_STALE_MS,
   findOpenPrNumber,
+  paneHasLiveNextStep,
   endsWithQuestion,
   reapStalledClaims,
   stallResumeNote,
@@ -145,5 +146,89 @@ describe('reapStalledClaims thresholds (AISDLC-1103)', () => {
   it('reaps any worker as stale-heartbeat after the stale period', async () => {
     const r = await reap(31, 'busy');
     expect(r[0]?.reason).toBe('stale-heartbeat');
+  });
+});
+
+describe('reapStalledClaims live next-step (AISDLC-1198)', () => {
+  const T0 = Date.parse('2026-11-06T10:00:00Z');
+  const MIN = 60000;
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'stall-ns-'));
+    ensureBoardDirs(dir);
+    writeManifest(dir, {
+      schemaVersion: 'v1',
+      taskId: 'AISDLC-9',
+      taskFile: 'x',
+      branch: 'b',
+      baseSha: 'a'.repeat(40),
+      dispatchedAt: new Date(T0).toISOString(),
+      dispatchedBy: 't',
+    } as never);
+    renameSync(
+      path.join(dir, 'queue', 'AISDLC-9.dispatch.json'),
+      path.join(dir, 'inflight', 'AISDLC-9.dispatch.json'),
+    );
+    writeHeartbeat(dir, {
+      taskId: 'AISDLC-9',
+      workerId: 'eph-1',
+      workerKind: 'any',
+      startedAt: new Date(T0).toISOString(),
+      lastHeartbeat: new Date(T0).toISOString(),
+      currentStep: '06-dev-done',
+    } as never);
+  });
+  afterEach(() => removeFixtureDir(dir));
+
+  const reap = (live: () => boolean, spared: unknown[] = []) =>
+    reapStalledClaims({
+      boardDir: dir,
+      now: () => new Date(T0 + 40 * MIN),
+      staleMs: 30 * MIN,
+      graceMs: 10 * MIN,
+      hasLiveNextStep: live,
+      onSpared: (o) => spared.push(o),
+    });
+
+  it('spares an aged executor with a live next-step and records why', async () => {
+    const spared: { reason: string }[] = [];
+    expect(await reap(() => true, spared)).toEqual([]);
+    expect(spared).toHaveLength(1);
+    expect(spared[0]?.reason).toContain('live next-step');
+  });
+
+  it('reaps an aged executor with no live work', async () => {
+    const r = await reap(() => false);
+    expect(r[0]?.reason).toBe('stale-heartbeat');
+  });
+
+  it('reaps when the probe throws', async () => {
+    const r = await reap(() => {
+      throw new Error('ps failed');
+    });
+    expect(r).toHaveLength(1);
+  });
+});
+
+describe('paneHasLiveNextStep', () => {
+  const ps =
+    (stdout: string, status = 0): CommandRunner =>
+    () => ({ status, stdout, stderr: '' });
+  const table = [
+    '  10     1 zsh',
+    '  20    10 claude',
+    '  30    20 node pipeline-cli/bin/cli-next-step.mjs --task X',
+    '  99     1 node next-step unrelated',
+  ].join('\n');
+  it('finds a next-step descendant of the pane', () => {
+    expect(paneHasLiveNextStep(ps(table), 10)).toBe(true);
+  });
+  it('ignores next-step outside the pane tree', () => {
+    expect(paneHasLiveNextStep(ps(table), 20 + 1000)).toBe(false);
+    expect(paneHasLiveNextStep(ps('  10 1 zsh\n  99 1 node next-step'), 10)).toBe(false);
+  });
+  it('is false for no pane pid or ps failure', () => {
+    expect(paneHasLiveNextStep(ps(table), 0)).toBe(false);
+    expect(paneHasLiveNextStep(ps('', 1), 10)).toBe(false);
   });
 });
