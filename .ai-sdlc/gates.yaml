@@ -101,12 +101,6 @@ gates:
     owner: engineering
     property: task files changed by the PR pass the Definition of Ready
     baseline: true
-  - id: gate-job:independence-policy-gate
-    surface: pr-ready-job
-    origin: AISDLC-591
-    owner: security
-    property: reviewer independence policy holds for the PR
-    baseline: true
   - id: gate-job:pr-ready
     surface: pr-ready-job
     origin: AISDLC-388, AISDLC-712.1

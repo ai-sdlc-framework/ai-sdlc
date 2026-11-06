@@ -160,11 +160,6 @@ export interface ReconcileResult {
    */
   reviewerCompletedAt?: string;
   /**
-   * AISDLC-493 — ISO-8601 timestamp when the attestation was signed
-   * (reconcile Step 2). Undefined when sign was skipped or failed.
-   */
-  signedAt?: string;
-  /**
    * AISDLC-493 — ISO-8601 timestamp when the PR was flipped ready-for-review
    * (reconcile Step 4). Undefined when gh-pr-ready was skipped or failed.
    */
@@ -229,11 +224,6 @@ export interface RunReconcileOptions {
   /** Skip `gh pr merge --auto`. The flip ready step still runs. */
   skipArmAutoMerge?: boolean;
   /**
-   * Schema version for sign-attestation. Defaults to v6 (current default).
-   * Pass 'v5' to opt back into the legacy schema.
-   */
-  schemaVersion?: 'v5' | 'v6';
-  /**
    * Override the model passed to `cli-attestation emit-leaf`. Defaults to
    * the routing default for `code-reviewer` (the `sonnet` alias).
    */
@@ -270,11 +260,6 @@ export interface RunReconcileOptions {
    * so the next round can be a delta whatever this round's verdict.
    */
   reviewRoundPlan?: ReviewRoundPlan;
-  /**
-   * Override sign-attestation script path. Defaults to
-   * `ai-sdlc-plugin/scripts/sign-attestation.mjs` relative to workDir.
-   */
-  signScriptPath?: string;
   /**
    * Override cli-attestation bin path. Defaults to
    * `pipeline-cli/bin/cli-attestation.mjs` relative to workDir.
@@ -490,20 +475,14 @@ export function runReconcile(options: RunReconcileOptions): ReconcileResult {
   })();
   // Count steps that indicate a rebase was performed.
   const rebased = result.steps.some((s) => s.name === 'git-rebase' && s.status === 'success');
-  // AISDLC-543: the first successful sign is the PR's one expected signature;
-  // only signs beyond it are re-signs. With fetch -> rebase -> sign -> push a
-  // clean drain signs exactly once, so reSignCount stays 0.
-  const reSignCount = Math.max(
-    0,
-    result.steps.filter((s) => s.name === 'sign-attestation' && s.status === 'success').length - 1,
-  );
   const reconcileEventPayload: Parameters<typeof writeEvent>[0] = {
     ts: '',
     type: 'ReconcileCompleted',
     taskId: options.taskId,
     prUrl: result.prUrl ?? null,
     rebased,
-    reSignCount,
+    // Nothing is signed any more (RFC-0061 phase 3); the field stays for the event schema.
+    reSignCount: 0,
   };
   if (reconcileDurationMs !== undefined) {
     reconcileEventPayload.reconcileDurationMs = reconcileDurationMs;
@@ -812,48 +791,7 @@ function runReconcileInner(
   const reviewerCompletedAt = now().toISOString();
 
   // -------------------------------------------------------------------------
-  // Step 2: sign attestation.
-  // -------------------------------------------------------------------------
-  const aggregatedVerdictPath = path.join(
-    worktreePath,
-    '.ai-sdlc',
-    'verdicts',
-    `${taskIdLower}.json`,
-  );
-  if (!existsSync(aggregatedVerdictPath)) {
-    steps.push({
-      name: 'sign-attestation',
-      status: 'failed',
-      output: `aggregated verdict missing at ${aggregatedVerdictPath} — the slash body must write this before reconcile`,
-    });
-    return finalizeResult(taskId, devVerdict, steps);
-  }
-
-  const signScript =
-    options.signScriptPath ??
-    path.join(workDir, 'ai-sdlc-plugin', 'scripts', 'sign-attestation.mjs');
-  const signArgs = [signScript, '--review-verdicts', aggregatedVerdictPath, '--task-id', taskId];
-  if (options.schemaVersion) {
-    signArgs.push('--schema-version', options.schemaVersion);
-  }
-  const sign = spawn('node', signArgs, { cwd: worktreePath });
-  // AISDLC-493 — capture sign timestamp before recording the step so the
-  // timestamp reflects sign completion even if later steps branch off early.
-  const signedAt = sign.status === 0 ? now().toISOString() : undefined;
-  steps.push({
-    name: 'sign-attestation',
-    status: sign.status === 0 ? 'success' : 'failed',
-    output: trimOutput(sign.stdout + (sign.stderr ? `\n[stderr] ${sign.stderr}` : '')),
-  });
-  if (sign.status !== 0) {
-    return finalizeResult(taskId, devVerdict, steps, undefined, {
-      reviewerStartedAt,
-      reviewerCompletedAt,
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // Step 3: force-push the chore commit on top of the dev's branch.
+  // Step 3: push the dev's branch.
   // -------------------------------------------------------------------------
   if (!options.skipPush) {
     const push = spawn('git', ['push', '--force-with-lease'], { cwd: worktreePath });
@@ -873,7 +811,6 @@ function runReconcileInner(
       return finalizeResult(taskId, devVerdict, steps, undefined, {
         reviewerStartedAt,
         reviewerCompletedAt,
-        signedAt,
       });
     }
   } else {
@@ -903,7 +840,6 @@ function runReconcileInner(
       return finalizeResult(taskId, devVerdict, steps, prNumber, {
         reviewerStartedAt,
         reviewerCompletedAt,
-        signedAt,
       });
     }
     const ready = spawn('gh', ['pr', 'ready', prNumber], { cwd: worktreePath });
@@ -916,7 +852,6 @@ function runReconcileInner(
       return finalizeResult(taskId, devVerdict, steps, prNumber, {
         reviewerStartedAt,
         reviewerCompletedAt,
-        signedAt,
       });
     }
     prOpenedAt = now().toISOString();
@@ -967,7 +902,6 @@ function runReconcileInner(
   patchDoneVerdict(boardDir, taskId, {
     ...(reviewerStartedAt !== undefined ? { reviewerStartedAt } : {}),
     ...(reviewerCompletedAt !== undefined ? { reviewerCompletedAt } : {}),
-    ...(signedAt !== undefined ? { signedAt } : {}),
     ...(prOpenedAt !== undefined ? { prOpenedAt } : {}),
   });
 
@@ -989,7 +923,6 @@ function runReconcileInner(
   return finalizeResult(taskId, devVerdict, steps, prNumber, {
     reviewerStartedAt,
     reviewerCompletedAt,
-    signedAt,
     prOpenedAt,
   });
 }
@@ -1002,7 +935,6 @@ function runReconcileInner(
 interface ReconcileTimings {
   reviewerStartedAt?: string;
   reviewerCompletedAt?: string;
-  signedAt?: string;
   prOpenedAt?: string;
 }
 
@@ -1036,7 +968,6 @@ function finalizeResult(
   // AISDLC-493 — stamp timing fields when available.
   if (timings?.reviewerStartedAt) result.reviewerStartedAt = timings.reviewerStartedAt;
   if (timings?.reviewerCompletedAt) result.reviewerCompletedAt = timings.reviewerCompletedAt;
-  if (timings?.signedAt) result.signedAt = timings.signedAt;
   if (timings?.prOpenedAt) result.prOpenedAt = timings.prOpenedAt;
   return result;
 }

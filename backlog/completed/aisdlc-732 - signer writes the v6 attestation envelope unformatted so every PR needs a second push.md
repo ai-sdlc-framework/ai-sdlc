@@ -1,7 +1,8 @@
 ---
 id: AISDLC-732
 title: >-
-  Signer writes the v6 attestation envelope unformatted, so the format check fails and every PR needs a second push
+  Signer writes the v6 attestation envelope unformatted, so the format check
+  fails and every PR needs a second push
 status: Done
 assignee: []
 created_date: '2026-10-05'
@@ -10,11 +11,23 @@ labels:
   - friction
 dependencies: []
 references:
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - ai-sdlc-plugin/scripts/sign-attestation.test.mjs
   - .prettierignore
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.test.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

@@ -1,6 +1,6 @@
 ---
 id: AISDLC-984
-title: 'Push step fails closed when the head patch-id has no attestation envelope'
+title: Push step fails closed when the head patch-id has no attestation envelope
 status: Done
 assignee: []
 created_date: '2026-10-20'
@@ -11,10 +11,15 @@ dependencies: []
 references:
   - pipeline-cli/src/next-step/ship.ts
   - pipeline-cli/src/next-step/resume-decision.ts
-  - pipeline-cli/src/attestation/patch-id.ts
   - docs/operations/attestation-troubleshooting.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/patch-id.ts'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

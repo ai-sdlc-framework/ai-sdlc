@@ -12,7 +12,6 @@ labels:
 dependencies: []
 references:
   - orchestrator/src/runtime/attestations.ts
-  - pipeline-cli/attestation-core/verify-core.mjs
   - docs/operations/attestation-reference.md
 priority: medium
 dispatchable: true
@@ -21,7 +20,13 @@ drift_log:
     type: ref-deleted
     detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
     resolution: flagged
-drift_checked: '2026-11-05'
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/attestation-core/verify-core.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

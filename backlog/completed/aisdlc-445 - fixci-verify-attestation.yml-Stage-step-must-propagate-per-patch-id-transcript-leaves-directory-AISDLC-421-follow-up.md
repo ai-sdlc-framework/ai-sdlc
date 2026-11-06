@@ -21,8 +21,13 @@ references:
   - >-
     backlog/completed/aisdlc-422 -
     fixattestation-RFC-0042-follow-up-—-exclude-.ai-sdlc-transcript-leaves-from-PATCH_ID_EXCLUSION-AISDLC-421-self-reference-bug.md
-  - scripts/verify-attestation.mjs
 priority: high
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

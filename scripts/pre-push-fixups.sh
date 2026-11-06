@@ -110,18 +110,6 @@ run_sub_hook() {
 # ── Track which fixups ran ────────────────────────────────────────────
 FIXED=()
 
-# ── Step 0: squash stacked chore-sign commits (AISDLC-369, AISDLC-837) ──
-# Runs first so the pushed HEAD is the squashed one. A squash
-# is not counted as a fixup (it never required a re-push on its own).
-if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
-  SQUASH_EXIT=0
-  run_sub_hook "squash-chores" "$SCRIPT_DIR/squash-attestation-chores.sh" || SQUASH_EXIT=$?
-  if [ "$SQUASH_EXIT" -ne 0 ]; then
-    echo "[pre-push-fixups] squash-chores failed (exit $SQUASH_EXIT) — aborting push" >&2
-    exit 2
-  fi
-fi
-
 # ── Sub-hook 1: task-move ─────────────────────────────────────────────
 HEAD_BEFORE_TASK_MOVE=$(git rev-parse HEAD 2>/dev/null || echo '')
 TASK_MOVE_EXIT=0

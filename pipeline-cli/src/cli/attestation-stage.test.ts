@@ -1,19 +1,17 @@
 /**
- * `cli-attestation emit-leaf --stage`: the staged review's leaves. A leaf per planner,
- * per probe and per synthesizer transcript, executor and planner leaves forced to zero
- * findings and `verdictApproved: false`, only the synthesizer leaf carrying the verdict,
- * and the reviews ledger taking one `staged` row per review.
+ * `cli-attestation emit-leaf --stage`: the staged review's stages. Plan and execute
+ * stages carry no verdict, only the synthesize stage does, and the reviews ledger takes
+ * one `staged` row per review.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadLeavesForPatchId, STAGED_REVIEWER_NAME } from '../attestation/merkle.js';
+import { STAGED_REVIEWER_NAME } from '../attestation/staged-review.js';
 import { loadReviewLedger } from '../attestation/reviews-ledger.js';
 import { buildAttestationCli } from './attestation.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
-const PATCH_ID = '9'.repeat(40);
 const HEAD = 'f'.repeat(40);
 const TASK = 'AISDLC-676';
 
@@ -83,8 +81,6 @@ async function emit(
     'claude-code',
     '--model',
     'sonnet',
-    '--patch-id',
-    PATCH_ID,
     ...extra,
   ]).parseAsync();
 }
@@ -95,27 +91,6 @@ const critical = {
 };
 
 describe('emit-leaf --stage', () => {
-  it('writes one leaf per stage transcript; only the synthesize leaf carries the verdict', async () => {
-    await emit('planner', critical, ['--stage', 'plan']);
-    await emit('probe-a', critical, ['--stage', 'execute']);
-    await emit('probe-b', critical, ['--stage', 'execute']);
-    await emit('synth', critical, ['--stage', 'synthesize']);
-
-    const leaves = loadLeavesForPatchId(PATCH_ID, root);
-    expect(leaves.map((l) => l.stage)).toEqual(['plan', 'execute', 'execute', 'synthesize']);
-    expect(leaves.every((l) => l.reviewerName === STAGED_REVIEWER_NAME)).toBe(true);
-    expect(new Set(leaves.map((l) => l.transcriptHash)).size).toBe(4);
-
-    // Whatever the verdict file said, plan and execute leaves hold no verdict.
-    for (const l of leaves.filter((x) => x.stage !== 'synthesize')) {
-      expect(l.verdictApproved).toBe(false);
-      expect(l.findings).toEqual({ critical: 0, major: 0, minor: 0, suggestion: 0 });
-    }
-    const synth = leaves.find((l) => l.stage === 'synthesize')!;
-    expect(synth.verdictApproved).toBe(true);
-    expect(synth.findings).toEqual({ critical: 1, major: 0, minor: 0, suggestion: 0 });
-  });
-
   it('adds one `staged` ledger row, from the synthesizer leaf only', async () => {
     await emit('planner', critical, ['--stage', 'plan']);
     await emit('probe-a', critical, ['--stage', 'execute']);
@@ -134,30 +109,16 @@ describe('emit-leaf --stage', () => {
     expect(rows[0]!.findings[0]).toMatchObject({ severity: 'critical', area: 'src/a.ts' });
   });
 
-  it('is idempotent per transcript, like every other leaf', async () => {
-    await emit('probe-a', critical, ['--stage', 'execute']);
-    await emit('probe-a', critical, ['--stage', 'execute']);
-    expect(loadLeavesForPatchId(PATCH_ID, root)).toHaveLength(1);
-  });
-
-  it('never writes a stage key for a leaf given none', async () => {
-    await emit('code', { approved: true, findings: [] }, [], 'code-reviewer');
-    const file = join(root, '.ai-sdlc', 'transcript-leaves', `${PATCH_ID}.jsonl`);
-    const text = readFileSync(file, 'utf8');
-    expect(text).not.toContain('stage');
-    expect(loadLeavesForPatchId(PATCH_ID, root)[0]).not.toHaveProperty('stage');
-  });
-
   it('refuses a stage on any reviewer but the staged set', async () => {
     await expect(emit('code', critical, ['--stage', 'execute'], 'code-reviewer')).rejects.toThrow(
       /process\.exit\(1\)/,
     );
     expect(stderr.join('')).toContain('--stage is only valid with --reviewer staged-review');
-    expect(loadLeavesForPatchId(PATCH_ID, root)).toHaveLength(0);
+    expect(loadReviewLedger(TASK, root)).toHaveLength(0);
   });
 
   it.each(['', 'review', 'EXECUTE'])('rejects the stage %j', async (bad) => {
     await expect(emit('x', critical, ['--stage', bad])).rejects.toThrow();
-    expect(loadLeavesForPatchId(PATCH_ID, root)).toHaveLength(0);
+    expect(loadReviewLedger(TASK, root)).toHaveLength(0);
   });
 });

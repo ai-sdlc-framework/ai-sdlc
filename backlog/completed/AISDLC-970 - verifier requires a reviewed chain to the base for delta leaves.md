@@ -1,6 +1,8 @@
 ---
 id: AISDLC-970
-title: 'The attestation verifier requires a verified chain of envelopes back to the base commit when a leaf carries a delta reviewRange'
+title: >-
+  The attestation verifier requires a verified chain of envelopes back to the
+  base commit when a leaf carries a delta reviewRange
 status: Done
 assignee: []
 created_date: '2026-10-17'
@@ -10,12 +12,22 @@ labels:
   - security
 dependencies: []
 references:
-  - pipeline-cli/attestation-core/verify-core.mjs
-  - pipeline-cli/src/attestation/sign-v6.ts
   - pipeline-cli/src/incremental-review/review-rounds.ts
   - docs/operations/attestation-reference.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/attestation-core/verify-core.mjs
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/sign-v6.ts'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

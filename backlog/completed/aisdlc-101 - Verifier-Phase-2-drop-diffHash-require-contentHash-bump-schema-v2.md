@@ -11,8 +11,6 @@ labels:
 dependencies:
   - AISDLC-94
 references:
-  - scripts/verify-attestation.mjs
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - orchestrator/src/runtime/attestations.ts
   - >-
     backlog/completed/aisdlc-94 -
@@ -29,7 +27,17 @@ drift_log:
       Referenced file no longer exists:
       .ai-sdlc/schemas/attestation.v1.schema.json
     resolution: flagged
-drift_checked: '2026-05-03'
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

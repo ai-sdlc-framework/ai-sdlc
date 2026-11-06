@@ -1,15 +1,34 @@
 ---
 id: AISDLC-409
-title: 'feat(attestation): flip AI_SDLC_V6_CUTOVER_ACTIVE default-ON — make v6 the default schema'
+title: >-
+  feat(attestation): flip AI_SDLC_V6_CUTOVER_ACTIVE default-ON — make v6 the
+  default schema
 status: Done
-labels: [attestation, rfc-0042, promotion, operator-merge]
+labels:
+  - attestation
+  - rfc-0042
+  - promotion
+  - operator-merge
 references:
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
-  - pipeline-cli/src/attestation/sign-v6.ts
-  - scripts/verify-attestation.mjs
 priority: high
 permittedExternalPaths: []
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/sign-v6.ts'
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

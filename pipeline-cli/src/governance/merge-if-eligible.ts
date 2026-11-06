@@ -519,8 +519,7 @@ export async function fetchChangedFiles(
 }
 
 /** Generated attestation evidence that every attested code PR commits under `.ai-sdlc/`. */
-const EVIDENCE_PATH =
-  /^\.ai-sdlc\/(?:(?:attestations|transcript-leaves|reviews|verdicts|transcripts)\/[^/]+|transcript-leaves\.jsonl)$/;
+const EVIDENCE_PATH = /^\.ai-sdlc\/(?:reviews|verdicts|transcripts)\/[^/]+$/;
 
 /** Lower-case, unify separators and resolve `.` / `..` / empty segments. */
 function normalizePath(rawPath: string): string {

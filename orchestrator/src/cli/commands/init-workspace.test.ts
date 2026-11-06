@@ -422,7 +422,7 @@ describe('init — AISDLC-143 wizard scaffolding', () => {
     // Attestation
     expect(existsSync(join(tmpDir, '.ai-sdlc', 'trusted-reviewers.yaml'))).toBe(true);
     expect(existsSync(join(tmpDir, '.github', 'workflows', 'verify-attestation.yml'))).toBe(true);
-    expect(existsSync(join(tmpDir, '.ai-sdlc', 'attestations', '.gitkeep'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.ai-sdlc', 'attestations', '.gitkeep'))).toBe(false);
     expect(existsSync(join(tmpDir, '.husky', 'pre-push'))).toBe(true);
 
     // Classifier
@@ -525,7 +525,6 @@ describe('init — AISDLC-143 wizard scaffolding', () => {
     expect(out).toContain('Next steps');
     expect(out).toContain('Commit the scaffolded files');
     expect(out).toContain('Definition-of-Ready');
-    expect(out).toContain('init-signing-key');
     // AISDLC-152: AI_SDLC_CI_ATTESTOR_PRIVATE_KEY scaffolding removed
     // alongside the AISDLC-87 attestor itself (AISDLC-140 sub-4 made
     // attestation audit-only). Asserted-absent here as a regression guard.

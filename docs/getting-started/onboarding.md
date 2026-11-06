@@ -183,7 +183,6 @@ Expected output (paths may vary):
 [ai-sdlc:init] write .ai-sdlc/autonomy-policy.yaml
 [ai-sdlc:init] write .ai-sdlc/dor-config.yaml
 [ai-sdlc:init] write .ai-sdlc/trusted-reviewers.yaml
-[ai-sdlc:init] write .ai-sdlc/attestations/.gitkeep
 [ai-sdlc:init] write .github/workflows/ai-sdlc-gate.yml
 [ai-sdlc:init] write .github/workflows/verify-attestation.yml
 [ai-sdlc:init] write .github/workflows/ai-sdlc-review.yml

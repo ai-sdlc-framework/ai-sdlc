@@ -57,17 +57,17 @@ export const FROZEN_SET: readonly FrozenEntry[] = [
     enforcers: ['pipeline-cli/src/workflow/engine.ts', 'spec/schemas/workflow.schema.json'],
   },
   {
-    id: 'attestation-signing',
-    rule: 'attestation signing and verification',
+    id: 'verdict-check',
+    rule: 'the merge gate reads the review verdict; a v6 envelope is refused',
     enforcers: [
-      'pipeline-cli/src/attestation/sign-v6.ts',
-      'pipeline-cli/attestation-core/verify-core.mjs',
+      'pipeline-cli/src/attestation/verdict-check.ts',
+      'pipeline-cli/src/attestation/v6-refusal.ts',
     ],
   },
   {
-    id: 'nonce-head-sha',
-    rule: 'the nonce is bound to the head SHA',
-    enforcers: ['pipeline-cli/src/attestation/merkle.ts'],
+    id: 'verdict-head-binding',
+    rule: 'a verdict record is bound to the head it reviewed',
+    enforcers: ['pipeline-cli/src/attestation/verdict-record.ts'],
   },
   {
     id: 'baseline-checklist',

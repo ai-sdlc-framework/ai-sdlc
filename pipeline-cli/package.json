@@ -46,7 +46,6 @@
     "cli-backlog-verify": "bin/cli-backlog-verify.mjs",
     "cli-estimate": "bin/cli-estimate.mjs",
     "cli-estimate-classes": "bin/cli-estimate-classes.mjs",
-    "cli-verify-attestation-debug": "bin/cli-verify-attestation-debug.mjs",
     "cli-kpi": "bin/cli-kpi.mjs",
     "cli-quality-corpus": "bin/cli-quality-corpus.mjs",
     "cli-quality": "bin/cli-quality.mjs",
@@ -125,8 +124,8 @@
       "import": "./dist/estimation/index.js"
     },
     "./attestation": {
-      "types": "./dist/attestation/merkle.d.ts",
-      "import": "./dist/attestation/merkle.js"
+      "types": "./dist/attestation/staged-review.d.ts",
+      "import": "./dist/attestation/staged-review.js"
     },
     "./import-spec": {
       "types": "./dist/import-spec/index.d.ts",

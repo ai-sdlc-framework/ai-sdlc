@@ -14,7 +14,6 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { now } from '../clock.js';
 import { buildExecuteGraph, renderYaml } from '../workflow/graph.js';
 
 /** The command an operator runs to scaffold missing configuration. */
@@ -129,48 +128,11 @@ spec:
 `;
 }
 
-function renderKeyring(answers: Readonly<Record<string, string>>): string {
-  const identity = requireAnswer(answers, 'identity');
-  const pubkey = requireAnswer(answers, 'pubkey').replace(/\r/g, '').trim();
-  if (!pubkey.includes('BEGIN PUBLIC KEY')) {
-    throw new Error('pubkey is not a PEM public key (run /ai-sdlc init-signing-key first)');
-  }
-  const machine = (answers.machine ?? '').trim() || 'default';
-  const addedAt = (answers.addedAt ?? '').trim() || now().toISOString().slice(0, 10);
-  const pem = pubkey
-    .split('\n')
-    .map((l) => `      ${l.trim()}`)
-    .join('\n');
-  return `# Trusted signing keys for review attestations. The verifier reads this file
-# from the base branch: every scalar single-quoted, pubkey a block scalar
-# indented 6 spaces, no tabs. Add keys with a reviewed PR.
-reviewers:
-  - identity: '${identity}'
-    machine: '${machine}'
-    pubkey: |
-${pem}
-    addedAt: '${addedAt}'
-    addedBy: '${identity}'
-`;
-}
-
 /**
  * The manifest. Add an entry (with the releasing version as `since`) whenever a
  * release starts reading a new file under `.ai-sdlc/`.
  */
 export const REQUIRED_CONFIG_MANIFEST: readonly ConfigEntry[] = [
-  {
-    id: 'trusted-reviewers',
-    path: '.ai-sdlc/trusted-reviewers.yaml',
-    since: '0.10.0',
-    description: 'signing keyring the attestation verifier checks Step 10.6 envelopes against',
-    operatorInput: true,
-    prompts: [
-      { key: 'identity', question: 'Reviewer identity (email or GitHub handle)' },
-      { key: 'pubkey', question: 'PEM public key (output of /ai-sdlc init-signing-key)' },
-    ],
-    render: renderKeyring,
-  },
   {
     id: 'review-policy',
     path: '.ai-sdlc/review-policy.md',

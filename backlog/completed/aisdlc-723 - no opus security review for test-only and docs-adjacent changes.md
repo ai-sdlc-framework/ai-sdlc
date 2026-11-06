@@ -1,7 +1,6 @@
 ---
 id: AISDLC-723
-title: >-
-  No opus security review for test-only and docs-adjacent changes
+title: No opus security review for test-only and docs-adjacent changes
 status: Done
 assignee: []
 created_date: '2026-10-04'
@@ -12,13 +11,18 @@ dependencies: []
 references:
   - pipeline-cli/src/steps/reviewer-set.ts
   - scripts/is-docs-only-changeset.mjs
-  - scripts/verify-attestation.mjs
   - ai-sdlc-plugin/agents/correctness-reviewer.md
   - ai-sdlc-plugin/agents/security-reviewer.md
   - docs/operations/reviewer-set-flag.md
 priority: high
 dispatchable: true
 updated_date: '2026-10-10 21:03'
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

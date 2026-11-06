@@ -427,7 +427,7 @@ describe('runExecuteCommand — real-run mode', () => {
     expect(executorCalled).toBe(false);
   });
 
-  it.each(['.ai-sdlc/trusted-reviewers.yaml', '.ai-sdlc/review-policy.md'])(
+  it.each(['.ai-sdlc/review-policy.md'])(
     'refuses before any dev dispatch when %s is missing (AISDLC-910)',
     async (missing) => {
       writeTaskFile(tmp, { id: 'AISDLC-201', title: 'preflight', status: 'To Do' });

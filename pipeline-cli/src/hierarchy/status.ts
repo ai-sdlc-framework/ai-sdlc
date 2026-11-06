@@ -6,11 +6,6 @@
 import { listBoard, peekQueue } from '../dispatch/board.js';
 import { listUnbriefed } from './auto-brief.js';
 import type { QueueCounts } from '../dispatch/types.js';
-import {
-  attestationGrowth,
-  formatAttestationGrowth,
-  type AttestationGrowth,
-} from './attestation-growth.js';
 import { listInflight } from './inflight.js';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -136,8 +131,6 @@ export interface StatusResult {
   drainStall?: DrainStallRecord;
   /** Spawn errors of the last tick (AISDLC-1117). */
   spawnErrors?: { taskId: string; error: string }[];
-  /** Committed attestation envelope and leaf growth (AISDLC-968). */
-  attestationGrowth?: AttestationGrowth;
   /** Worktree directories, how many the last sweep could not remove, and the alarm ceiling (AISDLC-1108). */
   worktrees?: { count: number; removable: number; ceiling: number };
 }
@@ -343,12 +336,6 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* an unreadable health reading must not break status */
   }
-  let growth: AttestationGrowth | undefined;
-  try {
-    growth = attestationGrowth(deps.cwd, deps.run);
-  } catch {
-    /* unreadable directories must not break status */
-  }
   const lastTick = lastTickInfo(deps.boardDir, deps.now());
   const spawnErrors = readLoopState(deps.boardDir).lastSpawnErrors ?? [];
   const nowMs = deps.now().getTime();
@@ -366,7 +353,6 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     ...(agedPrs.length > 0 ? { agedPrs } : {}),
     prTable: formatPrTable(deps.boardDir, nowMs),
     unowned: landings.filter((l) => l.owner === 'unowned').length,
-    ...(growth ? { attestationGrowth: growth } : {}),
     ...(drainStall ? { drainStall } : {}),
     ...(spawnErrors.length > 0 ? { spawnErrors } : {}),
     ...(Object.keys(ghCallsPerHour).length > 0 ? { ghCallsPerHour } : {}),
@@ -536,10 +522,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
 }
 
 function formatGhCalls(result: StatusResult): string[] {
-  const growth = result.attestationGrowth
-    ? [formatAttestationGrowth(result.attestationGrowth)]
-    : [];
-  if (!result.ghCallsPerHour && !result.quota) return growth;
+  if (!result.ghCallsPerHour && !result.quota) return [];
   const calls = result.ghCallsPerHour;
   const per = calls
     ? Object.entries(calls)
@@ -551,7 +534,7 @@ function formatGhCalls(result: StatusResult): string[] {
   const quota = q
     ? `remaining core ${q.core ?? '?'}, graphql ${q.graphql ?? '?'}`
     : 'remaining unknown';
-  return [`gh calls last hour: ${per}; ${quota}`, ...growth];
+  return [`gh calls last hour: ${per}; ${quota}`];
 }
 
 /** One warning line per session whose context is above its clear threshold (AISDLC-1066). */

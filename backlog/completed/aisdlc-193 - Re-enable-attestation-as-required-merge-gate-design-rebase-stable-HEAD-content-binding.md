@@ -15,11 +15,16 @@ labels:
 dependencies: []
 references:
   - .github/workflows/ai-sdlc-gate.yml
-  - scripts/verify-attestation.mjs
   - pipeline-cli/src/incremental-review/incremental.ts
   - pipeline-cli/src/cli/pr-unstick.ts
   - spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md
 priority: high
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

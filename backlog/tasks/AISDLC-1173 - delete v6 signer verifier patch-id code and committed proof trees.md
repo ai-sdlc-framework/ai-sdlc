@@ -1,7 +1,9 @@
 ---
 id: AISDLC-1173
-title: 'RFC-0061 Phase 3: delete the v6 signer, verifier, patch-id code, committed proof trees and signing-key setup'
-status: To Do
+title: >-
+  RFC-0061 Phase 3: delete the v6 signer, verifier, patch-id code, committed
+  proof trees and signing-key setup
+status: In Progress
 assignee: []
 created_date: '2026-11-03'
 labels:
@@ -14,12 +16,29 @@ dependencies:
   - AISDLC-1172
 references:
   - spec/rfcs/RFC-0061-review-verdict-gate-outside-the-branch.md
-  - pipeline-cli/src/attestation/patch-id-exclusion-lockstep.test.ts
   - pipeline-cli/src/pipeline/clean-room-signer.ts
-  - ai-sdlc-plugin/commands/init-signing-key.md
   - pipeline-cli/src/cli/attestation.ts
 priority: medium
 dispatchable: true
+drift_status: flagged
+drift_checked: '2026-11-06'
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/attestation/patch-id-exclusion-lockstep.test.ts
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/commands/init-signing-key.md
+    resolution: flagged
+  - date: '2026-11-06'
+    type: dep-resolved
+    detail: Dependency AISDLC-1172 has been completed
+    resolution: flagged
 ---
 
 ## Description

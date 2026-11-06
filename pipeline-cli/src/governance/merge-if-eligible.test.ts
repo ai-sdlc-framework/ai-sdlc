@@ -1831,16 +1831,11 @@ describe('governance-sensitive changes are audited, not refused, for trusted PRs
   });
 
   it.each([
-    '.ai-sdlc/attestations/084baa0744e41026bb02b247ec586f333de72482.v6.dsse.json',
-    '.ai-sdlc/transcript-leaves/084baa0744e41026bb02b247ec586f333de72482.jsonl',
-    '.ai-sdlc/transcript-leaves.jsonl',
     '.ai-sdlc/reviews/aisdlc-9.jsonl',
     '.ai-sdlc/verdicts/aisdlc-9.json',
     '.ai-sdlc/transcripts/x.jsonl',
-    '.AI-SDLC/Attestations/X.v6.dsse.json',
-    './.ai-sdlc//attestations/x.json',
     '.ai-sdlc\\reviews\\x.jsonl',
-    '.ai-sdlc/foo/../attestations/x.json',
+    '.ai-sdlc/foo/../reviews/x.jsonl',
   ])('generated evidence %s is exempt', (path) => {
     expect(isGovernanceSensitivePath(path)).toBe(false);
   });
@@ -1969,9 +1964,6 @@ describe('governance-sensitive changes are audited, not refused, for trusted PRs
           ['pipeline-cli/src/steps/04-flip-status.ts', 'modified'],
           ['pipeline-cli/src/steps/04-flip-status.test.ts', 'modified'],
           ['docs/operations/x.md', 'modified'],
-          ['.ai-sdlc/attestations/084baa0744e41026bb02b247ec586f333de72482.v6.dsse.json'],
-          ['.ai-sdlc/transcript-leaves/084baa0744e41026bb02b247ec586f333de72482.jsonl'],
-          ['.ai-sdlc/transcript-leaves.jsonl', 'modified'],
           ['.ai-sdlc/reviews/aisdlc-9.jsonl'],
         ]),
         mode,
@@ -1983,14 +1975,14 @@ describe('governance-sensitive changes are audited, not refused, for trusted PRs
       const { r } = await gate(
         changedFiles([
           TASK,
-          ['.ai-sdlc/attestations/x.v6.dsse.json'],
+          ['.ai-sdlc/reviews/x.jsonl'],
           ['.ai-sdlc/agent-role.yaml', 'modified'],
         ]),
         mode,
       );
       expect(r.eligibility.eligible).toBe(true);
       expect(r.eligibility.reason).toMatch(/\.ai-sdlc\/agent-role\.yaml/);
-      expect(r.eligibility.reason).not.toMatch(/attestations/);
+      expect(r.eligibility.reason).not.toMatch(/reviews/);
     });
 
     it(`${mode}: an ordinary code, docs, backlog, spec and reference PR passes`, async () => {

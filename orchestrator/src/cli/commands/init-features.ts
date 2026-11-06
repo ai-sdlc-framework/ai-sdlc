@@ -2007,12 +2007,9 @@ export function renderNextSteps(
   if (selection.attestation) {
     lines.push(`${stepN}. Attestation infrastructure was scaffolded in AUDIT-ONLY mode.`);
     lines.push('     Nothing currently blocks a merge when review attestation is missing —');
-    lines.push('     this keyring and the verify-attestation.yml workflow are an audit trail,');
+    lines.push('     the verify-attestation.yml workflow is an audit trail,');
     lines.push('     not an enforcement gate. Run `ai-sdlc doctor` at any time to');
     lines.push("     see the real state of this repo's attestation governance.");
-    lines.push('     a) Bootstrap your signing key: /ai-sdlc init-signing-key');
-    lines.push('     b) Open a PR adding the printed YAML block to');
-    lines.push('        .ai-sdlc/trusted-reviewers.yaml');
     // AISDLC-152: removed the optional CI-side signer step (the AISDLC-87
     // CI-attestor was retired in AISDLC-140 sub-4 alongside attestation
     // becoming audit-only). New adopters no longer need to provision the

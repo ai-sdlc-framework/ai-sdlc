@@ -16,10 +16,15 @@ labels:
 dependencies: []
 priority: high
 references:
-  - scripts/verify-attestation.mjs
   - orchestrator/src/runtime/attestations.ts
   - ai-sdlc-plugin/agents/code-reviewer-codex.md
   - ai-sdlc-plugin/agents/test-reviewer-codex.md
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

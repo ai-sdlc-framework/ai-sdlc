@@ -163,7 +163,7 @@ export function buildCli(): Argv {
             .option('schema-version', {
               type: 'string',
               choices: ['v5', 'v6'] as const,
-              describe: 'Override the attestation schema version (default: v6 per AISDLC-409).',
+              describe: 'Ignored: nothing is signed any more (RFC-0061 phase 3).',
             })
             .option('reviewer-model', {
               type: 'string',
@@ -209,9 +209,6 @@ export function buildCli(): Argv {
           };
           if (argv['worktree-path']) opts.worktreePath = argv['worktree-path'] as string;
           if (argv['board-dir']) opts.boardDir = argv['board-dir'] as string;
-          if (argv['schema-version']) {
-            opts.schemaVersion = argv['schema-version'] as 'v5' | 'v6';
-          }
           if (argv['reviewer-model']) opts.reviewerModel = argv['reviewer-model'] as string;
           if (argv['harness']) opts.harness = argv['harness'] as string;
           if (argv['reviewer-nonce']) opts.reviewerNonce = argv['reviewer-nonce'] as string;

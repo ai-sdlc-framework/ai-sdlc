@@ -335,7 +335,7 @@ describe('applyFeatureSelection', () => {
     );
     expect(state.files.has('/proj/.ai-sdlc/trusted-reviewers.yaml')).toBe(true);
     expect(state.files.has('/proj/.github/workflows/verify-attestation.yml')).toBe(true);
-    expect(state.files.has('/proj/.ai-sdlc/attestations/.gitkeep')).toBe(true);
+    expect(state.files.has('/proj/.ai-sdlc/attestations/.gitkeep')).toBe(false);
     expect(state.files.has('/proj/.husky/pre-push')).toBe(true);
 
     // The husky hook should carry our sentinel block so a follow-up run
@@ -1044,7 +1044,6 @@ describe('renderNextSteps', () => {
     // CI-attestor `gh secret set AI_SDLC_CI_ATTESTOR_PRIVATE_KEY` line
     // was removed in AISDLC-152 (the AISDLC-87 attestor was retired in
     // AISDLC-140 sub-4 — attestation is audit-only).
-    expect(out).toContain('init-signing-key');
     expect(out).not.toContain('AI_SDLC_CI_ATTESTOR_PRIVATE_KEY');
 
     // Classifier callout pointing at AISDLC-141

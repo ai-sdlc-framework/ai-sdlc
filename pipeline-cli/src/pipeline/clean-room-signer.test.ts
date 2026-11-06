@@ -1,28 +1,16 @@
 /**
  * Hermetic tests for RFC-0043 Phase 2 — Clean-Room Signer (AISDLC-498)
  *
- * AC#10 coverage:
- *   - Signer isolation invariant: refuses to run when sandbox artifacts present
- *   - Tampered report rejected at Zod boundary BEFORE key is touched
- *   - Signs only after Zod validation passes
- *   - v6 envelope generation (mock key path)
- *   - readFileSync TOCTOU guard: key deleted after existsSync → phase:key-resolution
- *   - headSha cross-check: report.headSha ≠ opts.headSha → phase:zod-validation
- *   - Signing-phase failure: valid-PEM-but-wrong-algorithm key → phase:signing
- *   - v6 verifier: produced envelope verifies against RFC-0042 TS primitives
+ * Coverage:
+ *   - Isolation invariant: refuses to run when sandbox artifacts are present
+ *   - Tampered report rejected at the Zod boundary
+ *   - headSha cross-check: report.headSha differs from opts.headSha -> phase:zod-validation
+ *   - Approval gate: unapproved or injection-flagged reports are refused
+ *   - A fully approved report passes; nothing is signed or written
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CLAUDE_SONNET_MODEL_ID } from '@ai-sdlc/reference';
-import {
-  mkdtempSync,
-  mkdirSync,
-  rmSync,
-  writeFileSync,
-  unlinkSync,
-  existsSync,
-  readFileSync,
-} from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -129,8 +117,6 @@ describe('runCleanRoomSigner — isolation invariant enforcement (AC#8)', () => 
 
     const result = runCleanRoomSigner({
       reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-498',
       headSha: 'a'.repeat(40),
       workDir: tmpDir, // workDir contains the sentinel
     });
@@ -151,8 +137,6 @@ describe('runCleanRoomSigner — isolation invariant enforcement (AC#8)', () => 
 
     const result = runCleanRoomSigner({
       reportArtifactPath: nonExistentReport,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-498',
       headSha: 'a'.repeat(40),
       workDir: tmpDir,
     });
@@ -180,8 +164,6 @@ describe('runCleanRoomSigner — artifact read failures', () => {
   it('fails with phase:artifact-read when report file does not exist', () => {
     const result = runCleanRoomSigner({
       reportArtifactPath: join(tmpDir, 'missing.json'),
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-498',
       headSha: 'a'.repeat(40),
       workDir: tmpDir, // clean workDir, no sentinels
     });
@@ -198,8 +180,6 @@ describe('runCleanRoomSigner — artifact read failures', () => {
 
     const result = runCleanRoomSigner({
       reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-498',
       headSha: 'a'.repeat(40),
       workDir: tmpDir,
     });
@@ -233,8 +213,6 @@ describe('runCleanRoomSigner — Zod validation BEFORE key resolution (AC#5)', (
 
     const result = runCleanRoomSigner({
       reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-498',
       headSha: 'a'.repeat(40),
       workDir: tmpDir,
     });
@@ -266,8 +244,6 @@ describe('runCleanRoomSigner — Zod validation BEFORE key resolution (AC#5)', (
 
     const result = runCleanRoomSigner({
       reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-498',
       headSha: 'a'.repeat(40),
       workDir: tmpDir,
     });
@@ -284,8 +260,6 @@ describe('runCleanRoomSigner — Zod validation BEFORE key resolution (AC#5)', (
 
     const result = runCleanRoomSigner({
       reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-498',
       headSha: 'a'.repeat(40),
       workDir: tmpDir,
     });
@@ -294,236 +268,6 @@ describe('runCleanRoomSigner — Zod validation BEFORE key resolution (AC#5)', (
     if (result.success) throw new Error('Expected failure');
     // Must be zod-validation, not key-resolution — key is NOT touched
     expect(result.phase).toBe('zod-validation');
-  });
-});
-
-// ── Key resolution failure test ───────────────────────────────────────────────
-
-describe('runCleanRoomSigner — key resolution (AC#5 order)', () => {
-  let tmpDir: string;
-  let origSigningKeyPath: string | undefined;
-
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-    origSigningKeyPath = process.env['AISDLC_SIGNING_KEY_PATH'];
-    // Point to a non-existent key so key-resolution fails predictably
-    process.env['AISDLC_SIGNING_KEY_PATH'] = join(tmpDir, 'nonexistent-key.pem');
-  });
-
-  afterEach(() => {
-    removeFixtureDir(tmpDir);
-    if (origSigningKeyPath !== undefined) {
-      process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
-    } else {
-      delete process.env['AISDLC_SIGNING_KEY_PATH'];
-    }
-  });
-
-  it('fails with phase:key-resolution (not zod-validation) for a valid report with no key', () => {
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-
-    const result = runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-498',
-      headSha: 'a'.repeat(40),
-      workDir: tmpDir,
-    });
-
-    expect(result.success).toBe(false);
-    if (result.success) throw new Error('Expected failure');
-    // Valid report passes Zod — failure must be at key-resolution, not earlier
-    expect(result.phase).toBe('key-resolution');
-    expect(result.error).toContain('[clean-room-signer]');
-    expect(result.error).toContain('signing key');
-  });
-});
-
-// ── v6 envelope generation test (AC#7) ───────────────────────────────────────
-
-describe('runCleanRoomSigner — v6 envelope generation (AC#7)', () => {
-  let tmpDir: string;
-  let origSigningKeyPath: string | undefined;
-
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-    origSigningKeyPath = process.env['AISDLC_SIGNING_KEY_PATH'];
-  });
-
-  afterEach(() => {
-    removeFixtureDir(tmpDir);
-    if (origSigningKeyPath !== undefined) {
-      process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
-    } else {
-      delete process.env['AISDLC_SIGNING_KEY_PATH'];
-    }
-  });
-
-  it('signs successfully with a real ed25519 key and produces v6 envelope', async () => {
-    // Generate a test ed25519 key inline using Node's built-in crypto
-    const { generateKeyPairSync } = await import('node:crypto');
-    const { privateKey } = generateKeyPairSync('ed25519', {
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-    });
-
-    // Write the key to a temp file
-    const keyPath = join(tmpDir, 'test-signing-key.pem');
-    writeFileSync(keyPath, privateKey, 'utf8');
-    process.env['AISDLC_SIGNING_KEY_PATH'] = keyPath;
-
-    // Write a valid report
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-
-    // Write at least one transcript leaf so signAndWriteV6Envelope finds leaves
-    const leavesDir = join(tmpDir, '.ai-sdlc', 'transcript-leaves');
-    mkdirSync(leavesDir, { recursive: true });
-    const taskId = 'aisdlc-498';
-    // Use a fake patch-id (40-hex) so the per-patch-id path is used
-    const fakePatchId = 'c'.repeat(40);
-    const leaf = {
-      leafIndex: 0,
-      taskId,
-      reviewerName: 'code-reviewer',
-      transcriptHash: 'd'.repeat(64),
-      nonce: 'e'.repeat(64),
-      harness: 'claude-code',
-      model: 'sonnet',
-      verdictApproved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-      signedAt: '2026-06-02T10:00:00.000Z',
-    };
-    writeFileSync(join(leavesDir, `${fakePatchId}.jsonl`), JSON.stringify(leaf) + '\n', 'utf8');
-
-    const result = runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId,
-      headSha: VALID_REPORT.headSha,
-      patchId: fakePatchId,
-      workDir: tmpDir,
-    });
-
-    expect(result.success).toBe(true);
-    if (!result.success) {
-      throw new Error(`Expected success, got ${result.phase}: ${result.error}`);
-    }
-    expect(result.report.schemaVersion).toBe('untrusted-pr-report.v1');
-    expect(result.envelopePath).toContain(`${fakePatchId}.v6.dsse.json`);
-
-    // Verify the written envelope is valid JSON and has v6 schema
-    const { readFileSync } = await import('node:fs');
-    const envelope = JSON.parse(readFileSync(result.envelopePath, 'utf8')) as Record<
-      string,
-      unknown
-    >;
-    expect(envelope['schemaVersion']).toBe('v6');
-    expect(envelope['rootHash']).toBeTruthy();
-    expect(envelope['rootSignature']).toBeTruthy();
-    expect(typeof envelope['rootSignature']).toBe('string');
-  });
-});
-
-// ── readFileSync TOCTOU guard: key deleted → phase:key-resolution (finding #4) ─
-
-describe('runCleanRoomSigner — readFileSync TOCTOU guard (finding #4)', () => {
-  let tmpDir: string;
-  let origSigningKeyPath: string | undefined;
-
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-    origSigningKeyPath = process.env['AISDLC_SIGNING_KEY_PATH'];
-  });
-
-  afterEach(() => {
-    removeFixtureDir(tmpDir);
-    if (origSigningKeyPath !== undefined) {
-      process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
-    } else {
-      delete process.env['AISDLC_SIGNING_KEY_PATH'];
-    }
-  });
-
-  it('returns phase:key-resolution (not a throw) when key file is deleted after existsSync', async () => {
-    // Create a real key so resolveSigningKeyPath returns a path...
-    const { generateKeyPairSync } = await import('node:crypto');
-    const { privateKey } = generateKeyPairSync('ed25519', {
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-    });
-    const keyPath = join(tmpDir, 'key-to-delete.pem');
-    writeFileSync(keyPath, privateKey, 'utf8');
-    process.env['AISDLC_SIGNING_KEY_PATH'] = keyPath;
-
-    // Write a valid report
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-
-    // Now delete the key to simulate TOCTOU race (key disappears between resolveSigningKeyPath
-    // and the readFileSync call). We test this by mocking: key exists initially, then we delete
-    // it just before signer reads it.
-    // Since we can't intercept the call precisely, we pre-delete before calling signer.
-    // resolveSigningKeyPath checks existsSync — if key is gone, it returns null → key-resolution.
-    // To test the case where existsSync passes but readFileSync fails (the TOCTOU race), we
-    // use a file that exists but is unreadable (mode 000 on Unix).
-    const { chmodSync } = await import('node:fs');
-    chmodSync(keyPath, 0o000); // no read permission
-
-    const result = runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-498',
-      headSha: VALID_REPORT.headSha,
-      workDir: tmpDir,
-    });
-
-    // Restore perms before cleanup
-    chmodSync(keyPath, 0o600);
-
-    // Must return a structured error, not throw
-    expect(result.success).toBe(false);
-    if (result.success) throw new Error('Expected failure');
-    // Either key-resolution (existsSync failed due to mode) or key-resolution (readFileSync failed)
-    // On macOS/Linux the file exists but is unreadable — resolveSigningKeyPath uses existsSync
-    // which succeeds (file exists), so readFileSync throws → phase:key-resolution.
-    // On some platforms existsSync may also fail — either way it's key-resolution.
-    expect(['key-resolution', 'signing']).toContain(result.phase);
-    // The key assertion: the function must NOT throw — it returns a discriminated union.
-    // If it reaches signing with a garbled key that's fine too — the main guarantee is no throw.
-  });
-
-  it('returns phase:key-resolution with a useful error message when key is unreadable', async () => {
-    const { generateKeyPairSync } = await import('node:crypto');
-    const { privateKey } = generateKeyPairSync('ed25519', {
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-    });
-    const keyPath = join(tmpDir, 'zero-perm.pem');
-    writeFileSync(keyPath, privateKey, 'utf8');
-    process.env['AISDLC_SIGNING_KEY_PATH'] = keyPath;
-
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-
-    // Delete the file entirely to simulate TOCTOU (key gone after existsSync)
-    // resolveSigningKeyPath will return null because existsSync fails → phase:key-resolution
-    unlinkSync(keyPath);
-
-    const result = runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-498',
-      headSha: VALID_REPORT.headSha,
-      workDir: tmpDir,
-    });
-
-    expect(result.success).toBe(false);
-    if (result.success) throw new Error('Expected failure');
-    expect(result.phase).toBe('key-resolution');
-    expect(result.error).toContain('[clean-room-signer]');
-    expect(result.error.toLowerCase()).toContain('sign');
   });
 });
 
@@ -555,8 +299,6 @@ describe('runCleanRoomSigner — headSha cross-check (finding #6)', () => {
 
     const result = runCleanRoomSigner({
       reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-498',
       headSha: 'b'.repeat(40), // intentionally different from report.headSha
       workDir: tmpDir,
     });
@@ -569,236 +311,17 @@ describe('runCleanRoomSigner — headSha cross-check (finding #6)', () => {
     expect(result.error).toContain('b'.repeat(40)); // caller value
   });
 
-  it('proceeds past cross-check when headSha matches (stops at key-resolution)', () => {
+  it('passes the cross-check when headSha matches', () => {
     const reportPath = join(tmpDir, 'report.json');
     writeJson(reportPath, VALID_REPORT);
 
     const result = runCleanRoomSigner({
       reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-498',
       headSha: VALID_REPORT.headSha, // matches report
       workDir: tmpDir,
     });
 
-    expect(result.success).toBe(false);
-    if (result.success) throw new Error('Expected failure');
-    // Cross-check passes → failure is at key-resolution (no key file)
-    expect(result.phase).toBe('key-resolution');
-  });
-});
-
-// ── Signing-phase failure: wrong-algorithm key → phase:signing (finding #7) ───
-
-describe('runCleanRoomSigner — signing phase failure with wrong-algorithm key (finding #7)', () => {
-  let tmpDir: string;
-  let origSigningKeyPath: string | undefined;
-
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-    origSigningKeyPath = process.env['AISDLC_SIGNING_KEY_PATH'];
-  });
-
-  afterEach(() => {
-    removeFixtureDir(tmpDir);
-    if (origSigningKeyPath !== undefined) {
-      process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
-    } else {
-      delete process.env['AISDLC_SIGNING_KEY_PATH'];
-    }
-  });
-
-  it('returns phase:signing (not a throw) when signing fails due to a corrupted key PEM', async () => {
-    // Write a file that passes existsSync and readFileSync but contains a key
-    // value that will cause crypto.sign to throw (invalid PEM header that
-    // Node accepts for reading but cannot use for signing).
-    // We use a DSA key (not ed25519) which Node's sign(null, data, key) rejects
-    // because the prehash-less signing mode only supports ed25519 / ed448.
-    // generateKeyPairSync('dsa') is not available; instead write a deliberately
-    // malformed key PEM that gets past readFileSync but causes sign() to throw.
-    const corruptedKeyPem =
-      '-----BEGIN PRIVATE KEY-----\n' +
-      'MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC7corrupted\n' +
-      '-----END PRIVATE KEY-----\n';
-    const keyPath = join(tmpDir, 'corrupted-key.pem');
-    writeFileSync(keyPath, corruptedKeyPem, 'utf8');
-    process.env['AISDLC_SIGNING_KEY_PATH'] = keyPath;
-
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-
-    // Provide a transcript leaf so signing actually attempts
-    const leavesDir = join(tmpDir, '.ai-sdlc', 'transcript-leaves');
-    mkdirSync(leavesDir, { recursive: true });
-    const fakePatchId = 'f'.repeat(40);
-    const leaf = {
-      leafIndex: 0,
-      taskId: 'aisdlc-498',
-      reviewerName: 'code-reviewer',
-      transcriptHash: 'd'.repeat(64),
-      nonce: 'e'.repeat(64),
-      harness: 'claude-code',
-      model: 'sonnet',
-      verdictApproved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-      signedAt: '2026-06-02T10:00:00.000Z',
-    };
-    writeFileSync(join(leavesDir, `${fakePatchId}.jsonl`), JSON.stringify(leaf) + '\n', 'utf8');
-
-    const result = runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'aisdlc-498',
-      headSha: VALID_REPORT.headSha,
-      patchId: fakePatchId,
-      workDir: tmpDir,
-    });
-
-    // Must NOT throw — must return a structured error
-    expect(result.success).toBe(false);
-    if (result.success) throw new Error('Expected failure');
-    // Corrupted key → error at signing or key-resolution phase
-    // Either phase is acceptable: the key guarantee is that the function returns
-    // a discriminated union rather than throwing.
-    expect(['signing', 'key-resolution']).toContain(result.phase);
-    expect(result.error).toContain('[clean-room-signer]');
-  });
-});
-
-// ── v6 verifier integration: produced envelope verifies clean (finding #2) ────
-
-describe('runCleanRoomSigner — v6 verifier integration (finding #2)', () => {
-  let tmpDir: string;
-  let origSigningKeyPath: string | undefined;
-
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-    origSigningKeyPath = process.env['AISDLC_SIGNING_KEY_PATH'];
-  });
-
-  afterEach(() => {
-    removeFixtureDir(tmpDir);
-    if (origSigningKeyPath !== undefined) {
-      process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
-    } else {
-      delete process.env['AISDLC_SIGNING_KEY_PATH'];
-    }
-  });
-
-  it('v6 envelope produced by signAndWriteV6Envelope verifies via RFC-0042 TS primitives', async () => {
-    // This test proves the claim in clean-room-signer.ts §Trust boundary invariants:
-    // "the same verify-attestation.mjs accepts it" — we verify using the SAME
-    // RFC-0042 TS primitives (computeMerkleRoot + verifyInclusion + cryptoVerify)
-    // that the verifier script is built on.
-    const {
-      generateKeyPairSync,
-      verify: cryptoVerify,
-      createPublicKey,
-    } = await import('node:crypto');
-    const { readFileSync } = await import('node:fs');
-    const { computeMerkleRoot, verifyInclusion, hashLeaf } =
-      await import('../attestation/merkle.js');
-
-    // generateKeyPairSync returns KeyObjects by default; call .export() to get PEM strings
-    const kp = generateKeyPairSync('ed25519');
-    const privateKeyPem = kp.privateKey.export({ format: 'pem', type: 'pkcs8' }) as string;
-    const publicKeyPem = kp.publicKey.export({ format: 'pem', type: 'spki' }) as string;
-
-    const keyPath = join(tmpDir, 'test-key.pem');
-    writeFileSync(keyPath, privateKeyPem, 'utf8');
-    process.env['AISDLC_SIGNING_KEY_PATH'] = keyPath;
-
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-
-    // Write transcript leaves
-    const leavesDir = join(tmpDir, '.ai-sdlc', 'transcript-leaves');
-    mkdirSync(leavesDir, { recursive: true });
-    const fakePatchId = '9'.repeat(40);
-    const leaf = {
-      leafIndex: 0,
-      taskId: 'aisdlc-498',
-      reviewerName: 'code-reviewer',
-      transcriptHash: 'a'.repeat(64),
-      nonce: 'b'.repeat(64),
-      harness: 'claude-code',
-      model: 'sonnet',
-      verdictApproved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-      signedAt: '2026-06-02T10:00:00.000Z',
-    };
-    writeFileSync(join(leavesDir, `${fakePatchId}.jsonl`), JSON.stringify(leaf) + '\n', 'utf8');
-
-    const result = runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'aisdlc-498',
-      headSha: VALID_REPORT.headSha,
-      patchId: fakePatchId,
-      workDir: tmpDir,
-    });
-
     expect(result.success).toBe(true);
-    if (!result.success) {
-      throw new Error(`Expected success, got ${result.phase}: ${result.error}`);
-    }
-
-    // Read the written envelope
-    const envelope = JSON.parse(readFileSync(result.envelopePath, 'utf8')) as {
-      schemaVersion: string;
-      subject: { digest: { sha1: string } };
-      transcriptLeaves: Array<{ leafIndex: number; reviewerName: string; transcriptHash: string }>;
-      merkleProofs: Array<{ leafIndex: number; proof: string[] }>;
-      rootHash: string;
-      rootSignature: string;
-      nonce: string;
-      leafCount: number;
-    };
-
-    // 1. Schema version assertion
-    expect(envelope.schemaVersion).toBe('v6');
-
-    // 2. Subject SHA binding
-    expect(envelope.subject.digest.sha1).toBe(VALID_REPORT.headSha);
-
-    // 3. Root signature verification against the operator's public key
-    // (RFC-0042 §verifyV6Envelope step 3-7)
-    const rootHashBuf = Buffer.from(envelope.rootHash, 'utf8');
-    const signatureBuf = Buffer.from(envelope.rootSignature, 'base64');
-    const pubKeyObj = createPublicKey(publicKeyPem);
-    const sigValid = cryptoVerify(null, rootHashBuf, pubKeyObj, signatureBuf);
-    expect(sigValid).toBe(true);
-
-    // 4. Merkle inclusion proof verification for each leaf
-    // (RFC-0042 §verifyV6Envelope step 6)
-    //
-    // runCleanRoomSigner (AISDLC-522 Step 4c) emits 3 new leaves (code/test/security)
-    // to the same per-patch-id file BEFORE signing, so the Merkle tree now contains
-    // the original pre-written leaf PLUS the 3 new reviewer leaves (4 total).
-    // Read all leaves from the file (in the order they were written) to compute the
-    // same root that the signer computed.
-    const { loadLeavesForPatchId } = await import('../attestation/merkle.js');
-    const allLeaves = loadLeavesForPatchId(fakePatchId, tmpDir);
-    expect(allLeaves.length).toBeGreaterThanOrEqual(1); // at least the original + new leaves
-    const { root } = computeMerkleRoot(allLeaves);
-    expect(root).toBe(envelope.rootHash);
-
-    for (const merkleProof of envelope.merkleProofs) {
-      const matchingLeaf = allLeaves.find((l) => l.leafIndex === merkleProof.leafIndex);
-      expect(matchingLeaf).toBeDefined();
-      if (!matchingLeaf) continue;
-
-      const leafHash = hashLeaf(matchingLeaf);
-      const arrayPos = allLeaves.findIndex((l) => l.leafIndex === merkleProof.leafIndex);
-      const isValid = verifyInclusion(
-        leafHash,
-        merkleProof.proof,
-        envelope.rootHash,
-        arrayPos,
-        envelope.leafCount,
-      );
-      expect(isValid).toBe(true);
-    }
   });
 });
 
@@ -834,8 +357,6 @@ describe('runCleanRoomSigner — approval gate (CRITICAL fix #4)', () => {
 
     const result = runCleanRoomSigner({
       reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-501',
       headSha: VALID_REPORT.headSha,
       workDir: tmpDir,
     });
@@ -869,8 +390,6 @@ describe('runCleanRoomSigner — approval gate (CRITICAL fix #4)', () => {
 
     const result = runCleanRoomSigner({
       reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-501',
       headSha: VALID_REPORT.headSha,
       workDir: tmpDir,
     });
@@ -895,8 +414,6 @@ describe('runCleanRoomSigner — approval gate (CRITICAL fix #4)', () => {
 
     const result = runCleanRoomSigner({
       reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-501',
       headSha: VALID_REPORT.headSha,
       workDir: tmpDir,
     });
@@ -908,470 +425,20 @@ describe('runCleanRoomSigner — approval gate (CRITICAL fix #4)', () => {
     expect(result.error).toContain('security');
   });
 
-  it('proceeds past approval gate for a fully-approved report (stops at key-resolution)', () => {
+  it('passes a fully-approved report', () => {
     // VALID_REPORT has all reviewers approved + consensus.approved=true + no injection
     const reportPath = join(tmpDir, 'report-approved.json');
     writeJson(reportPath, VALID_REPORT);
 
     const result = runCleanRoomSigner({
       reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-501',
       headSha: VALID_REPORT.headSha,
       workDir: tmpDir,
-    });
-
-    expect(result.success).toBe(false);
-    if (result.success) throw new Error('Expected failure');
-    // Approval gate passes → next failure is key-resolution (no key file)
-    expect(result.phase).toBe('key-resolution');
-  });
-});
-
-// ── AISDLC-522 AC-3: Transcript leaf emission before v6 signing ───────────────
-//
-// Verifies that runCleanRoomSigner emits one TranscriptLeaf per reviewer
-// (code, test, security) into .ai-sdlc/transcript-leaves.jsonl BEFORE
-// attempting to sign. The leaves are written in Step 3b, which runs AFTER the
-// consensus-approval gate but BEFORE key-resolution — so they are present even
-// when the signer stops at key-resolution (no key file, as in CI).
-//
-// REGRESSION GUARD: this block forces the no-key path (AISDLC_SIGNING_KEY_PATH
-// points at a nonexistent file) so the assertion "leaves written without a key"
-// is exercised deterministically. Before the Step 3b reorder, leaf emission ran
-// AFTER key-resolution, so in CI (no key) the signer returned early and no
-// leaves were written — this test passed only on operator machines with an
-// ambient ~/.ai-sdlc/signing-key.pem and would have failed in CI.
-
-describe('runCleanRoomSigner — transcript leaf emission (AISDLC-522 AC-3)', () => {
-  let tmpDir: string;
-  let origSigningKeyPath: string | undefined;
-
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-    // Force the no-key path so leaf emission is proven to run independently of
-    // key presence (deterministic regression guard — see block comment above).
-    origSigningKeyPath = process.env['AISDLC_SIGNING_KEY_PATH'];
-    process.env['AISDLC_SIGNING_KEY_PATH'] = join(tmpDir, 'nonexistent-key.pem');
-  });
-
-  afterEach(() => {
-    if (origSigningKeyPath === undefined) {
-      delete process.env['AISDLC_SIGNING_KEY_PATH'];
-    } else {
-      process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
-    }
-    removeFixtureDir(tmpDir);
-  });
-
-  it('writes transcript-leaves.jsonl with 3 leaves (one per reviewer) before signing attempt', () => {
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-
-    // runCleanRoomSigner emits transcript leaves in Step 3b BEFORE key-resolution.
-    // With AISDLC_SIGNING_KEY_PATH forced to a nonexistent file (beforeEach), the
-    // signer deterministically stops at key-resolution — yet the leaves must still
-    // have been written. This is the exact CI scenario the Step 3b reorder fixes.
-    const result = runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-522',
-      headSha: VALID_REPORT.headSha,
-      workDir: tmpDir,
-    });
-
-    // Deterministic: no key → key-resolution failure, but leaves were written first.
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.phase).toBe('key-resolution');
-    }
-
-    // Leaves file must exist and contain exactly 3 lines (one per reviewer)
-    const leavesPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl');
-    expect(existsSync(leavesPath)).toBe(true);
-
-    const lines = readFileSync(leavesPath, 'utf8')
-      .split('\n')
-      .filter((l) => l.trim().length > 0);
-    expect(lines).toHaveLength(3);
-
-    // Verify each leaf is valid JSON and has the expected reviewer names
-    const reviewerNames = lines.map((l) => {
-      const leaf = JSON.parse(l) as Record<string, unknown>;
-      return leaf['reviewerName'];
-    });
-    expect(reviewerNames).toContain('code-reviewer');
-    expect(reviewerNames).toContain('test-reviewer');
-    expect(reviewerNames).toContain('security-reviewer');
-  });
-
-  it('leaf model defaults to the central Sonnet id and honours AI_SDLC_REVIEWER_MODEL (AISDLC-690)', () => {
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-    const leafModels = (): unknown[] =>
-      readFileSync(join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl'), 'utf8')
-        .split('\n')
-        .filter((l) => l.trim().length > 0)
-        .map((l) => (JSON.parse(l) as Record<string, unknown>)['model']);
-    const run = (): void => {
-      removeFixtureDir(join(tmpDir, '.ai-sdlc'));
-      runCleanRoomSigner({
-        reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'AISDLC-690',
-        headSha: VALID_REPORT.headSha,
-        workDir: tmpDir,
-      });
-    };
-    const saved = process.env['AI_SDLC_REVIEWER_MODEL'];
-    try {
-      delete process.env['AI_SDLC_REVIEWER_MODEL'];
-      run();
-      expect(leafModels()).toEqual(Array(3).fill(CLAUDE_SONNET_MODEL_ID));
-      process.env['AI_SDLC_REVIEWER_MODEL'] = 'pinned-reviewer-model';
-      run();
-      expect(leafModels()).toEqual(Array(3).fill('pinned-reviewer-model'));
-    } finally {
-      if (saved === undefined) delete process.env['AI_SDLC_REVIEWER_MODEL'];
-      else process.env['AI_SDLC_REVIEWER_MODEL'] = saved;
-    }
-  });
-
-  it('each leaf has taskId, harness, transcriptHash (sha256 hex), and verdictApproved fields', () => {
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-
-    runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-522',
-      headSha: VALID_REPORT.headSha,
-      workDir: tmpDir,
-    });
-
-    const leavesPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl');
-    expect(existsSync(leavesPath)).toBe(true);
-    const lines = readFileSync(leavesPath, 'utf8')
-      .split('\n')
-      .filter((l) => l.trim().length > 0);
-    expect(lines).toHaveLength(3);
-
-    for (const line of lines) {
-      const leaf = JSON.parse(line) as Record<string, unknown>;
-      expect(leaf['taskId']).toBe('AISDLC-522');
-      expect(leaf['harness']).toBe('ucvg-sandbox');
-      expect(leaf['verdictApproved']).toBe(true); // VALID_REPORT has all approved=true
-      // transcriptHash must be a 64-char hex string (sha256)
-      expect(typeof leaf['transcriptHash']).toBe('string');
-      expect((leaf['transcriptHash'] as string).length).toBe(64);
-      expect(leaf['transcriptHash'] as string).toMatch(/^[0-9a-f]{64}$/);
-      // nonce must be non-empty
-      expect(typeof leaf['nonce']).toBe('string');
-      expect((leaf['nonce'] as string).length).toBeGreaterThan(0);
-    }
-  });
-
-  it('with patchId set: leaves are written to per-patch-id file, not the shared jsonl', () => {
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-    // patchId must be exactly 40 lowercase hex chars (merkle.leavesFilePathForPatchId contract)
-    const patchId = 'a'.repeat(40);
-
-    runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-522',
-      headSha: VALID_REPORT.headSha,
-      patchId,
-      workDir: tmpDir,
-    });
-
-    // Per-patch-id file must exist under .ai-sdlc/transcript-leaves/<patchId>.jsonl
-    const perPatchPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves', `${patchId}.jsonl`);
-    expect(existsSync(perPatchPath)).toBe(true);
-    // Shared file must NOT exist (leaves go only to per-patch-id file when patchId is provided)
-    const sharedPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl');
-    expect(existsSync(sharedPath)).toBe(false);
-  });
-
-  it('carries anchorEvidence through to every emitted leaf as-is (RFC-0047 Phase 2, AISDLC-594)', () => {
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-    const anchorEvidence = {
-      runId: '123456789',
-      workflowRef: 'owner/repo/.github/workflows/ucvg-isolated-review.yml@refs/heads/main',
-      signerKeyId: 'ci-only-key-1',
-    };
-
-    runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-522',
-      headSha: VALID_REPORT.headSha,
-      workDir: tmpDir,
-      anchorEvidence,
-    });
-
-    const leavesPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl');
-    const lines = readFileSync(leavesPath, 'utf8')
-      .split('\n')
-      .filter((l) => l.trim().length > 0);
-    expect(lines).toHaveLength(3);
-    for (const line of lines) {
-      const leaf = JSON.parse(line) as Record<string, unknown>;
-      expect(leaf['anchorEvidence']).toEqual(anchorEvidence);
-    }
-  });
-
-  it('leaves anchorEvidence absent when the caller does not provide it (never defaulted)', () => {
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-
-    runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-522',
-      headSha: VALID_REPORT.headSha,
-      workDir: tmpDir,
-    });
-
-    const leavesPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl');
-    const lines = readFileSync(leavesPath, 'utf8')
-      .split('\n')
-      .filter((l) => l.trim().length > 0);
-    expect(lines).toHaveLength(3);
-    for (const line of lines) {
-      const leaf = JSON.parse(line) as Record<string, unknown>;
-      expect(leaf['anchorEvidence']).toBeUndefined();
-    }
-  });
-});
-
-// ── RFC-0047 Phase 4 (AISDLC-596) — ci-only key resolution + isolated producer ──
-
-describe('runCleanRoomSigner — RFC-0047 Phase 4 (AISDLC-596): ci-only key + independenceTier', () => {
-  let tmpDir: string;
-  let origSigningKeyPath: string | undefined;
-  let origCiKeyPath: string | undefined;
-
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-    origSigningKeyPath = process.env['AISDLC_SIGNING_KEY_PATH'];
-    origCiKeyPath = process.env['AISDLC_CI_SIGNING_KEY_PATH'];
-  });
-
-  afterEach(() => {
-    removeFixtureDir(tmpDir);
-    if (origSigningKeyPath !== undefined) {
-      process.env['AISDLC_SIGNING_KEY_PATH'] = origSigningKeyPath;
-    } else {
-      delete process.env['AISDLC_SIGNING_KEY_PATH'];
-    }
-    if (origCiKeyPath !== undefined) {
-      process.env['AISDLC_CI_SIGNING_KEY_PATH'] = origCiKeyPath;
-    } else {
-      delete process.env['AISDLC_CI_SIGNING_KEY_PATH'];
-    }
-  });
-
-  it('carries independenceTier through to every emitted leaf as-is', () => {
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-    delete process.env['AISDLC_SIGNING_KEY_PATH'];
-
-    runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-596',
-      headSha: VALID_REPORT.headSha,
-      workDir: tmpDir,
-      independenceTier: 'isolated',
-    });
-
-    const leavesPath = join(tmpDir, '.ai-sdlc', 'transcript-leaves.jsonl');
-    const lines = readFileSync(leavesPath, 'utf8')
-      .split('\n')
-      .filter((l) => l.trim().length > 0);
-    expect(lines).toHaveLength(3);
-    for (const line of lines) {
-      const leaf = JSON.parse(line) as Record<string, unknown>;
-      expect(leaf['independenceTier']).toBe('isolated');
-    }
-  });
-
-  it('ciOnlyKey:true fails with phase:key-resolution when AISDLC_CI_SIGNING_KEY_PATH is unset — no fallback to operator key', async () => {
-    const { generateKeyPairSync } = await import('node:crypto');
-    // An operator key IS present, but must never be used for a ciOnlyKey:true request.
-    const { privateKey } = generateKeyPairSync('ed25519', {
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-    });
-    const operatorKeyPath = join(tmpDir, 'operator-key.pem');
-    writeFileSync(operatorKeyPath, privateKey as string, 'utf8');
-    process.env['AISDLC_SIGNING_KEY_PATH'] = operatorKeyPath;
-    delete process.env['AISDLC_CI_SIGNING_KEY_PATH'];
-
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-
-    const result = runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-596',
-      headSha: VALID_REPORT.headSha,
-      workDir: tmpDir,
-      independenceTier: 'isolated',
-      ciOnlyKey: true,
-    });
-
-    expect(result.success).toBe(false);
-    if (result.success) throw new Error('expected failure');
-    expect(result.phase).toBe('key-resolution');
-    expect(result.error).toContain('AISDLC_CI_SIGNING_KEY_PATH');
-  });
-
-  it('ciOnlyKey:true resolves and signs with the ci-only key when AISDLC_CI_SIGNING_KEY_PATH is set (operator key ignored)', async () => {
-    const { generateKeyPairSync } = await import('node:crypto');
-    const operatorKp = generateKeyPairSync('ed25519', {
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-    });
-    const ciKp = generateKeyPairSync('ed25519', {
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-    });
-    const operatorKeyPath = join(tmpDir, 'operator-key.pem');
-    const ciKeyPath = join(tmpDir, 'ci-only-key.pem');
-    writeFileSync(operatorKeyPath, operatorKp.privateKey as string, 'utf8');
-    writeFileSync(ciKeyPath, ciKp.privateKey as string, 'utf8');
-    process.env['AISDLC_SIGNING_KEY_PATH'] = operatorKeyPath;
-    process.env['AISDLC_CI_SIGNING_KEY_PATH'] = ciKeyPath;
-
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-
-    const result = runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-596',
-      headSha: VALID_REPORT.headSha,
-      workDir: tmpDir,
-      independenceTier: 'isolated',
-      ciOnlyKey: true,
-      anchorEvidence: {
-        runId: '42',
-        workflowRef: 'owner/repo/.github/workflows/isolated-review.yml@refs/heads/main',
-        signerKeyId: 'ci-only-test-key',
-      },
     });
 
     expect(result.success).toBe(true);
-    if (!result.success) throw new Error(`expected success, got ${result.phase}: ${result.error}`);
-
-    const { createPublicKey, verify: cryptoVerify } = await import('node:crypto');
-    const envelope = JSON.parse(readFileSync(result.envelopePath, 'utf8')) as {
-      rootHash: string;
-      rootSignature: string;
-    };
-    const rootHashBuf = Buffer.from(envelope.rootHash, 'utf8');
-    const signatureBuf = Buffer.from(envelope.rootSignature, 'base64');
-
-    // The root MUST verify under the CI-only public key...
-    const ciPubKeyObj = createPublicKey(ciKp.publicKey as string);
-    expect(cryptoVerify(null, rootHashBuf, ciPubKeyObj, signatureBuf)).toBe(true);
-
-    // ...and MUST NOT verify under the operator's public key (proves the
-    // operator key was never touched for this signing operation).
-    const operatorPubKeyObj = createPublicKey(operatorKp.publicKey as string);
-    expect(cryptoVerify(null, rootHashBuf, operatorPubKeyObj, signatureBuf)).toBe(false);
-  });
-
-  // ── SECURITY-CRITICAL NEGATIVE (AISDLC-596 AC) ──────────────────────────────
-  //
-  // A coordinator running `clean-room-sign --independence-tier isolated` LOCALLY
-  // (operator key, no ci-only secret) must NOT be able to produce an envelope
-  // the RFC-0047 Phase 3 (AISDLC-595) verifier credits as `isolated` — it must
-  // downgrade. This proves the invariant end-to-end: producer (this module) +
-  // verifier (attestation-core/verify-core.mjs), not just the verifier in
-  // isolation.
-  it('SECURITY NEGATIVE: local operator-key --independence-tier isolated downgrades at verify time (not credited isolated)', async () => {
-    const { generateKeyPairSync } = await import('node:crypto');
-    const operatorKp = generateKeyPairSync('ed25519');
-    const operatorPrivatePem = operatorKp.privateKey.export({
-      format: 'pem',
-      type: 'pkcs8',
-    }) as string;
-    const operatorPublicPem = operatorKp.publicKey.export({
-      format: 'pem',
-      type: 'spki',
-    }) as string;
-
-    const operatorKeyPath = join(tmpDir, 'operator-key.pem');
-    writeFileSync(operatorKeyPath, operatorPrivatePem, 'utf8');
-    process.env['AISDLC_SIGNING_KEY_PATH'] = operatorKeyPath;
-    delete process.env['AISDLC_CI_SIGNING_KEY_PATH'];
-
-    const reportPath = join(tmpDir, 'report.json');
-    writeJson(reportPath, VALID_REPORT);
-    const patchId = 'e'.repeat(40);
-
-    // The coordinator locally declares `isolated` WITHOUT `ciOnlyKey: true` —
-    // exactly the forgery attempt this RFC closes. The signer does not
-    // refuse (per RFC-0047 OQ-3, the security invariant lives at the
-    // verifier), but the produced envelope must not be credited isolated.
-    const result = runCleanRoomSigner({
-      reportArtifactPath: reportPath,
-      repoRoot: tmpDir,
-      taskId: 'AISDLC-596',
-      headSha: VALID_REPORT.headSha,
-      patchId,
-      workDir: tmpDir,
-      independenceTier: 'isolated',
-      // ciOnlyKey deliberately omitted — the coordinator only has the operator key.
-    });
-
-    expect(result.success).toBe(true);
-    if (!result.success) throw new Error(`expected success, got ${result.phase}: ${result.error}`);
-
-    const envelope = JSON.parse(readFileSync(result.envelopePath, 'utf8'));
-
-    // Register the operator key as an ORDINARY (non-ci-only) trusted reviewer —
-    // the realistic trusted-reviewers.yaml state: the operator's own key is
-    // registered (so their attested/none-tier reviews verify), but it is
-    // NEVER marked ciOnly: true.
-    // @ts-expect-error -- plain ESM, no type declarations shipped
-    const { verifyV6Envelope } = await import('../../attestation-core/verify-core.mjs');
-    const verifyResult = verifyV6Envelope({
-      envelope,
-      envelopeFileName: `${VALID_REPORT.headSha}.v6.dsse.json`,
-      headSha: VALID_REPORT.headSha,
-      trustedReviewers: [{ pubkey: operatorPublicPem }], // ciOnly absent/false
-      repoRoot: tmpDir,
-      patchIdHint: patchId,
-    }) as {
-      status: string;
-      reason?: string;
-      overallIndependenceTier?: string;
-      independenceTiers?: Array<{ independenceTier: string; isolatedDowngraded?: unknown }>;
-    };
-
-    if (verifyResult.status !== 'valid') {
-      throw new Error(`expected valid, got invalid: ${verifyResult.reason}`);
-    }
-
-    // Integrity still passes (a real key signed a real Merkle root over a
-    // genuinely approved report) — the claim is merely not credited at the
-    // requested tier. This is the documented RFC-0047 OQ-3 behavior:
-    // downgrade with a recorded reason, never reject on anchor grounds alone.
-    expect(verifyResult.status).toBe('valid');
-    expect(verifyResult.overallIndependenceTier).not.toBe('isolated');
-    expect(verifyResult.overallIndependenceTier).toBe('attested');
-    expect(verifyResult.independenceTiers?.every((t) => t.independenceTier !== 'isolated')).toBe(
-      true,
-    );
-    expect(verifyResult.independenceTiers?.some((t) => t.isolatedDowngraded !== undefined)).toBe(
-      true,
-    );
+    if (!result.success) throw new Error('Expected success');
+    expect(result.report.prNumber).toBe(42);
   });
 });
 

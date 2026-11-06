@@ -1,6 +1,8 @@
 ---
 id: AISDLC-998
-title: 'Step 10.6 signs with the post-rebase patch-id, or sends a changed diff back to review'
+title: >-
+  Step 10.6 signs with the post-rebase patch-id, or sends a changed diff back to
+  review
 status: Done
 assignee: []
 created_date: '2026-10-20'
@@ -13,11 +15,23 @@ references:
   - pipeline-cli/src/next-step/ship.ts
   - pipeline-cli/src/next-step/review-finalize.ts
   - pipeline-cli/src/governance/rebase-rearm.ts
-  - ai-sdlc-plugin/scripts/sign-attestation-if-consumer.sh
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - docs/operations/attestation-reference.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation-if-consumer.sh
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

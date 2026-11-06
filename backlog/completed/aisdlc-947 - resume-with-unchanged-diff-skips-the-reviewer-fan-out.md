@@ -1,6 +1,8 @@
 ---
 id: AISDLC-947
-title: 'Resume with an unchanged or chore-only diff skips the reviewer fan-out and re-signs instead of re-running developer plus three reviewers'
+title: >-
+  Resume with an unchanged or chore-only diff skips the reviewer fan-out and
+  re-signs instead of re-running developer plus three reviewers
 status: Done
 assignee: []
 created_date: '2026-10-16'
@@ -13,10 +15,15 @@ references:
   - pipeline-cli/src/steps/07-build-review-prompts.ts
   - pipeline-cli/src/steps/reviewer-set.ts
   - pipeline-cli/src/steps/09-iterate.ts
-  - pipeline-cli/src/attestation/patch-id.ts
   - docs/operations/attestation-reference.md
 priority: critical
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/patch-id.ts'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

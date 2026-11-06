@@ -19,15 +19,23 @@ dependencies:
 priority: high
 references:
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
-  - pipeline-cli/src/attestation/merkle.ts
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - ai-sdlc-plugin/commands/execute.md
 drift_log:
   - date: '2026-11-05'
     type: ref-deleted
     detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
     resolution: flagged
-drift_checked: '2026-11-05'
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/merkle.ts'
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Scope (RFC-0042 Phase 3 prerequisite — gap identified by AISDLC-383.6 security review)

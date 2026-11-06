@@ -15,10 +15,17 @@ dependencies:
   - AISDLC-202.2
   - AISDLC-203
 references:
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - pipeline-cli/src/steps/10-finalize.ts
   - spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md
 priority: high
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

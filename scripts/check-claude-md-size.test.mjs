@@ -46,7 +46,6 @@ describe('CLAUDE.md size budget', () => {
       'Never close',
       'Always rebase',
       'MUST NOT resolve RFC Open Questions',
-      'PATCH_ID_EXCLUSIONS',
       'read-only',
     ]) {
       assert.ok((claudeMd + rules).includes(needle), `CLAUDE.md lost rule text: ${needle}`);

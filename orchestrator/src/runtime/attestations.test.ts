@@ -18,7 +18,6 @@ import {
   ATTESTATION_ENVELOPE_PATH_PATTERN,
   CONTENTHASH_SHARED_CHURN_FILES,
   CONTENTHASHV4_IGNORE_FILES,
-  DSSE_PAYLOAD_TYPE,
   INDEPENDENCE_REQUIRED_ROLES,
   REQUIRED_REVIEWER_AGENT_IDS,
   REVIEWER_ROLE_EQUIVALENCES,
@@ -30,21 +29,15 @@ import {
   computeContentHashV3,
   computeContentHashV4,
   computeContentHashV5,
-  generateSigningKeyPair,
   isAttestationEnvelopePath,
   isIgnoredForContentHash,
-  paeEncode,
   projectDeltaEntriesToHeadEntries,
   sha256Hex,
-  signAttestation,
   validatePredicateShape,
   validateTrustedReviewers,
-  verifyAttestation,
   type AttestationPredicate,
   type ChangedFileHeadEntry,
   type ChangedFileV5Entry,
-  type DsseEnvelope,
-  type TrustedReviewer,
 } from './attestations.js';
 
 const FIXED_COMMIT = 'a'.repeat(40); // 40 hex chars
@@ -89,31 +82,6 @@ const DEFAULT_INPUTS = {
   signedAt: '2026-04-27T12:34:56.000Z',
   changedFileDeltas: DEFAULT_DELTAS,
 };
-
-function buildExpected(predicate: AttestationPredicate) {
-  return {
-    commitSha: predicate.subject.digest.sha1,
-    contentHashV3: predicate.contentHashV3,
-    policyHash: predicate.policyHash,
-    expectedAgentFileHashes: Object.fromEntries(
-      predicate.reviewers.map((r) => [r.agentId, r.agentFileHash]),
-    ),
-  };
-}
-
-function makeTrustedReviewer(
-  pubkey: string,
-  overrides: Partial<TrustedReviewer> = {},
-): TrustedReviewer {
-  return {
-    identity: 'dev@example.com',
-    machine: 'laptop',
-    pubkey,
-    addedAt: '2026-04-27',
-    addedBy: 'maintainer',
-    ...overrides,
-  };
-}
 
 describe('buildPredicate', () => {
   it('produces a v3 predicate with contentHashV3 and the subject sha1', () => {
@@ -214,57 +182,6 @@ describe('buildPredicate', () => {
         ],
       }),
     ).toThrow(/changedFileDeltas\[0\]\.headBlobSha must be a string/);
-  });
-});
-
-describe('verifyAttestation (failure modes)', () => {
-  it('rejects envelope with no signatures', () => {
-    const { publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    const envelope: DsseEnvelope = {
-      payloadType: 'application/vnd.ai-sdlc.attestation+json',
-      payload: Buffer.from(JSON.stringify(predicate), 'utf-8').toString('base64'),
-      signatures: [],
-    };
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/no signatures/);
-  });
-
-  it('rejects envelope with non-JSON payload', () => {
-    const { publicKeyPem } = generateSigningKeyPair();
-    const envelope: DsseEnvelope = {
-      payloadType: 'application/vnd.ai-sdlc.attestation+json',
-      payload: Buffer.from('not json at all', 'utf-8').toString('base64'),
-      signatures: [{ keyid: 'k', sig: Buffer.alloc(64).toString('base64') }],
-    };
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        commitSha: FIXED_COMMIT,
-        contentHashV3: 'x',
-        policyHash: 'y',
-        expectedAgentFileHashes: {},
-      },
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/payload is not valid JSON/);
-  });
-});
-
-describe('paeEncode', () => {
-  it('produces the canonical DSSE PAE prefix shape', () => {
-    const out = paeEncode(
-      'application/vnd.ai-sdlc.attestation+json',
-      Buffer.from('hello', 'utf-8'),
-    );
-    const str = out.toString('utf-8');
-    expect(str).toMatch(/^DSSEv1 \d+ application\/vnd\.ai-sdlc\.attestation\+json 5 hello$/);
   });
 });
 
@@ -2238,38 +2155,5 @@ describe('ACCEPTED_SCHEMA_VERSIONS includes v5', () => {
   it('accepts both v3 and v5', () => {
     expect(ACCEPTED_SCHEMA_VERSIONS).toContain('v3');
     expect(ACCEPTED_SCHEMA_VERSIONS).toContain('v5');
-  });
-});
-
-describe('legacy schemas are refused (DEC-0284)', () => {
-  it('signAttestation refuses a v5 predicate and names DEC-0284', () => {
-    const { privateKeyPem } = generateSigningKeyPair();
-    const predicate = { ...buildPredicate(DEFAULT_INPUTS), schemaVersion: 'v5' as const };
-    expect(() => signAttestation({ predicate, privateKeyPem, keyid: 'k' })).toThrow(/DEC-0284/);
-  });
-
-  function verifyWithVersion(schemaVersion: string) {
-    const payload = Buffer.from(JSON.stringify({ schemaVersion }), 'utf-8').toString('base64');
-    return verifyAttestation({
-      envelope: {
-        payloadType: DSSE_PAYLOAD_TYPE,
-        payload,
-        signatures: [{ keyid: 'k', sig: 'AA==' }],
-      },
-      trustedReviewers: [],
-      expected: {},
-    } as unknown as Parameters<typeof verifyAttestation>[0]);
-  }
-
-  it('verifyAttestation refuses a v5 envelope and names DEC-0284', () => {
-    const result = verifyWithVersion('v5');
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/'v5' refused.*DEC-0284/);
-  });
-
-  it('verifyAttestation never echoes an unbounded schemaVersion into the reason', () => {
-    const result = verifyWithVersion('v5\nevil=1');
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/'unknown' refused.*DEC-0284/);
   });
 });

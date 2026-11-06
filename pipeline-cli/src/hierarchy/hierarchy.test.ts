@@ -1111,7 +1111,6 @@ describe('hierarchy status', () => {
       'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
       'EXECUTOR CAP 3 (executors.max 3, board ceiling none, pacer allowance unlimited, load headroom 7; limited by executors.max)',
       'unowned PRs: 0',
-      expect.stringContaining('attestation and leaf files:'),
     ]);
   });
 

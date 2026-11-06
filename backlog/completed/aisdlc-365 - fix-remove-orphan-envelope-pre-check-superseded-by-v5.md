@@ -1,6 +1,8 @@
 ---
 id: AISDLC-365
-title: 'fix(attestation): remove orphan-envelope pre-check — superseded by V5 (was kicking out parallel PRs from queue)'
+title: >-
+  fix(attestation): remove orphan-envelope pre-check — superseded by V5 (was
+  kicking out parallel PRs from queue)
 status: Done
 assignee: []
 created_date: '2026-05-18'
@@ -12,8 +14,12 @@ labels:
 dependencies:
   - AISDLC-362
 priority: critical
-references:
-  - scripts/verify-attestation.mjs
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Why this is critical

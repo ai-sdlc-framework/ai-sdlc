@@ -15,9 +15,18 @@ labels:
   - bug
 dependencies: []
 references:
-  - pipeline-cli/attestation-core/verify-core.mjs
-  - backlog/completed/aisdlc-575 - ship-a-consumer-runnable-attestation-verify-cli-subcommand.md
+  - >-
+    backlog/completed/aisdlc-575 -
+    ship-a-consumer-runnable-attestation-verify-cli-subcommand.md
 priority: high
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/attestation-core/verify-core.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

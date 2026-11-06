@@ -261,26 +261,6 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     assert.doesNotMatch(code, /squash-attestation-chores\.sh/);
   });
 
-  it('squashes stacked chore-sign commits in the same pass (and honours its skip var)', () => {
-    for (const skip of [false, true]) {
-      const r0 = setupRepo();
-      try {
-        for (let i = 0; i < 2; i++) {
-          writeFileSync(join(r0, `a${i}.txt`), 'x');
-          git(['add', '.'], r0);
-          git(['commit', '-q', '-m', 'chore: sign attestation'], r0);
-        }
-        const before = git(['rev-list', '--count', 'HEAD'], r0).trim();
-        const r = runOrchestrator(r0, { env: skip ? { AI_SDLC_SKIP_SQUASH_CHORES: '1' } : {} });
-        assert.equal(r.status, 0, r.stderr);
-        const after = git(['rev-list', '--count', 'HEAD'], r0).trim();
-        assert.equal(after, skip ? before : String(Number(before) - 1));
-      } finally {
-        rmSync(r0, { recursive: true, force: true });
-      }
-    }
-  });
-
   // ── AC-5: sub-hooks retain standalone exit-1 behavior ─────────────────
 
   it('check-task-moved.sh still exits 1 when invoked directly (no AI_SDLC_INTERNAL_NO_EXIT_1)', () => {

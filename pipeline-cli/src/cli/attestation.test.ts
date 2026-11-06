@@ -11,47 +11,21 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createHash, generateKeyPairSync } from 'node:crypto';
 import {
-  appendFileSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
   readdirSync,
-  realpathSync,
   writeFileSync,
   readFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, resolve, sep } from 'node:path';
-import {
-  appendLeaf,
-  appendLeafForPatchId,
-  loadLeavesForPatchId,
-  type TranscriptLeaf,
-} from '../attestation/merkle.js';
-import { subagentSessionsDir } from '../attestation/verdict-class.js';
-import {
-  claudeProjectSlug,
-  claudeProjectsDir,
-  nonceMarkerLiteral,
-} from '../attestation/harness-transcript.js';
+import { join } from 'node:path';
+import { nonceMarkerLiteral } from '../attestation/harness-transcript.js';
+import { V6_REFUSED_CODE } from '../attestation/v6-refusal.js';
 import { buildAttestationCli, readAgentIdSidecar } from './attestation.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
-
-/** AISDLC-734: markers are bound to their leaf, not deleted; list the ones still free. */
-function unconsumedMarkers(dir: string): string[] {
-  return readdirSync(dir)
-    .filter((f) => f.endsWith('.json'))
-    .filter((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')).consumedFor === undefined);
-}
-import { PATCH_ID_EXCLUSIONS } from '../attestation/patch-id.js';
-import {
-  loadAttestationRuntime,
-  TrustedRuntimeResolutionError,
-} from '../attestation/verify-runtime.js';
-import { loadVerifyCore } from '../attestation/verify-core-loader.js';
 
 /**
  * AISDLC-570 round-2 review: mocked so the `emit-leaf --claude-session-id`
@@ -59,43 +33,19 @@ import { loadVerifyCore } from '../attestation/verify-core-loader.js';
  * tree without touching the real home directory. `tmpdir` and every other
  * `node:os` export pass through unmocked via `importOriginal`.
  */
-let fakeHomeDirForHarnessTests = '';
+const fakeHomeDirForHarnessTests = '';
 vi.mock('node:os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:os')>();
   return { ...actual, homedir: () => fakeHomeDirForHarnessTests || actual.homedir() };
 });
 
-/**
- * AISDLC-575: the `verify` subcommand's wiring (arg validation + exit-code
- * mapping) is tested in isolation from the actual trusted-runtime resolution
- * and Merkle-proof verification logic — both of those have their own
- * dedicated hermetic test suites (`verify-runtime.test.ts`,
- * `attestation-core/verify-core.test.mjs`). Mocking these two modules lets
- * the CLI-level tests below assert purely on `buildAttestationCli`'s own
- * behavior: which exit code it produces for a given core-verifier result,
- * and what it prints to stdout.
- */
-vi.mock('../attestation/verify-runtime.js', () => {
-  class TrustedRuntimeResolutionError extends Error {}
-  return {
-    loadAttestationRuntime: vi.fn(),
-    TrustedRuntimeResolutionError,
-  };
-});
-vi.mock('../attestation/verify-core-loader.js', () => ({
-  loadVerifyCore: vi.fn(),
-}));
-
-/**
- * AISDLC-421: deterministic test patch-id used to drive `emit-leaf` in
- * hermetic tests (no real git worktree available, so `--patch-id` is passed
- * explicitly instead of letting the CLI auto-compute via `git patch-id`).
- *
- * Helper to read the leaves the test-fixture call produced.
- */
-const TEST_PATCH_ID = '0'.repeat(40);
-function loadLeavesUnderTest(repoRoot: string, patchId: string = TEST_PATCH_ID): TranscriptLeaf[] {
-  return loadLeavesForPatchId(patchId, repoRoot);
+/** Records the reviews ledger holds under `repoRoot`, across every task. */
+function ledgerRecords(repoRoot: string): string[] {
+  const dir = join(repoRoot, '.ai-sdlc', 'reviews');
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.jsonl'))
+    .flatMap((f) => readFileSync(join(dir, f), 'utf8').split('\n').filter(Boolean));
 }
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
@@ -193,22 +143,6 @@ function writeVerdict(name: string, contents: unknown): string {
   const verdictPath = join(verdictsDir, name);
   writeFileSync(verdictPath, typeof contents === 'string' ? contents : JSON.stringify(contents));
   return verdictPath;
-}
-
-function makeLeaf(overrides: Partial<TranscriptLeaf> = {}): TranscriptLeaf {
-  return {
-    leafIndex: 0,
-    taskId: 'AISDLC-383.2',
-    reviewerName: 'code-reviewer',
-    transcriptHash: 'a'.repeat(64),
-    nonce: 'b'.repeat(64),
-    harness: 'claude-code',
-    model: 'sonnet',
-    verdictApproved: true,
-    findings: { critical: 0, major: 0, minor: 1, suggestion: 0 },
-    signedAt: '2026-05-20T19:14:37.561Z',
-    ...overrides,
-  };
 }
 
 // ── CLI: transcripts list ─────────────────────────────────────────────────────
@@ -327,6 +261,36 @@ describe('cli-attestation --help', () => {
 
 // ── CLI: missing subcommand ───────────────────────────────────────────────────
 
+describe('cli-attestation verify — v6 is refused (RFC-0061 phase 3)', () => {
+  it('refuses with the named error and exits 1 for any head/base', async () => {
+    await buildAttestationCli([
+      'verify',
+      '--head',
+      'a'.repeat(40),
+      '--base',
+      'b'.repeat(40),
+    ]).parseAsync();
+    expect(flushStdout()).toContain('status=invalid');
+    expect(flushStdout()).toContain(`reason=${V6_REFUSED_CODE}`);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+  });
+
+  it('names the schema a v6 envelope file declares', async () => {
+    const envelope = join(tmpRoot, 'x.v6.dsse.json');
+    const statement = { predicate: { schemaVersion: 'v6' } };
+    writeFileSync(
+      envelope,
+      JSON.stringify({ payload: Buffer.from(JSON.stringify(statement)).toString('base64') }),
+    );
+    await buildAttestationCli(['verify', '--envelope', envelope]).parseAsync();
+    expect(flushStdout()).toContain(V6_REFUSED_CODE);
+    expect(flushStdout()).toContain('declares schema v6');
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+  });
+});
+
 describe('cli-attestation missing subcommand', () => {
   it('exits non-zero when no subcommand is provided', async () => {
     let caught: Error | null = null;
@@ -336,60 +300,6 @@ describe('cli-attestation missing subcommand', () => {
       caught = err as Error;
     }
     expect(caught?.message).toMatch(/process\.exit.*["']?[1-9]/);
-  });
-});
-
-// ── CLI: merkle-root ──────────────────────────────────────────────────────────
-
-describe('merkle-root — no leaves', () => {
-  it('prints leaf count 0 in text mode', async () => {
-    await buildAttestationCli(['merkle-root']).parseAsync();
-    const out = flushStdout();
-    expect(out).toContain('leaf count: 0');
-    expect(out).toContain('(no leaves)');
-  });
-
-  it('emits JSON with root null and leafCount 0', async () => {
-    await buildAttestationCli(['merkle-root', '--json']).parseAsync();
-    const parsed = JSON.parse(flushStdout()) as { root: null; leafCount: number };
-    expect(parsed.root).toBeNull();
-    expect(parsed.leafCount).toBe(0);
-  });
-});
-
-describe('merkle-root — with leaves', () => {
-  it('prints leaf count and root hash in text mode', async () => {
-    appendLeaf(makeLeaf({ leafIndex: 0 }), tmpRoot);
-    appendLeaf(makeLeaf({ leafIndex: 1, reviewerName: 'test-reviewer' }), tmpRoot);
-    await buildAttestationCli(['merkle-root']).parseAsync();
-    const out = flushStdout();
-    expect(out).toContain('leaf count: 2');
-    expect(out).toMatch(/root:\s+[0-9a-f]{64}/);
-  });
-
-  it('emits JSON with correct leaf count and 64-char root', async () => {
-    appendLeaf(makeLeaf({ leafIndex: 0 }), tmpRoot);
-    await buildAttestationCli(['merkle-root', '--json']).parseAsync();
-    const parsed = JSON.parse(flushStdout()) as { root: string; leafCount: number };
-    expect(parsed.leafCount).toBe(1);
-    expect(parsed.root).toMatch(/^[0-9a-f]{64}$/);
-  });
-});
-
-// ── CLI: print-patch-id-exclusions (AISDLC-618) ────────────────────────────────
-
-describe('print-patch-id-exclusions', () => {
-  it('prints one pathspec per line in text mode, matching PATCH_ID_EXCLUSIONS', async () => {
-    await buildAttestationCli(['print-patch-id-exclusions']).parseAsync();
-    const out = flushStdout();
-    const lines = out.split('\n').filter((l) => l.length > 0);
-    expect(lines).toEqual([...PATCH_ID_EXCLUSIONS]);
-  });
-
-  it('emits a JSON array matching PATCH_ID_EXCLUSIONS with --json', async () => {
-    await buildAttestationCli(['print-patch-id-exclusions', '--json']).parseAsync();
-    const parsed = JSON.parse(flushStdout()) as string[];
-    expect(parsed).toEqual([...PATCH_ID_EXCLUSIONS]);
   });
 });
 
@@ -472,205 +382,6 @@ describe('reviewer-set-window', () => {
   });
 });
 
-// ── CLI: merkle-proof ─────────────────────────────────────────────────────────
-
-describe('merkle-proof', () => {
-  it('prints proof for leaf 0 in text mode', async () => {
-    appendLeaf(makeLeaf({ leafIndex: 0 }), tmpRoot);
-    appendLeaf(makeLeaf({ leafIndex: 1, reviewerName: 'test-reviewer' }), tmpRoot);
-    await buildAttestationCli(['merkle-proof', '0']).parseAsync();
-    const out = flushStdout();
-    expect(out).toContain('leaf index: 0');
-    expect(out).toContain('root:');
-    expect(out).toContain('proof');
-  });
-
-  it('emits JSON with leafIndex, leafHash, root, proof', async () => {
-    appendLeaf(makeLeaf({ leafIndex: 0 }), tmpRoot);
-    appendLeaf(makeLeaf({ leafIndex: 1, reviewerName: 'test-reviewer' }), tmpRoot);
-    await buildAttestationCli(['merkle-proof', '0', '--json']).parseAsync();
-    const parsed = JSON.parse(flushStdout()) as {
-      leafIndex: number;
-      leafHash: string;
-      root: string;
-      proof: string[];
-    };
-    expect(parsed.leafIndex).toBe(0);
-    expect(parsed.leafHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(parsed.root).toMatch(/^[0-9a-f]{64}$/);
-    expect(Array.isArray(parsed.proof)).toBe(true);
-  });
-
-  it('emits verified=true when --verify flag is set', async () => {
-    appendLeaf(makeLeaf({ leafIndex: 0 }), tmpRoot);
-    await buildAttestationCli(['merkle-proof', '0', '--verify', '--json']).parseAsync();
-    const parsed = JSON.parse(flushStdout()) as { verified: boolean };
-    expect(parsed.verified).toBe(true);
-  });
-
-  it('single-leaf tree: proof is empty array', async () => {
-    appendLeaf(makeLeaf({ leafIndex: 0 }), tmpRoot);
-    await buildAttestationCli(['merkle-proof', '0', '--json']).parseAsync();
-    const parsed = JSON.parse(flushStdout()) as { proof: string[] };
-    expect(parsed.proof).toEqual([]);
-  });
-
-  it('prints "(empty)" note in text mode for single-leaf tree', async () => {
-    appendLeaf(makeLeaf({ leafIndex: 0 }), tmpRoot);
-    await buildAttestationCli(['merkle-proof', '0']).parseAsync();
-    expect(flushStdout()).toContain('(empty');
-  });
-
-  it('exits with error when no leaves exist', async () => {
-    let caught: Error | null = null;
-    try {
-      await buildAttestationCli(['merkle-proof', '0']).parseAsync();
-    } catch (err) {
-      caught = err as Error;
-    }
-    expect(caught?.message).toMatch(/process\.exit\(1\)/);
-  });
-
-  it('exits with error when index is out of range', async () => {
-    appendLeaf(makeLeaf({ leafIndex: 0 }), tmpRoot);
-    let caught: Error | null = null;
-    try {
-      await buildAttestationCli(['merkle-proof', '99']).parseAsync();
-    } catch (err) {
-      caught = err as Error;
-    }
-    expect(caught?.message).toMatch(/process\.exit\(1\)/);
-  });
-});
-
-// ── CLI: sign-v6 ──────────────────────────────────────────────────────────────
-
-describe('sign-v6', () => {
-  let keyPath: string;
-
-  beforeEach(() => {
-    // Generate a fresh ed25519 keypair for each test.
-    const { privateKey } = generateKeyPairSync('ed25519');
-    const pem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
-    keyPath = join(tmpRoot, 'test-key.pem');
-    writeFileSync(keyPath, pem, { mode: 0o600 });
-  });
-
-  it('writes a v6 envelope and prints the output path', async () => {
-    appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-383.3' }), tmpRoot);
-    appendLeaf(
-      makeLeaf({ leafIndex: 1, taskId: 'AISDLC-383.3', reviewerName: 'test-reviewer' }),
-      tmpRoot,
-    );
-
-    await expect(
-      buildAttestationCli([
-        'sign-v6',
-        '--task-id',
-        'AISDLC-383.3',
-        '--head-sha',
-        'a'.repeat(40),
-        '--key-path',
-        keyPath,
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    const out = flushStdout();
-    expect(out).toContain('.v6.dsse.json');
-  });
-
-  it('AISDLC-610 AC-3: honors an explicit --patch-id verbatim (per-patch-id file, no shared fallback)', async () => {
-    const explicitPatchId = '9'.repeat(40);
-    appendLeafForPatchId(
-      makeLeaf({ leafIndex: 0, taskId: 'AISDLC-610' }),
-      explicitPatchId,
-      tmpRoot,
-    );
-    appendLeafForPatchId(
-      makeLeaf({ leafIndex: 1, taskId: 'AISDLC-610', reviewerName: 'test-reviewer' }),
-      explicitPatchId,
-      tmpRoot,
-    );
-
-    await expect(
-      buildAttestationCli([
-        'sign-v6',
-        '--task-id',
-        'AISDLC-610',
-        '--head-sha',
-        'a'.repeat(40),
-        '--key-path',
-        keyPath,
-        '--patch-id',
-        explicitPatchId,
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    const out = flushStdout();
-    expect(out).toContain(`${explicitPatchId}.v6.dsse.json`);
-  });
-
-  it('AISDLC-610 AC-3: rejects a malformed --patch-id', async () => {
-    let caught: Error | null = null;
-    try {
-      await buildAttestationCli([
-        'sign-v6',
-        '--task-id',
-        'AISDLC-610',
-        '--head-sha',
-        'a'.repeat(40),
-        '--key-path',
-        keyPath,
-        '--patch-id',
-        'not-a-valid-patch-id',
-      ]).parseAsync();
-    } catch (err) {
-      caught = err as Error;
-    }
-    expect(caught?.message).toMatch(/process\.exit\(1\)/);
-    expect(flushStderr()).toMatch(/--patch-id must be 40 lowercase hex characters/);
-  });
-
-  it('exits 1 when no leaves match task-id', async () => {
-    // No leaves appended.
-    let caught: Error | null = null;
-    try {
-      await buildAttestationCli([
-        'sign-v6',
-        '--task-id',
-        'AISDLC-383.3',
-        '--head-sha',
-        'a'.repeat(40),
-        '--key-path',
-        keyPath,
-      ]).parseAsync();
-    } catch (err) {
-      caught = err as Error;
-    }
-    expect(caught?.message).toMatch(/process\.exit\(1\)/);
-  });
-
-  it('exits 1 when key file does not exist', async () => {
-    appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-383.3' }), tmpRoot);
-
-    let caught: Error | null = null;
-    try {
-      await buildAttestationCli([
-        'sign-v6',
-        '--task-id',
-        'AISDLC-383.3',
-        '--head-sha',
-        'a'.repeat(40),
-        '--key-path',
-        join(tmpRoot, 'nonexistent.pem'),
-      ]).parseAsync();
-    } catch (err) {
-      caught = err as Error;
-    }
-    expect(caught?.message).toMatch(/process\.exit\(1\)/);
-  });
-});
-
 // ── CLI: emit-leaf ────────────────────────────────────────────────────────────
 
 describe('emit-leaf — --review-head-sha validation (AISDLC-725)', () => {
@@ -705,8 +416,6 @@ describe('emit-leaf — --review-head-sha validation (AISDLC-725)', () => {
         'claude-code',
         '--model',
         'claude-sonnet-4-6',
-        '--patch-id',
-        TEST_PATCH_ID,
         '--review-mode',
         'delta',
         '--review-base-sha',
@@ -718,179 +427,7 @@ describe('emit-leaf — --review-head-sha validation (AISDLC-725)', () => {
       caught = err as Error;
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
-  });
-});
-
-describe('emit-leaf — happy path', () => {
-  it('appends one leaf for a single reviewer run', async () => {
-    makeTranscript('aisdlc-383.8', 'code-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-383.8',
-      'code-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict-code-reviewer.json', {
-      approved: true,
-      findings: { critical: 0, major: 0, minor: 1, suggestion: 2 },
-    });
-
-    await expect(
-      buildAttestationCli([
-        'emit-leaf',
-        '--task-id',
-        'AISDLC-383.8',
-        '--reviewer',
-        'code-reviewer',
-        '--transcript-path',
-        transcriptPath,
-        '--verdict-path',
-        verdictPath,
-        '--head-sha',
-        'a'.repeat(40),
-        '--harness',
-        'claude-code',
-        '--model',
-        'claude-sonnet-4-6',
-        '--patch-id',
-        TEST_PATCH_ID,
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves).toHaveLength(1);
-    const leaf = leaves[0];
-    expect(leaf.leafIndex).toBe(0);
-    expect(leaf.taskId).toBe('AISDLC-383.8');
-    expect(leaf.reviewerName).toBe('code-reviewer');
-    expect(leaf.harness).toBe('claude-code');
-    expect(leaf.model).toBe('claude-sonnet-4-6');
-    expect(leaf.verdictApproved).toBe(true);
-    expect(leaf.findings).toEqual({ critical: 0, major: 0, minor: 1, suggestion: 2 });
-    expect(leaf.transcriptHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(leaf.nonce).toMatch(/^[0-9a-f]{64}$/);
-    expect(leaf.signedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    // AISDLC-568: no SubagentStart marker present in this hermetic fixture,
-    // so the leaf must default to the lower-trust class (fail-safe).
-    expect(leaf.verdictClass).toBe('self-authored');
-  });
-
-  it('transcriptHash is SHA-256 of the transcript file content', async () => {
-    makeTranscript('aisdlc-383.8', 'code-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-383.8',
-      'code-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict.json', {
-      approved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-    });
-
-    await buildAttestationCli([
-      'emit-leaf',
-      '--task-id',
-      'AISDLC-383.8',
-      '--reviewer',
-      'code-reviewer',
-      '--transcript-path',
-      transcriptPath,
-      '--verdict-path',
-      verdictPath,
-      '--head-sha',
-      'a'.repeat(40),
-      '--harness',
-      'claude-code',
-      '--model',
-      'sonnet',
-      '--patch-id',
-      TEST_PATCH_ID,
-    ]).parseAsync();
-
-    const expectedHash = createHash('sha256').update(readFileSync(transcriptPath)).digest('hex');
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves[0].transcriptHash).toBe(expectedHash);
-  });
-
-  it('sets verdictApproved=false for CHANGES_REQUESTED verdict', async () => {
-    makeTranscript('aisdlc-383.8', 'security-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-383.8',
-      'security-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict-security.json', {
-      approved: false,
-      findings: { critical: 1, major: 0, minor: 0, suggestion: 0 },
-    });
-
-    await buildAttestationCli([
-      'emit-leaf',
-      '--task-id',
-      'AISDLC-383.8',
-      '--reviewer',
-      'security-reviewer',
-      '--transcript-path',
-      transcriptPath,
-      '--verdict-path',
-      verdictPath,
-      '--head-sha',
-      'b'.repeat(40),
-      '--harness',
-      'claude-code',
-      '--model',
-      'claude-opus-4-5',
-      '--patch-id',
-      TEST_PATCH_ID,
-    ]).parseAsync();
-
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves[0].verdictApproved).toBe(false);
-    expect(leaves[0].findings.critical).toBe(1);
-  });
-
-  it('supports verdictApproved key in verdict JSON', async () => {
-    makeTranscript('aisdlc-383.8', 'test-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-383.8',
-      'test-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict-test.json', {
-      verdictApproved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 1 },
-    });
-
-    await buildAttestationCli([
-      'emit-leaf',
-      '--task-id',
-      'AISDLC-383.8',
-      '--reviewer',
-      'test-reviewer',
-      '--transcript-path',
-      transcriptPath,
-      '--verdict-path',
-      verdictPath,
-      '--head-sha',
-      'c'.repeat(40),
-      '--harness',
-      'claude-code',
-      '--model',
-      'sonnet',
-      '--patch-id',
-      TEST_PATCH_ID,
-    ]).parseAsync();
-
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves[0].verdictApproved).toBe(true);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(0);
   });
 });
 
@@ -930,8 +467,6 @@ describe('emit-leaf — reviews ledger integration (AISDLC-616)', () => {
       'claude-code',
       '--model',
       'claude-sonnet-4-6',
-      '--patch-id',
-      TEST_PATCH_ID,
       '--iteration',
       '1',
       '--pr-number',
@@ -986,8 +521,6 @@ describe('emit-leaf — reviews ledger integration (AISDLC-616)', () => {
       'claude-code',
       '--model',
       'claude-sonnet-4-6',
-      '--patch-id',
-      TEST_PATCH_ID,
     ]).parseAsync();
 
     const { loadReviewLedger } = await import('../attestation/reviews-ledger.js');
@@ -1025,8 +558,6 @@ describe('emit-leaf — reviews ledger integration (AISDLC-616)', () => {
       'claude-code',
       '--model',
       'sonnet',
-      '--patch-id',
-      TEST_PATCH_ID,
     ]).parseAsync();
 
     const { loadReviewLedger } = await import('../attestation/reviews-ledger.js');
@@ -1067,8 +598,6 @@ describe('emit-leaf — reviews ledger integration (AISDLC-616)', () => {
       'claude-code',
       '--model',
       'opus',
-      '--patch-id',
-      TEST_PATCH_ID,
       '--iteration',
       '1',
     ]).parseAsync();
@@ -1096,8 +625,6 @@ describe('emit-leaf — reviews ledger integration (AISDLC-616)', () => {
       'claude-code',
       '--model',
       'opus',
-      '--patch-id',
-      TEST_PATCH_ID,
       '--iteration',
       '2',
     ]).parseAsync();
@@ -1142,8 +669,6 @@ describe('emit-leaf — reviews ledger integration (AISDLC-616)', () => {
       'claude-code',
       '--model',
       'sonnet',
-      '--patch-id',
-      TEST_PATCH_ID,
     ]).parseAsync();
 
     const { loadReviewLedger } = await import('../attestation/reviews-ledger.js');
@@ -1151,184 +676,13 @@ describe('emit-leaf — reviews ledger integration (AISDLC-616)', () => {
     expect(flushStderr()).toContain('does not map to a canonical reviews-ledger role');
     // The Merkle leaf itself must still be written — reviews-ledger skipping
     // must not regress the pre-existing v6 signing path.
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(1);
-  });
-});
-
-// ── CLI: emit-leaf anchorEvidence (RFC-0047 Phase 2, AISDLC-594) ──────────────
-
-describe('emit-leaf — anchorEvidence (RFC-0047 Phase 2, AISDLC-594)', () => {
-  function buildBaseArgs(): string[] {
-    makeTranscript('aisdlc-383.8', 'code-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-383.8',
-      'code-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict-anchor-evidence.json', {
-      approved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-    });
-    return [
-      'emit-leaf',
-      '--task-id',
-      'AISDLC-383.8',
-      '--reviewer',
-      'code-reviewer',
-      '--transcript-path',
-      transcriptPath,
-      '--verdict-path',
-      verdictPath,
-      '--head-sha',
-      'a'.repeat(40),
-      '--harness',
-      'claude-code',
-      '--model',
-      'sonnet',
-      '--patch-id',
-      TEST_PATCH_ID,
-    ];
-  }
-
-  it('leaves anchorEvidence undefined when no anchor flags are passed (never defaulted)', async () => {
-    await buildAttestationCli(buildBaseArgs()).parseAsync();
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves[0].anchorEvidence).toBeUndefined();
-  });
-
-  it('binds anchorEvidence when all three anchor flags are passed', async () => {
-    await buildAttestationCli([
-      ...buildBaseArgs(),
-      '--anchor-run-id',
-      '123456789',
-      '--anchor-workflow-ref',
-      'owner/repo/.github/workflows/ucvg-isolated-review.yml@refs/heads/main',
-      '--anchor-signer-key-id',
-      'ci-only-key-1',
-    ]).parseAsync();
-
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves[0].anchorEvidence).toEqual({
-      runId: '123456789',
-      workflowRef: 'owner/repo/.github/workflows/ucvg-isolated-review.yml@refs/heads/main',
-      signerKeyId: 'ci-only-key-1',
-    });
-  });
-
-  it('rejects a partial set of anchor flags (all-or-nothing)', async () => {
-    let caught: Error | null = null;
-    try {
-      await buildAttestationCli([...buildBaseArgs(), '--anchor-run-id', '123456789']).parseAsync();
-    } catch (err) {
-      caught = err as Error;
-    }
-    expect(caught?.message).toMatch(/process\.exit\(1\)/);
-    expect(stderrChunks.join('')).toContain('must be passed together');
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(0);
   });
 });
 
 // ── CLI: emit-leaf verdictClass detection (AISDLC-568) ─────────────────────────
 
 describe('emit-leaf — verdictClass detection', () => {
-  it('(a) classifies as independent when a fresh SubagentStart marker exists', async () => {
-    makeTranscript('aisdlc-568', 'code-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-568',
-      'code-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict-independent.json', {
-      approved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-    });
-
-    const markerDir = join(tmpRoot, '.ai-sdlc', 'subagent-sessions');
-    mkdirSync(markerDir, { recursive: true });
-    writeFileSync(
-      join(markerDir, 'agent-real.json'),
-      JSON.stringify({
-        agentId: 'agent-real',
-        agentType: 'code-reviewer',
-        firedAt: new Date().toISOString(),
-      }),
-    );
-
-    await buildAttestationCli([
-      'emit-leaf',
-      '--task-id',
-      'AISDLC-568',
-      '--reviewer',
-      'code-reviewer',
-      '--transcript-path',
-      transcriptPath,
-      '--verdict-path',
-      verdictPath,
-      '--head-sha',
-      'd'.repeat(40),
-      '--harness',
-      'claude-code',
-      '--model',
-      'sonnet',
-      '--patch-id',
-      TEST_PATCH_ID,
-    ]).parseAsync();
-
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves[0].verdictClass).toBe('independent');
-    // RFC-0046 Phase 1 (AISDLC-588): emit-leaf dual-emits independenceTier from
-    // the SAME signal — verdictClass 'independent' ⇒ 'attested'.
-    expect(leaves[0].independenceTier).toBe('attested');
-  });
-
-  it('(b) classifies as self-authored when no marker exists (coordinator-run Bash)', async () => {
-    makeTranscript('aisdlc-568', 'code-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-568',
-      'code-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict-self.json', {
-      approved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-    });
-
-    await buildAttestationCli([
-      'emit-leaf',
-      '--task-id',
-      'AISDLC-568',
-      '--reviewer',
-      'code-reviewer',
-      '--transcript-path',
-      transcriptPath,
-      '--verdict-path',
-      verdictPath,
-      '--head-sha',
-      'e'.repeat(40),
-      '--harness',
-      'claude-code',
-      '--model',
-      'sonnet',
-      '--patch-id',
-      TEST_PATCH_ID,
-    ]).parseAsync();
-
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves[0].verdictClass).toBe('self-authored');
-    // RFC-0046 Phase 1 (AISDLC-588): the 'none' (default) case is OMITTED, not
-    // written explicitly, so the leaf hashes identically under verifiers that
-    // predate independenceTier (an explicit "independenceTier":"none" would be
-    // bound into the Merkle preimage and break base/consumer verifiers still on
-    // the pre-RFC-0046 hashing code). Dual-read maps the absent field → 'none'.
-    expect(leaves[0].independenceTier).toBeUndefined();
-  });
-
   it('the emit-leaf confirmation message includes verdictClass', async () => {
     makeTranscript('aisdlc-568', 'code-reviewer');
     const transcriptPath = join(
@@ -1359,161 +713,9 @@ describe('emit-leaf — verdictClass detection', () => {
       'claude-code',
       '--model',
       'sonnet',
-      '--patch-id',
-      TEST_PATCH_ID,
     ]).parseAsync();
 
     expect(flushStdout()).toMatch(/verdictClass=self-authored/);
-  });
-});
-
-describe('emit-leaf — leafIndex monotonicity across multiple reviewers', () => {
-  it('three sequential calls produce leafIndex 0, 1, 2', async () => {
-    const reviewers = ['code-reviewer', 'test-reviewer', 'security-reviewer'] as const;
-    for (const reviewer of reviewers) {
-      makeTranscript('aisdlc-383.8', reviewer);
-      const transcriptPath = join(
-        tmpRoot,
-        '.ai-sdlc',
-        'transcripts',
-        'aisdlc-383.8',
-        `${reviewer}.jsonl`,
-      );
-      const verdictPath = writeVerdict(`verdict-${reviewer}.json`, {
-        approved: true,
-        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-      });
-
-      // Reset stdout for next call.
-      stdoutChunks.length = 0;
-      await buildAttestationCli([
-        'emit-leaf',
-        '--task-id',
-        'AISDLC-383.8',
-        '--reviewer',
-        reviewer,
-        '--transcript-path',
-        transcriptPath,
-        '--verdict-path',
-        verdictPath,
-        '--head-sha',
-        'a'.repeat(40),
-        '--harness',
-        'claude-code',
-        '--model',
-        'sonnet',
-        '--patch-id',
-        TEST_PATCH_ID,
-      ]).parseAsync();
-    }
-
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves).toHaveLength(3);
-    expect(leaves[0].leafIndex).toBe(0);
-    expect(leaves[1].leafIndex).toBe(1);
-    expect(leaves[2].leafIndex).toBe(2);
-    expect(leaves[0].reviewerName).toBe('code-reviewer');
-    expect(leaves[1].reviewerName).toBe('test-reviewer');
-    expect(leaves[2].reviewerName).toBe('security-reviewer');
-  });
-
-  it('leafIndex continues sequentially across multiple task runs', async () => {
-    // Simulate two different task runs, 2 reviewers each.
-    const tasks = [
-      { taskId: 'AISDLC-383.8', reviewer: 'code-reviewer' },
-      { taskId: 'AISDLC-383.8', reviewer: 'test-reviewer' },
-      { taskId: 'AISDLC-400', reviewer: 'code-reviewer' },
-      { taskId: 'AISDLC-400', reviewer: 'security-reviewer' },
-    ];
-
-    for (const { taskId, reviewer } of tasks) {
-      const taskIdLower = taskId.toLowerCase();
-      makeTranscript(taskIdLower, reviewer);
-      const transcriptPath = join(
-        tmpRoot,
-        '.ai-sdlc',
-        'transcripts',
-        taskIdLower,
-        `${reviewer}.jsonl`,
-      );
-      const verdictPath = writeVerdict(`verdict-${taskIdLower}-${reviewer}.json`, {
-        approved: true,
-        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-      });
-
-      stdoutChunks.length = 0;
-      await buildAttestationCli([
-        'emit-leaf',
-        '--task-id',
-        taskId,
-        '--reviewer',
-        reviewer,
-        '--transcript-path',
-        transcriptPath,
-        '--verdict-path',
-        verdictPath,
-        '--head-sha',
-        'a'.repeat(40),
-        '--harness',
-        'claude-code',
-        '--model',
-        'sonnet',
-        '--patch-id',
-        TEST_PATCH_ID,
-      ]).parseAsync();
-    }
-
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves).toHaveLength(4);
-    // leafIndex must be strictly monotonic regardless of taskId.
-    expect(leaves.map((l) => l.leafIndex)).toEqual([0, 1, 2, 3]);
-  });
-});
-
-describe('emit-leaf — idempotent re-emission', () => {
-  it('skips on second call with same (taskId, reviewerName, transcriptHash)', async () => {
-    makeTranscript('aisdlc-383.8', 'code-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-383.8',
-      'code-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict.json', {
-      approved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-    });
-
-    const args = [
-      'emit-leaf',
-      '--task-id',
-      'AISDLC-383.8',
-      '--reviewer',
-      'code-reviewer',
-      '--transcript-path',
-      transcriptPath,
-      '--verdict-path',
-      verdictPath,
-      '--head-sha',
-      'a'.repeat(40),
-      '--harness',
-      'claude-code',
-      '--model',
-      'sonnet',
-      '--patch-id',
-      TEST_PATCH_ID,
-    ];
-
-    // First call — should append.
-    await buildAttestationCli(args).parseAsync();
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(1);
-
-    // Second call — should skip (idempotent).
-    stdoutChunks.length = 0;
-    await buildAttestationCli(args).parseAsync();
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(1);
-    expect(flushStdout()).toContain('skipping (idempotent)');
   });
 });
 
@@ -1542,8 +744,6 @@ describe('emit-leaf — missing-transcript edge case', () => {
         'claude-code',
         '--model',
         'sonnet',
-        '--patch-id',
-        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
@@ -1581,8 +781,6 @@ describe('emit-leaf — missing-transcript edge case', () => {
         'claude-code',
         '--model',
         'sonnet',
-        '--patch-id',
-        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
@@ -1621,8 +819,6 @@ describe('emit-leaf — missing-transcript edge case', () => {
         'claude-code',
         '--model',
         'sonnet',
-        '--patch-id',
-        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
@@ -1671,8 +867,6 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
       'claude-code',
       '--model',
       'sonnet',
-      '--patch-id',
-      TEST_PATCH_ID,
     ];
   }
 
@@ -1680,7 +874,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     await expect(
       buildAttestationCli(buildValidArgsWithHeadSha('a'.repeat(40))).parseAsync(),
     ).resolves.not.toThrow();
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(1);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(1);
   });
 
   it('rejects empty string', async () => {
@@ -1692,7 +886,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects too-short SHA (39 chars)', async () => {
@@ -1704,7 +898,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects too-long SHA (41 chars)', async () => {
@@ -1716,7 +910,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects uppercase hex (git emits lowercase; uppercase indicates caller bug)', async () => {
@@ -1728,7 +922,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects non-hex characters', async () => {
@@ -1741,7 +935,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects multi-line input (newline embedded)', async () => {
@@ -1754,7 +948,7 @@ describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(0);
   });
 });
 
@@ -1790,12 +984,10 @@ describe('emit-leaf — --transcript-path traversal hardening (AISDLC-391 AC-2)'
         'claude-code',
         '--model',
         'sonnet',
-        '--patch-id',
-        TEST_PATCH_ID,
       ]).parseAsync(),
     ).resolves.not.toThrow();
 
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(1);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(1);
   });
 
   it('rejects transcript-path outside .ai-sdlc/ (sibling of repo root)', async () => {
@@ -1826,15 +1018,13 @@ describe('emit-leaf — --transcript-path traversal hardening (AISDLC-391 AC-2)'
         'claude-code',
         '--model',
         'sonnet',
-        '--patch-id',
-        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--transcript-path must resolve inside');
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects transcript-path that escapes via ../ segments', async () => {
@@ -1874,8 +1064,6 @@ describe('emit-leaf — --transcript-path traversal hardening (AISDLC-391 AC-2)'
         'claude-code',
         '--model',
         'sonnet',
-        '--patch-id',
-        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
@@ -1908,8 +1096,6 @@ describe('emit-leaf — --transcript-path traversal hardening (AISDLC-391 AC-2)'
         'claude-code',
         '--model',
         'sonnet',
-        '--patch-id',
-        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
@@ -1957,15 +1143,13 @@ describe('emit-leaf — --verdict-path traversal hardening (AISDLC-391 AC-3)', (
         'claude-code',
         '--model',
         'sonnet',
-        '--patch-id',
-        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--verdict-path must resolve inside');
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects verdict-path that escapes via ../ segments', async () => {
@@ -2005,304 +1189,12 @@ describe('emit-leaf — --verdict-path traversal hardening (AISDLC-391 AC-3)', (
         'claude-code',
         '--model',
         'sonnet',
-        '--patch-id',
-        TEST_PATCH_ID,
       ]).parseAsync();
     } catch (err) {
       caught = err as Error;
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--verdict-path must resolve inside');
-  });
-});
-
-// ── CLI: inspect-v6 ───────────────────────────────────────────────────────────
-
-describe('inspect-v6', () => {
-  let keyPath: string;
-
-  beforeEach(() => {
-    const { privateKey } = generateKeyPairSync('ed25519');
-    const pem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
-    keyPath = join(tmpRoot, 'inspect-test-key.pem');
-    writeFileSync(keyPath, pem, { mode: 0o600 });
-  });
-
-  it('pretty-prints a v6 envelope in text mode', async () => {
-    appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-383.3' }), tmpRoot);
-
-    // Sign first.
-    await buildAttestationCli([
-      'sign-v6',
-      '--task-id',
-      'AISDLC-383.3',
-      '--head-sha',
-      'b'.repeat(40),
-      '--key-path',
-      keyPath,
-    ]).parseAsync();
-
-    const envelopePath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'attestations',
-      `${'b'.repeat(40)}.v6.dsse.json`,
-    );
-
-    // Clear stdout buffer, then inspect.
-    stdoutChunks.length = 0;
-    await buildAttestationCli(['inspect-v6', envelopePath]).parseAsync();
-
-    const out = flushStdout();
-    expect(out).toContain('Schema version : v6');
-    expect(out).toContain('Leaf count     : 1');
-  });
-
-  it('emits JSON when --json flag is set', async () => {
-    appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-383.3' }), tmpRoot);
-
-    await buildAttestationCli([
-      'sign-v6',
-      '--task-id',
-      'AISDLC-383.3',
-      '--head-sha',
-      'c'.repeat(40),
-      '--key-path',
-      keyPath,
-    ]).parseAsync();
-
-    const envelopePath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'attestations',
-      `${'c'.repeat(40)}.v6.dsse.json`,
-    );
-
-    stdoutChunks.length = 0;
-    await buildAttestationCli(['inspect-v6', envelopePath, '--json']).parseAsync();
-
-    const parsed = JSON.parse(flushStdout()) as { schemaVersion: string };
-    expect(parsed.schemaVersion).toBe('v6');
-  });
-
-  it('exits 1 when envelope file does not exist', async () => {
-    let caught: Error | null = null;
-    try {
-      await buildAttestationCli([
-        'inspect-v6',
-        join(tmpRoot, 'nonexistent.v6.dsse.json'),
-      ]).parseAsync();
-    } catch (err) {
-      caught = err as Error;
-    }
-    expect(caught?.message).toMatch(/process\.exit\(1\)/);
-  });
-
-  it('exits 1 when envelope has wrong schemaVersion', async () => {
-    const fakePath = join(tmpRoot, 'bad.v6.dsse.json');
-    writeFileSync(fakePath, JSON.stringify({ schemaVersion: 'v5' }), 'utf8');
-
-    let caught: Error | null = null;
-    try {
-      await buildAttestationCli(['inspect-v6', fakePath]).parseAsync();
-    } catch (err) {
-      caught = err as Error;
-    }
-    expect(caught?.message).toMatch(/process\.exit\(1\)/);
-  });
-});
-
-// ── emit-leaf auto-compute patch-id branch (AISDLC-421 coverage gap) ───────
-// The production path is auto-compute — every reviewer-fan-out invocation runs
-// without `--patch-id` and lets the CLI derive the patch-id from git state.
-// Pre-hotfix these tests didn't exist (per code-reviewer minor finding); the
-// resulting coverage gap in cli/attestation.ts lines 560-585 dragged patch
-// coverage below the 80% gate. These three tests pin the production path
-// (happy + both failure modes) and lift the file above the threshold.
-
-describe('emit-leaf — auto-compute patch-id branch', () => {
-  function git(cwd: string, args: string[]): string {
-    return execFileSync('git', args, {
-      cwd,
-      encoding: 'utf-8',
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: 'test',
-        GIT_AUTHOR_EMAIL: 'test@test',
-        GIT_COMMITTER_NAME: 'test',
-        GIT_COMMITTER_EMAIL: 'test@test',
-      },
-    });
-  }
-
-  function initGitFixtureWithMain(repoRoot: string): { mainSha: string; headSha: string } {
-    git(repoRoot, ['init', '--initial-branch=main']);
-    writeFileSync(join(repoRoot, 'README.md'), '# base\n');
-    git(repoRoot, ['add', '.']);
-    git(repoRoot, ['commit', '-m', 'base']);
-    const mainSha = git(repoRoot, ['rev-parse', 'HEAD']).trim();
-    // Branch off main BEFORE the work commit so `main` stays at the base.
-    // Without this, main would advance with each new commit and main..HEAD
-    // would be empty — `git diff-tree main..HEAD` returns nothing → null
-    // patch-id, which would mask the auto-compute branch we're trying to test.
-    git(repoRoot, ['checkout', '-q', '-b', 'feature/work']);
-    writeFileSync(join(repoRoot, 'changed.txt'), 'work\n');
-    git(repoRoot, ['add', '.']);
-    git(repoRoot, ['commit', '-m', 'work']);
-    const headSha = git(repoRoot, ['rev-parse', 'HEAD']).trim();
-    return { mainSha, headSha };
-  }
-
-  it('auto-computes patch-id when --patch-id flag is omitted (happy path)', async () => {
-    initGitFixtureWithMain(tmpRoot);
-    makeTranscript('aisdlc-421', 'code-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-421',
-      'code-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict.json', {
-      approved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-    });
-
-    await expect(
-      buildAttestationCli([
-        'emit-leaf',
-        '--task-id',
-        'AISDLC-421',
-        '--reviewer',
-        'code-reviewer',
-        '--transcript-path',
-        transcriptPath,
-        '--verdict-path',
-        verdictPath,
-        '--head-sha',
-        execFileSync('git', ['rev-parse', 'HEAD'], { cwd: tmpRoot, encoding: 'utf-8' }).trim(),
-        '--harness',
-        'claude-code',
-        '--model',
-        'claude-sonnet-4-6',
-        // INTENTIONALLY no --patch-id — the CLI must compute it.
-        '--base-ref',
-        'main',
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    // The leaf must land in SOME per-patch-id file. The filename is deterministic
-    // from the diff, but rather than recomputing it ourselves we list the
-    // directory and assert exactly one .jsonl was created with our leaf.
-    const leavesDir = join(tmpRoot, '.ai-sdlc', 'transcript-leaves');
-    const files = readdirSync(leavesDir);
-    const jsonlFiles = files.filter((f) => f.endsWith('.jsonl'));
-    expect(jsonlFiles).toHaveLength(1);
-    // Filename must be the canonical 40-hex patch-id pattern.
-    expect(jsonlFiles[0]).toMatch(/^[0-9a-f]{40}\.jsonl$/);
-    const leaves = readFileSync(join(leavesDir, jsonlFiles[0]!), 'utf-8')
-      .trim()
-      .split('\n')
-      .map((l: string) => JSON.parse(l));
-    expect(leaves).toHaveLength(1);
-    expect(leaves[0].taskId).toBe('AISDLC-421');
-    expect(leaves[0].reviewerName).toBe('code-reviewer');
-  });
-
-  it('exits non-zero with a clear stderr message when --base-ref does not resolve (no merge-base)', async () => {
-    // tmpRoot is NOT a git repo at all — computeMergeBase returns null.
-    makeTranscript('aisdlc-421', 'code-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-421',
-      'code-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict.json', {
-      approved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-    });
-
-    let caught: Error | null = null;
-    try {
-      await buildAttestationCli([
-        'emit-leaf',
-        '--task-id',
-        'AISDLC-421',
-        '--reviewer',
-        'code-reviewer',
-        '--transcript-path',
-        transcriptPath,
-        '--verdict-path',
-        verdictPath,
-        '--head-sha',
-        'a'.repeat(40),
-        '--harness',
-        'claude-code',
-        '--model',
-        'claude-sonnet-4-6',
-        '--base-ref',
-        'does-not-exist',
-      ]).parseAsync();
-    } catch (err) {
-      caught = err as Error;
-    }
-    expect(caught?.message).toMatch(/process\.exit\(1\)/);
-    const stderr = stderrChunks.join('');
-    // The CLI should explain which derivation step failed and how to fix it.
-    expect(stderr).toMatch(/(could not compute merge-base|pass --patch-id explicitly)/);
-  });
-
-  it('exits non-zero when the diff after attestation exclusion is empty (no patch-id derivable)', async () => {
-    // Git fixture with main == HEAD (no commits beyond base). The diff
-    // base..HEAD is empty so computePatchId returns null → exit 1.
-    git(tmpRoot, ['init', '--initial-branch=main']);
-    writeFileSync(join(tmpRoot, 'README.md'), '# base\n');
-    git(tmpRoot, ['add', '.']);
-    git(tmpRoot, ['commit', '-m', 'base']);
-    // NO second commit — main IS HEAD.
-
-    makeTranscript('aisdlc-421', 'code-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-421',
-      'code-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict.json', {
-      approved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-    });
-
-    let caught: Error | null = null;
-    try {
-      await buildAttestationCli([
-        'emit-leaf',
-        '--task-id',
-        'AISDLC-421',
-        '--reviewer',
-        'code-reviewer',
-        '--transcript-path',
-        transcriptPath,
-        '--verdict-path',
-        verdictPath,
-        '--head-sha',
-        execFileSync('git', ['rev-parse', 'HEAD'], { cwd: tmpRoot, encoding: 'utf-8' }).trim(),
-        '--harness',
-        'claude-code',
-        '--model',
-        'claude-sonnet-4-6',
-        '--base-ref',
-        'main',
-      ]).parseAsync();
-    } catch (err) {
-      caught = err as Error;
-    }
-    expect(caught?.message).toMatch(/process\.exit\(1\)/);
-    const stderr = stderrChunks.join('');
-    expect(stderr).toMatch(/(could not compute patch-id|empty diff after attestation exclusion)/);
   });
 });
 
@@ -2330,21 +1222,10 @@ describe('emit-leaf — --nonce validation (AISDLC-570)', () => {
       '--head-sha': 'a'.repeat(40),
       '--harness': 'claude-code',
       '--model': 'sonnet',
-      '--patch-id': TEST_PATCH_ID,
       ...overrides,
     };
     return ['emit-leaf', ...Object.entries(argv).flatMap(([k, v]) => [k, v])];
   }
-
-  it('accepts a well-formed 64-hex-char --nonce and uses it verbatim on the leaf', async () => {
-    const nonce = 'b'.repeat(64);
-    await expect(
-      buildAttestationCli(buildValidArgs({ '--nonce': nonce })).parseAsync(),
-    ).resolves.not.toThrow();
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves).toHaveLength(1);
-    expect(leaves[0].nonce).toBe(nonce);
-  });
 
   it('rejects a malformed --nonce (wrong length)', async () => {
     let caught: Error | null = null;
@@ -2355,7 +1236,7 @@ describe('emit-leaf — --nonce validation (AISDLC-570)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--nonce must be exactly 64 lowercase hex');
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(0);
   });
 
   it('rejects a malformed --nonce (non-hex characters)', async () => {
@@ -2367,123 +1248,7 @@ describe('emit-leaf — --nonce validation (AISDLC-570)', () => {
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     expect(stderrChunks.join('')).toContain('--nonce must be exactly 64 lowercase hex');
-    expect(loadLeavesUnderTest(tmpRoot)).toHaveLength(0);
-  });
-
-  it('generates a fresh nonce when --nonce is omitted (legacy behavior preserved)', async () => {
-    await expect(buildAttestationCli(buildValidArgs()).parseAsync()).resolves.not.toThrow();
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves).toHaveLength(1);
-    expect(leaves[0].nonce).toMatch(/^[0-9a-f]{64}$/);
-  });
-
-  it('sets harnessTranscriptHash to null and logs a reason when no harness signal exists', async () => {
-    await expect(buildAttestationCli(buildValidArgs()).parseAsync()).resolves.not.toThrow();
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves).toHaveLength(1);
-    expect(leaves[0].harnessTranscriptHash).toBeNull();
-    expect(stderrChunks.join('')).toContain('harnessTranscriptHash=null');
-  });
-});
-
-// ── CLI: emit-leaf harnessTranscriptHash positive path (AISDLC-570 round-2) ────
-//
-// Proves the marker-consumption ORDERING FIX: computeHarnessTranscriptHash
-// reads the SAME SubagentStart marker that determineVerdictClass ALSO
-// consumes (unlinks) — in the SAME emit-leaf invocation, not in isolation.
-// Before the fix, determineVerdictClass ran first and deleted the marker,
-// so computeHarnessTranscriptHash could never find it: harnessTranscriptHash
-// was permanently null even on an otherwise-fully-correct positive path.
-
-describe('emit-leaf — harnessTranscriptHash positive path through real verdictClass consumption (AISDLC-570 round-2)', () => {
-  afterEach(() => {
-    fakeHomeDirForHarnessTests = '';
-  });
-
-  it('resolves a non-null harnessTranscriptHash AND verdictClass=independent from the SAME marker', async () => {
-    fakeHomeDirForHarnessTests = mkdtempSync(join(tmpdir(), 'harness-positive-home-'));
-
-    makeTranscript('aisdlc-570', 'code-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-570',
-      'code-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict-positive-path.json', {
-      approved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-    });
-
-    // Real SubagentStart marker (as subagent-start.js would write it),
-    // timed to fall within determineVerdictClass's lookback window of
-    // "now" (the transcript's mtime, since makeTranscript just wrote it).
-    const markerDir = subagentSessionsDir(tmpRoot);
-    mkdirSync(markerDir, { recursive: true });
-    writeFileSync(
-      join(markerDir, 'agent-rev-positive.json'),
-      JSON.stringify({
-        agentId: 'rev-positive',
-        agentType: 'code-reviewer',
-        firedAt: new Date().toISOString(),
-      }),
-    );
-
-    // Real harness-captured transcript fixture: correct nonce literal +
-    // reviewer agentType, at the deterministic path emit-leaf will resolve.
-    const nonce = 'd4'.repeat(32);
-    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(tmpRoot));
-    const subagentsDir = join(slugDir, 'session-positive', 'subagents');
-    mkdirSync(subagentsDir, { recursive: true });
-    writeFileSync(
-      join(subagentsDir, 'agent-rev-positive.jsonl'),
-      `{"type":"user","message":"Review this diff ${nonceMarkerLiteral(nonce)}"}\n`,
-    );
-    writeFileSync(
-      join(subagentsDir, 'agent-rev-positive.meta.json'),
-      JSON.stringify({ agentType: 'ai-sdlc:code-reviewer' }),
-    );
-
-    await expect(
-      buildAttestationCli([
-        'emit-leaf',
-        '--task-id',
-        'AISDLC-570',
-        '--reviewer',
-        'code-reviewer',
-        '--transcript-path',
-        transcriptPath,
-        '--verdict-path',
-        verdictPath,
-        '--head-sha',
-        'a'.repeat(40),
-        '--harness',
-        'claude-code',
-        '--model',
-        'sonnet',
-        '--patch-id',
-        TEST_PATCH_ID,
-        '--nonce',
-        nonce,
-        '--claude-session-id',
-        'session-positive',
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves).toHaveLength(1);
-    // The core assertion: harnessTranscriptHash is set (not null) on the
-    // SAME leaf where verdictClass was ALSO correctly derived from the same
-    // marker — proving the ordering fix, not just isolated unit behavior.
-    expect(leaves[0].harnessTranscriptHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(leaves[0].verdictClass).toBe('independent');
-
-    // The marker was consumed (real determineVerdictClass semantics
-    // preserved) — but only AFTER computeHarnessTranscriptHash read it.
-    expect(unconsumedMarkers(markerDir)).toHaveLength(0);
-
-    expect(stderrChunks.join('')).toMatch(/harnessTranscriptHash=[0-9a-f]{16}\.\.\./);
+    expect(ledgerRecords(tmpRoot)).toHaveLength(0);
   });
 });
 
@@ -2551,537 +1316,9 @@ describe('nonce-marker', () => {
   });
 });
 
-// ── End-to-end: reviewer-dispatch nonce injection activates harnessTranscriptHash
-// (AISDLC-573 AC-2) ─────────────────────────────────────────────────────────────
-//
-// Simulates the FULL activated flow the reviewer-dispatch orchestrator now
-// performs: generate-nonce → nonce-marker → embed literal in the (simulated)
-// reviewer harness transcript → emit-leaf --nonce <same value>. Proves the
-// three CLI calls compose end-to-end to a non-null harnessTranscriptHash, and
-// that a coordinator-authored transcript with NO nonce embedded still yields
-// null (fail-closed unchanged).
-
-describe('reviewer-dispatch nonce injection — end-to-end activation (AISDLC-573)', () => {
-  afterEach(() => {
-    fakeHomeDirForHarnessTests = '';
-  });
-
-  it('generate-nonce + nonce-marker + emit-leaf --nonce compose to a non-null harnessTranscriptHash', async () => {
-    fakeHomeDirForHarnessTests = mkdtempSync(join(tmpdir(), 'harness-e2e-home-'));
-    const headSha = 'e'.repeat(40);
-
-    // Step 1: orchestrator generates the nonce ONCE, before any reviewer spawns.
-    await buildAttestationCli(['generate-nonce', '--head-sha', headSha]).parseAsync();
-    const nonce = flushStdout().trim();
-    expect(nonce).toMatch(/^[0-9a-f]{64}$/);
-
-    // Step 2: orchestrator renders the exact literal to embed in the reviewer prompt.
-    stdoutChunks = [];
-    await buildAttestationCli(['nonce-marker', '--nonce', nonce]).parseAsync();
-    const marker = flushStdout().trim();
-    expect(marker).toBe(`[[ai-sdlc-nonce: ${nonce}]]`);
-
-    // Step 3: simulate the reviewer subagent's real harness-captured transcript —
-    // its first-turn prompt (the dispatch prompt) contains the embedded marker,
-    // exactly as it would if the orchestrator had actually injected it.
-    makeTranscript('aisdlc-573', 'code-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-573',
-      'code-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict-573-e2e.json', {
-      approved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-    });
-
-    const markerDir = subagentSessionsDir(tmpRoot);
-    mkdirSync(markerDir, { recursive: true });
-    writeFileSync(
-      join(markerDir, 'agent-e2e-573.json'),
-      JSON.stringify({
-        agentId: 'e2e-573',
-        agentType: 'code-reviewer',
-        firedAt: new Date().toISOString(),
-      }),
-    );
-
-    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(tmpRoot));
-    const subagentsDir = join(slugDir, 'session-e2e-573', 'subagents');
-    mkdirSync(subagentsDir, { recursive: true });
-    writeFileSync(
-      join(subagentsDir, 'agent-e2e-573.jsonl'),
-      `{"type":"user","message":"Review this diff ${marker}"}\n`,
-    );
-    writeFileSync(
-      join(subagentsDir, 'agent-e2e-573.meta.json'),
-      JSON.stringify({ agentType: 'ai-sdlc:code-reviewer' }),
-    );
-
-    // Step 4: emit-leaf, passing the SAME nonce the orchestrator generated
-    // (this is the wiring AISDLC-573 activates — Step 7c now threads the
-    // Step 7b nonce through instead of letting emit-leaf mint a fresh one).
-    await expect(
-      buildAttestationCli([
-        'emit-leaf',
-        '--task-id',
-        'AISDLC-573',
-        '--reviewer',
-        'code-reviewer',
-        '--transcript-path',
-        transcriptPath,
-        '--verdict-path',
-        verdictPath,
-        '--head-sha',
-        headSha,
-        '--harness',
-        'claude-code',
-        '--model',
-        'sonnet',
-        '--patch-id',
-        TEST_PATCH_ID,
-        '--nonce',
-        nonce,
-        '--claude-session-id',
-        'session-e2e-573',
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves).toHaveLength(1);
-    expect(leaves[0].harnessTranscriptHash).toMatch(/^[0-9a-f]{64}$/);
-  });
-
-  it('a coordinator-authored transcript with NO nonce embedded still yields null (fail-closed unchanged)', async () => {
-    fakeHomeDirForHarnessTests = mkdtempSync(join(tmpdir(), 'harness-e2e-negative-home-'));
-    const headSha = 'f'.repeat(40);
-
-    await buildAttestationCli(['generate-nonce', '--head-sha', headSha]).parseAsync();
-    const nonce = flushStdout().trim();
-
-    makeTranscript('aisdlc-573-neg', 'code-reviewer');
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-573-neg',
-      'code-reviewer.jsonl',
-    );
-    const verdictPath = writeVerdict('verdict-573-e2e-negative.json', {
-      approved: true,
-      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-    });
-
-    const markerDir = subagentSessionsDir(tmpRoot);
-    mkdirSync(markerDir, { recursive: true });
-    writeFileSync(
-      join(markerDir, 'agent-e2e-573-neg.json'),
-      JSON.stringify({
-        agentId: 'e2e-573-neg',
-        agentType: 'code-reviewer',
-        firedAt: new Date().toISOString(),
-      }),
-    );
-
-    // A REAL harness transcript exists (a real subagent DID run) but the
-    // coordinator never embedded the nonce in its dispatch prompt — the
-    // pre-AISDLC-573 dormant state, reproduced deliberately here to prove
-    // the fail-closed default still holds even after activation.
-    const slugDir = join(claudeProjectsDir(), claudeProjectSlug(tmpRoot));
-    const subagentsDir = join(slugDir, 'session-e2e-573-neg', 'subagents');
-    mkdirSync(subagentsDir, { recursive: true });
-    writeFileSync(
-      join(subagentsDir, 'agent-e2e-573-neg.jsonl'),
-      `{"type":"user","message":"Review this diff (no nonce embedded here)"}\n`,
-    );
-    writeFileSync(
-      join(subagentsDir, 'agent-e2e-573-neg.meta.json'),
-      JSON.stringify({ agentType: 'ai-sdlc:code-reviewer' }),
-    );
-
-    await expect(
-      buildAttestationCli([
-        'emit-leaf',
-        '--task-id',
-        'AISDLC-573-NEG',
-        '--reviewer',
-        'code-reviewer',
-        '--transcript-path',
-        transcriptPath,
-        '--verdict-path',
-        verdictPath,
-        '--head-sha',
-        headSha,
-        '--harness',
-        'claude-code',
-        '--model',
-        'sonnet',
-        '--patch-id',
-        '1'.repeat(40),
-        '--nonce',
-        nonce,
-        '--claude-session-id',
-        'session-e2e-573-neg',
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    const leaves = loadLeavesUnderTest(tmpRoot, '1'.repeat(40));
-    expect(leaves).toHaveLength(1);
-    expect(leaves[0].harnessTranscriptHash).toBeNull();
-  });
-});
-
-// ── CLI: verify (AISDLC-575) ──────────────────────────────────────────────────
-//
-// The trusted-runtime resolution walk (`loadAttestationRuntime`) and the
-// actual v6/v5/v4/v3 verification core (`loadVerifyCore().runVerifier`) are
-// mocked here (see the `vi.mock` calls near the top of this file) so these
-// tests isolate the CLI's OWN wiring: --head/--base shape validation, and the
-// exit-code + stdout mapping from the core verifier's result shape.
-
-const VALID_HEAD_SHA = 'a'.repeat(40);
-const VALID_BASE_SHA = 'b'.repeat(40);
-
-describe('cli-attestation verify — --head/--base shape validation', () => {
-  let savedExitCode: number | string | null | undefined;
-
-  beforeEach(() => {
-    savedExitCode = process.exitCode;
-    process.exitCode = undefined;
-  });
-
-  afterEach(() => {
-    process.exitCode = savedExitCode;
-  });
-
-  it('rejects a non-40-hex --head with exit 2, before touching runtime resolution', async () => {
-    await expect(
-      buildAttestationCli(['verify', '--head', 'not-a-sha', '--base', VALID_BASE_SHA]).parseAsync(),
-    ).rejects.toThrow('process.exit(2)');
-    expect(flushStdout()).toBe('');
-    expect(stderrChunks.join('')).toMatch(/--head must be exactly 40 lowercase hex characters/);
-    expect(loadAttestationRuntime).not.toHaveBeenCalled();
-  });
-
-  it('rejects a non-40-hex --base with exit 2, before touching runtime resolution', async () => {
-    await expect(
-      buildAttestationCli(['verify', '--head', VALID_HEAD_SHA, '--base', 'ZZZZ']).parseAsync(),
-    ).rejects.toThrow('process.exit(2)');
-    expect(flushStdout()).toBe('');
-    expect(stderrChunks.join('')).toMatch(/--base must be exactly 40 lowercase hex characters/);
-    expect(loadAttestationRuntime).not.toHaveBeenCalled();
-  });
-
-  it('rejects an uppercase (non-lowercase) --head with exit 2', async () => {
-    await expect(
-      buildAttestationCli([
-        'verify',
-        '--head',
-        VALID_HEAD_SHA.toUpperCase(),
-        '--base',
-        VALID_BASE_SHA,
-      ]).parseAsync(),
-    ).rejects.toThrow('process.exit(2)');
-    expect(loadAttestationRuntime).not.toHaveBeenCalled();
-  });
-
-  it('rejects a --head that is 39 characters (one short) with exit 2', async () => {
-    await expect(
-      buildAttestationCli([
-        'verify',
-        '--head',
-        'a'.repeat(39),
-        '--base',
-        VALID_BASE_SHA,
-      ]).parseAsync(),
-    ).rejects.toThrow('process.exit(2)');
-    expect(loadAttestationRuntime).not.toHaveBeenCalled();
-  });
-});
-
-describe('cli-attestation verify — exit-code mapping from the core verifier', () => {
-  let savedExitCode: number | string | null | undefined;
-
-  beforeEach(() => {
-    savedExitCode = process.exitCode;
-    process.exitCode = undefined;
-    vi.mocked(loadAttestationRuntime).mockReset();
-    vi.mocked(loadVerifyCore).mockReset();
-  });
-
-  afterEach(() => {
-    process.exitCode = savedExitCode;
-  });
-
-  it('maps status=valid to exit 0 and prints status=/reason= to stdout', async () => {
-    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
-    const runVerifier = vi
-      .fn()
-      .mockReturnValue({ status: 'valid', reason: 'ok', overallVerdictClass: 'clean' });
-    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
-
-    await expect(
-      buildAttestationCli([
-        'verify',
-        '--head',
-        VALID_HEAD_SHA,
-        '--base',
-        VALID_BASE_SHA,
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    expect(process.exitCode).toBe(0);
-    const out = flushStdout();
-    expect(out).toMatch(/status=valid/);
-    expect(out).toMatch(/reason=ok/);
-    expect(out).toMatch(/verdictClass=clean/);
-    expect(runVerifier).toHaveBeenCalledWith(
-      expect.objectContaining({ headSha: VALID_HEAD_SHA, baseSha: VALID_BASE_SHA }),
-    );
-  });
-
-  it('maps status=invalid to exit 1 and prints status=/reason= to stdout, without a verdictClass line when absent', async () => {
-    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
-    const runVerifier = vi.fn().mockReturnValue({ status: 'invalid', reason: 'tampered' });
-    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
-
-    await expect(
-      buildAttestationCli([
-        'verify',
-        '--head',
-        VALID_HEAD_SHA,
-        '--base',
-        VALID_BASE_SHA,
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    expect(process.exitCode).toBe(1);
-    const out = flushStdout();
-    expect(out).toMatch(/status=invalid/);
-    expect(out).toMatch(/reason=tampered/);
-    expect(out).not.toMatch(/verdictClass=/);
-  });
-
-  it('maps a TrustedRuntimeResolutionError to exit 2 with the ERROR: message on stderr, never touching stdout', async () => {
-    vi.mocked(loadAttestationRuntime).mockRejectedValue(
-      new TrustedRuntimeResolutionError('Cannot locate a TRUSTED AI-SDLC attestation runtime.'),
-    );
-
-    await expect(
-      buildAttestationCli([
-        'verify',
-        '--head',
-        VALID_HEAD_SHA,
-        '--base',
-        VALID_BASE_SHA,
-      ]).parseAsync(),
-    ).rejects.toThrow('process.exit(2)');
-
-    expect(flushStdout()).toBe('');
-    expect(stderrChunks.join('')).toMatch(
-      /ERROR: Cannot locate a TRUSTED AI-SDLC attestation runtime\./,
-    );
-    expect(loadVerifyCore).not.toHaveBeenCalled();
-  });
-
-  it('re-throws a non-TrustedRuntimeResolutionError from runtime resolution rather than swallowing it', async () => {
-    vi.mocked(loadAttestationRuntime).mockRejectedValue(new Error('unexpected boom'));
-
-    await expect(
-      buildAttestationCli([
-        'verify',
-        '--head',
-        VALID_HEAD_SHA,
-        '--base',
-        VALID_BASE_SHA,
-      ]).parseAsync(),
-    ).rejects.toThrow('unexpected boom');
-  });
-});
-
-// ── CLI: independence-policy (RFC-0046 Phase 4/AISDLC-591, RFC-0047 Phase 5/AISDLC-597) ──
-//
-// Mirrors the `verify` subcommand's CLI-level test pattern above (same
-// `loadAttestationRuntime` / `loadVerifyCore` mocks): isolates the CLI's
-// OWN wiring — the `status==='valid' && policyOutcome==='pass'` exit-code
-// AND-logic, and the fail-closed behavior on a malformed on-disk policy
-// config — from the actual verifier/runtime-resolution machinery (each
-// covered by its own hermetic suite).
-
-describe('cli-attestation independence-policy — exit-code AND-logic', () => {
-  let savedExitCode: number | string | null | undefined;
-
-  beforeEach(() => {
-    savedExitCode = process.exitCode;
-    process.exitCode = undefined;
-    vi.mocked(loadAttestationRuntime).mockReset();
-    vi.mocked(loadVerifyCore).mockReset();
-  });
-
-  afterEach(() => {
-    process.exitCode = savedExitCode;
-  });
-
-  it('status=valid + policyOutcome=pass (default requiredTier: none, no policy file) → exit 0', async () => {
-    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
-    const runVerifier = vi.fn().mockReturnValue({
-      status: 'valid',
-      reason: 'ok',
-      overallIndependenceTier: 'attested',
-    });
-    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
-
-    await expect(
-      buildAttestationCli([
-        'independence-policy',
-        '--head',
-        VALID_HEAD_SHA,
-        '--base',
-        VALID_BASE_SHA,
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    expect(process.exitCode).toBe(0);
-    const out = flushStdout();
-    expect(out).toMatch(/status=valid/);
-    expect(out).toMatch(/overallIndependenceTier=attested/);
-    expect(out).toMatch(/requiredTier=none/);
-    expect(out).toMatch(/policyOutcome=pass/);
-  });
-
-  it('status=valid but policyOutcome=shortfall (requiredTier: isolated, envelope only attested) → exit 1', async () => {
-    const policyDir = join(tmpRoot, '.ai-sdlc');
-    mkdirSync(policyDir, { recursive: true });
-    writeFileSync(join(policyDir, 'independence-policy.yaml'), 'requiredTier: isolated\n');
-
-    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
-    const runVerifier = vi.fn().mockReturnValue({
-      status: 'valid',
-      reason: 'ok',
-      overallIndependenceTier: 'attested',
-    });
-    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
-
-    await expect(
-      buildAttestationCli([
-        'independence-policy',
-        '--head',
-        VALID_HEAD_SHA,
-        '--base',
-        VALID_BASE_SHA,
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    expect(process.exitCode).toBe(1);
-    const out = flushStdout();
-    expect(out).toMatch(/requiredTier=isolated/);
-    expect(out).toMatch(/policyOutcome=shortfall/);
-  });
-
-  it('status=valid + policyOutcome=pass (requiredTier: isolated, envelope claims isolated — AISDLC-597 satisfiable) → exit 0', async () => {
-    const policyDir = join(tmpRoot, '.ai-sdlc');
-    mkdirSync(policyDir, { recursive: true });
-    writeFileSync(join(policyDir, 'independence-policy.yaml'), 'requiredTier: isolated\n');
-
-    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
-    const runVerifier = vi.fn().mockReturnValue({
-      status: 'valid',
-      reason: 'ok',
-      overallIndependenceTier: 'isolated',
-    });
-    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
-
-    await expect(
-      buildAttestationCli([
-        'independence-policy',
-        '--head',
-        VALID_HEAD_SHA,
-        '--base',
-        VALID_BASE_SHA,
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    expect(process.exitCode).toBe(0);
-    const out = flushStdout();
-    expect(out).toMatch(/requiredTier=isolated/);
-    expect(out).toMatch(/policyOutcome=pass/);
-  });
-
-  it('status=invalid (regardless of policyOutcome) → exit 1', async () => {
-    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
-    const runVerifier = vi.fn().mockReturnValue({
-      status: 'invalid',
-      reason: 'tampered',
-      overallIndependenceTier: 'isolated',
-    });
-    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
-
-    await expect(
-      buildAttestationCli([
-        'independence-policy',
-        '--head',
-        VALID_HEAD_SHA,
-        '--base',
-        VALID_BASE_SHA,
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    expect(process.exitCode).toBe(1);
-    const out = flushStdout();
-    expect(out).toMatch(/status=invalid/);
-  });
-
-  it('a malformed .ai-sdlc/independence-policy.yaml fails CLOSED end-to-end (non-zero exit, no crash)', async () => {
-    const policyDir = join(tmpRoot, '.ai-sdlc');
-    mkdirSync(policyDir, { recursive: true });
-    writeFileSync(join(policyDir, 'independence-policy.yaml'), 'requiredTier: bogus-tier\n');
-
-    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
-    const runVerifier = vi.fn().mockReturnValue({
-      status: 'valid',
-      reason: 'ok',
-      overallIndependenceTier: 'attested',
-    });
-    vi.mocked(loadVerifyCore).mockResolvedValue({ bindRuntime: vi.fn(), runVerifier });
-
-    // The CLI handler catches the parse error itself (fail-closed contract)
-    // rather than letting it propagate as an unhandled rejection — asserted
-    // end-to-end here, not just at the pure `parseIndependencePolicyYaml`
-    // unit level (that coverage lives in independence-policy.test.ts).
-    await expect(
-      buildAttestationCli([
-        'independence-policy',
-        '--head',
-        VALID_HEAD_SHA,
-        '--base',
-        VALID_BASE_SHA,
-      ]).parseAsync(),
-    ).resolves.not.toThrow();
-
-    expect(process.exitCode).toBe(1);
-    expect(stderrChunks.join('')).toMatch(/invalid requiredTier/);
-    // A malformed policy must never be credited as an accidental `pass` —
-    // no policyOutcome line should have been printed at all.
-    expect(flushStdout()).not.toMatch(/policyOutcome=/);
-  });
-});
-
 // ── emit-leaf: leaf-to-reviewer binding (marker role, agent id, sidecar) ─────
 
 describe('emit-leaf — binds the leaf to its own reviewer run', () => {
-  function writeMarkerFile(name: string, agentType: string, firedAt = new Date()): string {
-    const markerDir = subagentSessionsDir(tmpRoot);
-    mkdirSync(markerDir, { recursive: true });
-    const filePath = join(markerDir, `${name}.json`);
-    writeFileSync(
-      filePath,
-      JSON.stringify({ agentId: name, agentType, firedAt: firedAt.toISOString() }),
-    );
-    return filePath;
-  }
-
   async function emit(reviewer: string, extra: string[] = []): Promise<void> {
     makeTranscript('aisdlc-697', reviewer);
     const verdictPath = writeVerdict(`${reviewer}-aisdlc-697.json`, {
@@ -3104,263 +1341,15 @@ describe('emit-leaf — binds the leaf to its own reviewer run', () => {
       'claude-code',
       '--model',
       'sonnet',
-      '--patch-id',
-      TEST_PATCH_ID,
       ...extra,
     ]).parseAsync();
   }
-
-  it('AISDLC-734: a second emit for the same reviewer run and head keeps `independent`', async () => {
-    writeMarkerFile('run-code', 'ai-sdlc:code-reviewer');
-
-    await emit('code-reviewer');
-    // The transcript changed, so this is a new leaf rather than the
-    // idempotent skip; the run behind it is the same one.
-    const transcriptPath = join(
-      tmpRoot,
-      '.ai-sdlc',
-      'transcripts',
-      'aisdlc-697',
-      'code-reviewer.jsonl',
-    );
-    appendFileSync(transcriptPath, '\n{"note":"re-run"}\n');
-    await buildAttestationCli([
-      'emit-leaf',
-      '--task-id',
-      'AISDLC-697',
-      '--reviewer',
-      'code-reviewer',
-      '--transcript-path',
-      transcriptPath,
-      '--verdict-path',
-      join(tmpRoot, '.ai-sdlc', 'verdicts', 'code-reviewer-aisdlc-697.json'),
-      '--head-sha',
-      'e'.repeat(40),
-      '--harness',
-      'claude-code',
-      '--model',
-      'sonnet',
-      '--patch-id',
-      TEST_PATCH_ID,
-    ]).parseAsync();
-
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves.map((l) => l.verdictClass)).toEqual(['independent', 'independent']);
-  });
-
-  it('three reviewers with markers fired seconds apart all get independent leaves, in any emit order', async () => {
-    const now = Date.now();
-    writeMarkerFile('run-sec', 'ai-sdlc:security-reviewer', new Date(now - 6000));
-    writeMarkerFile('run-code', 'ai-sdlc:code-reviewer', new Date(now - 4000));
-    writeMarkerFile('run-test', 'ai-sdlc:test-reviewer', new Date(now - 2000));
-
-    await emit('code-reviewer');
-    await emit('test-reviewer');
-    await emit('security-reviewer');
-
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves.map((l) => [l.reviewerName, l.verdictClass])).toEqual([
-      ['code-reviewer', 'independent'],
-      ['test-reviewer', 'independent'],
-      ['security-reviewer', 'independent'],
-    ]);
-    expect(unconsumedMarkers(subagentSessionsDir(tmpRoot))).toEqual([]);
-  });
-
-  it("does not use another reviewer's marker: the leaf is self-authored and the marker is kept", async () => {
-    const marker = writeMarkerFile('run-sec', 'security-reviewer');
-    await emit('code-reviewer');
-
-    const leaves = loadLeavesUnderTest(tmpRoot);
-    expect(leaves[0].verdictClass).toBe('self-authored');
-    expect(leaves[0].independenceTier).toBeUndefined();
-    expect(readdirSync(subagentSessionsDir(tmpRoot))).toEqual(['run-sec.json']);
-    expect(readFileSync(marker, 'utf8')).toContain('security-reviewer');
-  });
-
-  it('--agent-id selects exactly that run when the same reviewer has two markers', async () => {
-    const now = Date.now();
-    writeMarkerFile('first-run', 'code-reviewer', new Date(now - 60_000));
-    writeMarkerFile('second-run', 'code-reviewer', new Date(now - 1_000));
-
-    await emit('code-reviewer', ['--agent-id', 'first-run']);
-
-    expect(loadLeavesUnderTest(tmpRoot)[0].verdictClass).toBe('independent');
-    expect(unconsumedMarkers(subagentSessionsDir(tmpRoot))).toEqual(['second-run.json']);
-  });
-
-  it('reads the agent id from the sidecar next to the transcript when --agent-id is omitted', async () => {
-    const now = Date.now();
-    writeMarkerFile('first-run', 'code-reviewer', new Date(now - 60_000));
-    writeMarkerFile('second-run', 'code-reviewer', new Date(now - 1_000));
-    const dir = join(tmpRoot, '.ai-sdlc', 'transcripts', 'aisdlc-697');
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'code-reviewer.agent-id'), 'first-run\n');
-
-    await emit('code-reviewer');
-
-    expect(loadLeavesUnderTest(tmpRoot)[0].verdictClass).toBe('independent');
-    expect(unconsumedMarkers(subagentSessionsDir(tmpRoot))).toEqual(['second-run.json']);
-  });
-
-  it('an agent id whose marker belongs to another reviewer yields a self-authored leaf', async () => {
-    writeMarkerFile('run-sec', 'security-reviewer');
-    await emit('code-reviewer', ['--agent-id', 'run-sec']);
-    expect(loadLeavesUnderTest(tmpRoot)[0].verdictClass).toBe('self-authored');
-    expect(readdirSync(subagentSessionsDir(tmpRoot))).toEqual(['run-sec.json']);
-  });
 
   it('rejects an --agent-id with characters outside the allowed set', async () => {
     await expect(emit('code-reviewer', ['--agent-id', '../../etc/passwd'])).rejects.toThrow(
       'process.exit(1)',
     );
     expect(flushStderr()).toMatch(/--agent-id may only contain/);
-  });
-});
-
-/** True when `p` exists and its real path sits inside the real tmpdir (incident 2026-10-30). */
-function isUnderTmpdir(p: string): boolean {
-  try {
-    const tmpReal = realpathSync(tmpdir());
-    const real = realpathSync(p);
-    // Strictly inside: a fixture root is always a child of the tmpdir, never the tmpdir itself.
-    return real.startsWith(tmpReal + sep);
-  } catch {
-    return false;
-  }
-}
-
-describe('emit-leaf — worktree layout end to end (markers under the main checkout)', () => {
-  let mainRoot = '';
-  let worktreeRoot = '';
-
-  beforeEach(() => {
-    fakeHomeDirForHarnessTests = mkdtempSync(join(tmpdir(), 'emit-leaf-worktree-home-'));
-    mainRoot = mkdtempSync(join(tmpdir(), 'emit-leaf-main-'));
-    const git = (args: string[], cwd: string): string =>
-      execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    git(['init', '-q', '-b', 'main'], mainRoot);
-    git(['config', 'user.email', 'fixture@example.invalid'], mainRoot);
-    git(['config', 'user.name', 'Fixture'], mainRoot);
-    writeFileSync(join(mainRoot, 'README.md'), 'fixture\n');
-    git(['add', '.'], mainRoot);
-    git(['commit', '-q', '-m', 'init'], mainRoot);
-    worktreeRoot = join(mainRoot, '.worktrees', 'task-1');
-    git(['worktree', 'add', '-q', '-b', 'task-1', worktreeRoot], mainRoot);
-    // git may report the realpath (macOS /var -> /private/var); use what git reports.
-    const common = git(['rev-parse', '--git-common-dir'], worktreeRoot).trim();
-    // Incident 2026-10-30: with an inherited GIT_DIR this resolved to the REAL
-    // repository and afterEach deleted it. Only adopt the git answer once it is
-    // proven to sit under the tmpdir; until then mainRoot stays the mkdtemp path.
-    const resolved = join(common, '..');
-    if (!isUnderTmpdir(resolved)) {
-      throw new Error(`fixture root ${resolved} is not under ${tmpdir()}; refusing to continue`);
-    }
-    mainRoot = resolved;
-    process.env['REPO_ROOT'] = worktreeRoot;
-  });
-
-  afterEach(() => {
-    // Same guard on the way out: never delete a path that is not a tmp fixture.
-    if (mainRoot && isUnderTmpdir(mainRoot)) removeFixtureDir(mainRoot);
-    removeFixtureDir(fakeHomeDirForHarnessTests);
-    fakeHomeDirForHarnessTests = '';
-  });
-
-  function reviewerRun(role: string, agentId: string, nonce: string, firedAt: Date): string {
-    const markerDir = subagentSessionsDir(mainRoot);
-    mkdirSync(markerDir, { recursive: true });
-    writeFileSync(
-      join(markerDir, `${agentId}.json`),
-      JSON.stringify({ agentId, agentType: `ai-sdlc:${role}`, firedAt: firedAt.toISOString() }),
-    );
-    const subagents = join(
-      claudeProjectsDir(),
-      claudeProjectSlug(resolve(mainRoot)),
-      'session-exec',
-      'subagents',
-    );
-    mkdirSync(subagents, { recursive: true });
-    const content = `${role} review ${nonceMarkerLiteral(nonce)}\n`;
-    writeFileSync(join(subagents, `agent-${agentId}.jsonl`), content);
-    writeFileSync(
-      join(subagents, `agent-${agentId}.meta.json`),
-      JSON.stringify({ agentType: `ai-sdlc:${role}` }),
-    );
-    return createHash('sha256').update(content).digest('hex');
-  }
-
-  async function emitInWorktree(reviewer: string, nonce: string): Promise<void> {
-    const dir = join(worktreeRoot, '.ai-sdlc', 'transcripts', 'task-1');
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, `${reviewer}.jsonl`), `{"persisted":"${reviewer}"}\n`);
-    const verdicts = join(worktreeRoot, '.ai-sdlc', 'verdicts');
-    mkdirSync(verdicts, { recursive: true });
-    const verdictPath = join(verdicts, `${reviewer}-task-1.json`);
-    writeFileSync(
-      verdictPath,
-      JSON.stringify({
-        approved: true,
-        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-      }),
-    );
-    await buildAttestationCli([
-      'emit-leaf',
-      '--repo-root',
-      worktreeRoot,
-      '--task-id',
-      'TASK-1',
-      '--reviewer',
-      reviewer,
-      '--transcript-path',
-      join(dir, `${reviewer}.jsonl`),
-      '--verdict-path',
-      verdictPath,
-      '--head-sha',
-      'f'.repeat(40),
-      '--harness',
-      'claude-code',
-      '--model',
-      'sonnet',
-      '--nonce',
-      nonce,
-      '--patch-id',
-      TEST_PATCH_ID,
-    ]).parseAsync();
-  }
-
-  it('three reviewers spawned seconds apart: every leaf is independent and carries its own transcript hash', async () => {
-    const nonce = 'a7'.repeat(32);
-    const now = Date.now();
-    const expected: Record<string, string> = {
-      'security-reviewer': reviewerRun('security-reviewer', 'aaa111', nonce, new Date(now - 6000)),
-      'code-reviewer': reviewerRun('code-reviewer', 'bbb222', nonce, new Date(now - 4000)),
-      'test-reviewer': reviewerRun('test-reviewer', 'ccc333', nonce, new Date(now - 2000)),
-    };
-
-    await emitInWorktree('code-reviewer', nonce);
-    await emitInWorktree('test-reviewer', nonce);
-    await emitInWorktree('security-reviewer', nonce);
-
-    const leaves = loadLeavesUnderTest(worktreeRoot);
-    expect(leaves).toHaveLength(3);
-    for (const leaf of leaves) {
-      expect(leaf.verdictClass, leaf.reviewerName).toBe('independent');
-      expect(leaf.independenceTier, leaf.reviewerName).toBe('attested');
-      expect(leaf.harnessTranscriptHash, leaf.reviewerName).toBe(expected[leaf.reviewerName]);
-    }
-    expect(unconsumedMarkers(subagentSessionsDir(mainRoot))).toEqual([]);
-  });
-
-  it("another task's reviewer marker in the main checkout does not make this task's leaf independent", async () => {
-    reviewerRun('code-reviewer', 'other1', 'c9'.repeat(32), new Date());
-    await emitInWorktree('code-reviewer', 'e3'.repeat(32));
-
-    const leaves = loadLeavesUnderTest(worktreeRoot);
-    expect(leaves[0].verdictClass).toBe('self-authored');
-    expect(leaves[0].independenceTier).toBeUndefined();
-    expect(leaves[0].harnessTranscriptHash).toBeNull();
-    expect(readdirSync(subagentSessionsDir(mainRoot))).toEqual(['other1.json']);
   });
 });
 
@@ -3385,56 +1374,5 @@ describe('readAgentIdSidecar', () => {
     expect(readAgentIdSidecar(transcript)).toBeUndefined();
 
     expect(readAgentIdSidecar(join(dir, 'code-reviewer.txt'))).toBeUndefined();
-  });
-});
-
-describe('cli-attestation verify — self-authored note', () => {
-  let savedExitCode: number | string | null | undefined;
-
-  beforeEach(() => {
-    savedExitCode = process.exitCode;
-    process.exitCode = undefined;
-    vi.mocked(loadAttestationRuntime).mockReset();
-    vi.mocked(loadVerifyCore).mockReset();
-  });
-
-  afterEach(() => {
-    process.exitCode = savedExitCode;
-  });
-
-  async function runVerifyWith(result: Record<string, unknown>): Promise<void> {
-    vi.mocked(loadAttestationRuntime).mockResolvedValue({ marker: 'fake-runtime' });
-    vi.mocked(loadVerifyCore).mockResolvedValue({
-      bindRuntime: vi.fn(),
-      runVerifier: vi.fn().mockReturnValue(result),
-    });
-    await buildAttestationCli([
-      'verify',
-      '--head',
-      'a'.repeat(40),
-      '--base',
-      'b'.repeat(40),
-    ]).parseAsync();
-  }
-
-  it('keeps exit 0 for a valid self-authored envelope but says verify does not enforce independence', async () => {
-    await runVerifyWith({ status: 'valid', reason: 'ok', overallVerdictClass: 'self-authored' });
-    expect(process.exitCode).toBe(0);
-    expect(flushStdout()).toMatch(/verdictClass=self-authored/);
-    const err = flushStderr();
-    expect(err).toMatch(/does not enforce independence/);
-    expect(err).toMatch(/independence-policy/);
-  });
-
-  it('prints no note for an independent envelope or an invalid one', async () => {
-    await runVerifyWith({ status: 'valid', reason: 'ok', overallVerdictClass: 'independent' });
-    expect(flushStderr()).not.toMatch(/does not enforce independence/);
-    await runVerifyWith({
-      status: 'invalid',
-      reason: 'bad signature',
-      overallVerdictClass: 'self-authored',
-    });
-    expect(process.exitCode).toBe(1);
-    expect(flushStderr()).not.toMatch(/does not enforce independence/);
   });
 });

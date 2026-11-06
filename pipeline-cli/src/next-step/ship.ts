@@ -20,9 +20,8 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { reviewsLedgerPath } from '../attestation/reviews-ledger.js';
-import { computeMergeBase, computePatchId } from '../attestation/patch-id.js';
+import { createHash } from 'node:crypto';
 import { PUSH_NON_FAST_FORWARD_CAUSE } from '../hierarchy/playbook.js';
-import { dropAttestationChores } from '../attestation/drop-chores.js';
 import { loadOperationalPolicy } from '../hierarchy/operational.js';
 import { isProtectedBranch } from '../hierarchy/lease-policy.js';
 import { leasePushPreflight, type LeasePreflight } from '../hierarchy/lease-preflight.js';
@@ -77,26 +76,36 @@ export type PreSignRebaseResult =
       cause?: 'rebase-conflict' | 'dirty-worktree' | 'rebase-failed' | 'ledger-not-staged';
     };
 
-async function contentHash(ctx: NextStepContext, worktreePath: string): Promise<string> {
-  const r = await ctx.runner(
-    'node',
-    [join(ctx.pluginScriptsDir, 'sign-attestation.mjs'), '--print-content-hash'],
+/**
+ * Content identity of HEAD against its merge-base with `baseRef`: a hash of the
+ * (path, new blob id) pairs the branch changes. The old blob id is left out because
+ * it moves with the base; a path the base also touched gets a new blob, so a rebase
+ * that merged content changes the hash. Empty when it cannot be computed.
+ */
+async function contentHash(
+  ctx: NextStepContext,
+  worktreePath: string,
+  baseRef: string,
+): Promise<string> {
+  const mb = await ctx.runner('git', ['merge-base', baseRef, 'HEAD'], {
+    cwd: worktreePath,
+    allowFailure: true,
+  });
+  if (mb.code !== 0 || mb.stdout.trim() === '') return '';
+  const diff = await ctx.runner(
+    'git',
+    ['diff', '--raw', '--no-abbrev', '--no-renames', mb.stdout.trim(), 'HEAD'],
     { cwd: worktreePath, allowFailure: true },
   );
-  return r.code === 0 ? r.stdout.trim() : '';
-}
-
-/**
- * Content patch-id of HEAD against its merge-base with `baseRef` (the key the
- * transcript leaves and the envelope are written under). Null when it cannot
- * be computed, in which case the contentHash oracle alone decides (AISDLC-998).
- */
-export function headPatchId(worktreePath: string, baseRef: string): string | null {
-  const mergeBase = computeMergeBase(baseRef, 'HEAD', worktreePath);
-  // merge-base of HEAD with itself resolves HEAD to a full sha.
-  const head = computeMergeBase('HEAD', 'HEAD', worktreePath);
-  if (!mergeBase || !head) return null;
-  return computePatchId(mergeBase, head, worktreePath);
+  if (diff.code !== 0) return '';
+  const pairs = diff.stdout
+    .split('\n')
+    .filter((l) => l.trim() !== '')
+    .map((l) => {
+      const [meta = '', path = ''] = l.split('\t');
+      return `${meta.split(' ')[3] ?? ''} ${path}`;
+    });
+  return createHash('sha256').update(pairs.join('\n')).digest('hex');
 }
 
 /**
@@ -106,12 +115,10 @@ export function headPatchId(worktreePath: string, baseRef: string): string | nul
 export async function preSignRebase(
   ctx: NextStepContext,
   state: NextStepState,
-  patchIdOf: (worktreePath: string, baseRef: string) => string | null = headPatchId,
 ): Promise<PreSignRebaseResult> {
   const wt = state.worktreePath;
   const target = resolveTargetBranch(ctx.workDir);
-  const before = await contentHash(ctx, wt);
-  const patchIdBefore = patchIdOf(wt, `origin/${target}`);
+  const before = await contentHash(ctx, wt, `origin/${target}`);
 
   const fetch = await ctx.runner('git', ['fetch', 'origin', target], {
     cwd: wt,
@@ -121,40 +128,11 @@ export async function preSignRebase(
   if (fetch.code !== 0) {
     return { kind: 'skipped', reason: `git fetch origin ${target} failed (timeout/network)` };
   }
-  // A retried ship leaves the previous attempt's sign and leaves commits in the
-  // stack; the retry owns the stack, so drop them before anything else is
-  // committed or rebased. The leaf files they carried come back staged and are
-  // committed again below (AISDLC-999). A refusal or failure is not fatal here:
-  // the ship carries on with the stack as it is.
-  const dropped = await dropAttestationChores(
-    async (args) => {
-      const r = await ctx.runner('git', [...args], {
-        cwd: wt,
-        allowFailure: true,
-        timeout: 120_000,
-      });
-      return { status: r.code, stdout: r.stdout, stderr: r.stderr };
-    },
-    { target, taskId: state.taskId },
-  );
-  if (dropped.kind === 'dropped') {
-    ctx.logger.info(
-      `Step 10.5 dropped ${dropped.dropped.length} earlier attestation chore commit(s) before re-signing`,
-    );
-  }
   const anc = await ctx.runner('git', ['merge-base', '--is-ancestor', `origin/${target}`, 'HEAD'], {
     cwd: wt,
     allowFailure: true,
   });
   if (anc.code === 0) {
-    if (dropped.kind === 'dropped' && dropped.restored.length > 0) {
-      // No rebase follows, so commit the restored leaf files here.
-      await ctx.runner(
-        'git',
-        ['commit', '-m', `chore: commit pending transcript leaves (${state.taskId})`],
-        { cwd: wt, allowFailure: true, timeout: 300_000 },
-      );
-    }
     return { kind: 'skipped', reason: `origin/${target} already ancestor of HEAD` };
   }
 
@@ -166,61 +144,27 @@ export async function preSignRebase(
     cwd: wt,
     allowFailure: true,
   });
-  // Pipeline-owned files (transcript leaves, this task's review ledger) are
-  // untracked/modified files that make git refuse the rebase; commit them
-  // first, in one commit. Both are excluded from the patch-id (patch-id.ts),
-  // so the content hash is unchanged (AISDLC-848). A non-empty porcelain means
-  // a real change, so no empty commit is made when the ledger equals HEAD
-  // (AISDLC-951).
+  // The task's review ledger is an untracked/modified file that makes git refuse the
+  // rebase; commit it first. A non-empty porcelain means a real change, so no empty
+  // commit is made when the ledger equals HEAD (AISDLC-951).
   // Empty root keeps the ledger path worktree-relative; the writer owns the
   // (lowercase) spelling, so it is never rebuilt by hand (AISDLC-1017).
-  // AISDLC-1098: a re-sign removes the stale envelope for the previous content
-  // hash, leaving a tracked file deleted-unstaged that makes git refuse the
-  // rebase. Stage exactly those deletions; any other unstaged change still refuses.
-  const deleted = await ctx.runner(
-    'git',
-    ['ls-files', '--deleted', '--', '.ai-sdlc/attestations/'],
-    { cwd: wt, allowFailure: true },
-  );
-  const staleEnvelopes = deleted.stdout
-    .split('\n')
-    .map((f) => f.trim())
-    .filter((f) => f !== '');
-  if (deleted.code === 0 && staleEnvelopes.length > 0) {
-    await ctx.runner('git', ['rm', '--cached', '-q', '--', ...staleEnvelopes], {
-      cwd: wt,
-      allowFailure: true,
-    });
-    await ctx.runner(
-      'git',
-      ['commit', '-m', `chore: drop stale attestation envelope (${state.taskId})`],
-      { cwd: wt, allowFailure: true, timeout: 300_000 },
-    );
-  }
-  const owned = ['.ai-sdlc/transcript-leaves/', reviewsLedgerPath(state.taskId, '')];
+  const owned = [reviewsLedgerPath(state.taskId, '')];
   const pending = await ctx.runner('git', ['status', '--porcelain', '--', ...owned], {
     cwd: wt,
     allowFailure: true,
   });
   if (pending.code === 0 && pending.stdout.trim() !== '') {
-    // One `git add` per path: a pathspec matching nothing aborts the whole
-    // call, so a missing ledger must not keep the leaves from being staged.
-    for (const path of owned) {
-      await ctx.runner('git', ['add', '--', path], { cwd: wt, allowFailure: true });
-    }
-    await ctx.runner(
-      'git',
-      [
-        'commit',
-        '-m',
-        `chore: commit pending transcript leaves and review ledger (${state.taskId})`,
-      ],
-      { cwd: wt, allowFailure: true, timeout: 300_000 },
-    );
+    await ctx.runner('git', ['add', '--', owned[0]!], { cwd: wt, allowFailure: true });
+    await ctx.runner('git', ['commit', '-m', `chore: commit review ledger (${state.taskId})`], {
+      cwd: wt,
+      allowFailure: true,
+      timeout: 300_000,
+    });
   }
   // AISDLC-967: an ignored ledger makes the add above a silent no-op and the PR
   // would ship without it (the incremental review reads committed ledgers only).
-  const ledger = owned[1];
+  const ledger = owned[0]!;
   if (existsSync(join(wt, ledger))) {
     const tracked = await ctx.runner('git', ['ls-files', '--error-unmatch', '--', ledger], {
       cwd: wt,
@@ -304,14 +248,7 @@ export async function preSignRebase(
       `origin/${target} moved during the rebase (now ${baseAfter.stdout.trim()}); not an error under strict=false`,
     );
   }
-  // AISDLC-998: leaves are keyed on the pre-rebase content patch-id. A changed
-  // patch-id means the reviewed diff is not the diff being signed, so the run
-  // returns to review rather than signing with orphaned leaves.
-  const patchIdAfter = patchIdOf(wt, `origin/${target}`);
-  if (patchIdBefore && patchIdAfter && patchIdBefore !== patchIdAfter) {
-    return { kind: 'changed', before: patchIdBefore, after: patchIdAfter };
-  }
-  const after = await contentHash(ctx, wt);
+  const after = await contentHash(ctx, wt, `origin/${target}`);
   if (before !== '' && before === after) return { kind: 'unchanged', hash: before };
   return { kind: 'changed', before, after };
 }
@@ -339,9 +276,7 @@ export function choreCommitMessage(taskId: string): string {
   return sanitizeCiSkipTokens(
     `chore: mark ${taskId} complete\n\n` +
       `Auto-generated by /ai-sdlc execute. Reviews approved; task lifecycle landed in this PR.\n` +
-      `The signed review attestation lands on a follow-up chore commit auto-produced by\n` +
-      `the husky pre-push hook (AISDLC-133) at .ai-sdlc/attestations/<head-sha>.dsse.json\n` +
-      `(AISDLC-74) so CI's verify-attestation workflow can skip the duplicate review run.\n\n` +
+      `The review verdict is recorded outside the branch (RFC-0061); no attestation file is committed.\n\n` +
       `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`,
   );
 }

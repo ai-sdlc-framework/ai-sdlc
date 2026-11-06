@@ -14,9 +14,19 @@ labels:
 dependencies: []
 references:
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
-  - scripts/verify-attestation.mjs
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
 priority: high
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

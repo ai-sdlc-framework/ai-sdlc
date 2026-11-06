@@ -1,6 +1,6 @@
 ---
 id: AISDLC-977
-title: 'CI attestation verifier checks that review leaves carry an approved verdict'
+title: CI attestation verifier checks that review leaves carry an approved verdict
 status: Done
 assignee: []
 created_date: '2026-10-20'
@@ -10,11 +10,21 @@ labels:
 dependencies:
   - AISDLC-970
 references:
-  - pipeline-cli/attestation-core/verify-core.mjs
-  - scripts/verify-attestation.mjs
   - docs/operations/attestation-reference.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/attestation-core/verify-core.mjs
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

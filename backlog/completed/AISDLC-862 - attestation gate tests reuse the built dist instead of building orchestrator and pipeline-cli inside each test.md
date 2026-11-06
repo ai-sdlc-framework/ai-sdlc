@@ -1,7 +1,8 @@
 ---
 id: AISDLC-862
 title: >-
-  attestation gate tests reuse the built dist instead of building orchestrator and pipeline-cli inside each test
+  attestation gate tests reuse the built dist instead of building orchestrator
+  and pipeline-cli inside each test
 status: Done
 assignee: []
 created_date: '2026-10-13'
@@ -10,13 +11,28 @@ labels:
   - reliability
 dependencies: []
 references:
-  - ai-sdlc-plugin/scripts/sign-attestation.test.mjs
-  - ai-sdlc-plugin/scripts/verify-attestation.test.mjs
-  - scripts/verify-attestation.test.mjs
   - scripts/run-gate-tests.mjs
   - docs/operations/decision-authority.md
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.test.mjs
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/verify-attestation.test.mjs
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/verify-attestation.test.mjs'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

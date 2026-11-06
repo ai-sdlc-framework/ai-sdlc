@@ -1,7 +1,8 @@
 ---
 id: AISDLC-747
 title: >-
-  verify-attestation workflow posts an approving GitHub review when the v6 envelope verifies
+  verify-attestation workflow posts an approving GitHub review when the v6
+  envelope verifies
 status: Done
 assignee: []
 created_date: '2026-10-06'
@@ -11,11 +12,18 @@ labels:
 dependencies: []
 references:
   - .github/workflows/ai-sdlc-gate.yml
-  - ai-sdlc-plugin/scripts/verify-attestation.mjs
   - docs/operations/decision-authority.md
 priority: high
 dispatchable: true
 updated_date: '2026-10-07 02:43'
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/verify-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

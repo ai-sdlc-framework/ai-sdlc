@@ -23,7 +23,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ensureBoardDirs, writeVerdict } from '../dispatch/board.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 
-import { eventsFilePath } from './events.js';
 import {
   AGENT_ID_PATTERN,
   defaultHomeDir,
@@ -352,59 +351,6 @@ describe('runReconcile — orchestration', () => {
     expect(result.steps.find((s) => s.name === 'verify-worktree')?.status).toBe('failed');
   });
 
-  it('runs the full happy path: leaves → sign → fetch → rebase → push → ready → merge → remove', () => {
-    writeDevVerdict(boardDir);
-    const { spawn, calls } = makeSpawnRecorder();
-    const result = runReconcile({
-      workDir,
-      taskId,
-      boardDir,
-      worktreePath,
-      spawn,
-    });
-    expect(result.outcome).toBe('success');
-    expect(result.prNumber).toBe('4321');
-    expect(result.prUrl).toBe('https://github.com/org/repo/pull/4321');
-    // Three emit-leaf calls, one sign, fetch, rebase, push, ready, merge.
-    const stepNames = result.steps.map((s) => s.name);
-    expect(stepNames).toContain('emit-leaf:code-reviewer');
-    expect(stepNames).toContain('emit-leaf:test-reviewer');
-    expect(stepNames).toContain('emit-leaf:security-reviewer');
-    expect(stepNames).toContain('sign-attestation');
-    expect(stepNames).toContain('git-fetch');
-    expect(stepNames).toContain('git-rebase');
-    expect(stepNames).toContain('git-push');
-    // AISDLC-606 — with targetBranch unset the fetch/rebase resolve to the
-    // byte-identical pre-606 'main' default; assert on the literal args so a
-    // future refactor of the `origin/${targetBranch}` interpolation can't
-    // silently regress the default path (this is the one threaded surface
-    // whose default-fallback was previously only covered by step-name checks).
-    const fetchCall = calls.find((c) => c.file === 'git' && c.args[0] === 'fetch');
-    expect(fetchCall?.args).toEqual(['fetch', 'origin', 'main']);
-    const rebaseCall = calls.find((c) => c.file === 'git' && c.args[0] === 'rebase');
-    expect(rebaseCall?.args).toEqual(['rebase', 'origin/main']);
-    expect(stepNames).toContain('gh-pr-ready');
-    expect(stepNames).toContain('gh-pr-merge-auto');
-    expect(stepNames).toContain('remove-verdict');
-    // git push uses --force-with-lease, never raw --force.
-    const pushCall = calls.find((c) => c.file === 'git' && c.args[0] === 'push');
-    expect(pushCall?.args).toContain('--force-with-lease');
-    expect(pushCall?.args).not.toContain('--force');
-    // gh pr ready was called with the right number.
-    const readyCall = calls.find(
-      (c) => c.file === 'gh' && c.args[0] === 'pr' && c.args[1] === 'ready',
-    );
-    expect(readyCall?.args).toContain('4321');
-    // AISDLC-975: arming goes through cli-merge-if-eligible --arm, never raw gh.
-    expect(calls.find((c) => c.file === 'gh' && c.args[1] === 'merge')).toBeUndefined();
-    const armCall = calls.find(
-      (c) => c.file === 'node' && c.args[0].endsWith('cli-merge-if-eligible.mjs'),
-    );
-    expect(armCall?.args).toEqual(
-      expect.arrayContaining(['4321', '--source-kind', 'backlog', '--arm']),
-    );
-  });
-
   // AISDLC-617 — reconcile's per-reviewer loop must honor an explicit
   // `reviewers` override (the opt-in merged 2-reviewer set) rather than
   // hardcoding RECONCILE_REVIEWERS (3).
@@ -541,39 +487,6 @@ describe('runReconcile — orchestration', () => {
     expect(fetchCall?.args).toEqual(['fetch', 'origin', 'develop']);
     const rebaseCall = calls.find((c) => c.file === 'git' && c.args[0] === 'rebase');
     expect(rebaseCall?.args).toEqual(['rebase', 'origin/develop']);
-  });
-
-  it('outcome=partial when sign-attestation fails', () => {
-    writeDevVerdict(boardDir);
-    const { spawn } = makeSpawnRecorder({
-      // 1st node call is emit-leaf (return 0). We need to differentiate the
-      // sign call. Match by the script suffix in args[0].
-      node: { status: 0 },
-    });
-    // Override: when the 2nd positional arg is the sign script, fail.
-    const customSpawn = (
-      file: string,
-      args: readonly string[],
-      opts: { cwd?: string },
-    ): { status: number | null; stdout: string; stderr: string } => {
-      if (file === 'node' && args[0]?.endsWith('sign-attestation.mjs')) {
-        return { status: 1, stdout: '', stderr: 'signing key missing' };
-      }
-      return spawn(file, args, opts);
-    };
-    const result = runReconcile({
-      workDir,
-      taskId,
-      boardDir,
-      worktreePath,
-      spawn: customSpawn,
-    });
-    expect(result.outcome).toBe('partial');
-    expect(result.steps.find((s) => s.name === 'sign-attestation')?.status).toBe('failed');
-    // AISDLC-543: fetch+rebase now run BEFORE signing; push/ready must not have.
-    expect(result.steps.find((s) => s.name === 'git-rebase')?.status).toBe('success');
-    expect(result.steps.find((s) => s.name === 'git-push')).toBeUndefined();
-    expect(result.steps.find((s) => s.name === 'gh-pr-ready')).toBeUndefined();
   });
 
   it('outcome=partial when git push fails after successful rebase', () => {
@@ -713,21 +626,6 @@ describe('runReconcile — orchestration', () => {
     expect(result.steps.find((s) => s.name === 'verify-head-sha')?.status).toBe('failed');
   });
 
-  it('outcome=partial when aggregated verdict is missing', () => {
-    writeDevVerdict(boardDir);
-    rmSync(path.join(worktreePath, '.ai-sdlc', 'verdicts', `${taskIdLower}.json`));
-    const { spawn } = makeSpawnRecorder();
-    const result = runReconcile({
-      workDir,
-      taskId,
-      boardDir,
-      worktreePath,
-      spawn,
-    });
-    expect(result.outcome).toBe('partial');
-    expect(result.steps.find((s) => s.name === 'sign-attestation')?.status).toBe('failed');
-  });
-
   it('outcome=partial when individual reviewer verdict is missing (emit-leaf skipped)', () => {
     writeDevVerdict(boardDir);
     rmSync(path.join(worktreePath, '.ai-sdlc', 'verdicts', `code-reviewer-${taskIdLower}.json`));
@@ -826,30 +724,6 @@ describe('runReconcile — orchestration', () => {
     expect(result.outcome).toBe('success');
     expect(result.steps.find((s) => s.name === 'gh-pr-merge-auto')?.status).toBe('skipped');
     expect(calls.some((c) => c.file === 'gh' && c.args[1] === 'merge')).toBe(false);
-  });
-
-  it('schema-version v5 is forwarded to sign-attestation', () => {
-    writeDevVerdict(boardDir);
-    const seen: string[][] = [];
-    const customSpawn = (
-      file: string,
-      args: readonly string[],
-    ): { status: number | null; stdout: string; stderr: string } => {
-      if (file === 'node' && args[0]?.endsWith('sign-attestation.mjs')) {
-        seen.push([...args]);
-      }
-      return { status: 0, stdout: '', stderr: '' };
-    };
-    const result = runReconcile({
-      workDir,
-      taskId,
-      boardDir,
-      worktreePath,
-      schemaVersion: 'v5',
-      spawn: customSpawn,
-    });
-    expect(result.outcome).toBe('success');
-    expect(seen[0]).toEqual(expect.arrayContaining(['--schema-version', 'v5']));
   });
 
   it('reviewerModel + harness overrides reach the emit-leaf invocation', () => {
@@ -1144,7 +1018,6 @@ describe('salvageReviewerTranscript — edge paths', () => {
 describe('runReconcile — AISDLC-543 ordering + concurrent-writer protection', () => {
   let workDir: string;
   let boardDir: string;
-  const REBASED_HEAD = '2222222222222222222222222222222222222222';
 
   function setupTask(id: string): { taskId: string; worktreePath: string } {
     const lower = id.toLowerCase();
@@ -1164,72 +1037,6 @@ describe('runReconcile — AISDLC-543 ordering + concurrent-writer protection', 
     removeFixtureDir(workDir);
   });
 
-  it('AC#1: orders fetch -> rebase -> emit-leaves -> sign -> push and binds leaves to the rebased HEAD', () => {
-    const { taskId, worktreePath } = setupTask('AISDLC-418');
-    const { spawn, calls } = makeSpawnRecorder({
-      // origin/main moved mid-flight: the rebase rewrote the dev's commit
-      // (verdict says 1111...), so HEAD is now 2222...
-      'git rev-parse HEAD': { status: 0, stdout: `${REBASED_HEAD}\n` },
-    });
-    const result = runReconcile({ workDir, taskId, boardDir, worktreePath, spawn });
-    expect(result.outcome).toBe('success');
-
-    const names = result.steps.map((s) => s.name);
-    const idx = (n: string): number => names.indexOf(n);
-    expect(idx('git-fetch')).toBeLessThan(idx('git-rebase'));
-    expect(idx('git-rebase')).toBeLessThan(idx('emit-leaf:code-reviewer'));
-    expect(idx('emit-leaf:security-reviewer')).toBeLessThan(idx('sign-attestation'));
-    expect(idx('sign-attestation')).toBeLessThan(idx('git-push'));
-
-    // Every leaf is bound to the post-rebase HEAD, never the orphaned dev SHA.
-    const emitCalls = calls.filter((c) => c.args.includes('emit-leaf'));
-    expect(emitCalls).toHaveLength(3);
-    for (const c of emitCalls) {
-      const i = c.args.indexOf('--head-sha');
-      expect(c.args[i + 1]).toBe(REBASED_HEAD);
-    }
-    // Sign runs after the rebase call in actual spawn order too.
-    const order = calls.map((c) =>
-      c.file === 'git' ? `git ${c.args[0]}` : String(c.args[0]).split('/').pop(),
-    );
-    expect(order.indexOf('git rebase')).toBeLessThan(order.indexOf('sign-attestation.mjs'));
-    expect(order.indexOf('sign-attestation.mjs')).toBeLessThan(order.indexOf('git push'));
-  });
-
-  it('AC#1: a rebase failure stops BEFORE any leaf is emitted or anything is signed', () => {
-    const { taskId, worktreePath } = setupTask('AISDLC-418');
-    const { spawn, calls } = makeSpawnRecorder({
-      'git rebase origin/main': { status: 1, stderr: 'conflict' },
-    });
-    const result = runReconcile({ workDir, taskId, boardDir, worktreePath, spawn });
-    expect(result.steps.find((s) => s.name === 'git-rebase')?.status).toBe('failed');
-    expect(result.steps.some((s) => s.name.startsWith('emit-leaf'))).toBe(false);
-    expect(result.steps.find((s) => s.name === 'sign-attestation')).toBeUndefined();
-    expect(calls.some((c) => c.file === 'node')).toBe(false);
-  });
-
-  it('AC#4: a rejected lease re-reads remote branch state and refuses to overwrite a concurrent writer', () => {
-    const { taskId, worktreePath } = setupTask('AISDLC-418');
-    const { spawn, calls } = makeSpawnRecorder({
-      'git push --force-with-lease': { status: 1, stderr: 'stale info' },
-      // origin/<branch> has commits HEAD does not contain (the #912 bot write).
-      'git merge-base --is-ancestor': { status: 1 },
-    });
-    const result = runReconcile({ workDir, taskId, boardDir, worktreePath, spawn });
-    expect(result.outcome).toBe('partial');
-    const check = result.steps.find((s) => s.name === 'concurrent-writer-check');
-    expect(check?.status).toBe('failed');
-    expect(check?.output).toContain('another writer moved origin/ai-sdlc/aisdlc-418-test');
-    // The branch was re-fetched after the failed push, and nothing was signed twice.
-    const pushIdx = calls.findIndex((c) => c.file === 'git' && c.args[0] === 'push');
-    const refetch = calls.findIndex(
-      (c, i) => i > pushIdx && c.file === 'git' && c.args[0] === 'fetch',
-    );
-    expect(refetch).toBeGreaterThan(pushIdx);
-    expect(calls.filter((c) => String(c.args[0]).endsWith('sign-attestation.mjs'))).toHaveLength(1);
-    expect(result.steps.find((s) => s.name === 'gh-pr-ready')).toBeUndefined();
-  });
-
   it('AC#4: a rejected lease where the remote is an ancestor of HEAD reports a non-concurrent cause', () => {
     const { taskId, worktreePath } = setupTask('AISDLC-418');
     const { spawn } = makeSpawnRecorder({
@@ -1237,39 +1044,6 @@ describe('runReconcile — AISDLC-543 ordering + concurrent-writer protection', 
     });
     const result = runReconcile({ workDir, taskId, boardDir, worktreePath, spawn });
     expect(result.steps.find((s) => s.name === 'concurrent-writer-check')?.status).toBe('success');
-  });
-
-  it('AC#5: a clean two-PR concurrent landing signs once per PR and emits reSignCount=0', () => {
-    const artifactsDir = path.join(workDir, 'artifacts');
-    const now = (): Date => new Date('2026-10-06T12:00:00.000Z');
-    for (const id of ['AISDLC-901', 'AISDLC-902']) {
-      const { taskId, worktreePath } = setupTask(id);
-      const { spawn } = makeSpawnRecorder({
-        'git rev-parse HEAD': { status: 0, stdout: `${REBASED_HEAD}\n` },
-      });
-      const result = runReconcile({
-        workDir,
-        taskId,
-        boardDir,
-        worktreePath,
-        spawn,
-        artifactsDir,
-        now,
-        isEnabled: () => true,
-      });
-      expect(result.outcome).toBe('success');
-      expect(result.steps.filter((s) => s.name === 'sign-attestation')).toHaveLength(1);
-    }
-    const events = readFileSync(eventsFilePath(artifactsDir, now()), 'utf8')
-      .trim()
-      .split('\n')
-      .map((l) => JSON.parse(l) as Record<string, unknown>)
-      .filter((e) => e.type === 'ReconcileCompleted');
-    expect(events).toHaveLength(2);
-    for (const e of events) {
-      expect(e.reSignCount).toBe(0);
-      expect(e.rebased).toBe(true);
-    }
   });
 });
 

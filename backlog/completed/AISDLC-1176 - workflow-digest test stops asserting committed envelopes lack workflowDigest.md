@@ -1,6 +1,8 @@
 ---
 id: AISDLC-1176
-title: 'workflow-digest test asserts no committed envelope carries workflowDigest, so every hook-signed push since AISDLC-1164 is refused'
+title: >-
+  workflow-digest test asserts no committed envelope carries workflowDigest, so
+  every hook-signed push since AISDLC-1164 is refused
 status: Done
 assignee: []
 created_date: '2026-11-03'
@@ -10,11 +12,22 @@ labels:
   - bug
   - hotfix
 dependencies: []
-references:
-  - pipeline-cli/src/attestation/workflow-digest.test.ts
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/attestation/workflow-digest.test.ts
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

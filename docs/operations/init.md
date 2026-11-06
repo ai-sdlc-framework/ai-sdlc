@@ -51,7 +51,7 @@ accepts the prescriptive default ratified in Q1 of the
 | # | Prompt | If yes, scaffolds |
 |---|---|---|
 | 1 | "Will this repo use Definition-of-Ready gates?" | `.ai-sdlc/dor-config.yaml`, `.github/workflows/dor-ingress.yml` |
-| 2 | "Do you want attestation infrastructure (audit-only)?" | `.ai-sdlc/trusted-reviewers.yaml`, `.ai-sdlc/attestations/.gitkeep`, `.github/workflows/verify-attestation.yml`, `.husky/pre-push` (sign block appended) |
+| 2 | "Do you want attestation infrastructure (audit-only)?" | `.ai-sdlc/trusted-reviewers.yaml`, `.github/workflows/verify-attestation.yml`, `.husky/pre-push` (sign block appended) |
 | 3 | "Add review classifier for cost-optimized reviews?" | `.ai-sdlc/review-classifier.yaml` (stub; runtime ships in AISDLC-141) |
 | 4 | "Apply recommended branch protection?" | PUT `/repos/{owner}/{repo}/branches/main/protection` via `gh api` (required checks: `ai-sdlc/pr-ready`, `codecov/patch`) |
 | 5 | "Scaffold GitHub Actions workflows (gate, review, attestation, auto-merge)?" | `.github/workflows/ai-sdlc-gate.yml`, `.github/workflows/verify-attestation.yml`, `.github/workflows/ai-sdlc-review.yml`, `.github/workflows/auto-enable-auto-merge.yml` (AISDLC-261) |

@@ -1,6 +1,8 @@
 ---
 id: AISDLC-355
-title: 'fix(orchestrator): resume-from-draft stale verdict reuse + verdict-shape mismatch + degenerate-reviewer retry'
+title: >-
+  fix(orchestrator): resume-from-draft stale verdict reuse + verdict-shape
+  mismatch + degenerate-reviewer retry
 status: Done
 assignee: []
 created_date: '2026-05-17'
@@ -13,8 +15,15 @@ dependencies: []
 priority: critical
 references:
   - pipeline-cli/src/cli/resume-from-draft.ts
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - pipeline-cli/src/steps/09-iterate.ts
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Three related resume-from-draft bugs hit during 282/286/323 finalization

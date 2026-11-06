@@ -46,7 +46,7 @@ import {
   statSync,
 } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
-import { STAGED_REVIEWER_NAME } from './merkle.js';
+import { STAGED_REVIEWER_NAME } from './staged-review.js';
 
 /**
  * Reviewer role recorded in a ledger entry.

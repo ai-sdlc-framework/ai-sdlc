@@ -11,7 +11,6 @@ labels:
 references:
   - .husky/pre-push
   - scripts/check-task-moved.sh
-  - scripts/squash-attestation-chores.sh
   - docs/operations/gate-friction-audit-2026.md
 parentTaskId: AISDLC-384
 drift_log:
@@ -19,7 +18,11 @@ drift_log:
     type: ref-deleted
     detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
     resolution: flagged
-drift_checked: '2026-11-05'
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/squash-attestation-chores.sh'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

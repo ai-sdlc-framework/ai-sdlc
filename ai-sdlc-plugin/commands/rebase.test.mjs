@@ -166,49 +166,16 @@ describe('/ai-sdlc rebase body — hard rules', () => {
   });
 });
 
-describe('/ai-sdlc rebase body — re-attestation', () => {
-  it('reads preContentHash + postContentHash from subagent output', () => {
-    assert.match(body, /preContentHash/);
-    assert.match(body, /postContentHash/);
+describe('/ai-sdlc rebase body — no re-signing (RFC-0061)', () => {
+  it('does not sign or stage any attestation', () => {
+    assert.doesNotMatch(body, /sign-attestation\.mjs/);
+    assert.doesNotMatch(body, /git add \.ai-sdlc\/attestations/);
+    assert.doesNotMatch(body, /init-signing-key/);
   });
 
-  it('skips re-attestation when contentHash is unchanged', () => {
-    assert.match(body, /contentHash unchanged/);
-    assert.match(body, /No re-signing needed/);
-  });
-
-  it('uses sign-attestation.mjs --print-content-hash as the oracle (AISDLC-102)', () => {
-    assert.match(body, /sign-attestation\.mjs"?\s+--print-content-hash/);
-  });
-
-  it('cites AISDLC-94 dual-hash + AISDLC-101 per-file delta as predicate justification', () => {
-    assert.match(body, /AISDLC-94/);
-    assert.match(body, /AISDLC-101/);
-  });
-
-  it('refuses re-sign without ~/.ai-sdlc/signing-key.pem', () => {
-    assert.match(body, /\$HOME\/\.ai-sdlc\/signing-key\.pem/);
-    assert.match(body, /\/ai-sdlc init-signing-key/);
-  });
-
-  it('invokes sign-attestation.mjs with verdicts + iteration + harness-note (same as execute Step 10)', () => {
-    assert.match(body, /scripts\/sign-attestation\.mjs/);
-    assert.match(body, /--review-verdicts/);
-    assert.match(body, /--iteration-count/);
-    assert.match(body, /--harness-note/);
-  });
-
-  it('stages .ai-sdlc/attestations in the chore commit', () => {
-    assert.match(body, /git add \.ai-sdlc\/attestations/);
-  });
-
-  it('chore commit body sanitises CI-skip magic tokens (AISDLC-88)', () => {
-    assert.match(body, /\(skip ci marker\)/);
-    assert.match(body, /\(ci skip marker\)/);
-    assert.match(body, /\(no ci marker\)/);
-    assert.match(body, /\(skip actions marker\)/);
-    assert.match(body, /\(actions skip marker\)/);
-    assert.match(body, /git commit -m "\$CHORE_BODY"/);
+  it('says the verdict check carries an approval across the rebase', () => {
+    assert.match(body, /Step 5 — No re-signing/);
+    assert.match(body, /ok-carried/);
   });
 });
 
@@ -246,17 +213,9 @@ describe('/ai-sdlc rebase body — escalation handling', () => {
 });
 
 describe('/ai-sdlc rebase body — composition with /ai-sdlc execute', () => {
-  it('mirrors execute Step 10 chore-commit sanitization pattern', () => {
-    // The five sed replacements + the same git commit -m wiring as
-    // execute.md Step 10 — defense-in-depth shared between the two
-    // commands.
-    assert.match(body, /sed -E/);
-    assert.match(body, /'s\/\\\[\[Ss\]\[Kk\]\[Ii\]\[Pp\] \[Cc\]\[Ii\]\\\]\/\(skip ci marker\)\/g'/);
-  });
-
   it('documents when operator should invoke this manually', () => {
     assert.match(body, /When the operator should invoke this manually/);
-    assert.match(body, /verify-attestation\.yml/);
+    assert.match(body, /replay-dirty/);
   });
 });
 
@@ -268,7 +227,6 @@ describe('/ai-sdlc rebase body — operator output', () => {
   it('prints a tight summary at end of run', () => {
     assert.match(body, /## Step 7.*Report/);
     assert.match(body, /Outcome:/);
-    assert.match(body, /Re-attestation:/);
   });
 });
 
@@ -340,42 +298,6 @@ describe('/ai-sdlc rebase body — Step 1 task-id regex (BSD-portable)', () => {
   });
 });
 
-describe('/ai-sdlc rebase body — Step 5 falls through to Step 6 (no exit 0)', () => {
-  // Ground truth: when contentHash is unchanged, Step 5 must SKIP the
-  // signing logic but MUST NOT terminate the command — Step 6 still
-  // needs to push the rebased commits. The prior `exit 0` left commits
-  // stranded in the worktree while operators believed the rebase was
-  // done. Round-2 reviewer flagged this as "concrete failure: PR shows
-  // pre-rebase HEAD on GitHub".
-  it('Step 5 skip-resign branch does NOT use `exit 0`', () => {
-    const step5 = body.split('## Step 5')[1]?.split('## Step 6')[0] || '';
-    assert.ok(step5.length > 0, 'Step 5 section must exist before Step 6');
-    // Ban the literal `exit 0` from the skip-resign control flow.
-    assert.doesNotMatch(
-      step5,
-      /^\s*exit 0\s*$/m,
-      'Step 5 must not contain `exit 0` (would skip Step 6 push)',
-    );
-  });
-
-  it('Step 5 uses if/else control flow (skip vs sign) rather than early-exit', () => {
-    const step5 = body.split('## Step 5')[1]?.split('## Step 6')[0] || '';
-    // Either an `if … then … else …` or an inverted-guard `if [ $PRE != $POST ]; then ... fi`
-    // pattern is acceptable. We assert at least an `else` OR an `fi` exists in
-    // the section to prove the skip path is wrapped, not exited.
-    assert.match(step5, /\bfi\b/, 'Step 5 must close an if-block (control flow, not exit)');
-  });
-
-  it('Step 5 documents that skip-branch must fall through to Step 6', () => {
-    const step5 = body.split('## Step 5')[1]?.split('## Step 6')[0] || '';
-    assert.match(
-      step5,
-      /[Ff]all(s)? through to Step 6|MUST.*push|push.*MUST/,
-      'Step 5 must explain that the skip branch still requires Step 6 to run',
-    );
-  });
-});
-
 describe('/ai-sdlc rebase body — push-owner consolidation (single push)', () => {
   // Ground truth: the slash command body owns the force-push (Step 6).
   // The subagent does NOT push. Round-2 reviewer caught duplicate-push
@@ -435,30 +357,5 @@ describe('/ai-sdlc rebase body — subagent JSON written to /tmp before Step 5',
       /skip-resign|skip the.*signing|skip the.*sign|Step 5/i,
       'Step 4 must explain that Step 5 reads the persisted file',
     );
-  });
-});
-
-describe('/ai-sdlc rebase body — re-attestation fidelity (iteration + harness)', () => {
-  // Ground truth: when re-signing after rebase, carry the original
-  // attestation's iterationCount + harnessNote forward instead of
-  // hard-coding `1` and `""`. Falls back to defaults + documents the
-  // loss in the chore commit body if the original envelope is missing.
-  it('reads iterationCount from the pre-rebase DSSE envelope (not hard-coded 1)', () => {
-    assert.match(
-      body,
-      /iterationCount.*?1|PRE_ITER/,
-      'must read iterationCount from the pre-rebase attestation file',
-    );
-    // The body should reference the pre-rebase attestation file path.
-    assert.match(body, /\.ai-sdlc\/attestations\/\$\{PRE_HEAD_SHA\}\.dsse\.json/);
-  });
-
-  it('reads harnessNote from the pre-rebase DSSE envelope (not hard-coded "")', () => {
-    assert.match(body, /harnessNote/);
-    assert.match(body, /PRE_HARNESS_NOTE/);
-  });
-
-  it('documents the fidelity-loss fallback path when pre-rebase envelope is missing', () => {
-    assert.match(body, /FIDELITY_NOTE|reset to defaults|fidelity/i);
   });
 });

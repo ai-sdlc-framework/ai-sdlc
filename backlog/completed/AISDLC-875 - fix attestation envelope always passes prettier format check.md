@@ -10,8 +10,6 @@ labels:
   - reliability
 dependencies: []
 references:
-  - pipeline-cli/src/attestation/format-json.ts
-  - pipeline-cli/src/attestation/sign-v6.ts
   - .prettierignore
 priority: medium
 dispatchable: true
@@ -20,7 +18,17 @@ drift_log:
     type: ref-deleted
     detail: 'Referenced file no longer exists: scripts/check-attestation-sign.sh'
     resolution: flagged
-drift_checked: '2026-11-05'
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/attestation/format-json.ts
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/sign-v6.ts'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Context

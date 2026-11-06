@@ -398,8 +398,6 @@ describe('RFC-0043 AC-3 — prompt injection → finding; clean-room signer vali
 
       const result = runCleanRoomSigner({
         reportArtifactPath: reportPath,
-        repoRoot: tmpDir,
-        taskId: 'AISDLC-504',
         headSha: 'a'.repeat(40), // matches VALID_REPORT.headSha
         workDir: tmpDir, // no sandbox sentinels → isolation check passes
       });

@@ -1,7 +1,8 @@
 ---
 id: AISDLC-676
 title: >-
-  RFC-0052: reviewerSet staged in resolution, Step 7 and Step 8; transcript leaves with stage; reviews-ledger role
+  RFC-0052: reviewerSet staged in resolution, Step 7 and Step 8; transcript
+  leaves with stage; reviews-ledger role
 status: Done
 assignee: []
 created_date: '2026-10-01'
@@ -20,11 +21,16 @@ references:
   - spec/rfcs/RFC-0052-staged-review-pipeline.md
   - pipeline-cli/src/steps/reviewer-set.ts
   - ai-sdlc-plugin/commands/execute.md
-  - pipeline-cli/src/attestation/merkle.ts
   - pipeline-cli/src/attestation/reviews-ledger.ts
   - pipeline-cli/bin/cli-attestation.mjs
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/attestation/merkle.ts'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

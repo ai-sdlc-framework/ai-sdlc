@@ -9,14 +9,21 @@ labels:
   - attestation
   - adoption
   - plugin
-  - ci:no-issue-required
+  - 'ci:no-issue-required'
 priority: high
 dependencies: []
 references:
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - ai-sdlc-plugin/plugin.json
   - orchestrator/package.json
   - ai-sdlc-plugin/scripts/install-runtime-deps.sh
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/scripts/sign-attestation.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description

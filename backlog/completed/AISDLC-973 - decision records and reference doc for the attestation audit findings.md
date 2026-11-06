@@ -1,6 +1,8 @@
 ---
 id: AISDLC-973
-title: 'Decision records for the AISDLC-484, 725 and 947 trust impacts, and the attestation reference documents the unverified post-sign backlog edits'
+title: >-
+  Decision records for the AISDLC-484, 725 and 947 trust impacts, and the
+  attestation reference documents the unverified post-sign backlog edits
 status: Done
 assignee: []
 created_date: '2026-10-17'
@@ -11,9 +13,16 @@ dependencies: []
 references:
   - docs/operations/attestation-reference.md
   - docs/operations/decision-authority.md
-  - pipeline-cli/attestation-core/verify-core.mjs
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/attestation-core/verify-core.mjs
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description
