@@ -487,6 +487,10 @@ export {
   type HandleResult,
 } from './sa-scoring/rescore-orchestrator.js';
 export {
+  createSoulAlignmentShadow,
+  type SoulAlignmentShadowConfig,
+} from './sa-scoring/admission-shadow.js';
+export {
   scoreSoulAlignment,
   resolveSoulAlignmentOverride,
   type ScoreSoulAlignmentInput,

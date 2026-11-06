@@ -104,7 +104,21 @@ export interface AdmissionComposite {
 
 const DEFAULT_SIGNAL = 0.5;
 
+/** Context handed to the Phase 2a SA shadow hook at admission (RFC-0062 Phase 1). */
+export interface SoulAlignmentShadowContext {
+  workItemId: string;
+  issueNumber: number;
+  /** Label-table soulAlignment actually used for the admitted score. */
+  labelSoulAlignment: number;
+}
+
 export interface AdmissionCompositeOptions {
+  /**
+   * Phase 2a shadow hook: invoked exactly once per non-override admission.
+   * It runs the three-layer SA engine for logging only; its result never
+   * feeds the composite, and any failure is swallowed.
+   */
+  soulAlignmentShadow?: (ctx: SoulAlignmentShadowContext) => void;
   /**
    * Optional override for the soulAlignment dimension — when present
    * (typically a Phase 2b/2c/3 SA-1 from `scoreSoulAlignment`), it
@@ -241,6 +255,19 @@ export function computeAdmissionComposite(
   const baseSoulAlignment = clamp01(
     options?.soulAlignmentOverride ?? priorityInput.soulAlignment ?? DEFAULT_SIGNAL,
   );
+
+  // ── Phase 2a shadow: engine runs for logging only, never alters score ──
+  if (options?.soulAlignmentShadow) {
+    try {
+      options.soulAlignmentShadow({
+        workItemId: input.workItemId ?? `#${input.issueNumber}`,
+        issueNumber: input.issueNumber,
+        labelSoulAlignment: baseSoulAlignment,
+      });
+    } catch {
+      // shadow must never affect admission
+    }
+  }
 
   // ── D-pi_adjusted ─────────────────────────────────────────────
   const demand = priorityInput.demandSignal ?? DEFAULT_SIGNAL;
