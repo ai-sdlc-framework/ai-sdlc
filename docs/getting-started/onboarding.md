@@ -1,5 +1,20 @@
 # External Adopter Onboarding: Clean Clone to First Attested PR
 
+## Fastest path: two steps
+
+```text
+/plugin marketplace add ai-sdlc-framework/ai-sdlc
+/plugin install ai-sdlc@ai-sdlc
+```
+
+Then, once the plugin is loaded (run `/reload-plugins` if Claude Code does not pick it up), run one command:
+
+```text
+/ai-sdlc setup
+```
+
+It runs init, registers the MCP advisor for the detected clients and runs doctor, then prints a report listing each step as done, skipped (already present) or not possible, with the reason and the exact next action. Re-running it is safe and says "Nothing changed" when the repo is already set up. No signing key is needed (RFC-0061). The global `@ai-sdlc/orchestrator` install is not required. The longer paths below remain for scripted or manual installs.
+
 ## Quick install: paste this into Claude Code
 
 Open Claude Code in the repository you want to adopt AI-SDLC in and paste the brief below. The agent runs each step, verifies it, and recovers from the known failures (partial plugin cache install, missing `@ai-sdlc/reference`, uninitialised keyring, doctor warnings). The same brief is kept as a standalone file at [`install-agent-brief.md`](install-agent-brief.md). The step-by-step commands follow in [Raw install commands](#raw-install-commands).

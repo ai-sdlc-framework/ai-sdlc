@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1178
 title: 'First-run install: one command after adding the plugin does signing key, init, doctor and MCP advisor registration'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-04'
 labels:

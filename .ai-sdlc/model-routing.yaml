@@ -115,6 +115,8 @@ spec:
       '*': { model: sonnet }
     rfc-init:
       '*': { model: haiku }
+    setup:
+      '*': { model: haiku }
     triage:
       '*': { model: haiku }
     version:
