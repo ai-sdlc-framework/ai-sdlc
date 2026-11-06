@@ -611,6 +611,8 @@ describe('Step 3 — setupWorktree auto-cleanup (AISDLC-224)', () => {
         workDir: tmp,
         runner: fake.toRunner(),
         autonomousMode: true,
+        readSentinelMtime: () => null,
+        readProcessTable: () => '',
       });
 
       // Cleanup proceeded (the prefix-match false positive is fixed)
