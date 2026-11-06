@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "2",
+  "description": "Inputs for the cross-SDK audit chain conformance fixture. Every SDK must derive expectedHashes.",
+  "inputs": [
+    {
+      "id": "audit-fixture-1",
+      "timestamp": "2026-01-02T03:04:05.006Z",
+      "actor": "agent/builder",
+      "action": "execute",
+      "resource": "pipeline/build",
+      "decision": "allowed"
+    },
+    {
+      "id": "audit-fixture-2",
+      "timestamp": "2026-01-02T03:04:06.000Z",
+      "actor": "agent/builder",
+      "action": "enforce",
+      "resource": "gate/quality",
+      "policy": "policy/strict",
+      "decision": "denied",
+      "details": {
+        "ratio": 1.0,
+        "note": "<&> café   😀",
+        "big": 1e21,
+        "small": 1e-7,
+        "nested": { "b": [1, 2.5, null, true], "a": "x\ty" }
+      }
+    },
+    {
+      "id": "audit-fixture-3",
+      "timestamp": "2026-01-02T03:04:07.123Z",
+      "actor": "user/admin",
+      "action": "promote",
+      "resource": "pipeline/build",
+      "decision": "overridden",
+      "details": {}
+    }
+  ],
+  "expectedHashes": [
+    "15dc48978d74864e997b13bd7353559a54c55356aa7d3f44712912479c24619a",
+    "a89992d60c3ac5b9b48c9ecc4cf6f210fcb64a2df514b7f8b983d836c2c8df59",
+    "7d3d0b145db346419b53a1263907a56a6bdf0c369775d5f6f018a8d25cae11a7"
+  ]
+}

@@ -27,7 +27,7 @@ func (s *FileSink) Write(entry *AuditEntry) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data, err := json.Marshal(entry)
+	data, err := marshalEntry(entry)
 	if err != nil {
 		return fmt.Errorf("failed to marshal audit entry: %w", err)
 	}
@@ -68,18 +68,27 @@ func VerifyFileIntegrity(path string) (bool, error) {
 		return false, err
 	}
 
-	prev := "genesis"
-	for _, e := range entries {
-		if e.PreviousHash != prev {
-			return false, nil
-		}
-		expected := ComputeEntryHash(e)
-		if e.Hash != expected {
-			return false, nil
-		}
-		prev = e.Hash
+	return VerifyEntries(entries), nil
+}
+
+// marshalEntry writes v2 entries in the shared wire schema (no Go-only legacy
+// fields) and omits "details" when nil, so an empty object ({}) survives a
+// round trip while an absent one stays absent.
+func marshalEntry(entry *AuditEntry) ([]byte, error) {
+	wire := *entry
+	if wire.SchemaVersion == SchemaVersion {
+		wire.ResourceKind, wire.ResourceName, wire.Outcome = "", "", ""
 	}
-	return true, nil
+	raw, err := json.Marshal(&wire)
+	if err != nil || wire.Details != nil {
+		return raw, err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	delete(m, "details")
+	return json.Marshal(m)
 }
 
 // RotateAuditFile renames the current file and creates a new one.

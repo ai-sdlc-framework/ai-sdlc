@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/audit-entry.json",
+  "title": "AuditEntry",
+  "description": "Wire schema of a hash-chained audit entry (spec.md#audit-entry). schemaVersion 2 is hashed over its RFC 8785 JCS form.",
+  "type": "object",
+  "required": ["schemaVersion", "id", "timestamp", "actor", "action", "resource", "decision", "hash"],
+  "properties": {
+    "schemaVersion": { "const": "2" },
+    "id": { "type": "string" },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "actor": { "type": "string" },
+    "action": { "type": "string" },
+    "resource": { "type": "string" },
+    "policy": { "type": "string" },
+    "decision": { "enum": ["allowed", "denied", "overridden"] },
+    "details": { "type": "object" },
+    "previousHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

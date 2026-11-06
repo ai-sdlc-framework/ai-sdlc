@@ -10,6 +10,10 @@ tests/v1alpha1/
   quality-gate/      — QualityGate resource test fixtures
   autonomy-policy/   — AutonomyPolicy resource test fixtures
   adapter/           — AdapterBinding resource test fixtures
+
+audit-chain/         — Cross-SDK audit hash chain fixture (fixture.json) and
+                       per-SDK sample chains (samples/*.jsonl); see spec.md#audit-entry.
+                       Regenerate a sample with AUDIT_CONFORMANCE_WRITE=1 in that SDK's test.
 ```
 
 ## Fixture Naming
