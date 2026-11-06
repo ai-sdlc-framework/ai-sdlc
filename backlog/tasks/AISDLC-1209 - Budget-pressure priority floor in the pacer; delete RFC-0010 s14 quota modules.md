@@ -1,6 +1,6 @@
 ---
 id: AISDLC-1209
-title: 'Budget-pressure priority floor in the pacer; delete RFC-0010 s14 quota modules'
+title: Budget-pressure priority floor in the pacer; delete RFC-0010 s14 quota modules
 status: In Progress
 assignee: []
 created_date: '2026-11-06'
@@ -14,12 +14,25 @@ references:
   - spec/rfcs/RFC-0062-algorithm-improvement-directions.md
   - spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md
   - pipeline-cli/src/hierarchy/budget.ts
-  - orchestrator/src/dispatch/worker-pool.ts
-  - orchestrator/src/scheduling/schedule-decision.ts
-  - orchestrator/src/scheduling/ledger.ts
   - .ai-sdlc/dark-code-baseline.json
 priority: high
 dispatchable: true
+drift_log:
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: orchestrator/src/dispatch/worker-pool.ts'
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      orchestrator/src/scheduling/schedule-decision.ts
+    resolution: flagged
+  - date: '2026-11-06'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: orchestrator/src/scheduling/ledger.ts'
+    resolution: flagged
+drift_checked: '2026-11-06'
 ---
 
 ## Description
