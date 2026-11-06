@@ -969,6 +969,9 @@ describe('AISDLC-1172: verdict-check job feeds pr-ready and posts ai-sdlc/attest
     const run = wf.jobs['verdict-check'].steps.map((st) => String(st.run ?? '')).join('\n');
     assert.match(run, /cli-attestation\.mjs verdict-check/);
     assert.match(run, /--post-status/);
+    // AISDLC-1194: carry-forward filters by PR; the base-checkout comment must stay.
+    assert.match(run, /--pull-request "\$PR_NUMBER"/);
+    assert.match(raw, /BASE tree's CLI \(trusted code, checked out from base\.sha\)/);
     assert.doesNotMatch(wf.jobs['verdict-check'].continue_on_error ?? '', /true/);
     assert.equal(wf.jobs['verdict-check'].permissions.statuses, 'write');
   });
