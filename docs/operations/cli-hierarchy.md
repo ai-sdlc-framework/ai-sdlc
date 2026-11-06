@@ -948,6 +948,15 @@ ledger file, not the 20-entry window; `(none)` when empty. A rotated session see
 `handoff read --role <r>`; the file and the board are all a fresh context needs. The resume
 command per role is `/ai-sdlc:planner`, `/ai-sdlc operator-dispatch` and `/ai-sdlc executor`.
 
+### Claim order and `ranking` (AISDLC-1208, RFC-0062)
+
+The board claims eligible manifests in the order set by `ranking:` in `.ai-sdlc/dispatch.yaml`:
+
+- `legacy` (default for one release): wave, manifest priority (`critical`, `high`, `medium`, `low`), then enqueue time. `cli-dispatch board` prints one extra line, `ranking: diverges at position N: legacy A, effective-priority B` or `ranking: identical`, comparing this order with the new one.
+- `effective-priority`: the tuple `(wave, effectivePriority desc, criticalPathLength desc, ageBonus desc, id)`. Effective priority is RFC-0014's `max` over downstream tasks (`critical` = 4), so a low leaf that unblocks a critical task outranks an unrelated high one. `ageBonus` is `clamp((ageDays - 30) / 180, 0, 1)` from the manifest's `dispatchedAt`. Manifest mtime is never a key.
+
+`critical` sorts first under both modes.
+
 ### Dispatch loop measures itself (RFC-0051 section 6)
 
 The dispatch loop is meant to be mechanical, so `tick` measures it:
