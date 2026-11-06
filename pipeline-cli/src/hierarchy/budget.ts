@@ -237,7 +237,13 @@ export function paceOf(
 /** Lowest task priority still claimed while the budget projects past 100% (RFC-0062 OQ-1, DEC-0385). */
 export type PriorityFloor = 'none' | 'high' | 'medium';
 
-export const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
+export const PRIORITY_RANK: Record<string, number> = {
+  highest: -2,
+  critical: -1,
+  high: 0,
+  medium: 1,
+  low: 2,
+};
 
 export interface BudgetStatus {
   at: string;

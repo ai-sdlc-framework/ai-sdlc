@@ -84,6 +84,37 @@ describe('claimNext honours the budget priority floor (RFC-0062 OQ-1)', () => {
     expect(resumed.claimed && resumed.manifest?.taskId).toBe('AISDLC-1');
   });
 
+  it('claims critical and highest tasks under a high floor', async () => {
+    for (const [id, pri] of [
+      ['AISDLC-4', 'critical'],
+      ['AISDLC-5', 'highest'],
+    ] as const) {
+      writeFileSync(
+        path.join(root, 'backlog', 'tasks', `${id} - t.md`),
+        `---\nid: ${id}\ntitle: t\nstatus: To Do\npriority: ${pri}\n---\n`,
+      );
+    }
+    enqueueTasks(board, [{ taskId: 'AISDLC-4' }, { taskId: 'AISDLC-5' }], {
+      baseSha: 'abc',
+      dispatchedBy: 'test',
+      workDir: root,
+      resolveTaskFile: (id) => `backlog/tasks/${id} - t.md`,
+    });
+    writeFileSync(
+      path.join(board, 'config.json'),
+      JSON.stringify({ budget: { priorityFloor: 'high', marginPoints: 100 } }),
+    );
+    await sample(50, T0);
+    await sample(60, T0 + 3600_000 + 6 * 60_000);
+    const now = () => new Date(clock);
+    const claimed: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const r = claimNext(board, 'in-session-agent', now);
+      if (r.claimed && r.manifest) claimed.push(r.manifest.taskId);
+    }
+    expect(claimed.sort()).toEqual(['AISDLC-3', 'AISDLC-4', 'AISDLC-5']);
+  });
+
   it('with the default none, claims are unrestricted under the same pressure', async () => {
     await sample(50, T0);
     await sample(60, T0 + 3600_000 + 6 * 60_000);
