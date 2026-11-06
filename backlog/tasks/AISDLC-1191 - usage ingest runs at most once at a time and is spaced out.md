@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1191
 title: 'Usage ingest runs at most once at a time and is spaced out'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-05'
 labels:

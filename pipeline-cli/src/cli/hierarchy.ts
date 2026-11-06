@@ -62,7 +62,8 @@ import { executorCap, resolveExecutorsMax } from '../hierarchy/executor-cap.js';
 import { clearScaleCeiling, writeScaleCeiling } from '../hierarchy/scale.js';
 import { parseQuota, parseQuotaFloor } from '../hierarchy/gh-calls.js';
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import { launchUsageIngestDetached } from '../usage/launch.js';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1430,16 +1431,11 @@ export async function runHierarchyCli(
           usageIngest:
             extras.usageIngest ??
             (() => {
-              const bin = path.join(repoRoot, 'pipeline-cli', 'bin', 'cli-usage.mjs');
-              if (!existsSync(bin)) return;
-              const child = spawn(process.execPath, [bin, 'ingest', '--max-seconds', '25'], {
+              // AISDLC-1191: spaced against the Stop hook and single-instance (see usage/launch.ts).
+              launchUsageIngestDetached({
+                binPath: path.join(repoRoot, 'pipeline-cli', 'bin', 'cli-usage.mjs'),
                 cwd: repoRoot,
-                detached: true,
-                stdio: 'ignore',
               });
-              // A failed spawn must never crash the tick.
-              child.on('error', () => undefined);
-              child.unref();
             }),
           // AISDLC-981: the tick owns the parent; the open-PR list is the wake's snapshot.
           parentUpkeep:
