@@ -83,7 +83,7 @@ describe('effective-priority ranking', () => {
       { 'AISDLC-3': { priority: 1 }, 'AISDLC-1': { priority: 3 } },
     );
     const res = claimNext(board, 'claude-p-shell');
-    expect(res.claimed && res.manifest.taskId).toBe('AISDLC-1');
+    expect(res.manifest?.taskId).toBe('AISDLC-1');
   });
 
   it('legacy mode keeps the old order and reports the divergence', () => {
