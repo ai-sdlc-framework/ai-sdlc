@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1195
 title: 'Verdict-check skips only the exact release-please branch, not any release-please-- prefix'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:
