@@ -42,6 +42,7 @@ import {
 } from '../routing/artifacts-dir.js';
 import { taskClassOf } from '../routing/task-class.js';
 import { generateNonce } from '../attestation/staged-review.js';
+import { verdictRefName } from '../attestation/verdict-record.js';
 import { nonceMarkerLiteral } from '../attestation/harness-transcript.js';
 import { diffHeaderPaths } from '../classifier/diff-header.js';
 import {
@@ -50,6 +51,7 @@ import {
   defaultGitRunner,
   formatRoundLogLine,
   planReviewRound,
+  guardSkipPlan,
   type ReviewRoundPlan,
 } from '../incremental-review/review-rounds.js';
 
@@ -122,7 +124,7 @@ export async function buildReviewPrompts(
   // AISDLC-725: ONE shared incremental decision for every prompt build. A first round (no
   // recorded state) plans a full review; a later round plans a delta unless a forced-full
   // rule fires. `skip` is chosen only when the caller opts in with `allowSkip`.
-  const roundPlan: ReviewRoundPlan = (
+  let roundPlan: ReviewRoundPlan = (
     opts.planRound ??
     ((i) =>
       planReviewRound({
@@ -307,6 +309,27 @@ export async function buildReviewPrompts(
       ...(judgment ? { judgment } : {}),
     })
   ).reviewers;
+
+  // AISDLC-1196: a skip needs every required reviewer in the anchor and a verdict ref for HEAD.
+  if (roundPlan.mode === 'skip') {
+    let refExists = false;
+    const headForRef = await runner('git', ['rev-parse', 'HEAD'], {
+      cwd: opts.worktreePath,
+      allowFailure: true,
+    });
+    if (headForRef.code === 0 && headForRef.stdout.trim()) {
+      const ls = await runner(
+        'git',
+        ['ls-remote', 'origin', verdictRefName(headForRef.stdout.trim())],
+        { cwd: opts.worktreePath, allowFailure: true },
+      );
+      refExists = ls.code === 0 && ls.stdout.trim() !== '';
+    }
+    roundPlan = guardSkipPlan(roundPlan, reviewers, refExists);
+    if (roundPlan.mode !== 'skip') {
+      console.log(`[ai-sdlc-progress] ${formatRoundLogLine(roundPlan)}`);
+    }
+  }
 
   // AISDLC-739: one diff-binding nonce per build, bound to the head SHA and embedded in
   // every prompt so a reviewer run outside the executor is bound by the same value

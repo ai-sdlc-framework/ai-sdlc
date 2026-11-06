@@ -177,7 +177,11 @@ export type IncrementalReason =
    * record that a review ran at the base commit, or that every reviewer approved), so
    * neither skip nor delta is allowed.
    */
-  | 'review-uncorroborated';
+  | 'review-uncorroborated'
+  /** AISDLC-1196: an unchanged-content anchor lacks a required reviewer, so no skip. */
+  | 'reviewer-missing'
+  /** AISDLC-1196: unchanged content with full coverage but no verdict ref for the head. */
+  | 'no-verdict-ref';
 
 // ── Marker parse / format ────────────────────────────────────────────
 

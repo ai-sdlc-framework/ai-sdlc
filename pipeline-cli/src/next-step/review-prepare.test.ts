@@ -407,10 +407,42 @@ spec:
     ...over,
   });
 
+  it('plans full when the unchanged-content anchor lacks a required reviewer (AISDLC-1196)', async () => {
+    script();
+    h.runner.on(/ls-remote/, ok('abc\trefs/ai-sdlc/verdicts/headsha\n'));
+    const res = await prepareReview(h.ctx, state, 2, {
+      planRound: () =>
+        plan({ mode: 'skip', reason: 'unchanged', baseSha: 'oldsha', skipRoles: ['code'] }),
+    });
+    expect(res.kind).toBe('spawn');
+  });
+
+  it('plans full when coverage is complete but the head has no verdict ref (AISDLC-1196)', async () => {
+    script();
+    h.runner.on(/ls-remote/, ok(''));
+    const res = await prepareReview(h.ctx, state, 2, {
+      planRound: () =>
+        plan({
+          mode: 'skip',
+          reason: 'unchanged',
+          baseSha: 'oldsha',
+          skipRoles: ['code', 'test', 'security', 'correctness', 'staged'],
+        }),
+    });
+    expect(res.kind).toBe('spawn');
+  });
+
   it('reuses the prior approval (no spawn, no nonce) when the content is unchanged', async () => {
     script();
+    h.runner.on(/ls-remote/, ok('abc\trefs/ai-sdlc/verdicts/headsha\n'));
     const res = await prepareReview(h.ctx, state, 2, {
-      planRound: () => plan({ mode: 'skip', reason: 'unchanged', baseSha: 'oldsha' }),
+      planRound: () =>
+        plan({
+          mode: 'skip',
+          reason: 'unchanged',
+          baseSha: 'oldsha',
+          skipRoles: ['code', 'test', 'security', 'correctness', 'staged'],
+        }),
     });
     expect(res.kind).toBe('nothing-to-spawn');
     if (res.kind !== 'nothing-to-spawn') return;
