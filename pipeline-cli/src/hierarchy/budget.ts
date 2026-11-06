@@ -245,9 +245,9 @@ export interface BudgetStatus {
   fiveHour?: WindowPace;
   overridden: boolean;
   /** Configured `budget.priorityFloor` (default `none`). */
-  floor: PriorityFloor;
+  floor?: PriorityFloor;
   /** True when the floor is set and a window projects 100% before its reset. */
-  floorActive: boolean;
+  floorActive?: boolean;
 }
 
 /** `budget.priorityFloor` from `<board>/config.json`: `none` (default), `high` or `medium`. */
@@ -422,5 +422,5 @@ export function formatBudget(b: BudgetStatus): string {
     : w
       ? `, no projected exhaustion (resets ${w.resetsAt})`
       : '';
-  return `BUDGET ${part('7d', b.sevenDay)}; ${part('5h', b.fiveHour)}${proj}${b.overridden ? ' [override active]' : ''}; FLOOR ${b.floor}${b.floorActive ? ' (active)' : ''}`;
+  return `BUDGET ${part('7d', b.sevenDay)}; ${part('5h', b.fiveHour)}${proj}${b.overridden ? ' [override active]' : ''}; FLOOR ${b.floor ?? 'none'}${b.floorActive ? ' (active)' : ''}`;
 }
