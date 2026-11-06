@@ -35,11 +35,8 @@ import {
 import path from 'node:path';
 
 import { buildDependencyGraph } from '../deps/dependency-graph.js';
-<<<<<<< HEAD
 import { activeClaimFloor, PRIORITY_RANK } from '../hierarchy/budget.js';
-=======
 import { buildRankKeys, compareRankKeys, readRankingMode, shadowLine } from './ranking.js';
->>>>>>> 630ba5af (feat(pipeline-cli): rank live claim order by effective priority and critical path (AISDLC-1208))
 
 import { now as clockNow } from '../clock.js';
 import { reportCapabilityOutcome } from '@ai-sdlc/reference';
