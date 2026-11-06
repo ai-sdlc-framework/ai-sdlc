@@ -94,6 +94,7 @@ import {
   type ClosedUnmergedReport,
   type ListedClosedPr,
 } from '../kpi/closed-unmerged.js';
+import { withReconcileLock } from './open-pr-limit.js';
 import { summariseLanding, takeSuppressedNote } from './reconcile.js';
 import { takeRestartRequests } from './restart-lock.js';
 import { clearRotateRequest } from './rotate-request.js';
@@ -451,6 +452,11 @@ export interface LoopDeps {
   markReady?: () => MarkReadyReport;
   /** Lands eligible own-author PRs through merge-if-eligible; called only when `land-eligible-prs` is granted. */
   landEligible?: () => Promise<LandReport>;
+  /**
+   * In-tick reconcile pass (AISDLC-1189): queues repairs before the spawn step. Runs under the
+   * reconcile lock, after landing; called only on a fresh GitHub read.
+   */
+  reconcileNow?: () => void | Promise<void>;
   /** Moves escalated decisions whose tier timebox lapsed up one tier; its failure never fails the tick. */
   promoteExpired?: () => PromotedDecision[];
   /**
@@ -792,6 +798,7 @@ async function runEphemeralSteps(
   quotaSkip: TickResult['quotaSkip'],
   reap: () => Promise<StalledReport[]>,
   state: LoopState,
+  beforeSpawn?: () => Promise<void>,
 ): Promise<{ stalled: StalledReport[]; report?: EphemeralReport }> {
   const eph = deps.ephemeral;
   if (!eph || held) return { stalled: await reap() };
@@ -810,10 +817,16 @@ async function runEphemeralSteps(
   const stalled = await reap();
   if (!quotaSkip) {
     try {
+      await beforeSpawn?.();
+    } catch {
+      /* a failed landing or reconcile pass must not stop the spawn step */
+    }
+    try {
       await spawnForEligibleClaims(deps.boardDir, eph, deps.now, report);
       for (const u of report.unclaimable ?? []) {
         console.error(`[hierarchy] not spawning an executor for ${u.taskId}: ${u.reason}`);
       }
+      if (report.heldForOpenPrs) console.error(`[hierarchy] ${report.heldForOpenPrs.reason}`);
     } catch {
       /* an unreadable queue must not stop the dispatch loop */
     }
@@ -1098,6 +1111,28 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const readGithub = !quotaSkip && !githubFresh;
   log.start('verdicts');
   const watch = await watchVerdicts(deps, state, held);
+  // AISDLC-1189: landing, then the in-tick reconcile, run before any spawn.
+  let landed: LandReport | undefined;
+  let landDone = false;
+  const landAndRepair = async (): Promise<void> => {
+    if (landDone || !readGithub) return;
+    landDone = true;
+    if (deps.landEligible && deps.operational.has('land-eligible-prs')) {
+      try {
+        landed = await deps.landEligible();
+      } catch (err) {
+        landed = {
+          landed: [],
+          refused: [],
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }
+    if (deps.reconcileNow) {
+      const run = deps.reconcileNow;
+      await withReconcileLock(deps.boardDir, deps.now(), run);
+    }
+  };
   const ephemeral = await runEphemeralSteps(
     deps,
     watch.verdicts,
@@ -1108,7 +1143,9 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
       return stalled;
     },
     state,
+    landAndRepair,
   );
+  await landAndRepair();
   const stalled = ephemeral.stalled;
   const restarts = await runRestarts(deps, state, held);
   state.drainStartedAt ??= deps.now().toISOString();
@@ -1245,18 +1282,6 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     readGithub && deps.markReady && deps.operational.has('mark-ready-after-codeql')
       ? deps.markReady()
       : undefined;
-  let landed: LandReport | undefined;
-  if (readGithub && deps.landEligible && deps.operational.has('land-eligible-prs')) {
-    try {
-      landed = await deps.landEligible();
-    } catch (err) {
-      landed = {
-        landed: [],
-        refused: [],
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-  }
   let promotions: PromotedDecision[] = [];
   if (deps.promoteExpired) {
     log.start('promotions');

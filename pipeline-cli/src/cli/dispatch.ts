@@ -216,6 +216,7 @@ import {
   type ReconcilePr,
 } from '../hierarchy/reconcile.js';
 import { createPlannerNotifier } from '../hierarchy/planner-notify.js';
+import { acquireReconcileLock, releaseReconcileLock } from '../hierarchy/open-pr-limit.js';
 import { gatherPrFacts } from '../hierarchy/pr-facts.js';
 import { annotateSnapshot, appendReconcileLog, rowsForOpen } from '../hierarchy/pr-rows.js';
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
@@ -607,10 +608,19 @@ export async function runDispatchCli(
           timerOpenMs: timers.timerOpenMs,
           timerIdleMs: timers.timerIdleMs,
           reconcile: () => {
-            const facts = pass();
-            if (!facts) return listLanding(boardDir).filter((r) => !r.landed).length;
-            out(runReconcile(facts));
-            logRows(facts);
+            // AISDLC-1189: skip the pass while the dispatch tick's own pass holds the lock.
+            if (!acquireReconcileLock(boardDir, clockNow())) {
+              return listLanding(boardDir).filter((r) => !r.landed).length;
+            }
+            try {
+              const facts = pass();
+              if (facts) {
+                out(runReconcile(facts));
+                logRows(facts);
+              }
+            } finally {
+              releaseReconcileLock(boardDir);
+            }
             return listLanding(boardDir).filter((r) => !r.landed).length;
           },
         });

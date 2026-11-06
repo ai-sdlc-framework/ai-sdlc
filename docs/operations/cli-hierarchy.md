@@ -1712,13 +1712,29 @@ session; `unknown` means it is open but absent from the registry. `inflightTask`
 task the session's heartbeat holds; an executor with `idle` and no `inflightTask` is ready
 to claim. `board.queued` of 0 with all executors idle means the queue is drained.
 
+## Land and repair before new tasks (AISDLC-1189, DEC-0373)
+
+Each dispatch tick, on a fresh GitHub read, runs in this order before any executor is spawned:
+landing (`landEligible`), then one in-tick `cli-dispatch reconcile` pass that queues repairs, then
+the spawn step. A repair queued by that pass is spawned in the same tick, ahead of brief entries.
+The in-tick pass and `reconcile --watch` never run a pass at once: both take
+`<board>/reconcile.lock` (stale after 10 minutes), and the watch skips a pass while the tick holds it.
+
+New tasks wait while open task PRs are at the limit; repair entries are still claimed. The limit
+resolves `AI_SDLC_OPEN_PR_LIMIT`, then `<board>/config.json` `{ "executors": { "openPrLimit": N } }`,
+then `executors.max`; an invalid value falls through to the next source. Landing records with
+`landed` or `closedUnlanded`, and non-task kinds (docs, decisions-sync, deps), do not count. When
+entries are held the tick logs a reason line naming the open PRs, and `status` prints
+`OPEN PRS <n> of limit <m>`.
+
 ## Claim order and reprioritize (AISDLC-904)
 
 A worker claims the eligible queue entry that sorts first by: `wave` ascending (absent is 0),
 then `priority` ascending (any finite number; an absent priority sorts last), then enqueue time
 (file mtime, oldest first). Inside one priority band the order is first-in-first-out, so a late
 critical task waits behind everything filed before it unless its priority is lowered. A resume
-manifest has no special rank. `peek --order` prints the eligible entries in exactly this order,
+(repair) manifest sorts ahead of brief entries because resuming clears its `wave`; it has no other
+special rank. `peek --order` prints the eligible entries in exactly this order,
 each with `wave`, `priority` and `dispatchedAt`:
 
 ```bash
