@@ -50,7 +50,6 @@ import {
   aggregateRound,
   attachVerdictRecordDraft,
   finalizeReview,
-  enforceReviewerCoverage,
   parseReviewReports,
   type ReviewFinalizeResult,
   type ReviewerReport,
@@ -86,8 +85,6 @@ export interface NextStepDeps {
     state: NextStepState,
     reports: ReviewerReport[],
   ) => Promise<ReviewFinalizeResult>;
-  /** AISDLC-1197: turn an approval that leaves required reviewers uncovered into a rejection. */
-  enforceCoverage: typeof enforceReviewerCoverage;
   /** AISDLC-798: the hook's lease predicate, evaluated before any rebase, review or signing. */
   leasePreflight: (ctx: NextStepContext, state: NextStepState) => LeasePreflight;
   preSignRebase: (ctx: NextStepContext, state: NextStepState) => Promise<PreSignRebaseResult>;
@@ -102,7 +99,6 @@ export const defaultNextStepDeps: NextStepDeps = {
   initTask,
   prepareReview,
   finalizeReview,
-  enforceCoverage: enforceReviewerCoverage,
   leasePreflight: leasePreflightStep,
   preSignRebase,
   ship: shipTask,
@@ -705,12 +701,6 @@ class Machine {
   private async afterVerdict(state: NextStepState): Promise<Instruction> {
     const { ctx, deps } = this;
     const verdict = state.verdict!;
-    if (verdict.decision === 'APPROVED') {
-      const missing = await deps.enforceCoverage(ctx, state, verdict);
-      if (missing.length > 0) {
-        ctx.logger.warn(`coverage short: missing ${missing.join(', ')}; not approved`);
-      }
-    }
     if (verdict.decision === 'APPROVED') {
       const lease = deps.leasePreflight(ctx, state);
       if (lease.status === 'refused') {

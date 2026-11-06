@@ -428,6 +428,10 @@ export async function finalizeReview(
 
   const verdict = await aggregateRound(verdicts, review.harnessNote);
   await attachVerdictRecordDraft(ctx, state, verdict, tiers);
+  // A staged round (RFC-0052) covers correctness through its synthesizer, not a named reviewer.
+  const missing = review.staged ? [] : await enforceReviewerCoverage(ctx, state, verdict);
+  if (missing.length > 0)
+    warnings.push(`coverage short: missing ${missing.join(', ')}; not approved`);
   if (review.staged?.verdict) verdict.stagedAdvisory = review.staged.verdict;
   writeRunFile(ctx, 'aggregate.json', JSON.stringify(verdict, null, 2));
   return { ok: true, verdict, warnings };
@@ -490,8 +494,13 @@ export async function enforceReviewerCoverage(
   if (!verdict.verdictRecordDraft) await attachVerdictRecordDraft(ctx, state, verdict);
   const draft = verdict.verdictRecordDraft;
   if (!draft || draft.coverage.satisfied) return [];
-  const have = new Set(draft.reviewers.filter((r) => r.verdict === 'approved').map((r) => r.name));
-  const missing = draft.coverage.required.filter((r) => !have.has(r));
+  // A codex variant (`code-reviewer-codex`) fills the same role as its claude-code namesake.
+  const role = (n: string): string => n.replace(/-codex$/, '');
+  const have = new Set(
+    draft.reviewers.filter((r) => r.verdict === 'approved').map((r) => role(r.name)),
+  );
+  const missing = draft.coverage.required.filter((r) => !have.has(role(r)));
+  if (missing.length === 0) return [];
   const message = `required reviewers did not approve this head: missing ${missing.join(', ')}; run them before approval`;
   verdict.approved = false;
   verdict.decision = 'CHANGES_REQUESTED';

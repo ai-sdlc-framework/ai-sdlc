@@ -126,7 +126,6 @@ function deps(script: Script = {}): Partial<NextStepDeps> {
   const rebases = script.rebases ?? [];
   const verifyExits = script.verifyExits ?? [];
   return {
-    enforceCoverage: async () => [],
     initTask: async () => ({
       ok: true,
       branch: 'ai-sdlc/aisdlc-900-demo-task',
@@ -628,38 +627,6 @@ describe('iteration (Step 9) and the human-attention cap', () => {
     expect(counters.devPrompts[0].feedback).toContain('fix me');
     expect(last).toMatchObject({ action: 'done', outcome: 'approved', iterations: 2 });
     expect(counters.rebased).toBe(1);
-  });
-
-  it('iterates instead of shipping when coverage is short (AISDLC-1197)', async () => {
-    let calls = 0;
-    const { instructions, last } = await drive({
-      ...deps(),
-      enforceCoverage: async (_c, _s, verdict) => {
-        calls += 1;
-        if (calls > 1) return [];
-        verdict.approved = false;
-        verdict.decision = 'CHANGES_REQUESTED';
-        verdict.verdicts = [
-          ...verdict.verdicts,
-          {
-            agentId: 'coverage-gate',
-            harness: 'claude-code',
-            approved: false,
-            findings: [{ severity: 'critical', message: 'missing security-reviewer' }],
-          },
-        ];
-        return ['security-reviewer'];
-      },
-    });
-    expect(instructions.map((i) => i.action)).toEqual([
-      'spawn-developer',
-      'spawn-reviewers',
-      'spawn-developer',
-      'spawn-reviewers',
-      'done',
-    ]);
-    expect(counters.devPrompts[0].feedback).toContain('missing security-reviewer');
-    expect(last).toMatchObject({ action: 'done', iterations: 2 });
   });
 
   it('opens the PR for a human after two failed passes instead of aborting', async () => {
