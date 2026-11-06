@@ -241,7 +241,7 @@ export async function plannerSessionMeasure(
   };
   await resumeAfterClear(p, state);
   const tokens = await readMeasure(p, state.name, e);
-  if (tokens >= PLANNER_ROTATE_AT_TOKENS) {
+  if (tokens >= (state.rotateAt ?? PLANNER_ROTATE_AT_TOKENS)) {
     // Never mid-turn: a measure that lands while the main thread runs waits for its turn.complete.
     if (turnRunning(state)) {
       await scheduleRotation(

@@ -33,6 +33,7 @@ import {
   rotatePendingKey,
 } from '../../hooks/hierarchy/planner.ts';
 import { makeGitEnv } from '../../../pipeline-cli/src/__test-helpers/git-env.ts';
+import { resolveThresholds } from '../../../pipeline-cli/src/hierarchy/thresholds.ts';
 import { registerStrict } from './stubs/hierarchy-strict-host.ts';
 
 const env = (from: string, text: string) =>
@@ -955,5 +956,100 @@ describe('version guard (AISDLC-1062)', () => {
     const line = guard(obj('2.1.309'), { ...present, 'session.send': false })!;
     expect(line).toContain('session.send');
     expect(line).toContain('2.1.309');
+  });
+});
+
+describe('hierarchy module: configured rotation thresholds (AISDLC-1163)', () => {
+  const writeConfig = (body: string): string => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'thr-'));
+    writeFileSync(path.join(dir, 'config.json'), body);
+    return dir;
+  };
+  // process.run executes the real node one-liner, so the module and the file are exercised together.
+  const withBoard = (s: ReturnType<typeof setup>) => {
+    // the dispatch role also probes the timer and the pane
+    s.$.clock = {
+      every: vi.fn(async (ms: any, fn: any) => {
+        if (typeof fn !== 'function') throw new TypeError('$.clock.every takes a function');
+      }),
+    };
+    s.$.ui = { open: vi.fn(async () => undefined) };
+    s.$.process.run.mockImplementation(async (a: any) => {
+      if (!Array.isArray(a) || a.length === 0) throw new Error('argv required');
+      if (a[0] !== 'node' || !String(a[2]).includes('contextThresholds'))
+        return { exitCode: 0, stdout: '' };
+      try {
+        return { exitCode: 0, stdout: execFileSync(a[0], a.slice(1), { encoding: 'utf-8' }) };
+      } catch {
+        return { exitCode: 1, stdout: '' };
+      }
+    });
+  };
+  const cases: Array<[string, string, number, number]> = [
+    ['planner', 'proj-planner', 150_000, 61_000],
+    ['executor', 'ex-1', 120_000, 61_000],
+    ['operator-dispatch', 'dispatch', 120_000, 61_000],
+  ];
+  for (const [role, name, fallback, configured] of cases) {
+    const boot = async (body: string | null) => {
+      const dir = body === null ? mkdtempSync(path.join(os.tmpdir(), 'thr-')) : writeConfig(body);
+      const s = setup({ role, name });
+      withBoard(s);
+      // the registration options carry the board dir
+      const h = registerStrict({ boardDir: dir });
+      const start = () => h.get('session.start')(s.$, { reason: 'startup' }, s.next);
+      await start();
+      return { s, h };
+    };
+    const rotated = (x: { s: ReturnType<typeof setup> }) =>
+      x.s.$.command.run.mock.calls.some((c: any[]) => c[0]?.command === 'clear') ||
+      x.s.$.command.run.mock.calls.some((c: any[]) => c[0]?.command === 'ai-sdlc:hierarchy');
+    const measure = async (x: any, tokens: number) =>
+      x.h.get('session.measure')(x.s.$, { tokens }, x.s.next);
+
+    it(`${role}: a configured threshold rotates there, not at the constant`, async () => {
+      const x = await boot(JSON.stringify({ contextThresholds: { [role]: configured } }));
+      expect(logOf(x.s.kv).some((l) => l.includes(`role=${role} tokens=${configured}`))).toBe(true);
+      await measure(x, configured - 1);
+      expect(rotated(x)).toBe(false);
+      await measure(x, configured);
+      expect(rotated(x)).toBe(true);
+    });
+    for (const [label, body] of [
+      ['absent', null],
+      ['malformed', '{nope'],
+      ['invalid value', JSON.stringify({ contextThresholds: { [role]: -5 } })],
+    ] as Array<[string, string | null]>) {
+      it(`${role}: ${label} config falls back to ${fallback}`, async () => {
+        const x = await boot(body);
+        expect(logOf(x.s.kv).some((l) => l.includes(`role=${role} tokens=${fallback}`))).toBe(true);
+        await measure(x, fallback - 1);
+        expect(rotated(x)).toBe(false);
+        await measure(x, fallback);
+        expect(rotated(x)).toBe(true);
+      });
+    }
+  }
+
+  it('the module and cli-hierarchy status resolve the same thresholds for one config file', async () => {
+    const dir = writeConfig(
+      JSON.stringify({
+        contextThresholds: { planner: 70_000, executor: 'x', 'operator-dispatch': 90_000 },
+      }),
+    );
+    const expected = resolveThresholds(dir);
+    for (const [role, name] of [
+      ['planner', 'proj-planner'],
+      ['executor', 'ex-1'],
+      ['operator-dispatch', 'dispatch'],
+    ] as const) {
+      const s = setup({ role, name });
+      withBoard(s);
+      const h = registerStrict({ boardDir: dir });
+      await h.get('session.start')(s.$, { reason: 'startup' }, s.next);
+      expect(logOf(s.kv).some((l) => l.includes(`role=${role} tokens=${expected[role]}`))).toBe(
+        true,
+      );
+    }
   });
 });

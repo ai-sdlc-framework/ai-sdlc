@@ -60,6 +60,7 @@ node "$PIPELINE_CLI_BIN/cli-file.mjs" rebase <id> --pr
 - **No config edits.** This command never edits `.ai-sdlc/` configuration. The only files it touches
   there are briefs under `.ai-sdlc/dispatch/briefs/`, written by `cli-hierarchy brief`.
 - **Outward posts.** Before any post outside this repository, get the operator's go on the exact title and first line; then record it with `cli-hierarchy handoff note --role planner --kind filed|commented|opened|closed|sent --url <url> --summary "<text>"`.
+- **Asking.** When you ask the operator or a peer something that stays unanswered, run `cli-hierarchy handoff note --role planner --kind asked --ref <key> --summary "<question>"` (key: a draft path or `DEC-NNNN`); when it is answered, `--kind settled --ref <key>`. Open asks print under `## Pending asks` in the handoff.
 - **Five-step review.** Fix and rule tasks open their Fix with `**Five-step review (requirements first).**`; template in `docs/operations/decision-authority.md`.
 
 ## Step 1 — Resolve the CLI
@@ -118,5 +119,5 @@ The hierarchy hooks module rotates this session past 150k tokens (restart: `/ai-
 
 **Handoff routine** (the hooks module runs it as a model turn at the end of the turn that crosses the rotation threshold, before the clear; the operator word "handoff" or the "Context is at N%" warning only triggers it earlier, at the next turn boundary):
 run `handoff write`, edit the file outside the markers with ONE `## RESUME HERE` block at the end
-(open rulings, owed items, pending operator asks with the absolute path of every scratchpad draft, next free task and decision ids, scheduled jobs, what each peer waits on), then confirm `Handoff written: <path>. Safe to /clear.` Details and recall commands:
+(open rulings, owed items, pending operator asks with the absolute path of every scratchpad draft, next free task and decision ids, scheduled jobs, what each peer waits on), check that `## Pending asks` matches what you still wait on (note any missing `asked` / `settled` first), then confirm `Handoff written: <path>. Safe to /clear.` Details and recall commands:
 `docs/operations/cli-hierarchy.md`.

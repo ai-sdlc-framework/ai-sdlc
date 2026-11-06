@@ -385,6 +385,8 @@ Options for handoff:
   --no-archive             write (planner): do not roll older notes blocks into <basename>_archive.md
   note                     append one outward action to the role's ledger (AISDLC-1049):
                            --kind filed|commented|opened|closed|sent --url <url> [--summary <text>]
+                           --kind asked --ref <key> --summary <text>   (a pending ask)
+                           --kind settled --ref <key>                  (closes it)
   --full                   read: print the whole file (default: block plus last 8000 chars of prose)
 
 Options for transcript:
@@ -1662,6 +1664,7 @@ export async function runHierarchyCli(
             const r = noteLedger(opts, {
               kind: flags.kind ?? '',
               url: flags.url ?? '',
+              ...(flags.ref && flags.ref !== 'true' ? { ref: flags.ref } : {}),
               ...(flags.summary && flags.summary !== 'true' ? { summary: flags.summary } : {}),
             });
             deps.log(JSON.stringify({ ok: true, file: r.file, entry: r.entry }));
