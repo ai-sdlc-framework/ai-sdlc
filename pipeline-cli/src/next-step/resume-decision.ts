@@ -50,7 +50,25 @@ export interface ResumeDecisionOpts {
   /** Test injection: the head's verdict status (default: remote ref, else clean-replay carry). */
   headVerdict?: (ctx: ResumeDecisionCtx, cwd: string) => Promise<HeadVerdictStatus>;
   /** Test injection: earlier approved heads, newest first (default: the remote verdict refs). */
-  earlierHeads?: (ctx: ResumeDecisionCtx, cwd: string, head: string) => Promise<string[]>;
+  earlierHeads?: (
+    ctx: ResumeDecisionCtx,
+    cwd: string,
+    head: string,
+    pullRequest: number,
+  ) => Promise<string[]>;
+  /** Test injection: the PR number of the branch (default: `gh pr view`); null means none. */
+  pullRequest?: number | null;
+}
+
+/** The open PR number of the worktree's branch, or null when there is none (AISDLC-1220). */
+async function resolvePullRequest(ctx: ResumeDecisionCtx, cwd: string): Promise<number | null> {
+  const r = await ctx.runner('gh', ['pr', 'view', '--json', 'number', '--jq', '.number'], {
+    cwd,
+    allowFailure: true,
+  });
+  if (r.code !== 0) return null;
+  const n = Number.parseInt(r.stdout.trim(), 10);
+  return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 /** Decide what a resumed task's review does. Never throws: any doubt returns `full`. */
@@ -96,12 +114,18 @@ async function decide(
   }
 
   const head = verdict.headSha || ((await git(['rev-parse', 'HEAD']))?.trim() ?? '');
+  // AISDLC-1220: the baseline is chosen among earlier approved heads of THIS PR only; no PR, no delta.
+  const pullRequest =
+    opts.pullRequest !== undefined ? opts.pullRequest : await resolvePullRequest(ctx, cwd);
+  if (pullRequest === null) return FULL;
   const earlierHeads =
     opts.earlierHeads ??
-    (async (c, d, h) =>
-      (await listEarlierSubjects(c.runner, d, h, undefined)).map((x) => x.headSha));
+    (async (c, d, h, pr) =>
+      (await listEarlierSubjects(c.runner, d, h, pr, { strictPullRequest: true })).map(
+        (x) => x.headSha,
+      ));
   let lastHead: string | null = null;
-  for (const candidate of await earlierHeads(ctx, cwd, head)) {
+  for (const candidate of await earlierHeads(ctx, cwd, head, pullRequest)) {
     if ((await git(['cat-file', '-e', `${candidate}^{commit}`])) !== null) {
       lastHead = candidate;
       break;
@@ -127,7 +151,8 @@ async function decide(
   const reviewers: ReviewerType[] =
     kind.kind === 'three'
       ? ['code-reviewer', 'test-reviewer', 'security-reviewer']
-      : ['correctness-reviewer'];
+      : // The merge gate covers the whole PR and needs correctness plus security (AISDLC-1220).
+        ['correctness-reviewer', 'security-reviewer'];
   return {
     branch: 'delta',
     note: `review-delta: ${reviewers.join(', ')}`,
