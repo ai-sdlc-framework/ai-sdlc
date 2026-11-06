@@ -10,6 +10,7 @@ import {
   parseReviewReports,
   resolveAgentIdFromMarkers,
   detectReusedContexts,
+  enforceReviewerCoverage,
   type ReviewerReport,
 } from './review-finalize.js';
 import type { NextStepState, ReviewRoundState, SpawnedReviewer } from './types.js';
@@ -493,5 +494,39 @@ describe('aggregateRound', () => {
       '',
     );
     expect(v.decision).toBe('APPROVED');
+  });
+});
+
+describe('enforceReviewerCoverage (AISDLC-1197)', () => {
+  it('turns a resumed round with only correctness-reviewer into CHANGES_REQUESTED naming security', async () => {
+    h = makeHarness();
+    state = makeState(h.root);
+    h.runner.on(/^git diff --name-only/, ok('docs/readme.md\n'));
+    const verdict = await aggregateRound(
+      [{ agentId: 'correctness-reviewer', harness: 'claude-code', approved: true, findings: [] }],
+      '',
+    );
+    expect(verdict.approved).toBe(true);
+    const missing = await enforceReviewerCoverage(h.ctx, state, verdict);
+    expect(missing).toEqual(['security-reviewer']);
+    expect(verdict.approved).toBe(false);
+    expect(verdict.decision).toBe('CHANGES_REQUESTED');
+    expect(verdict.verdictRecordDraft).toBeUndefined();
+    expect(JSON.stringify(verdict.verdicts)).toContain('security-reviewer');
+  });
+
+  it('leaves a fully covered round approved', async () => {
+    h = makeHarness();
+    state = makeState(h.root);
+    h.runner.on(/^git diff --name-only/, ok('docs/readme.md\n'));
+    const verdict = await aggregateRound(
+      [
+        { agentId: 'correctness-reviewer', harness: 'claude-code', approved: true, findings: [] },
+        { agentId: 'security-reviewer', harness: 'claude-code', approved: true, findings: [] },
+      ],
+      '',
+    );
+    expect(await enforceReviewerCoverage(h.ctx, state, verdict)).toEqual([]);
+    expect(verdict.approved).toBe(true);
   });
 });

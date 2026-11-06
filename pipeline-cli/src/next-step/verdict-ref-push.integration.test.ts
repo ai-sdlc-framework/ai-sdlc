@@ -81,6 +81,13 @@ describe('verdict ref against a local bare remote (AISDLC-1193)', () => {
     expect(res.code).toBe('ok');
   });
 
+  it('records the PR number when the PR exists (AISDLC-1197)', async () => {
+    const v = await buildVerdictRefspec(defaultRunner, wt, DRAFT, 'origin/main', undefined, 2413);
+    const commit = v.refspec!.split(':')[0]!;
+    const record = git(wt, 'show', `${commit}:record.json`);
+    expect(JSON.parse(record).subject.pullRequest).toBe(2413);
+  });
+
   it('when the pre-push hook adds a commit, the ref names the final pushed sha', async () => {
     const hook = join(wt, '.git', 'hooks', 'pre-push');
     writeFileSync(

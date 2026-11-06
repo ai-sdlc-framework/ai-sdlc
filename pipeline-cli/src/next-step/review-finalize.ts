@@ -428,6 +428,10 @@ export async function finalizeReview(
 
   const verdict = await aggregateRound(verdicts, review.harnessNote);
   await attachVerdictRecordDraft(ctx, state, verdict, tiers);
+  // A staged round (RFC-0052) covers correctness through its synthesizer, not a named reviewer.
+  const missing = review.staged ? [] : await enforceReviewerCoverage(ctx, state, verdict);
+  if (missing.length > 0)
+    warnings.push(`coverage short: missing ${missing.join(', ')}; not approved`);
   if (review.staged?.verdict) verdict.stagedAdvisory = review.staged.verdict;
   writeRunFile(ctx, 'aggregate.json', JSON.stringify(verdict, null, 2));
   return { ok: true, verdict, warnings };
@@ -471,4 +475,47 @@ export async function aggregateRound(
 ): Promise<AggregatedVerdict> {
   if (verdicts.length === 0) return approvedWithoutReviewers(harnessNote);
   return aggregateVerdicts({ verdicts, harnessNote });
+}
+
+/**
+ * AISDLC-1197: an aggregate whose approvals leave the required reviewer set uncovered is not
+ * approved. Build the draft when missing (resumed rounds skip finalizeReview), and when
+ * `coverage.satisfied` is false turn the verdict into CHANGES_REQUESTED naming the missing
+ * roles, so the round iterates instead of shipping a verdict the gate will refuse.
+ * Returns the missing roles (empty when covered).
+ */
+export async function enforceReviewerCoverage(
+  ctx: NextStepContext,
+  state: NextStepState,
+  verdict: AggregatedVerdict,
+): Promise<string[]> {
+  // A round with no reviewers selected (empty diff) is approved by construction.
+  if (!verdict.approved || verdict.verdicts.length === 0) return [];
+  if (!verdict.verdictRecordDraft) await attachVerdictRecordDraft(ctx, state, verdict);
+  const draft = verdict.verdictRecordDraft;
+  if (!draft || draft.coverage.satisfied) return [];
+  // A codex variant (`code-reviewer-codex`) fills the same role as its claude-code namesake.
+  const role = (n: string): string => n.replace(/-codex$/, '');
+  const have = new Set(
+    draft.reviewers.filter((r) => r.verdict === 'approved').map((r) => role(r.name)),
+  );
+  const missing = draft.coverage.required.filter((r) => !have.has(role(r)));
+  if (missing.length === 0) return [];
+  const message = `required reviewers did not approve this head: missing ${missing.join(', ')}; run them before approval`;
+  verdict.approved = false;
+  verdict.decision = 'CHANGES_REQUESTED';
+  verdict.counts = { ...verdict.counts, critical: verdict.counts.critical + 1 };
+  verdict.verdicts = [
+    ...verdict.verdicts,
+    {
+      agentId: 'coverage-gate',
+      harness: DEFAULT_HARNESS,
+      approved: false,
+      findings: [{ severity: 'critical', message }],
+      summary: message,
+    },
+  ];
+  verdict.summary = `${verdict.summary}\nVerdict: CHANGES_REQUESTED - ${message}`;
+  delete verdict.verdictRecordDraft;
+  return missing;
 }

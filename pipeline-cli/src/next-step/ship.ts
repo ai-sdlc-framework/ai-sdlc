@@ -481,6 +481,8 @@ async function shipInner(
   if (!needsHuman && verdict.approved && !verdict.verdictRecordDraft) {
     await attachVerdictRecordDraft(ctx, state, verdict);
   }
+  // AISDLC-1197: the verdict record names the PR when it already exists (resumed rounds).
+  const priorPr = needsHuman ? null : await detectDraftPrForBranch(runner, wt, state.branch);
   for (let attempt = 0; attempt < PUSH_ATTEMPTS; attempt += 1) {
     // RFC-0061: branch and verdict ref in one atomic push (built per attempt: a pre-push fixup
     // can change the head).
@@ -491,6 +493,8 @@ async function shipInner(
           wt,
           verdict.verdictRecordDraft,
           `origin/${resolveTargetBranch(ctx.workDir)}`,
+          undefined,
+          priorPr?.prNumber ?? 0,
         );
     if ('note' in verdictRef && verdictRef.note) verdictNotes.push(verdictRef.note);
     const pushArgs = verdictRef.refspec
