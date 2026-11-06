@@ -54,6 +54,8 @@ export interface DispatchState {
   blockers: string[];
   plannerName: string;
   boardDir?: string;
+  /** `CLAUDE_PROJECT_DIR` as read by the registering module through `$.env.get`. */
+  projectDir?: string;
   /** Resolved rotation threshold in tokens (config.json `contextThresholds`); the constant when unset. */
   rotateAt?: number;
   /** Roster name of this session; keys the module heartbeat file. */
@@ -95,14 +97,18 @@ type Run = (a: { command: string; args: string[] }) => Promise<Any>;
 /**
  * AISDLC-1181: the one resolver every handoff writer uses, so the board path handed to `process.run` is
  * always absolute. A relative `.ai-sdlc/dispatch` followed the session cwd (for example `.claude/memory`)
- * and left untracked files in the parent checkout. Order: an absolute `boardDir`, `CLAUDE_PROJECT_DIR`,
- * the project root found from the cwd. Returns `undefined` (the caller writes nothing) when none resolves.
+ * and left untracked files in the parent checkout. Order: an absolute `boardDir`, `CLAUDE_PROJECT_DIR`
+ * (read by the caller through `$.env.get`; a hooks module has no `process` global), the project root found from the cwd. Returns `undefined` (the caller writes nothing) when none resolves.
  * A hooks module may import nothing but local files, so the root lookup runs in a child node process.
  */
-export async function resolveBoardDir(run: Run, boardDir?: string): Promise<string | undefined> {
+export async function resolveBoardDir(
+  run: Run,
+  boardDir?: string,
+  projectDir?: string,
+): Promise<string | undefined> {
   if (boardDir)
     return boardDir.startsWith('/') || /^[A-Za-z]:[\\/]/.test(boardDir) ? boardDir : undefined;
-  const env = process.env.CLAUDE_PROJECT_DIR;
+  const env = projectDir;
   if (env && (env.startsWith('/') || /^[A-Za-z]:[\\/]/.test(env)))
     return `${env}/.ai-sdlc/dispatch`;
   const r = await safe(() => run({ command: NODE, args: ['-e', ROOT_SCRIPT] }));
@@ -128,10 +134,11 @@ export async function recordReceivedSender(
   boardDir: string | undefined,
   name: string,
   raw: string,
+  projectDir?: string,
 ): Promise<void> {
   const from = senderAddressOf(raw);
   if (!/^uds:\/[A-Za-z0-9._/-]+\.sock$/.test(from)) return;
-  const board = await resolveBoardDir(run, boardDir);
+  const board = await resolveBoardDir(run, boardDir, projectDir);
   if (!board) return;
   const file = `${board}/handoff/received-${name}.json`;
   await safe(
@@ -151,8 +158,9 @@ export async function writeModuleHealth(
   name: string,
   health: { state: 'loaded' | 'refused'; reason?: string; version?: string },
   storeSet?: (k: string, v: unknown) => Promise<Any>,
+  projectDir?: string,
 ): Promise<void> {
-  const board = await resolveBoardDir(run, boardDir);
+  const board = await resolveBoardDir(run, boardDir, projectDir);
   const record = { ...health, at: new Date().toISOString() };
   const body = JSON.stringify(record);
   // AISDLC-1082: the plugin store copy survives a host whose `process.run` cannot write the board file.
@@ -339,6 +347,7 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
         state.sessionName,
         { state: 'loaded', ...(state.hostVersion ? { version: state.hostVersion } : {}) },
         p.storeSet,
+        state.projectDir,
       );
     }
     const r = await runCli(p, HIERARCHY_BIN, ['tick', ...boardArgs(state)]);
