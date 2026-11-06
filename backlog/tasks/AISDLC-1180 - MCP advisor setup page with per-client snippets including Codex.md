@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1180
 title: 'MCP advisor setup page with per-client snippets, and a Codex entry in mcp-setup'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-04'
 labels:

@@ -6,7 +6,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { detectAgents, installMcpServer, type DetectedAgent } from './mcp-setup.js';
+import {
+  detectAgents,
+  installMcpServer,
+  renderCodexToml,
+  type DetectedAgent,
+} from './mcp-setup.js';
 
 let tmpDir: string;
 
@@ -287,4 +292,95 @@ describe('installMcpServer', () => {
     const content = JSON.parse(readFileSync(join(tmpDir, '.mcp.json'), 'utf-8'));
     expect(content._aiSdlcComment).toBe(userCustomised);
   });
+});
+
+// ── Codex (TOML) ────────────────────────────────────────────────────
+
+describe('Codex', () => {
+  const codexAgent = (): DetectedAgent => {
+    mkdirSync(join(tmpDir, '.codex'));
+    const a = detectAgents(tmpDir, { isWorkspace: true }).find((x) => x.name === 'Codex');
+    if (!a) throw new Error('Codex not detected');
+    return a;
+  };
+
+  it('detects Codex when .codex/ exists, with TOML path and key', () => {
+    const a = codexAgent();
+    expect(a.configPath).toBe('.codex/config.toml');
+    expect(a.configKey).toBe('mcp_servers');
+    expect(a.format).toBe('toml');
+  });
+
+  it('creates config.toml with the documented shape', () => {
+    const a = codexAgent();
+    expect(installMcpServer(tmpDir, a, false)).toBe('created');
+    const text = readFileSync(join(tmpDir, '.codex/config.toml'), 'utf-8');
+    expect(text).toContain(
+      '[mcp_servers.ai-sdlc]\ncommand = "npx"\nargs = ["-y", "@ai-sdlc/mcp-advisor"]\n\n[mcp_servers.ai-sdlc.env]\nAI_SDLC_WORKSPACE = "."\n',
+    );
+  });
+
+  it('merges into an existing config.toml preserving content', () => {
+    const a = codexAgent();
+    writeFileSync(join(tmpDir, '.codex/config.toml'), '[mcp_servers.other]\ncommand = "x"\n');
+    expect(installMcpServer(tmpDir, a, false)).toBe('merged');
+    const text = readFileSync(join(tmpDir, '.codex/config.toml'), 'utf-8');
+    expect(text).toContain('[mcp_servers.other]');
+    expect(text).toContain('[mcp_servers.ai-sdlc]');
+  });
+
+  it('merges into an empty or blank-terminated file', () => {
+    const a = codexAgent();
+    writeFileSync(join(tmpDir, '.codex/config.toml'), 'a = 1');
+    expect(installMcpServer(tmpDir, a, false)).toBe('merged');
+    expect(readFileSync(join(tmpDir, '.codex/config.toml'), 'utf-8')).toContain('a = 1\n\n[mcp');
+  });
+
+  it('skips when ai-sdlc is already configured', () => {
+    const a = codexAgent();
+    writeFileSync(join(tmpDir, '.codex/config.toml'), '[mcp_servers.ai-sdlc]\ncommand = "node"\n');
+    expect(installMcpServer(tmpDir, a, false)).toBe('skipped');
+  });
+
+  it('dry-run writes nothing', () => {
+    const a = codexAgent();
+    expect(installMcpServer(tmpDir, a, true)).toBe('created');
+    expect(existsSync(join(tmpDir, '.codex/config.toml'))).toBe(false);
+    writeFileSync(join(tmpDir, '.codex/config.toml'), 'a = 1\n');
+    expect(installMcpServer(tmpDir, a, true)).toBe('merged');
+    expect(readFileSync(join(tmpDir, '.codex/config.toml'), 'utf-8')).toBe('a = 1\n');
+  });
+});
+
+// ── Docs page agreement ─────────────────────────────────────────────
+
+describe('mcp-advisor-setup docs page', () => {
+  const page = readFileSync(
+    join(__dirname, '../../../../docs/getting-started/mcp-advisor-setup.md'),
+    'utf-8',
+  );
+  const blocks = (lang: string) =>
+    [...page.matchAll(new RegExp('```' + lang + '\\n([\\s\\S]*?)```', 'g'))].map((m) => m[1]);
+
+  it('Codex snippet equals the generated TOML', () => {
+    const a = codexAgent2();
+    expect(blocks('toml')).toContain(renderCodexToml(a.serverEntry));
+  });
+
+  it.each([
+    ['Cursor', '.cursor'],
+    ['VS Code', '.vscode'],
+    ['Windsurf', '.windsurf'],
+  ])('%s snippet equals the generated JSON', (name, dir) => {
+    mkdirSync(join(tmpDir, dir));
+    const a = detectAgents(tmpDir, { isWorkspace: true }).find((x) => x.name === name)!;
+    const expected = { [a.configKey]: { 'ai-sdlc': a.serverEntry } };
+    const found = blocks('json').map((b) => JSON.parse(b));
+    expect(found).toContainEqual(expected);
+  });
+
+  function codexAgent2(): DetectedAgent {
+    mkdirSync(join(tmpDir, '.codex'));
+    return detectAgents(tmpDir, { isWorkspace: true }).find((x) => x.name === 'Codex')!;
+  }
 });
