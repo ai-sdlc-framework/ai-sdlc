@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-11-06T18:45:26.924Z","decisionId":"DEC-0389","chosenOptionId":"single-host-name-deps","rationale":"Operator choice 2026-11-06 via decision rubric: the packer is about forty lines behind a predicate and is cheaper to rewrite later than a priority-blind cap is to run until an undated RFC is answered.","by":"operator"}
