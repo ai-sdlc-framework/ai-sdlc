@@ -29,7 +29,7 @@ requiresDocs: []
 
 ### Product Authority review
 
-The dispatcher-only positioning is correct. `effectivePriority(task) = priority(task) + maxDownstreamPriority(task)` is **additive** while the PPA composite is **multiplicative**; the RFC handles this correctly by leaving per-task PPA scores unchanged in the calibration log. **Recommend** adding a one-line non-goal: *effectivePriority is a dispatch heuristic, not a composite contributor* — without that line, future readers will be tempted to fold downstream-reach back into the composite and end up double-counting.
+The dispatcher-only positioning is correct. `effectivePriority(task) = priority(task) + maxDownstreamPriority(task)` (as then written; amended to `max` on 2026-11-06, RFC-0062 OQ-2) is **additive** while the PPA composite is **multiplicative**; the RFC handles this correctly by leaving per-task PPA scores unchanged in the calibration log. **Recommend** adding a one-line non-goal: *effectivePriority is a dispatch heuristic, not a composite contributor* — without that line, future readers will be tempted to fold downstream-reach back into the composite and end up double-counting.
 
 When this RFC ships, PPA's ER3 (Dependency Clearance) consumes its graph output rather than relying on manual dependency tracking. ER3's resolution mechanism gets a formal adapter against the snapshot artifact format declared here. No PPA spec changes are required at sign-off; the integration lands when the foundation `cli-deps` (AISDLC-117) ships and ER3 can read from it.
 
@@ -125,7 +125,9 @@ PPA scores each task on 7 dimensions (RFC-0005) producing a composite priority. 
 
 ### 5.2 The composition
 
-Define `effectivePriority(task) = priority(task) + maxDownstreamPriority(task)` where `maxDownstreamPriority` = the highest PPA priority of any task in `task.unblocks` transitive closure.
+Define `effectivePriority(task) = max(priority(task), maxDownstreamPriority(task))` where `maxDownstreamPriority` = the highest PPA priority of any task in `task.unblocks` transitive closure.
+
+> **Amended 2026-11-06 (RFC-0062 OQ-2, DEC-0386).** This section previously read `priority(task) + maxDownstreamPriority(task)`, contradicting §5.3 ("a max, not a sum"), Q1 and the shipped `pipeline-cli/src/deps/effective-priority.ts`, which use `max`. Sum inheritance makes order a function of graph size (four low dependents equal one critical); `max` is the priority-inheritance rule used everywhere else. The live dispatch rank that consumes this value is specified in [RFC-0062](RFC-0062-algorithm-improvement-directions.md) Design Details: wave, effective-priority bucket, critical-path cost, age bonus, id.
 
 Effect: a low-PPA task that unblocks a high-PPA task inherits the high-PPA's urgency. Critical-path leaves bubble to the top of the dispatch queue automatically.
 

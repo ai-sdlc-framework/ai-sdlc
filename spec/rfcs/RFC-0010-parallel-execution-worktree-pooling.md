@@ -189,6 +189,8 @@ The fix is well-understood: each worktree gets its own database branch (Neon, Su
 - Define a `harness` field on the Stage object and a HarnessAdapter interface so each stage can run on a different coding-agent runtime (Claude Code, Codex CLI, Gemini CLI, OpenCode, Aider, generic-API).
 - Specify a capability matrix that adapters MUST self-declare so the orchestrator can validate stage requirements against available harnesses at pipeline-load time.
 - Specify a fallback chain so a stage can declare an ordered preference list of harnesses, falling through on rate-limit, outage, or capability mismatch.
+> **See also: [RFC-0062](RFC-0062-algorithm-improvement-directions.md) OQ-1 (DEC-0385, 2026-11-06).** The SubscriptionLedger, `runWorkerPool` and `evaluateSchedule` shipped without a production caller; the live hierarchy path meters quota through the pacer. They are deleted under the dark-code gate and the one rule worth keeping, defer low-priority work under budget pressure, becomes a priority floor in `pipeline-cli/src/hierarchy/budget.ts`. §14 is superseded for the hierarchy path.
+
 - Define a SubscriptionLedger that tracks per-harness window state (current usage, reset time, off-peak multipliers, monthly caps) so harness/model routing and pipeline dispatch decisions consult quota in real time.
 - Add a `schedule` field on the Stage object (`now` | `off-peak` | `quota-permitting` | `defer-if-low-priority`) so operators can declaratively defer cost-flexible work to high-multiplier windows.
 - Specify burn-down pacing: the orchestrator MUST emit telemetry showing projected window utilization given queue depth and observed per-stage cost, so operators can intervene if the subscription is under- or over-pacing.
