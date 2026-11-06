@@ -939,6 +939,14 @@ describe('governance-gate (AISDLC-764)', () => {
 });
 
 // ── RFC-0061 Phase 2 (AISDLC-1172): the verdict-check job replaces the v6 attestation gate ──
+describe('AISDLC-1195: verdict-check skips only the exact release-please branch', () => {
+  const raw = readFileSync(new URL('../ai-sdlc-gate.yml', import.meta.url), 'utf8');
+  it('matches the exact branch, never a release-please-- prefix', () => {
+    assert.ok(!/startsWith\([^)]*release-please--/.test(raw));
+    assert.match(raw, /head\.ref != 'release-please--branches--main'/);
+  });
+});
+
 describe('AISDLC-1172: verdict-check job feeds pr-ready and posts ai-sdlc/attestation', () => {
   let wf;
   let raw;

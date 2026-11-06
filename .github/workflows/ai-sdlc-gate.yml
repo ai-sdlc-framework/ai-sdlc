@@ -542,7 +542,7 @@ jobs:
       needs.detect.outputs.docs_only != 'true' &&
       needs.detect.outputs.records_only != 'true' &&
       github.event.pull_request.user.login != 'dependabot[bot]' &&
-      (!startsWith(github.event.pull_request.head.ref, 'release-please--') ||
+      (github.event.pull_request.head.ref != 'release-please--branches--main' ||
         github.event.pull_request.head.repo.full_name != github.repository) &&
       (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
