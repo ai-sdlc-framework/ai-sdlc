@@ -1,5 +1,6 @@
 export type { AuditEntry, AuditFilter, AuditSink, AuditLog, IntegrityResult } from './types.js';
-export { createAuditLog, computeEntryHash } from './logger.js';
+export { createAuditLog, computeEntryHash, AUDIT_SCHEMA_VERSION } from './logger.js';
+export { canonicalize } from './canonical.js';
 export {
   createFileSink,
   loadEntriesFromFile,

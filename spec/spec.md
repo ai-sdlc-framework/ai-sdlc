@@ -27,6 +27,7 @@
    - 9b. [Priority Policy Semantics](#9b-priority-policy-semantics-rfc-0005)
 10. [Extensibility](#10-extensibility)
 11. [Conformance Levels](#11-conformance-levels)
+12. [Audit Entry](#audit-entry)
 
 ### Document Map
 
@@ -1141,3 +1142,31 @@ Implementations declare one of three [conformance levels](glossary.md#conformanc
 | **Full** | Meets Adapter requirements. Additionally passes all tests including autonomy level management, multi-agent orchestration, and reconciliation loop semantics. |
 
 Conformance is verified through the language-agnostic conformance test suite in the [`conformance/`](../conformance/) directory. Implementations MUST document which conformance level they target and which spec version they support.
+
+---
+
+<a id="audit-entry"></a>
+
+## 12. Audit Entry
+
+<!-- Source: RFC-0062 OQ-4 (DEC-0388) -->
+
+Every SDK MUST record actions as an append-only, hash-chained sequence of audit entries. The wire schema is [`schemas/v1alpha1/audit-entry.json`](schemas/v1alpha1/audit-entry.json); the cross-SDK fixture is [`conformance/audit-chain/`](../conformance/audit-chain/).
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `schemaVersion` | yes (v2) | `"2"` selects the rule below. Absent means the legacy per-SDK rule (verify-only). |
+| `id` | yes | Unique entry identifier. |
+| `timestamp` | yes | RFC 3339 UTC with millisecond precision, e.g. `2026-01-02T03:04:05.006Z`. |
+| `actor`, `action`, `resource` | yes | Who did what to which resource (`kind/name`). |
+| `policy` | no | Governing policy. Omitted when absent. |
+| `decision` | yes | `allowed`, `denied` or `overridden`. |
+| `details` | no | Free-form JSON object. Omitted when absent; `{}` is distinct from absent. |
+| `previousHash` | no | `hash` of the preceding entry. **Genesis rule:** the first entry omits it (it is never `null`, `""` or `"genesis"`). |
+| `hash` | yes | Lowercase hex SHA-256 of the canonical form below. |
+
+**Hash rule (schemaVersion `"2"`).** `hash` is SHA-256 over the UTF-8 bytes of the [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785) (JCS) serialization of an object holding every field above except `hash`, with absent optional fields omitted. JCS fixes key order (UTF-16 code units), number form (`1.0` hashes as `1`, `1e21` as `1e+21`) and string escaping (no HTML or `\u2028` escaping), so the result does not depend on a runtime's JSON encoder. Because `schemaVersion` is part of the hashed object, it cannot be downgraded without detection.
+
+**Legacy chains.** An entry without `schemaVersion` is verified with the rule its SDK used before this section existed. SDKs MUST keep that verifier so old chains remain verifiable; SDKs MUST NOT write new legacy entries. Legacy rules are not interoperable across SDKs.
+
+**Conformance.** Each SDK MUST reproduce `expectedHashes` in `conformance/audit-chain/fixture.json` and verify the sample chains in `conformance/audit-chain/samples/` written by every SDK; changing one byte of a v2 chain MUST fail verification.

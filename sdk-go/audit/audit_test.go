@@ -21,7 +21,7 @@ func TestAuditLogAndVerify(t *testing.T) {
 
 	assert.Len(t, sink.Entries, 2)
 	assert.NotEmpty(t, sink.Entries[0].Hash)
-	assert.Equal(t, "genesis", sink.Entries[0].PreviousHash)
+	assert.Empty(t, sink.Entries[0].PreviousHash)
 	assert.Equal(t, sink.Entries[0].Hash, sink.Entries[1].PreviousHash)
 
 	valid, err := log.Verify()

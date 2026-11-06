@@ -5,6 +5,8 @@
  */
 
 import { createHash } from 'node:crypto';
+import { canonicalize } from './canonical.js';
+import { AUDIT_SCHEMA_VERSION } from './types.js';
 import type { AuditEntry, AuditFilter, AuditLog, AuditSink, IntegrityResult } from './types.js';
 
 let counter = 0;
@@ -23,11 +25,32 @@ function matchesFilter(entry: AuditEntry, filter: AuditFilter): boolean {
   return true;
 }
 
+export { AUDIT_SCHEMA_VERSION };
+
 /**
  * Compute a SHA-256 hash for an audit entry, chaining to the previous hash.
  * The hash covers all content fields plus the previousHash, excluding the hash field itself.
+ *
+ * Entries with `schemaVersion: "2"` hash the RFC 8785 (JCS) canonical form, in which
+ * absent/null optional fields (policy, details, previousHash) are omitted. Entries
+ * without a schemaVersion use the legacy `JSON.stringify` rule so old chains still verify.
  */
 export function computeEntryHash(entry: Omit<AuditEntry, 'hash'>, previousHash?: string): string {
+  if (entry.schemaVersion === AUDIT_SCHEMA_VERSION) {
+    const payload = canonicalize({
+      schemaVersion: AUDIT_SCHEMA_VERSION,
+      id: entry.id,
+      timestamp: entry.timestamp,
+      actor: entry.actor,
+      action: entry.action,
+      resource: entry.resource,
+      policy: entry.policy ?? undefined,
+      decision: entry.decision,
+      details: entry.details ?? undefined,
+      previousHash: previousHash ?? undefined,
+    });
+    return createHash('sha256').update(payload, 'utf8').digest('hex');
+  }
   const payload = JSON.stringify({
     id: entry.id,
     timestamp: entry.timestamp,
@@ -50,6 +73,7 @@ export function createAuditLog(sink?: AuditSink): AuditLog {
       const prevHash = log.length > 0 ? log[log.length - 1].hash : undefined;
 
       const base = {
+        schemaVersion: AUDIT_SCHEMA_VERSION,
         id: generateId(),
         timestamp: partial.timestamp ?? new Date().toISOString(),
         actor: partial.actor,

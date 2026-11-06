@@ -5,7 +5,12 @@
  * actor, action, resource, policy, decision, timestamp.
  */
 
+/** Current audit entry schema version (RFC 8785 JCS canonical hashing). */
+export const AUDIT_SCHEMA_VERSION = '2';
+
 export interface AuditEntry {
+  /** Hash rule version. Absent means the legacy (pre-JCS) rule; "2" is RFC 8785 JCS. */
+  readonly schemaVersion?: string;
   /** Unique identifier for the entry. */
   readonly id: string;
   /** ISO-8601 timestamp of when the action occurred. */

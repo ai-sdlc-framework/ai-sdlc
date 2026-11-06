@@ -20,6 +20,7 @@ class AuditEntry:
     details: dict[str, Any] | None = None
     hash: str | None = None
     previous_hash: str | None = None
+    schema_version: str | None = None
 
 
 @dataclass

@@ -29,6 +29,8 @@ def _entry_to_dict(entry: AuditEntry) -> dict[str, Any]:
         d["hash"] = entry.hash
     if entry.previous_hash is not None:
         d["previousHash"] = entry.previous_hash
+    if entry.schema_version is not None:
+        d["schemaVersion"] = entry.schema_version
     return d
 
 
@@ -44,6 +46,7 @@ def _dict_to_entry(d: dict[str, Any]) -> AuditEntry:
         details=d.get("details"),
         hash=d.get("hash"),
         previous_hash=d.get("previousHash"),
+        schema_version=d.get("schemaVersion"),
     )
 
 
