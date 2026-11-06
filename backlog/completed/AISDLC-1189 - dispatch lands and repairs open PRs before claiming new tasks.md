@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1189
 title: 'Dispatch lands and repairs open PRs before claiming new tasks'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-04'
 labels:
@@ -39,10 +39,42 @@ dispatchable: true
 
 ## Acceptance Criteria
 
-- [ ] AC-1: In one tick, landing runs before any spawn. A tick test with injected deps asserts the call order.
-- [ ] AC-2: With a repair needed and a free slot, the in-tick reconcile queues the repair and the same tick spawns it ahead of a queued brief task. Tested.
-- [ ] AC-3: At the limit, a new-task entry is not claimed and the reason line names the open PRs; a repair entry is still claimed. Tested for both.
-- [ ] AC-4: The limit resolves env, then config, then `executors.max`; invalid values fall back. Tested.
-- [ ] AC-5: Records with `landed` or `closedUnlanded`, and non-task kinds (docs, decisions-sync, deps), do not count. Tested.
-- [ ] AC-6: The in-tick reconcile and the watch process never run a pass concurrently. Tested with the lock.
-- [ ] AC-7: `status` prints the open-PR count and limit; docs updated as in Fix step 5.
+- [x] AC-1: In one tick, landing runs before any spawn. A tick test with injected deps asserts the call order.
+- [x] AC-2: With a repair needed and a free slot, the in-tick reconcile queues the repair and the same tick spawns it ahead of a queued brief task. Tested.
+- [x] AC-3: At the limit, a new-task entry is not claimed and the reason line names the open PRs; a repair entry is still claimed. Tested for both.
+- [x] AC-4: The limit resolves env, then config, then `executors.max`; invalid values fall back. Tested.
+- [x] AC-5: Records with `landed` or `closedUnlanded`, and non-task kinds (docs, decisions-sync, deps), do not count. Tested.
+- [x] AC-6: The in-tick reconcile and the watch process never run a pass concurrently. Tested with the lock.
+- [x] AC-7: `status` prints the open-PR count and limit; docs updated as in Fix step 5.
+
+## Final Summary
+
+## Summary
+Dispatch now lands open PRs and runs an in-tick reconcile before it spawns anything. It also has an open-PR limit that blocks new-task claims but still claims repairs. `status` prints the open-PR count and limit, and `docs/operations/cli-hierarchy.md` is updated.
+
+## Changes
+- docs/operations/cli-hierarchy.md
+- pipeline-cli/src/cli/dispatch.ts
+- pipeline-cli/src/cli/hierarchy.test.ts
+- pipeline-cli/src/cli/hierarchy.ts
+- pipeline-cli/src/dispatch/board.ts
+- pipeline-cli/src/hierarchy/dispatch-loop.ts
+- pipeline-cli/src/hierarchy/ephemeral-tick.ts
+- pipeline-cli/src/hierarchy/hierarchy.test.ts
+- pipeline-cli/src/hierarchy/open-pr-limit.test.ts
+- pipeline-cli/src/hierarchy/open-pr-limit.ts
+- pipeline-cli/src/hierarchy/status.ts
+
+## Design decisions
+The branch was already rebased on origin/main and pushed (286dddaa). PR #2413 already existed, so I did not create a second one. The pre-push patch-coverage gate passed at 99.2%, with only line 110 of open-pr-limit.ts uncovered. I did not run `gh pr ready`; the PR was left as it was. The task file in the worktree had been changed to `In Progress`. I set it back to `To Do`, so it matches the last commit, and left it uncommitted.
+
+## Verification
+- `pnpm build` — passed (ai-sdlc-plugin/mcp-server build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (244 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers; review-delta: correctness-reviewer)
+
+## Follow-up
+(none)
+
