@@ -15,13 +15,14 @@
 #         ai-sdlc-ref: <same-pinned-sha>
 #
 # Trust model: only the BASE sha is checked out (persist-credentials false,
-# contents: read). The PR head is fetched as git objects, never checked out, and
-# only the envelope + transcript leaves are copied in as untrusted data by
-# materialize-head-data.mjs. The trust root (.ai-sdlc/trusted-reviewers.yaml and
-# the independence policy) stays the base copy; the classifier, `cli-attestation
-# verify` and `cli-attestation independence-policy` run from trusted tooling
-# (the ai-sdlc tools checkout and npm-installed runtime), never from the head.
-# PR-derived values reach scripts only through `env:`.
+# contents: read). The PR head is fetched as git objects, never checked out and
+# never executed. RFC-0061: the check reads the review verdict record
+# (refs/ai-sdlc/verdicts/<head>) with `cli-attestation verdict-check`; the trust
+# root (.ai-sdlc/independence-policy.yaml) stays the base copy; the classifier and
+# the CLI run from trusted tooling (the ai-sdlc tools checkout and npm-installed
+# runtime), never from the head. The workflow name, inputs and exit codes are kept
+# from the v6 envelope era for branch-protection compatibility; the pin moves
+# producer and verifier together. PR-derived values reach scripts only through `env:`.
 name: consumer-verify-attestation
 
 on:
@@ -31,7 +32,7 @@ on:
         description: Exact version (x.y.z, no range) of @ai-sdlc/pipeline-cli and @ai-sdlc/orchestrator to install.
         type: string
         required: false
-        default: '0.31.0'
+        default: '0.41.0'
       required-independence-tier:
         description: Floor (none|attested|isolated) for the base independence-policy.yaml requiredTier.
         type: string

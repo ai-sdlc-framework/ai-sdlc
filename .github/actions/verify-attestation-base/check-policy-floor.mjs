@@ -36,6 +36,14 @@ export function checkFloor({ policyText, floor }) {
   return { ok: true, message: `base policy requiredTier=${actual} satisfies floor ${floor}` };
 }
 
+/** Stricter of the base policy requiredTier and the caller floor (invalid values fall back to the floor). */
+export function effectiveTier({ policyText, floor }) {
+  const actual = policyText == null ? 'none' : readRequiredTier(policyText);
+  const a = TIER_ORDER.indexOf(actual);
+  const f = TIER_ORDER.indexOf(floor);
+  return TIER_ORDER[Math.max(a, f, 0)];
+}
+
 const isMain =
   process.argv[1] != null && new URL(import.meta.url).pathname === resolve(process.argv[1]);
 if (isMain) {
@@ -46,6 +54,10 @@ if (isMain) {
   };
   const policyPath = join(resolve(get('repo-root') ?? '.'), '.ai-sdlc', 'independence-policy.yaml');
   const policyText = existsSync(policyPath) ? readFileSync(policyPath, 'utf8') : null;
+  if (argv.includes('--print-effective')) {
+    process.stdout.write(`${effectiveTier({ policyText, floor: get('floor') ?? 'none' })}\n`);
+    process.exit(0);
+  }
   const res = checkFloor({ policyText, floor: get('floor') ?? 'none' });
   process.stdout.write(`[policy-floor] ${res.message}\n`);
   process.exit(res.ok ? 0 : 1);

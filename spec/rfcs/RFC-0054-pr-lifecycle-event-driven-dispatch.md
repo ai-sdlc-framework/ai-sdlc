@@ -5,7 +5,7 @@ status: Approved
 lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-10-13
-updated: 2026-10-14
+updated: 2026-11-06
 targetSpecVersion: v1alpha1
 requires: []
 assumes: [RFC-0012, RFC-0035, RFC-0041, RFC-0042, RFC-0051]
@@ -13,6 +13,8 @@ requiresDocs: []
 ---
 
 # RFC-0054: PR Lifecycle as Event-Driven Dispatch (one state machine from branch pushed to merged)
+
+> **Amended by RFC-0061 (AISDLC-1174, 2026-11-06).** The `content-hash-mismatch` state and the push-only re-sign path are replaced: a rebase is handled by the gate's clean-replay carry-forward rule, with no re-sign (RFC-0061 OQ-2).
 
 **Status:** Signed Off (v0.2, 2026-10-14, operator sign-off same day: all 14 Open Questions resolved with the operator through the decision rubric; webhook-first event source with poll reconciler, executor owns to ready then the state machine, docs lane for no-task PRs, delivered/landed, landing/ records, land-prep runner, local only, rung: key, report-only budget)
 **Lifecycle:** Signed Off

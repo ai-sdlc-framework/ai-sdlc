@@ -5,7 +5,7 @@ status: Approved
 lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-11-06
 targetSpecVersion: v1alpha1
 requires: [RFC-0043]
 assumes: [RFC-0042]
@@ -13,6 +13,8 @@ requiresDocs: []
 ---
 
 # RFC-0046: Attested Reviewer Independence
+
+> **Amended by RFC-0061 (AISDLC-1174, 2026-11-06).** The tier carrier moves from `independenceTier` on a transcript leaf to the verdict record's `reviewers[]`. The tier derivation is unchanged and is computed once at Step 8 (RFC-0061 OQ-6). The tier is a pipeline claim, consistent with the RFC-0061 OQ-8 trust claim.
 
 **Status:** Approved (Signed Off 2026-09-06, Engineering + Operator) — all 5 OQs resolved via operator rubric walkthrough. Independence is modeled as a re-derivable **tier** (`independenceTier: none | attested | isolated`) anchored on RFC-0043's sandbox + clean-room boundary; defends against a determined same-machine coordinator; ships opt-in with a configurable, gate-topology-agnostic required-tier policy. RFC-0042 `verdictClass` is deprecated (legacy-read only), not amended.
 **Lifecycle:** Signed Off

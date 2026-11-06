@@ -5,7 +5,7 @@ status: Approved
 lifecycle: Signed Off
 author: Dominique Legault
 created: 2026-05-30
-updated: 2026-06-04
+updated: 2026-11-06
 signedOff: 2026-06-02
 targetSpecVersion: v1alpha1
 # Runtime-code dependency: the clean-room signer/verifier in this RFC IMPORTS the
@@ -26,6 +26,8 @@ deferredDocsDeadline: '2026-08-31'
 ---
 
 # RFC-0043: Untrusted-Contributor PR Verification — Zero-Trust Gate with OpenShell Sandbox Isolation
+
+> **Amended by RFC-0061 (AISDLC-1174, 2026-11-06).** The clean-room signing boundary now produces the review verdict record, not a v6 envelope: the clean-room output is the verdict record, written by the split CI writer (RFC-0061 OQ-7). The v6 signer and verifier this RFC assumed are gone (RFC-0061 phase 3).
 
 **Status:** Approved
 **Lifecycle:** Signed Off

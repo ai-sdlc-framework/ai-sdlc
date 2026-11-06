@@ -1,11 +1,11 @@
 ---
 id: RFC-0042
 title: Proof-of-Execution Attestation via In-Repo Merkle Transcripts
-status: Approved
-lifecycle: Implemented
+status: Superseded
+lifecycle: Superseded
 author: Dominique Legault
 created: 2026-05-20
-updated: 2026-05-28
+updated: 2026-11-06
 targetSpecVersion: v1alpha1
 requires: [RFC-0011]
 requiresDocs:
@@ -31,6 +31,8 @@ implementedBy:
 ---
 
 # RFC-0042: Proof-of-Execution Attestation via In-Repo Merkle Transcripts
+
+> **Superseded by RFC-0061 (AISDLC-1174, 2026-11-06).** The v6 Merkle-transcript envelope, its signer and verifier were deleted (AISDLC-1173); the merge gate reads the review verdict record instead.
 
 **Status:** Approved
 **Lifecycle:** Implemented

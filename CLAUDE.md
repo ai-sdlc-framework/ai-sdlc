@@ -27,7 +27,7 @@ Only rules that change behaviour in every session live here (budget 9k chars, `s
 - Workflows MUST call pipeline-cli via `node pipeline-cli/bin/cli-XXX.mjs`, never `pnpm --filter @ai-sdlc/pipeline-cli exec cli-XXX` (AISDLC-156).
 - **Dark-code gate (AISDLC-552):** `pnpm dark-code:check` fails on a module with no non-test importer; `.ai-sdlc/dark-code-baseline.json` only shrinks; never silence a finding with a token import.
 
-**Attestation schemas (DEC-0284):** v6 is the only schema signed or verified; v3/v4/v5 are refused.
+**Review verdict gate (RFC-0061):** the merge gate reads a verdict record in `refs/ai-sdlc/verdicts/*`; no attestation envelope is signed or verified, and v3 to v6 are refused (DEC-0284).
 
 ## Five-step algorithm (DEC-0090)
 

@@ -1,16 +1,18 @@
 ---
 id: RFC-0061
 title: Review verdict as a head-bound gate outside the branch (successor to RFC-0042)
-status: Signed Off
-lifecycle: Signed Off
+status: Implemented
+lifecycle: Implemented
 author: 'Dominique Legault'
 created: 2026-11-03
-updated: 2026-11-03
+updated: 2026-11-06
 targetSpecVersion: v1alpha1
 requires: []
 assumes: [RFC-0042, RFC-0043, RFC-0046, RFC-0052, RFC-0054]
 amends: [RFC-0042]
-requiresDocs: [operator-runbook]
+runtimeEvidence: []
+requiresDocs:
+  - operator-runbook
 ---
 
 # RFC-0061: Review verdict as a head-bound gate outside the branch (successor to RFC-0042)
@@ -352,7 +354,7 @@ No task is filed until Signed Off. Expected tasks after sign-off, by phase:
       exclusion list, committed proof trees, `init-signing-key`, doctor keyring checks.
 - [ ] Phase 3: amend RFC-0043, RFC-0046, RFC-0052; set RFC-0042 to Superseded; update
       `attestation-reference.md`, `review-attestations.md` rule, CLAUDE.md schema line.
-- [ ] Phase 4: adopter path per OQ-3 (`consumer-verify-attestation.yml`,
+- [x] Phase 4: adopter path per OQ-3 (`consumer-verify-attestation.yml`,
       `cli-attestation verify`, release note).
 - [x] `requiresDocs` set to `operator-runbook` at Ready for Review (2026-11-03).
 
