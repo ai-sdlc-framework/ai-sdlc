@@ -1,13 +1,13 @@
 ---
 id: RFC-0062
 title: Algorithm improvement directions, wire what exists, then calibrate, then learn
-status: Draft
-lifecycle: Draft
+status: Signed Off
+lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-11-06
 updated: 2026-11-06
 targetSpecVersion: v1alpha1
-requires: []
+requires: [RFC-0014, RFC-0035]
 assumes: [RFC-0005, RFC-0008, RFC-0010, RFC-0014, RFC-0016, RFC-0019, RFC-0050, RFC-0051, RFC-0056, RFC-0060, RFC-0061]
 runtimeEvidence: []
 requiresDocs: []
@@ -15,20 +15,20 @@ requiresDocs: []
 
 # RFC-0062: Algorithm improvement directions, wire what exists, then calibrate, then learn
 
-**Status:** Draft
-**Lifecycle:** Draft
+**Status:** Signed Off, Engineering + Operator (v0.2, 2026-11-06): all six Open Questions resolved by operator walkthrough through the decision rubric and recorded as DEC-0385 to DEC-0390 (this PR). OQ-1 deletes the RFC-0010 §14 modules and adds a budget-pressure priority floor to the pacer; OQ-2 settles RFC-0014 on `max` and fixes the live rank as bucket, then critical path; OQ-3 sources labels from implicit outcomes with logged propensity; OQ-4 makes JCS canonicalisation and a cross-SDK fixture a Phase 1 task; OQ-5 scopes packing to one host and names the RFC-0060 dependencies; OQ-6 chooses a bounded native consistency check over Z3.
+**Lifecycle:** Signed Off (Engineering + Operator, 2026-11-06; Product and Design pending)
 **Author:** Dominique Legault
 **Created:** 2026-11-06
 **Updated:** 2026-11-06
 **Target Spec Version:** v1alpha1
 
-> Draft. This RFC turns the external review "AI-SDLC Algorithm Improvement Directions"
+> Ready for Review. This RFC turns the external review "AI-SDLC Algorithm Improvement Directions"
 > (2026-11-06) into a proposal. Every claim the review made about the code was checked
 > against `main` at `e9da7a01` on 2026-11-06 by four read-only code audits; the "Corrections
 > to the source review" section records where the review was wrong or incomplete, and the
 > proposal below is built on the corrected picture. The six Open Questions are the review's
-> own six, restated with the evidence the audits found. None is resolved here; each is walked
-> with the operator through the decision rubric, one at a time.
+> own six, restated with the evidence the audits found. Each was walked with the
+> operator through the decision rubric on 2026-11-06 and is resolved below.
 
 ## Summary
 
@@ -138,7 +138,7 @@ SDK.
    memoised and already carrying the 1 to 4 bucket mapping with `critical = 4`), then
    critical-path length, with manifest mtime demoted to the last tie-break. `PRIORITY_RANK`
    gains `critical`. The `max` versus `+` conflict inside RFC-0014 (§5.2 says `+`, §5.3 and Q1
-   say `max`, code uses `max`) is settled by OQ-2, not here; until then the code's `max` stays.
+   say `max`, code uses `max`) is settled by OQ-2 as `max` (DEC-0386); RFC-0014 §5.2 is amended.
 2. **Soul Alignment from the three-layer engine.** `admission-composite.ts` consumes
    `scoreSoulAlignment` through the existing `soulAlignmentOverride` slot, in phase 2a shadow
    mode first (weights (0,0), one `did_scoring_events` row per dimension, label fallback
@@ -155,7 +155,13 @@ SDK.
    `sdk-go/audit/logger.go` and `sdk-python/src/ai_sdlc/audit/logger.py`; one genesis value;
    RFC 3339 timestamps at one precision; a cross-SDK fixture under `conformance/` that each SDK
    must verify. Whether this blocks Phase 1 or waits is OQ-4.
-5. **Small corrections.** `orchestrator/src/provenance.ts:29-31` stores the full prompt digest
+5. **Budget-pressure priority floor (OQ-1, DEC-0385).** `pipeline-cli/src/hierarchy/budget.ts`
+   limits claims to tasks at or above a configurable priority floor while the budget line
+   projects past 100% before the window resets; `worker-pool.ts`, `schedule-decision.ts` and the
+   SubscriptionLedger are deleted and leave the dark-code baseline.
+6. **Real `taskClass` on assignment rows (OQ-3, DEC-0387).** The assignment log stops writing
+   `uncategorized`; without it no routing label exists.
+7. **Small corrections.** `orchestrator/src/provenance.ts:29-31` stores the full prompt digest
    (the 16-hex form stays as a display and grep key, since that is all it is used for);
    `validate-agent-output.ts` diffs against the merge base instead of `HEAD~1`; the
    `ceiling: 40` worktree alarm becomes a cap with eviction of the oldest open-PR worktree by
@@ -222,6 +228,9 @@ rank(T) = ( wave(T),
             ageBonus(T),                        # clamp((ageDays − 30) / 180, 0, 1)
             id(T) )
 ```
+
+The tuple order is normative (OQ-2, DEC-0386): the effective-priority bucket is the primary
+key after wave; critical-path cost orders within a bucket. Manifest mtime is not a key.
 
 `ĉ(u)` is the calibrated expected cost from Phase 2; before calibration has data it is the
 t-shirt midpoint, and before an estimate exists it is 1, which reduces the term to
@@ -308,17 +317,19 @@ signed record is a future RFC if the trigger fires.
 
 ### A Z3 dependency for policy consistency checks
 
-Open (OQ-6). The alternative is a bounded TypeScript check over the small boolean systems
+Closed by OQ-6 (DEC-0390) in favour of the alternative: a bounded TypeScript check over the small boolean systems
 (autonomy policies, enforcement levels), which is enough for contradiction detection at
 today's sizes.
 
 ## Implementation Plan
 
-- [ ] Walk the six Open Questions with the operator through the decision rubric (one at a
-      time); record each answer as a Decision record on `main`.
-- [ ] Phase 1 tasks (filed after the OQ walkthrough, not before): live-path ranking with
-      shadow comparison; SA engine at admission in phase 2a; DAG consolidation; audit-entry
-      schema, JCS and conformance fixture; prompt-digest, merge-base diff and worktree cap.
+- [x] Walk the six Open Questions with the operator through the decision rubric (one at a
+      time); record each answer as a Decision record on `main` (2026-11-06, DEC-0385 to DEC-0390).
+- [ ] Phase 1 tasks (AISDLC-1208 to AISDLC-1215, filed with this walkthrough): live-path ranking with
+      shadow comparison; budget-pressure priority floor and RFC-0010 §14 deletion; real `taskClass`
+      and the label extractor; SA engine at admission in phase 2a; DAG consolidation; audit-entry
+      schema, JCS and conformance fixture; prompt-digest, merge-base diff, worktree cap and the
+      bounded policy consistency check.
 - [ ] Phase 2 tasks: calibration coefficient, token model, ordinal bias, confidence
       recalibration and Brier surface, sequential downshift test, drift and flood tests.
 - [ ] Phase 3 tasks: filed when the sequencing gate is met.
@@ -411,17 +422,18 @@ algorithm-identifier mention; all ten RFC-0060 questions open.
 
 ## Dependents
 
-- RFC-0014: §5.2 formula amended once OQ-2 is answered.
-- RFC-0010 §14: SubscriptionLedger wiring, if OQ-1 keeps it.
+- RFC-0014: §5.2 formula amended to `max` (OQ-2, DEC-0386); pointer added in RFC-0014.
+- RFC-0010 §14: SubscriptionLedger, `runWorkerPool` and `evaluateSchedule` deleted (OQ-1, DEC-0385); §14 is superseded by the pacer floor.
 - RFC-0019: lifecycle inconsistency fixed; adapter wiring is a Phase 3 dependency.
 - RFC-0061: unchanged; a signed verdict record would be a successor RFC.
 - `spec/spec.md`: new `#audit-entry` section that `spec/adapters.md:225` already links to.
 
 ## Open Questions
 
-Six questions, the review's own, restated with the evidence the audits found. None is
-resolved in this draft. Each is walked with the operator through the decision rubric, one
-at a time, and the answer recorded as a Decision record before the matching tasks are filed.
+Six questions, the review's own, restated with the evidence the audits found. All six were
+walked with the operator through the decision rubric on 2026-11-06, one at a time, and each
+answer is recorded as a Decision record (DEC-0385 to DEC-0390) filed in the same PR as the
+resolutions. The original question text is kept so each resolution reads in context.
 
 ### OQ-1: What happens to `runWorkerPool`, `evaluateSchedule` and the SubscriptionLedger
 
@@ -435,6 +447,8 @@ order as the quota term of the Phase 1 ranking; (b) delete them under the dark-c
 let the pacer's `BUDGET` line remain the only quota control; (c) keep them exported for an
 RFC-0060 worker and exclude them from this RFC.
 
+**Resolution (2026-11-06, full rubric; DEC-0385):** **Option (b) refined: delete the three modules under the dark-code gate and add a budget-pressure priority floor to the live pacer.** Industry research: Kubernetes separates quota (admission) from priority (scheduler) with one owner each; Slurm fair-share and Condor fold recent usage into the priority function; the pacer here already caps executors from the budget line but is priority-blind, so under pressure the cap starves the critical path as much as the rest. **Substantive gaps surfaced:** the modules model a worker pool and a ledger the hierarchy does not have, so "wiring" them means an adapter from board manifests and pacer windows to pool jobs and ledger entries, and two quota sources that can disagree; option (c) carries dead code against an RFC with no date, which is what the dark-code gate exists to refuse. **Refinement over the draft:** Phase 1 gains one rule in `pipeline-cli/src/hierarchy/budget.ts`: while the budget line projects past 100% before the window resets, claims are limited to tasks at or above a priority floor (`critical`, then `high`) until the projection recovers; the floor and the projection threshold are config keys with the current behaviour (`floor: none`) as default for one release. `orchestrator/src/dispatch/worker-pool.ts`, `orchestrator/src/scheduling/schedule-decision.ts` and the SubscriptionLedger are deleted and removed from the dark-code baseline; RFC-0010 §14 gets a pointer here. **Counter-argument:** "Deleting tested code that already does this to rewrite it elsewhere is waste; an adapter is a day's work." Rebuttal: the adapter translates two data models so that a one-line rule can run, and the two quota sources then need reconciling forever; the rule inside the pacer needs no translation. **Selected over wiring because one quota source beats two that drift; over delete-only because priority-blind throttling is the live starvation bug; over keeping for RFC-0060 because that RFC has no date.**
+
 ### OQ-2: `max`, `+`, or weighted critical path for RFC-0014 composition
 
 RFC-0014 says `+` at `:32` and `:128` and `max` at `:135` and `:231`; the code uses `max`
@@ -443,6 +457,8 @@ RFC to `max` and put effective priority on the live path as is; (b) adopt `+` as
 §5.2; (c) drop both for the weighted critical-path rank in Design Details, with effective
 priority as the first tie-break. The choice fixes what Phase 1 item 1 ships and what the
 RFC-0014 amendment says.
+
+**Resolution (2026-11-06, full rubric; DEC-0386):** **Option (a) with the Design Details rank: RFC-0014 is amended to `max`, and the live rank is (wave, effective-priority bucket with `critical = 4`, critical-path cost, age bonus, id).** Industry research: priority inheritance in real-time systems (Sha, Rajkumar, Lehoczky 1990; Linux PI-futexes) is always `max`, never a sum, because summing lets many low waiters outrank one critical one; critical-path list scheduling (Adam, Chandy, Dickson 1974) is near-optimal for makespan but optimises throughput, not declared urgency; Jira, Linear and Azure Boards keep a discrete bucket primary and never reorder by graph shape. **Substantive gaps surfaced:** option (c) as drafted put critical-path cost ahead of effective priority, which lets a long chain of mediums outrank a single critical fix, the inverse of the starvation the live path shows today; `+` makes order a function of graph size (four low dependents equal one critical). **Refinement over the draft:** the rank tuple in Design Details, `(wave, effectivePriority, criticalPathCost, ageBonus, id)`, is the normative order; RFC-0014 §5.2 and line 32 are amended from `+` to `max` so the RFC agrees with its own §5.3, Q1 and the code; the live comparator in `pipeline-cli/src/dispatch/board.ts` reads `effective-priority.ts` and the `dependency-graph.ts` longest path, with manifest mtime demoted to the last tie-break behind id. **Counter-argument:** "Buckets are coarse and operator priority is often stale; longest-path-first is the strongest makespan signal we have." Rebuttal: the board lands what the operator says matters, not minimum makespan over an arbitrary DAG; a stale bucket is corrected by `max` inheritance and the age bonus, while chain length overriding urgency removes the operator's lever entirely; critical path still orders everything inside a bucket, where most live ties are. **Selected over critical-path-primary because declared urgency must remain the lever; over `+` because no comparable system uses sum inheritance; over bucket-then-id because in-bucket order is where the live path is broken.**
 
 ### OQ-3: Labelled outcomes and the Phase 3 start date
 
@@ -455,6 +471,8 @@ rationale); (b) add an explicit operator label step to admission; (c) treat firs
 approval as the only label and fit routing first, PPA later. The answer sets the 200-per-cell
 gate's clock and which Phase 2 items can be fitted at all.
 
+**Resolution (2026-11-06, full rubric; DEC-0387):** **Option (c) extended: routing fits from first-pass review approval once `taskClass` is real; PPA labels are weak-supervised from implicit outcomes the pipeline already records, with the scheduler's rank logged as propensity; no explicit operator label step.** Industry research: Gmail Priority Inbox and Netflix ranking learn from implicit actions, and explicit rating prompts decay to near-zero compliance; bug-triage research (Lamkanfi et al. 2010; Menzies and Marcus 2008) labels priority from outcomes already in the tracker; Snorkel-style weak supervision (Ratner et al. 2017) combines noisy signals; learning from logged decisions is confounded by the policy that produced the log (Bottou et al. 2013) unless the propensity is recorded. **Substantive gaps surfaced:** the Decision Catalog's roughly 384 records decide process (merge holds, re-entries, webhook health), not whether a priority was right, and spread a handful per PPA cell; option (b) at one operator's intake reaches 200 per cell in years; option (c) alone leaves PPA with no start condition, so Phase 3 items 2 and 3 never start. **Refinement over the draft:** the PPA label is a stated combination of four signals: landed versus abandoned or parked; an operator edit of the task's `priority` field after filing (direction is the label, extracted from the task file's git history); queue age at claim relative to the bucket median; and a hold or park decision naming the task. Every phase 2a shadow row in `did_scoring_events` records the composite score and the rank the scheduler assigned at claim, so a later fit can correct for the log's policy. `usage/scorecard.ts` rows become routing labels once `taskClass` stops being `uncategorized`, which is a Phase 1 prerequisite task. Decision Catalog answers that name a task are one weak signal, not the label. **Counter-argument:** "Implicit labels are circular: the scheduler decides what lands first, then 'landed early' says the priority was right." Rebuttal: the propensity is logged for exactly that reason, and the operator's own priority edits and park decisions are the human disagreeing with the scheduler, the cleanest label available; queue age alone would be circular, which is why it is one of four signals. **Selected over an explicit step because it will not produce data; over the Decision Catalog because it is the wrong population; over review-only because it leaves PPA with no clock.**
+
 ### OQ-4: Cross-SDK audit verification and whether canonicalisation blocks Phase 1
 
 No SDK verifies another's chain; the Go verifier (`sdk-go/audit/filesink.go:65-83`) would
@@ -466,6 +484,8 @@ output, interop deferred; (c) document single-SDK verification as the contract a
 dangling link. This decides Phase 1 item 4's scope and whether the website's "verifiable"
 claim is cross-language.
 
+**Resolution (2026-11-06, full rubric; DEC-0388):** **Option (a): one audit-entry schema, RFC 8785 canonical bytes before hashing in all three SDKs, one genesis value and timestamp rule, and a cross-SDK conformance fixture every SDK must verify; filed as its own Phase 1 task that runs in parallel and blocks nothing.** Industry research: every transparency or attestation system that hashes JSON fixes the bytes first (DSSE and in-toto PAE, Certificate Transparency RFC 6962 leaf encoding, Sigstore Rekor, JCS in OpenID Federation and Trillian); JCS libraries exist in all three languages (`canonicalize`, `gowebpki/jcs`, `rfc8785`), with number formatting the known pitfall, so the fixture must include floats; cross-language test vectors are the standard interop proof and `conformance/` already exists for that purpose. **Substantive gaps surfaced:** "blocks Phase 1" was the wrong frame, since Phase 1 items are independently shippable; the three encodings are already a single-SDK correctness bug (Go HTML-escapes, Python ASCII-escapes, neither pins float formatting), so a chain can fail to verify after a runtime upgrade with no cross-SDK use at all; option (b) costs about four fifths of (a) and a fixture each SDK reads only its own half of proves nothing. **Refinement over the draft:** Phase 1 item 4 is confirmed at full scope; the schema in Design Details becomes `spec/spec.md#audit-entry` and `spec/schemas/v1alpha1/audit-entry.json`; the fixture under `conformance/audit-chain/` holds at least three entries with nested objects, non-ASCII strings, HTML-significant characters and floats, with the expected hashes, and each SDK's test suite verifies the fixture and the files the other two SDKs write; files carry `schemaVersion` so chains written before the change verify under the old rule. **Counter-argument:** "No adopter runs two SDKs against one log; this spends Phase 1 effort on a sentence on a website." Rebuttal: the cost is bounded and gates none of the dispatch work, and JCS fixes the single-SDK float and escaping hazard whether or not anyone verifies across languages. **Selected over own-output verification because it proves nothing at nearly the same cost; over a single-SDK contract because it retracts a public claim with a cheap fix; over deferral because it has no trigger.**
+
 ### OQ-5: Which RFC-0060 questions resource-aware dispatch depends on
 
 All ten RFC-0060 questions are open (`RFC-0060:157-158`, sign-off not eligible). The
@@ -476,6 +496,8 @@ state that dependency list for the successor; (b) hold resource-aware dispatch u
 three RFC-0060 questions are answered; (c) fold the packing pass into RFC-0060 and remove it
 from Phase 2 here.
 
+**Resolution (2026-11-06, full rubric; DEC-0389):** **Option (a): this RFC's packing pass is single-host, first-fit-decreasing by expected cost within the cap the pacer already computes, behind one `fits(task, headroom)` seam; a multi-host successor depends on RFC-0060 OQ-3 (per-user quota source), OQ-4 (placement policy) and OQ-5 (telemetry agent).** Industry research: Borg and Omega (Verma et al. 2015; Schwarzkopf et al. 2013) separate the ordering policy from placement, and the ordering function survived every placement redesign; single-host packing is the degenerate case of placement, first-fit-decreasing being an 11/9 OPT approximation; GitHub Actions and Buildkite do not pack by cost at all, which works when the constraint is a slot count, whereas here it is a token budget per window. **Substantive gaps surfaced:** options (b) and (c) tie Phase 2 to an RFC with all ten questions open and no owner or date; dropping packing leaves a tight budget window running whatever ranks first regardless of cost, so three cheap tasks lose to one expensive one the window could have landed alongside them. **Refinement over the draft:** the packer is a loop over the ranked list that asks one predicate whether a task fits the current headroom (concurrency slot, worktree, quota headroom in the window), bounded by `EXECUTOR CAP`; the predicate is the only surface a later placer replaces, so the ranking never changes when RFC-0060 ships; the item stays sequenced after Phase 2 calibration because packing by a noisy cost estimate is worse than the cap. **Counter-argument:** "Two schedulers will exist and the single-host packer is throwaway the day a multi-host placer lands." Rebuttal: the ranking is the durable part and is host-independent; the packer is about forty lines behind a predicate, cheaper to rewrite than a priority-blind cap is to run until an undated RFC is answered. **Selected over holding or folding into RFC-0060 because both wait on an RFC with no date; over cap-only because the constraint is a budget, not a slot count.**
+
 ### OQ-6: A Z3 dependency for policy consistency checks
 
 No SAT or SMT dependency exists today. The policy systems in question (autonomy policies,
@@ -485,12 +507,14 @@ artefact; (b) a bounded TypeScript truth-table check with an explicit size limit
 dependency; (c) no consistency check in this RFC. The choice weighs a credible compliance
 artefact against a heavy dependency in a CLI that adopters install.
 
+**Resolution (2026-11-06, full rubric; DEC-0390):** **Option (b): a bounded TypeScript consistency check (pairwise rule comparison plus truth-table reachability) with an explicit variable limit in the config schema; the compliance artefact is the conflicting rule pair plus a witness assignment; no SMT dependency.** Industry research: the one production precedent for SMT over access policy, AWS Zelkova (Backes et al. 2018), runs as a hosted service and is never shipped to the client; Cedar is proved in Lean but ships no solver; OPA, Conftest, Checkov and Kyverno ship no SAT or SMT dependency; firewall-rule anomaly detection (Al-Shaer and Hamed 2004) finds shadowing and contradiction with pairwise polynomial checks over rule sets of thousands. **Substantive gaps surfaced:** `z3-solver` on npm adds a 25 to 30 MB WebAssembly build and Emscripten glue, the largest dependency in the CLI, in a release whose trust chain went from unsigned to signed this week; the two policy systems have on the order of ten boolean inputs, where a full truth table runs in milliseconds; an optional solver behind the same interface is code for a case nothing approaches. **Refinement over the draft:** pairwise contradiction and shadowing checks run with no size limit (polynomial); full reachability of each enforcement level runs only up to a `maxPolicyVariables` limit (default 20) stated in the schema, and exceeding it fails validation with a message naming the limit rather than skipping the check; the artefact written under `compliance/` is the pair of rule ids and the witness assignment. The Alternatives Considered entry on Z3 closes. **Counter-argument:** "Truth tables are a dead end; the first thirty-flag policy gets no check, and an unsat core is a better audit artefact." Rebuttal: pairwise checks stay polynomial at any flag count, so only full reachability is bounded; a witness assignment names the exact two rules that conflict, which is what an operator fixes; a solver nobody has needed is thirty megabytes of attack surface. **Selected over Z3 because the footprint is out of proportion to ten-variable systems; over no check because contradictory enforcement levels are a real silent-failure class; over optional-Z3-later because that path is speculative code.**
+
 ## Sign-Off
 
 | Role | Owner | Status | Date |
 |---|---|---|---|
-| Engineering | Dominique Legault | pending | |
-| Operator | Dominique Legault | pending | |
+| Engineering | Dominique Legault | ✅ Signed (six OQs resolved through the full rubric; Phase 1 wires engines that exist before any new theory, with the three corrected premises built in) | 2026-11-06 |
+| Operator | Dominique Legault | ✅ Signed (every resolution recorded as a Decision record DEC-0385 to DEC-0390; Phase 3 start remains gated on the 200-per-cell count that OQ-3 now gives a clock) | 2026-11-06 |
 | Product | | pending | |
 | Design | | pending | |
 
@@ -498,6 +522,7 @@ artefact against a heavy dependency in a CLI that adopters install.
 
 | Version | Date | Change |
 |---|---|---|
+| v0.2 | 2026-11-06 | Ready for Review: all six OQs resolved by operator walkthrough (decision rubric), recorded as DEC-0385 to DEC-0390. OQ-1 delete RFC-0010 §14 modules, pacer priority floor. OQ-2 `max`, rank bucket then critical path (Design Details tuple made normative; Phase 1 item 1 updated). OQ-3 implicit outcomes plus review approval, propensity logged; new Phase 1 `taskClass` item. OQ-4 one schema, JCS, cross-SDK fixture as a Phase 1 task. OQ-5 single-host packing behind a `fits` seam; RFC-0060 OQ-3/4/5 named for the successor. OQ-6 bounded native consistency check, Z3 alternative closed. Phase 1 tasks AISDLC-1208 to AISDLC-1215 filed. |
 | v0.1 | 2026-11-06 | Draft from the external review "AI-SDLC Algorithm Improvement Directions" (2026-11-06), with every code claim verified against `main` at `e9da7a01` by four read-only audits; twenty corrections recorded; three phases with a sequencing gate; six Open Questions restated with evidence, none resolved. |
 
 ## References
