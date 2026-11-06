@@ -9,9 +9,10 @@
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ingestIntervalMs, launchDebounced } from './ingest-lock.js';
 import { DEFAULT_MAX_SECONDS, isIngestSwitchedOff, isRemoteSandbox } from './ingest-claude.js';
 
 export interface LaunchOptions {
@@ -20,6 +21,12 @@ export interface LaunchOptions {
   /** Bin script to run. Defaults to this package's own `cli-usage.mjs`. */
   binPath?: string;
   env?: NodeJS.ProcessEnv;
+  /** Clock, for tests. */
+  now?: () => number;
+  /** Usage directory holding the launch stamp. */
+  usageDir?: string;
+  /** Working directory for the child. Defaults to the temp dir. */
+  cwd?: string;
 }
 
 function defaultBinPath(): string {
@@ -36,10 +43,12 @@ export function launchUsageIngestDetached(opts: LaunchOptions = {}): boolean {
     if (isRemoteSandbox(env) || isIngestSwitchedOff(env)) return false;
     const bin = opts.binPath ?? defaultBinPath();
     if (!existsSync(bin)) return false;
+    const dir = opts.usageDir ?? env['AI_SDLC_USAGE_DIR'] ?? join(homedir(), '.ai-sdlc', 'usage');
+    if (launchDebounced(dir, (opts.now ?? Date.now)(), ingestIntervalMs(env))) return false;
     const child = spawn(
       process.execPath,
       [bin, 'ingest', '--max-seconds', String(opts.maxSeconds ?? DEFAULT_MAX_SECONDS)],
-      { detached: true, stdio: 'ignore', cwd: tmpdir(), env },
+      { detached: true, stdio: 'ignore', cwd: opts.cwd ?? tmpdir(), env },
     );
     child.on('error', () => {});
     child.unref();

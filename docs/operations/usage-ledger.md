@@ -479,3 +479,12 @@ A config that fails validation is skipped with a warning and the next source is 
 - [`model-routing.md`](model-routing.md): choosing models from this evidence.
 - [`billing-and-cost-optimization.md`](billing-and-cost-optimization.md): billing pools and how to spread work across them.
 - [`RFC-0050`](../../spec/rfcs/RFC-0050-usage-ledger-and-model-routing.md): the design and its rationale.
+
+## Ingest spacing and single instance (AISDLC-1191)
+
+The dispatch tick and the Stop hook share one launch stamp (`<usage dir>/.ingest-launch`); a launch within the
+interval of the last one is skipped. The interval defaults to 20000 ms and is read from
+`AI_SDLC_USAGE_INGEST_INTERVAL_MS`. The ingester also takes an exclusive lock (`<usage dir>/.ingest.lock`, holding
+its pid); a second ingester exits 0 without reading files (`disabled: already-running`). A lock whose pid is dead,
+or that is older than 5 minutes, is taken over. A run stops at the first file or 256 lines past `--max-seconds`
+and saves its cursors.

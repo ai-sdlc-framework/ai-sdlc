@@ -28,6 +28,14 @@ const BIN_NAME = 'cli-usage.mjs';
 const MAX_SECONDS = 25;
 /** Stop fires every turn; launch at most once per this window. */
 const DEBOUNCE_MS = 20_000;
+const INTERVAL_ENV = 'AI_SDLC_USAGE_INGEST_INTERVAL_MS';
+
+function intervalMs(env) {
+  const raw = env[INTERVAL_ENV];
+  if (raw === undefined || String(raw).trim() === '') return DEBOUNCE_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : DEBOUNCE_MS;
+}
 const STAMP_FILE = '.ingest-launch';
 const PIPELINE_CLI_REL = join('node_modules', '@ai-sdlc', 'pipeline-cli', 'bin');
 
@@ -63,7 +71,7 @@ function debounced(env, now) {
   try {
     const dir = usageDirOf(env);
     const stamp = join(dir, STAMP_FILE);
-    if (existsSync(stamp) && now - statSync(stamp).mtimeMs < DEBOUNCE_MS) return true;
+    if (existsSync(stamp) && now - statSync(stamp).mtimeMs < intervalMs(env)) return true;
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     writeFileSync(stamp, '', { mode: 0o600 });
   } catch {

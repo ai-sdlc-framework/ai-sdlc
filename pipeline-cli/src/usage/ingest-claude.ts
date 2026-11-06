@@ -27,6 +27,7 @@ import {
   type LimitCategory,
   type ParsedCall,
 } from './claude-transcript.js';
+import { acquireIngestLock } from './ingest-lock.js';
 import { LimitEventLog } from './limit-event-log.js';
 import { readLines } from './line-reader.js';
 import { isReplayWorktreeCwd } from './replay-git.js';
@@ -42,7 +43,7 @@ const DEADLINE_CHECK_EVERY = 256;
 
 export const DEFAULT_MAX_SECONDS = 30;
 
-export type IngestDisabledReason = 'remote-sandbox' | 'switched-off';
+export type IngestDisabledReason = 'remote-sandbox' | 'switched-off' | 'already-running';
 
 export interface IngestOptions {
   /** Projects directory to walk. Defaults to the harness's standard location. */
@@ -275,117 +276,127 @@ export async function ingestClaudeTranscripts(opts: IngestOptions = {}): Promise
     withUsageLock,
     (e) => `${e.ts}|${e.sessionId}|${e.category}`,
   );
-  const bytesPerFile = opts.backfill ? BACKFILL_BYTES_PER_FILE : NORMAL_RUN_BYTES_PER_FILE;
+  const release = acquireIngestLock(usageDir, { now });
+  if (!release) return { ...result, disabled: 'already-running' };
+  try {
+    return await scan();
+  } finally {
+    release();
+  }
 
-  for (const file of newestFirst(walkTranscripts(projectsDir))) {
-    if (expired()) {
-      result.timedOut = true;
-      break;
-    }
-    const st = realStat(file.path);
-    if (!st?.isFile()) continue;
-    result.filesScanned++;
+  async function scan(): Promise<IngestResult> {
+    const bytesPerFile = opts.backfill ? BACKFILL_BYTES_PER_FILE : NORMAL_RUN_BYTES_PER_FILE;
 
-    try {
-      const key = cursorKey(file.path);
-      let start = opts.backfill ? 0 : readCursor(key, storeOpts);
-      if (st.size < start) start = 0; // file shrank or was rotated
-      if (start >= st.size) continue;
-
-      const agentRole = file.sidecarPath
-        ? readAgentRole(file.sidecarPath)
-        : (opts.sessionRoles?.get(file.sessionStem) ?? 'main-session');
-      const batch = new Map<string, ModelCallRecord>();
-      const limits: LimitEvent[] = [];
-      let scopeDecided = !frameworkOnly;
-      let cwdChecked = false;
-      let skipFile = false;
-      let replayFile = false;
-      let lines = 0;
-      let timedOutHere = false;
-
-      const flush = (consumed: number): void => {
-        if (batch.size > 0) {
-          const res = appendModelCalls([...batch.values()], storeOpts);
-          result.callsWritten += res.written;
-          result.repeatsSkipped += res.skipped;
-          result.errors += res.invalid;
-          batch.clear();
-        }
-        result.limitEvents += limitLog.append(limits.splice(0));
-        if (consumed > start || opts.backfill) writeCursor(key, consumed, storeOpts);
-      };
-
-      const read = readLines(file.path, {
-        start,
-        maxBytes: bytesPerFile,
-        onLine: (line, lineStart, endOffset) => {
-          if (++lines % DEADLINE_CHECK_EVERY === 0 && expired()) {
-            timedOutHere = true;
-            return false;
-          }
-          if (!cwdChecked || !scopeDecided) {
-            const cwd = peekCwd(line);
-            if (cwd !== undefined) {
-              cwdChecked = true;
-              if (isReplayWorktreeCwd(cwd)) {
-                skipFile = true;
-                replayFile = true;
-                return false;
-              }
-              if (!scopeDecided) {
-                scopeDecided = true;
-                if (!resolver.frameworkFor(cwd)) {
-                  skipFile = true;
-                  return false;
-                }
-              }
-            }
-          }
-          const parsed = parseTranscriptLine(line);
-          if (parsed.kind === 'error') {
-            result.errors++;
-          } else if (parsed.kind === 'limit') {
-            limits.push({
-              ts: parsed.ts,
-              sessionId: parsed.sessionId ?? file.sessionStem,
-              category: parsed.category,
-            });
-          } else if (parsed.kind === 'call') {
-            const record = buildRecord(parsed.call, file, agentRole, lineStart, resolver);
-            if (record && frameworkOnly && record.scope === 'other') {
-              result.otherScopeSkipped++;
-            } else if (record) {
-              const prior = batch.get(record.callId);
-              if (prior) {
-                result.repeatsSkipped++;
-                // repeats of one message can carry a growing output count; keep the largest
-                if (record.tokens.output > prior.tokens.output) batch.set(record.callId, record);
-              } else {
-                batch.set(record.callId, record);
-              }
-            }
-          }
-          if (batch.size >= BATCH_LIMIT) flush(endOffset);
-          return true;
-        },
-      });
-
-      result.errors += read.oversizeLines;
-      if (skipFile) {
-        if (replayFile) result.replayTranscriptsSkipped++;
-        else result.otherScopeSkipped++;
-        continue;
-      }
-      flush(read.consumed);
-      if (timedOutHere) {
+    for (const file of newestFirst(walkTranscripts(projectsDir))) {
+      if (expired()) {
         result.timedOut = true;
         break;
       }
-    } catch {
-      // one unreadable file or failed write must not stop the run; it is retried next time
-      result.errors++;
+      const st = realStat(file.path);
+      if (!st?.isFile()) continue;
+      result.filesScanned++;
+
+      try {
+        const key = cursorKey(file.path);
+        let start = opts.backfill ? 0 : readCursor(key, storeOpts);
+        if (st.size < start) start = 0; // file shrank or was rotated
+        if (start >= st.size) continue;
+
+        const agentRole = file.sidecarPath
+          ? readAgentRole(file.sidecarPath)
+          : (opts.sessionRoles?.get(file.sessionStem) ?? 'main-session');
+        const batch = new Map<string, ModelCallRecord>();
+        const limits: LimitEvent[] = [];
+        let scopeDecided = !frameworkOnly;
+        let cwdChecked = false;
+        let skipFile = false;
+        let replayFile = false;
+        let lines = 0;
+        let timedOutHere = false;
+
+        const flush = (consumed: number): void => {
+          if (batch.size > 0) {
+            const res = appendModelCalls([...batch.values()], storeOpts);
+            result.callsWritten += res.written;
+            result.repeatsSkipped += res.skipped;
+            result.errors += res.invalid;
+            batch.clear();
+          }
+          result.limitEvents += limitLog.append(limits.splice(0));
+          if (consumed > start || opts.backfill) writeCursor(key, consumed, storeOpts);
+        };
+
+        const read = readLines(file.path, {
+          start,
+          maxBytes: bytesPerFile,
+          onLine: (line, lineStart, endOffset) => {
+            if (++lines % DEADLINE_CHECK_EVERY === 0 && expired()) {
+              timedOutHere = true;
+              return false;
+            }
+            if (!cwdChecked || !scopeDecided) {
+              const cwd = peekCwd(line);
+              if (cwd !== undefined) {
+                cwdChecked = true;
+                if (isReplayWorktreeCwd(cwd)) {
+                  skipFile = true;
+                  replayFile = true;
+                  return false;
+                }
+                if (!scopeDecided) {
+                  scopeDecided = true;
+                  if (!resolver.frameworkFor(cwd)) {
+                    skipFile = true;
+                    return false;
+                  }
+                }
+              }
+            }
+            const parsed = parseTranscriptLine(line);
+            if (parsed.kind === 'error') {
+              result.errors++;
+            } else if (parsed.kind === 'limit') {
+              limits.push({
+                ts: parsed.ts,
+                sessionId: parsed.sessionId ?? file.sessionStem,
+                category: parsed.category,
+              });
+            } else if (parsed.kind === 'call') {
+              const record = buildRecord(parsed.call, file, agentRole, lineStart, resolver);
+              if (record && frameworkOnly && record.scope === 'other') {
+                result.otherScopeSkipped++;
+              } else if (record) {
+                const prior = batch.get(record.callId);
+                if (prior) {
+                  result.repeatsSkipped++;
+                  // repeats of one message can carry a growing output count; keep the largest
+                  if (record.tokens.output > prior.tokens.output) batch.set(record.callId, record);
+                } else {
+                  batch.set(record.callId, record);
+                }
+              }
+            }
+            if (batch.size >= BATCH_LIMIT) flush(endOffset);
+            return true;
+          },
+        });
+
+        result.errors += read.oversizeLines;
+        if (skipFile) {
+          if (replayFile) result.replayTranscriptsSkipped++;
+          else result.otherScopeSkipped++;
+          continue;
+        }
+        flush(read.consumed);
+        if (timedOutHere) {
+          result.timedOut = true;
+          break;
+        }
+      } catch {
+        // one unreadable file or failed write must not stop the run; it is retried next time
+        result.errors++;
+      }
     }
+    return result;
   }
-  return result;
 }
