@@ -9,7 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -206,5 +206,19 @@ describe('checkActorAllowed', () => {
     });
     expect(r.allowed).toBe(true);
     expect(r.reason).toContain('release-manager');
+  });
+});
+
+describe('canonical trusted-reviewers.yaml (AISDLC-1206)', () => {
+  it('registers the release-bot signing public key', () => {
+    const filePath = join(__dirname, '..', '..', '..', '.ai-sdlc', 'trusted-reviewers.yaml');
+    const entry = loadTrustedReviewers({ filePath }).find(
+      (r) => r.identity === 'release-bot@ai-sdlc.io',
+    );
+    expect(entry).toBeDefined();
+    expect(entry?.machine).toBe('ci-runner');
+    expect(readFileSync(filePath, 'utf8')).toContain(
+      '      MCowBQYDK2VwAyEA4ffdPxGoKLIfEMkfkLMlrp8YtJ5wmn+dVv3CJJhLGlQ=\n',
+    );
   });
 });

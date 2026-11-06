@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1206
 title: 'Register the release signing public key in trusted-reviewers'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:
