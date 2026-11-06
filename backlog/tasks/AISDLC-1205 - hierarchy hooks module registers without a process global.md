@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1205
 title: 'Hierarchy hooks module registers without a process global'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:

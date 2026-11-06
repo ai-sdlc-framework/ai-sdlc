@@ -1,5 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -488,10 +495,9 @@ describe('hierarchy module: socket-path envelope (AISDLC-1090)', () => {
         );
       }
       // Env wins without spawning; a relative boardDir resolves to nothing, so nothing is written.
-      process.env.CLAUDE_PROJECT_DIR = '/p';
-      expect(await resolveBoardDir(run)).toBe('/p/.ai-sdlc/dispatch');
-      expect(await resolveBoardDir(run, 'rel')).toBeUndefined();
-      delete process.env.CLAUDE_PROJECT_DIR;
+      expect(await resolveBoardDir(run, undefined, '/p')).toBe('/p/.ai-sdlc/dispatch');
+      expect(await resolveBoardDir(run, '/b', '/p')).toBe('/b');
+      expect(await resolveBoardDir(run, 'rel', '/p')).toBeUndefined();
       expect(await resolveBoardDir(async () => ({ stdout: '' }))).toBeUndefined();
       const before = calls.length;
       await recordReceivedSender(calls.push.bind(calls) as never, 'rel', 'me', sock('x', 'hi'));
@@ -502,6 +508,41 @@ describe('hierarchy module: socket-path envelope (AISDLC-1090)', () => {
       if (prevEnv === undefined) delete process.env.CLAUDE_PROJECT_DIR;
       else process.env.CLAUDE_PROJECT_DIR = prevEnv;
     }
+  });
+
+  it('registers and writes module health with no process global (AISDLC-1205)', async () => {
+    const s = setup();
+    const get = s.$.env.get;
+    s.$.env.get = (k: string) => (k === 'CLAUDE_PROJECT_DIR' ? '/proj' : get(k));
+    const real = globalThis.process;
+    vi.stubGlobal('process', undefined);
+    try {
+      expect(globalThis.process).toBeUndefined();
+      await s.start();
+    } finally {
+      vi.stubGlobal('process', real);
+    }
+    const writes = s.$.process.run.mock.calls
+      .map((c: any[]) => c[0])
+      .filter((a: any) => Array.isArray(a) && String(a[3] ?? '').includes('module-'));
+    expect(writes.length).toBeGreaterThan(0);
+    expect(writes[0][3]).toBe('/proj/.ai-sdlc/dispatch/handoff/module-executor.json');
+  });
+
+  it('has no bare process global in the hierarchy module sources (AISDLC-1205)', () => {
+    const dir = path.resolve(__dirname, '../../hooks/hierarchy');
+    const offenders: string[] = [];
+    for (const f of readdirSync(dir).filter((n) => /\.tsx?$/.test(n))) {
+      readFileSync(path.join(dir, f), 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          // Child-process script strings are quoted constants; `$.process.run` is a host primitive.
+          if (/^\s*(\/\/|\*|\/\*)/.test(line) || /^\s*"/.test(line)) return;
+          if (/(^|[^$.\w'"])process\.(env|cwd|argv|stdout|exit)\b/.test(line))
+            offenders.push(`${f}:${i + 1}: ${line.trim()}`);
+        });
+    }
+    expect(offenders).toEqual([]);
   });
 
   it('passes a non-dispatch sender through unchanged, for executor and planner', async () => {

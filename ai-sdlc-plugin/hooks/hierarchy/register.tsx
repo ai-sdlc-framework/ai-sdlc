@@ -54,6 +54,7 @@ interface Router {
   planner: PlannerState;
   sessionName: string;
   boardDir: string | undefined;
+  projectDir: string | undefined;
 }
 
 // The validator follows `$` only into functions declared at the top of the file or imported from the
@@ -67,6 +68,7 @@ async function onReceive(r: Router, $: Any, e: Any, next: Any): Promise<Any> {
       r.boardDir,
       r.sessionName,
       String(e?.text ?? ''),
+      r.projectDir,
     );
   if (r.current === 'operator-dispatch') return dispatchSessionReceive(r.dispatch, $, e, next);
   if (r.current === 'planner') return plannerSessionReceive(r.planner, $, e, next);
@@ -108,6 +110,7 @@ export const register = (on: Any, options?: Any): void => {
     },
     sessionName: '',
     boardDir: options?.boardDir,
+    projectDir: undefined,
   };
   const state = router.executor;
   const dispatch = router.dispatch;
@@ -151,6 +154,9 @@ export const register = (on: Any, options?: Any): void => {
     const named = (await safe(() => $.env.get('AI_SDLC_HIERARCHY_SESSION'))).value;
     const sessionName = typeof named === 'string' && named ? named : role;
     router.sessionName = sessionName;
+    const projectEnv = (await safe(() => $.env.get('CLAUDE_PROJECT_DIR'))).value;
+    router.projectDir = typeof projectEnv === 'string' && projectEnv ? projectEnv : undefined;
+    dispatch.projectDir = router.projectDir;
     const versionText = typeof version === 'string' ? version : '';
     const health = (h: { state: 'loaded' | 'refused'; reason?: string }): Promise<void> =>
       writeModuleHealth(
@@ -159,6 +165,7 @@ export const register = (on: Any, options?: Any): void => {
         sessionName,
         { ...h, ...(versionText ? { version: versionText } : {}) },
         (k, v) => $.store.set(k, v),
+        router.projectDir,
       );
     // OQ-5: the validator refuses `typeof $.noun.verb`, so each primitive is probed by one call whose
     // argument is a bare string, never an object with fields: a typed boundary rejects it before any
