@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1189
 title: 'Dispatch lands and repairs open PRs before claiming new tasks'
-status: In Progress
+status: To Do
 assignee: []
 created_date: '2026-11-04'
 labels:
