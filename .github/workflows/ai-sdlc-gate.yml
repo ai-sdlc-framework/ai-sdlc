@@ -585,9 +585,16 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          # This job runs the BASE tree's CLI (trusted code). On the cutover PR itself the base
+          # predates --pull-request (strict yargs rejects unknown flags), so pass it only when
+          # the base CLI knows it.
+          PR_ARGS=()
+          if node pipeline-cli/bin/cli-attestation.mjs verdict-check --help 2>&1 | grep -q -- '--pull-request'; then
+            PR_ARGS=(--pull-request "$PR_NUMBER")
+          fi
           node pipeline-cli/bin/cli-attestation.mjs verdict-check \
             --head "$HEAD_SHA" --base "$BASE_SHA" --repository "$REPOSITORY" \
-            --pull-request "$PR_NUMBER" --post-status
+            "${PR_ARGS[@]}" --post-status
 
   # ── Dependency review gate (npm + github-actions; issue #791 follow-up) ──
   # Folds dependency-review into the pr-ready rollup so it is a REAL blocking
