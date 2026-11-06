@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1220
 title: Resumed review round keeps the two-reviewer set and scopes the earlier head to the PR
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:
