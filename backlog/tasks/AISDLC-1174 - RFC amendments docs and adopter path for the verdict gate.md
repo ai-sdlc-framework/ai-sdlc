@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1174
 title: 'RFC-0061 Phases 3 and 4: amend dependent RFCs, update docs and move the adopter path to the verdict check'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-03'
 labels:

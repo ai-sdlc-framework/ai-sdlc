@@ -4,7 +4,6 @@
  *
  *   - `.github/workflows/consumer-verify-attestation.yml` (workflow_call)
  *   - `.github/actions/verify-attestation-base/action.yml` (composite)
- *   - `.github/actions/verify-attestation-base/materialize-head-data.mjs`
  *   - `.github/actions/verify-attestation-base/check-policy-floor.mjs`
  *
  * `auditGate()` encodes the base-only trust invariants. The shipped files must
@@ -53,17 +52,12 @@ const GUARD_STEP = 'Require pull_request_target and a pinned tooling SHA';
 const GATE_STEPS = {
   'Classify changeset (base copy of the docs-only classifier)':
     /\$ACTION_PATH\/\.\.\/\.\.\/\.\.\/scripts\/is-docs-only-changeset\.mjs/,
-  'Materialize head attestation data (untrusted data only)':
-    /\$ACTION_PATH\/materialize-head-data\.mjs/,
   'Check independence-policy floor (base policy)': /\$ACTION_PATH\/check-policy-floor\.mjs/,
-  'Verify attestation': /cli-attestation\.mjs" verify/,
-  'Enforce independence policy': /cli-attestation\.mjs" independence-policy/,
+  'Verify attestation': /cli-attestation\.mjs" verdict-check/,
 };
 const EXEMPT_GUARDED = new Set([
-  'Materialize head attestation data (untrusted data only)',
   'Check independence-policy floor (base policy)',
   'Verify attestation',
-  'Enforce independence policy',
 ]);
 
 /** Returns a list of invariant violations; empty means the gate is sound. */
@@ -202,11 +196,64 @@ describe('consumer-verify-attestation: shipped files (AC-1, AC-3)', () => {
     assert.ok(step.uses.endsWith('.github/actions/verify-attestation-base'));
     assert.match(step.with['head-sha'], /pull_request\.head\.sha/);
   });
-  it('enforces independence via cli-attestation independence-policy with no bespoke script or stdout parsing', () => {
-    const run = stepOf(action, 'Enforce independence policy').run;
-    assert.match(run, /independence-policy/);
+  it('checks the verdict record with verdict-check and passes the tier floor, with no stdout parsing', () => {
+    const run = stepOf(action, 'Verify attestation').run;
+    assert.match(run, /verdict-check/);
+    assert.match(run, /--required-tier "\$TIER_FLOOR"/);
     for (const s of action.runs.steps) {
       assert.doesNotMatch(s.run ?? '', /\|\s*(grep|awk|sed|jq)\b|\$\(.*cli-attestation/);
+    }
+  });
+  it('keeps every input name and adds only optional ones (RFC-0061 OQ-3)', () => {
+    for (const k of [
+      'base-sha',
+      'head-sha',
+      'head-repository',
+      'github-token',
+      'pipeline-cli-version',
+      'required-independence-tier',
+    ])
+      assert.ok(action.inputs[k], k);
+    for (const k of ['repository', 'pull-request'])
+      assert.notEqual(action.inputs[k].required, true);
+  });
+  it('fixture run: the verify step exits 0 on a valid verdict and 1 otherwise, with the kept arguments', () => {
+    const run = stepOf(action, 'Verify attestation').run;
+    const dir = mkdtempSync(join(tmpdir(), 'verdict-fixture-'));
+    try {
+      const bin = join(dir, 'node_modules/@ai-sdlc/pipeline-cli/bin');
+      mkdirSync(bin, { recursive: true });
+      const log = join(dir, 'args.log');
+      writeFileSync(
+        join(bin, 'cli-attestation.mjs'),
+        `import { appendFileSync } from 'node:fs';
+appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(' ') + '\\n');
+process.exitCode = process.env.FIXTURE_VERDICT === 'ok' ? 0 : 1;
+`,
+      );
+      const exec = (verdict) =>
+        spawnSync('bash', ['-c', run], {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            BASE_SHA: 'b'.repeat(40),
+            HEAD_SHA: 'a'.repeat(40),
+            REPOSITORY: 'o/r',
+            PR_NUMBER: '7',
+            TIER_FLOOR: 'none',
+            VERIFIER_HOME: dir,
+            NODE_OPTIONS: '',
+            FIXTURE_VERDICT: verdict,
+          },
+        }).status;
+      assert.equal(exec('ok'), 0);
+      assert.equal(exec('bad'), 1);
+      assert.match(
+        readFileSync(log, 'utf8'),
+        /verdict-check --head a{40} --base b{40} --repository o\/r --pull-request 7 --required-tier none/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
   it('fails closed when the fetched sha differs from the event head sha', () => {
@@ -222,7 +269,7 @@ describe('consumer-verify-attestation: tamper cases go red (AC-2)', () => {
     assert.ok(
       mutate((a) => (stepOf(a, 'Verify attestation')['continue-on-error'] = true)).length > 0,
     );
-    assert.ok(mutate((a) => (stepOf(a, 'Enforce independence policy').if = 'false')).length > 0);
+    assert.ok(mutate((a) => (stepOf(a, 'Verify attestation').if = 'false')).length > 0);
   });
   it('forged exempt classifier', () => {
     assert.ok(
@@ -253,8 +300,8 @@ describe('consumer-verify-attestation: tamper cases go red (AC-2)', () => {
   it('replaced gate script', () => {
     assert.ok(
       mutate((a) => {
-        stepOf(a, 'Materialize head attestation data (untrusted data only)').run =
-          'node scripts/materialize-head-data.mjs --repo-root . --head-sha "$HEAD_SHA"';
+        stepOf(a, 'Check independence-policy floor (base policy)').run =
+          'node scripts/check-policy-floor.mjs --repo-root . --floor none';
       }).length > 0,
     );
   });
@@ -278,9 +325,6 @@ describe('consumer-verify-attestation: tamper cases go red (AC-2)', () => {
   });
 });
 
-const { materializeHeadData, MaterializeError } = await import(
-  pathToFileURL(join(ACTION_DIR, 'materialize-head-data.mjs')).href
-);
 const { checkFloor } = await import(pathToFileURL(join(ACTION_DIR, 'check-policy-floor.mjs')).href);
 
 function git(cwd, ...args) {
@@ -295,105 +339,6 @@ function git(cwd, ...args) {
     },
   }).trim();
 }
-function repoWithHead(files, symlinks = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'mat-'));
-  git(dir, 'init', '-q');
-  writeFileSync(join(dir, 'README'), 'base');
-  mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
-  writeFileSync(join(dir, '.ai-sdlc/trusted-reviewers.yaml'), 'trusted: base\n');
-  git(dir, 'add', '-A');
-  git(dir, 'commit', '-q', '-m', 'base');
-  const base = git(dir, 'rev-parse', 'HEAD');
-  for (const [p, c] of Object.entries(files)) {
-    mkdirSync(dirname(join(dir, p)), { recursive: true });
-    writeFileSync(join(dir, p), c);
-  }
-  for (const [p, target] of Object.entries(symlinks)) {
-    mkdirSync(dirname(join(dir, p)), { recursive: true });
-    symlinkSync(target, join(dir, p));
-  }
-  writeFileSync(join(dir, '.ai-sdlc/trusted-reviewers.yaml'), 'trusted: HEAD-FORGED\n');
-  git(dir, 'add', '-A', '-f');
-  git(dir, 'commit', '-q', '-m', 'head');
-  const head = git(dir, 'rev-parse', 'HEAD');
-  git(dir, 'checkout', '-q', base);
-  return { dir, head };
-}
-const LEAF = 'a'.repeat(40);
-
-describe('materialize-head-data.mjs', () => {
-  it('copies only envelope + leaves and never head scripts or the trust root', () => {
-    const { dir, head } = repoWithHead({
-      '.ai-sdlc/attestations/abc.v6.dsse.json': '{"env":1}',
-      '.ai-sdlc/transcript-leaves.jsonl': 'leaf\n',
-      [`.ai-sdlc/transcript-leaves/${LEAF}.jsonl`]: 'leaf2\n',
-      'scripts/is-docs-only-changeset.mjs': 'forged',
-      '.github/actions/verify-attestation-base/materialize-head-data.mjs': 'replaced',
-    });
-    try {
-      const copied = materializeHeadData({ repoRoot: dir, headSha: head });
-      assert.deepEqual(
-        copied.sort(),
-        [
-          '.ai-sdlc/attestations/abc.v6.dsse.json',
-          `.ai-sdlc/transcript-leaves/${LEAF}.jsonl`,
-          '.ai-sdlc/transcript-leaves.jsonl',
-        ].sort(),
-      );
-      assert.equal(
-        readFileSync(join(dir, '.ai-sdlc/attestations/abc.v6.dsse.json'), 'utf8'),
-        '{"env":1}',
-      );
-      assert.equal(existsSync(join(dir, 'scripts/is-docs-only-changeset.mjs')), false);
-      assert.equal(existsSync(join(dir, '.github')), false);
-      assert.equal(
-        readFileSync(join(dir, '.ai-sdlc/trusted-reviewers.yaml'), 'utf8'),
-        'trusted: base\n',
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-  it('refuses a symlinked envelope', () => {
-    const { dir, head } = repoWithHead(
-      {},
-      { '.ai-sdlc/attestations/evil.dsse.json': '/etc/passwd' },
-    );
-    try {
-      assert.throws(() => materializeHeadData({ repoRoot: dir, headSha: head }), MaterializeError);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-  it('refuses a destination that traverses a base-side symlink', () => {
-    const { dir, head } = repoWithHead({ '.ai-sdlc/attestations/ok.dsse.json': '{}' });
-    const outside = mkdtempSync(join(tmpdir(), 'outside-'));
-    try {
-      rmSync(join(dir, '.ai-sdlc/attestations'), { recursive: true, force: true });
-      symlinkSync(outside, join(dir, '.ai-sdlc/attestations'));
-      assert.throws(() => materializeHeadData({ repoRoot: dir, headSha: head }), /symlink/);
-      assert.equal(existsSync(join(outside, 'ok.dsse.json')), false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(outside, { recursive: true, force: true });
-    }
-  });
-  it('rejects a malformed head sha', () => {
-    assert.throws(() => materializeHeadData({ repoRoot: '.', headSha: 'HEAD' }), MaterializeError);
-  });
-  it('CLI exits non-zero on failure', () => {
-    assert.throws(() =>
-      execFileSync(
-        'node',
-        [join(ACTION_DIR, 'materialize-head-data.mjs'), '--repo-root', '.', '--head-sha', 'nope'],
-        {
-          stdio: 'pipe',
-        },
-      ),
-    );
-  });
-});
-
 describe('classifier step: changed-path computation (AISDLC-757 round 2)', () => {
   const run = stepOf(action, 'Classify changeset (base copy of the docs-only classifier)').run;
   function classify(setup) {
@@ -490,7 +435,8 @@ describe('docs (AC-4)', () => {
     const fallback = doc.indexOf('Fallback: hand-written');
     assert.ok(reusable > 0 && fallback > reusable);
     assert.match(doc, /pull_request_target/);
-    assert.match(doc, /independence-policy/);
+    assert.match(doc, /verdict-check/);
+    assert.match(doc, /branch-protection compatibility/);
     assert.match(doc, /ai-sdlc-ref: <pinned-commit-sha>/);
     assert.match(doc, /exact pin/);
     assert.match(doc, /docs-only exemption/i);

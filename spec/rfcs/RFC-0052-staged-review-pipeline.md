@@ -5,7 +5,7 @@ status: Approved
 lifecycle: Signed Off
 author: 'Dominique Legault'
 created: 2026-10-01
-updated: 2026-10-01
+updated: 2026-11-06
 targetSpecVersion: v1alpha1
 requires: []
 assumes: [RFC-0012, RFC-0042, RFC-0043, RFC-0046, RFC-0049, RFC-0050]
@@ -14,6 +14,8 @@ requiresDocs:
 ---
 
 # RFC-0052: Staged Review Pipeline
+
+> **Amended by RFC-0061 (AISDLC-1174, 2026-11-06).** Reviewer entries go into the verdict record's `reviewers[]`; there is no leaf expansion rule and no transcript-leaf emission (RFC-0061 OQ-4). The non-goal of a new attestation scheme is superseded for the gate artifact only.
 
 **Status:** Signed Off (2026-10-01, Engineering + Operator) — **all 3 Open Questions
 resolved via operator rubric walkthrough.** Resolutions: **(OQ-1)** the v1 staged pipeline carries all three
