@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1208
 title: 'Live-path dispatch rank by effective priority and critical path'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:
