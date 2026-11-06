@@ -231,11 +231,13 @@ appendFileSync(${JSON.stringify(log)}, process.argv.slice(2).join(' ') + '\\n');
 process.exitCode = process.env.FIXTURE_VERDICT === 'ok' ? 0 : 1;
 `,
       );
-      const exec = (verdict) =>
+      const exec = (verdict, policyDir) =>
         spawnSync('bash', ['-c', run], {
           encoding: 'utf8',
+          cwd: policyDir ?? dir,
           env: {
             ...process.env,
+            ACTION_PATH: ACTION_DIR,
             BASE_SHA: 'b'.repeat(40),
             HEAD_SHA: 'a'.repeat(40),
             REPOSITORY: 'o/r',
@@ -248,6 +250,12 @@ process.exitCode = process.env.FIXTURE_VERDICT === 'ok' ? 0 : 1;
         }).status;
       assert.equal(exec('ok'), 0);
       assert.equal(exec('bad'), 1);
+      // base policy requiredTier is enforced even when the floor input is none
+      const pol = join(dir, 'pol');
+      mkdirSync(join(pol, '.ai-sdlc'), { recursive: true });
+      writeFileSync(join(pol, '.ai-sdlc/independence-policy.yaml'), 'requiredTier: isolated\n');
+      exec('ok', pol);
+      assert.match(readFileSync(log, 'utf8'), /--required-tier isolated\n$/);
       assert.match(
         readFileSync(log, 'utf8'),
         /verdict-check --head a{40} --base b{40} --repository o\/r --pull-request 7 --required-tier none/,
@@ -325,7 +333,9 @@ describe('consumer-verify-attestation: tamper cases go red (AC-2)', () => {
   });
 });
 
-const { checkFloor } = await import(pathToFileURL(join(ACTION_DIR, 'check-policy-floor.mjs')).href);
+const { checkFloor, effectiveTier } = await import(
+  pathToFileURL(join(ACTION_DIR, 'check-policy-floor.mjs')).href
+);
 
 function git(cwd, ...args) {
   return execFileSync('git', ['-C', cwd, ...args], {
@@ -440,5 +450,21 @@ describe('docs (AC-4)', () => {
     assert.match(doc, /ai-sdlc-ref: <pinned-commit-sha>/);
     assert.match(doc, /exact pin/);
     assert.match(doc, /docs-only exemption/i);
+  });
+});
+
+describe('effectiveTier: stricter of base policy and floor', () => {
+  it('takes the policy tier when above the floor', () => {
+    assert.equal(
+      effectiveTier({ policyText: 'requiredTier: isolated\n', floor: 'none' }),
+      'isolated',
+    );
+  });
+  it('takes the floor when above the policy or the policy is absent', () => {
+    assert.equal(
+      effectiveTier({ policyText: 'requiredTier: none\n', floor: 'attested' }),
+      'attested',
+    );
+    assert.equal(effectiveTier({ policyText: null, floor: 'none' }), 'none');
   });
 });

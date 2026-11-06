@@ -129,11 +129,14 @@ runs:
         PR_NUMBER: ${{ inputs.pull-request }}
         TIER_FLOOR: ${{ inputs.required-independence-tier }}
         VERIFIER_HOME: ${{ steps.runtime.outputs.home }}
+        ACTION_PATH: ${{ github.action_path }}
         NODE_OPTIONS: ''
       run: |
         # RFC-0061: the check reads the review verdict record (refs/ai-sdlc/verdicts/<head>)
         # from the base checkout's origin; nothing from the PR head is read or executed.
         # Exit codes are unchanged: 0 on a valid verdict, 1 otherwise.
+        # The required tier is the stricter of the BASE policy requiredTier and the floor input.
+        TIER_FLOOR=$(node "$ACTION_PATH/check-policy-floor.mjs" --repo-root . --floor "$TIER_FLOOR" --print-effective)
         node "$VERIFIER_HOME/node_modules/@ai-sdlc/pipeline-cli/bin/cli-attestation.mjs" verdict-check \
           --head "$HEAD_SHA" --base "$BASE_SHA" --repository "$REPOSITORY" \
           --pull-request "$PR_NUMBER" --required-tier "$TIER_FLOOR"
