@@ -869,13 +869,19 @@ export async function runHierarchyCli(
         const action = firstPositional(argv);
         let feed: ReturnType<typeof parseFeed>;
         try {
-          feed = parseFeed(flags.feed, flags['feed-pid']);
+          feed = parseFeed(flags.feed, flags['feed-pid'], flags['feed-agent']);
         } catch (e) {
           process.stderr.write(`cli-hierarchy: ${(e as Error).message}\n`);
           return 2;
         }
-        if (action === 'up') webhookUp(deps, flags.port, undefined, feed);
-        else if (action === 'down') webhookDown(deps);
+        if (action === 'up') {
+          try {
+            webhookUp(deps, flags.port, undefined, feed);
+          } catch (e) {
+            process.stderr.write(`cli-hierarchy: ${(e as Error).message}\n`);
+            return 1;
+          }
+        } else if (action === 'down') webhookDown(deps);
         else if (action === 'status') {
           const w = webhookStatus(deps);
           const h = deps.env.AI_SDLC_WEBHOOK_SECRET ? webhookHealth(deps) : undefined;

@@ -13,6 +13,12 @@ import { createReceiver } from '../dispatch/webhook-receiver.js';
 import { DEFAULT_WEBHOOK_PORT, loadPrLifecycleConfig } from './pr-lifecycle-config.js';
 import { eventEntries } from './pr-snapshot.js';
 import type { HierarchyDeps } from './types.js';
+import {
+  FORWARDER_LABEL,
+  forwarderAgentAlive,
+  installForwarder,
+  removeForwarder,
+} from './webhook-forwarder.js';
 
 export const WEBHOOK_SECRET_ENV = 'AI_SDLC_WEBHOOK_SECRET';
 export const WEBHOOK_PORT_ENV = 'AI_SDLC_WEBHOOK_PORT';
@@ -28,6 +34,8 @@ export type WebhookStatus =
 export interface WebhookFeed {
   kind: 'gh-forward' | 'tunnel' | 'none';
   pid?: number;
+  /** launchd label supervising the feed (AISDLC-1207); liveness comes from it, not a pid. */
+  agent?: string;
 }
 
 const FEED_KINDS: readonly string[] = ['gh-forward', 'tunnel', 'none'];
@@ -39,7 +47,11 @@ interface WebhookState {
 }
 
 /** Parse `--feed <kind>` (and `--feed-pid`); throws on an unknown kind. */
-export function parseFeed(kind: string | undefined, pid?: string): WebhookFeed | undefined {
+export function parseFeed(
+  kind: string | undefined,
+  pid?: string,
+  agent?: string,
+): WebhookFeed | undefined {
   if (kind === undefined) return undefined;
   if (!FEED_KINDS.includes(kind)) {
     throw new Error(`invalid webhook feed '${kind}' (gh-forward, tunnel or none)`);
@@ -48,6 +60,7 @@ export function parseFeed(kind: string | undefined, pid?: string): WebhookFeed |
   return {
     kind: kind as WebhookFeed['kind'],
     ...(Number.isInteger(n) && n > 0 ? { pid: n } : {}),
+    ...(agent ? { agent } : {}),
   };
 }
 
@@ -184,6 +197,7 @@ function forwarderSignal(
 ): WebhookSignals['forwarder'] {
   const alive = deps.isAlive ?? defaultIsAlive;
   if (feed?.kind === 'none') return 'none';
+  if (feed?.agent) return forwarderAgentAlive(deps) ? 'alive' : 'dead';
   if (feed?.pid !== undefined) return alive(feed.pid) ? 'alive' : 'dead';
   try {
     const r = deps.run('pgrep', ['-f', feed?.kind === 'tunnel' ? 'tunnel' : 'gh webhook forward'], {
@@ -309,8 +323,15 @@ export function webhookUp(
   portFlag?: string,
   spawner: Spawner = spawnDetached,
   feed?: WebhookFeed,
+  platform: NodeJS.Platform = process.platform,
 ): WebhookStatus {
   const before = webhookStatus(deps);
+  if (feed?.kind === 'gh-forward' && feed.pid === undefined) {
+    const secret = deps.env[WEBHOOK_SECRET_ENV];
+    if (!secret) throw new Error(`${WEBHOOK_SECRET_ENV} is not set: cannot start the forwarder`);
+    const supervised = installForwarder(deps, secret, resolvePort(deps, portFlag), platform);
+    feed = supervised ? { kind: 'gh-forward', agent: FORWARDER_LABEL } : feed;
+  }
   if (before.state === 'up') {
     if (feed) recordFeed(deps.boardDir, feed);
     deps.log(`webhook already running on 127.0.0.1:${before.port}`);
@@ -329,7 +350,14 @@ export function webhookUp(
     String(port),
     '--board-dir',
     deps.boardDir,
-    ...(feed ? ['--feed', feed.kind, ...(feed.pid ? ['--feed-pid', String(feed.pid)] : [])] : []),
+    ...(feed
+      ? [
+          '--feed',
+          feed.kind,
+          ...(feed.pid ? ['--feed-pid', String(feed.pid)] : []),
+          ...(feed.agent ? ['--feed-agent', feed.agent] : []),
+        ]
+      : []),
   ]);
   deps.log(`webhook starting on 127.0.0.1:${port}`);
   return before;
@@ -347,6 +375,7 @@ export function webhookDown(
   kill: (pid: number) => void = (pid) => process.kill(pid, 'SIGTERM'),
 ): boolean {
   const s = readState(deps.boardDir);
+  if (s?.feed?.agent) removeForwarder(deps);
   if (!s) {
     deps.log('webhook not running');
     return false;

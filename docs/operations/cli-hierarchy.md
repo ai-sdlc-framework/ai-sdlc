@@ -407,10 +407,18 @@ receiver binds to `127.0.0.1` only, on `--port` or `AI_SDLC_WEBHOOK_PORT` (defau
 `/webhooks/github`. `cli-hierarchy up` starts it when the secret is set (and always starts the reconcile scheduler that consumes its wake file, see `up`). Subscribed event kinds:
 `pull_request`, `check_suite`, `check_run`, `workflow_run`, `status`, `pull_request_review`.
 
-Reaching it from GitHub, with the repository webhook's secret equal to `AI_SDLC_WEBHOOK_SECRET`:
-`gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:8765/webhooks/github`
-for development, or a named tunnel (for example Cloudflare Tunnel) pointing at `127.0.0.1:8765` for daily
-use.
+Reaching it from GitHub: `cli-hierarchy webhook up --feed gh-forward` (AISDLC-1207) installs and loads a
+launchd agent (`io.ai-sdlc.webhook-forward`, KeepAlive, plist in `~/Library/LaunchAgents`, mode 0600) that runs
+`gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:8765/webhooks/github --secret $AI_SDLC_WEBHOOK_SECRET`,
+so the feed survives a closed terminal, sleep and a network drop. The hook secret must equal the receiver's, or
+every delivery is a 401; a missing `AI_SDLC_WEBHOOK_SECRET` is therefore an error. Before loading, `webhook up`
+deletes stale hooks named `cli` on the repository (a forwarder that died uncleanly leaves one, and the next start
+fails with `HTTP 422 Hook already exists`); hooks of any other name are never touched. `webhook status` reads the
+feed from the agent label (`launchctl print`), not a recorded pid, and `webhook down` unloads the agent, deletes
+the plist and removes any leftover `cli` hook. Without launchd (Linux, Windows) `webhook up` prints the forwarder
+command and loads nothing: run it under your own supervisor (a systemd unit with `Restart=always`, or a restart
+loop) and delete the `cli` hook before each start. A named tunnel (for example Cloudflare Tunnel) pointing at
+`127.0.0.1:8765` is the alternative for daily use (`--feed tunnel`).
 
 **Health (AISDLC-1157).** A live receiver pid does not prove events arrive: the forwarder is a separate
 process on the operator's account. `webhook up --feed <kind>` records the feed (and optional `--feed-pid`)
@@ -431,8 +439,8 @@ The thresholds are `spec.webhook.staleAfterMinutes` and `spec.webhook.downAfterM
 (a report of kind `webhook-health`) only when the class changes. Entering `degraded` or `down` files one
 operational escalation per episode (`cli-decisions escalate --route operational` shape, scope
 `webhook-health:<since>`) and fires the stall-notice channel once; returning to `healthy` closes the
-episode with a note. The fix is operator-only (it touches the operator's account and network): restart the
-forwarder with the `gh webhook forward` command above and record it with `cli-hierarchy webhook up --feed gh-forward`,
+episode with a note. The fix is operator-only (it touches the operator's account and network): reinstall the
+forwarder agent with `cli-hierarchy webhook up --feed gh-forward`,
 re-register the repository hook, or `cli-hierarchy webhook up` when the receiver itself is down. Meanwhile dispatch
 polls `gh` (about 2,700 calls an hour), which is the cost a degraded feed hides.
 
