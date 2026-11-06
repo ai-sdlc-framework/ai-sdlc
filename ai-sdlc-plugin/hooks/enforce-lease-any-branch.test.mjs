@@ -8,7 +8,7 @@
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -16,6 +16,29 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const hookScript = join(__dirname, 'enforce-blocked-actions.js');
+
+// AISDLC-1183: regression probe, not a located carrier. On origin/main this file passes under
+// plain `node --test` with the real executor variables exported (125/125 and 27/27 observed in
+// an executor session), so the 14 failures reported by AISDLC-1179 were not reproducible. Every
+// child here gets an explicit env, so spawn cannot carry session state. This test re-runs the
+// file with the variables exported so a future leak fails here.
+const SESSION_ENV = {
+  AI_SDLC_HIERARCHY_SESSION: 'ai-sdlc-executor-leak-probe',
+  AI_SDLC_HIERARCHY_ROLE: 'executor',
+  AI_SDLC_EXECUTOR_TASK: 'AISDLC-9999',
+  AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-9999',
+};
+
+describe('executor session env does not leak (AISDLC-1183)', () => {
+  it('suite passes with hierarchy and task variables exported', { timeout: 170_000 }, () => {
+    if (process.env.AI_SDLC_LEAK_PROBE === '1') return; // inner run: do not recurse
+    const r = spawnSync(process.execPath, ['--test', fileURLToPath(import.meta.url)], {
+      env: { ...process.env, ...SESSION_ENV, AI_SDLC_LEAK_PROBE: '1' },
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, (r.stdout || '') + (r.stderr || ''));
+  });
+});
 
 const BLOCKED = `  constraints:
     blockedActions:
