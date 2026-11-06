@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1213
 title: 'One audit entry schema, JCS canonical hashing and a cross-SDK conformance fixture'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:
