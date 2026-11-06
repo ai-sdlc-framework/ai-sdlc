@@ -25,11 +25,11 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const hookScript = join(__dirname, 'enforce-blocked-actions.js');
 
-// AISDLC-1183: the suite must pass from an executor shell. Every child process here gets an
-// explicit env (gitEnv plus per-test extras), so session variables cannot reach the hook through
-// spawn; the only carriers are the runner's own process.env (scrubbed by vitest.git-env.setup.mjs
-// under `pnpm test`) and files. This test re-runs the file with the variables exported and
-// asserts it still passes, so a regression in either path fails here.
+// AISDLC-1183: regression probe, not a located carrier. On origin/main this file passes under
+// plain `node --test` with the real executor variables exported (125/125 and 27/27 observed in
+// an executor session), so the 14 failures reported by AISDLC-1179 were not reproducible. Every
+// child here gets an explicit env, so spawn cannot carry session state. This test re-runs the
+// file with the variables exported so a future leak fails here.
 const SESSION_ENV = {
   AI_SDLC_HIERARCHY_SESSION: 'ai-sdlc-executor-leak-probe',
   AI_SDLC_HIERARCHY_ROLE: 'executor',
