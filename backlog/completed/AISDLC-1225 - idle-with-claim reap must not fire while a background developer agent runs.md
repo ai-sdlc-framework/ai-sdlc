@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1225
 title: idle-with-claim reap must not fire while a background developer agent runs
-status: To Do
+status: Done
 priority: critical
 labels: [bug, hierarchy, dispatch]
 dependencies: [AISDLC-1218, AISDLC-1216]
@@ -36,12 +36,42 @@ Secondary defect seen on the 731 pane: the clear issued after the reap sent `/ex
 
 ## Acceptance Criteria
 
-- [ ] #1 Test: an executor whose `state.agents` holds one id receives a parent `turn.start` with non-notification text; after the turn completes the published state is still `background-agent-running`, and the list empties only on the agent's own end event or the task notification naming it.
-- [ ] #2 Test: `reapStalledClaims` does not reap a claim whose published state flipped to `idle-awaiting-clear` while the host still reports a live background agent (or whose last state publish is younger than the floor, whichever option step 4 chose); the existing AC-2 of AISDLC-1218 (idle, no agent, no verdict → reaped) still passes.
-- [ ] #3 The clear issued after a reap never lands on the "Background work is running" dialog: a test on the clear path shows the agent stopped or awaited before the pane is exited.
-- [ ] #4 `docs/operations/cli-hierarchy.md` states when a background agent is considered ended, citing DEC-0392 and this task.
-- [ ] #5 The two diagnostics named above are cited in the PR body as the reproduction, and 515.1 and 731 are re-enqueued by dispatch after the fix lands (dispatch action, noted in the PR).
+- [x] #1 Test: an executor whose `state.agents` holds one id receives a parent `turn.start` with non-notification text; after the turn completes the published state is still `background-agent-running`, and the list empties only on the agent's own end event or the task notification naming it.
+- [x] #2 Test: `reapStalledClaims` does not reap a claim whose published state flipped to `idle-awaiting-clear` while the host still reports a live background agent (or whose last state publish is younger than the floor, whichever option step 4 chose); the existing AC-2 of AISDLC-1218 (idle, no agent, no verdict → reaped) still passes.
+- [x] #3 The clear issued after a reap never lands on the "Background work is running" dialog: a test on the clear path shows the agent stopped or awaited before the pane is exited.
+- [x] #4 `docs/operations/cli-hierarchy.md` states when a background agent is considered ended, citing DEC-0392 and this task.
+- [x] #5 The two diagnostics named above are cited in the PR body as the reproduction, and 515.1 and 731 are re-enqueued by dispatch after the fix lands (dispatch action, noted in the PR).
 
 ## Notes
 
 Reproduction evidence: `failed/AISDLC-515.1.diagnostic.json`, `failed/AISDLC-731.diagnostic.json`, tmux pane `ai-sdlc-executor-aisdlc-731` captured 06:51Z. The planner held the drain at 06:51Z (`cli-hierarchy hold`) until this lands.
+
+## Final Summary
+
+## Summary
+A background developer agent now ends only on its own end event or the task notification that names it. The reap spares a claim whose last heartbeat or state publish is under 30s old (the step-4 floor). The stop path answers the host's 'Background work is running' exit dialog with 'Exit and stop tasks'. `docs/operations/cli-hierarchy.md` states when a background agent is considered ended.
+
+## Changes
+- ai-sdlc-plugin/hooks/hierarchy/executor.ts
+- ai-sdlc-plugin/mods/tests/hierarchy.test.ts
+- pipeline-cli/src/hierarchy/stall.ts
+- pipeline-cli/src/hierarchy/stall.test.ts
+- pipeline-cli/src/hierarchy/tmux.ts
+- pipeline-cli/src/hierarchy/down.ts
+- pipeline-cli/src/hierarchy/tmux-exit-dialog.test.ts
+- pipeline-cli/src/hierarchy/dispatch-loop.test.ts
+- docs/operations/cli-hierarchy.md
+
+## Design decisions
+A WIP commit from the planner (ebbbbdac) already held the executor.ts, floor and dialog code. I added the floor, dialog and docs tests, plus the docs paragraph. Three `dispatch-loop.test.ts` idle-claim tests failed against the new floor, so I aged those claims past it. After the final test commit I ran only `dispatch-loop.test.ts` (93 passed). I did not re-run the four-command suite, which passed before that commit. The push succeeded, and the remote branch matches local HEAD. AC3: the exit dialog fires on `/exit` in `stopSessionWindow`, because the executor `/clear` path never sends `/exit`. AC5: 515.1 and 731 must be re-enqueued by dispatch after merge. This is noted in the PR body.
+
+## Verification
+- `pnpm build` — passed (dashboard build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (240 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers; review-full)
+
+## Follow-up
+(none)
+

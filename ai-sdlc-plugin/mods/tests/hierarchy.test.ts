@@ -482,10 +482,23 @@ describe('hierarchy module: executor state on the board (AISDLC-1216)', () => {
     }
     await h('turn.complete')(s.$, { text: 'x' }, s.next);
     expect(state()).toBe('idle-awaiting-clear');
-    // agents that never signalled an end are dropped by the next ordinary parent turn
+  });
+
+  it('keeps background-agent-running across a non-notification parent turn (AISDLC-1225)', async () => {
+    const { s, state } = boarded();
+    await s.start();
+    const h = (n: string) => s.handlers.get(n);
+    await h('turn.start')(s.$, {}, s.next);
     await h('session.start')(s.$, { agentId: 'g1' }, s.next);
-    await h('turn.start')(s.$, { text: 'next task' }, s.next);
+    await h('turn.complete')(s.$, { text: 'backgrounded' }, s.next);
+    await h('turn.start')(s.$, { text: 'dispatch status line' }, s.next);
+    await h('turn.complete')(s.$, { text: 'x' }, s.next);
+    expect(state()).toBe('background-agent-running');
+    await h('turn.complete')(s.$, { agentId: 'g1', text: 'done' }, s.next);
+    await h('turn.start')(s.$, { text: 'next' }, s.next);
     expect(state()).toBe('turn-running');
+    await h('turn.complete')(s.$, { text: 'x' }, s.next);
+    expect(state()).toBe('idle-awaiting-clear');
   });
 
   it('publishes nothing without a heartbeat file, a worker name or process.run', async () => {

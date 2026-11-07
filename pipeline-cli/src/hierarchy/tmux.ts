@@ -122,6 +122,17 @@ export function sendExit(run: CommandRunner, target: string): CommandResult {
   return run('tmux', ['send-keys', '-t', target, '/exit', 'Enter']);
 }
 
+/**
+ * AISDLC-1225: the host answers `/exit` with a "Background work is running" dialog while a background agent
+ * lives, and a bare `/exit` would sit there forever. When the pane shows it, choose option 1 ("Exit and stop
+ * tasks"). Returns true when the choice was sent.
+ */
+export function confirmExitDialog(run: CommandRunner, target: string): boolean {
+  const r = run('tmux', ['capture-pane', '-p', '-t', target]);
+  if (r.status !== 0 || !/Background work is running/i.test(r.stdout)) return false;
+  return run('tmux', ['send-keys', '-t', target, '1', 'Enter']).status === 0;
+}
+
 /** Close one pane by its id; pane ids are never reused within a tmux server's lifetime. */
 export function killPane(run: CommandRunner, paneId: string): CommandResult {
   return run('tmux', ['kill-pane', '-t', paneId]);

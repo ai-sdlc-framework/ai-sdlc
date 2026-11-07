@@ -30,6 +30,7 @@ import {
   ownershipRefusal,
   resolveSendTarget,
   sendExit,
+  confirmExitDialog,
 } from './tmux.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 
@@ -80,7 +81,11 @@ export async function stopSessionWindow(
   // AISDLC-1217: a requested stop is not an executor exit.
   removePaneExitHook(deps.run, entry.tmuxSession);
   sendExit(deps.run, first.target);
-  for (let i = 0; i < deps.pollAttempts && isOpen(); i++) await deps.sleep(deps.pollIntervalMs);
+  for (let i = 0; i < deps.pollAttempts && isOpen(); i++) {
+    await deps.sleep(deps.pollIntervalMs);
+    // AISDLC-1225: a live background agent parks /exit on a confirm dialog; stop its tasks explicitly.
+    if (isOpen()) confirmExitDialog(deps.run, first.target);
+  }
   if (!isOpen()) return { forced: false };
   // The grace period is seconds long: a session could have been replaced meanwhile,
   // so check again immediately before the destructive call. A confirmed pane id is

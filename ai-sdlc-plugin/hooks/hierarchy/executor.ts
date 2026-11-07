@@ -523,11 +523,9 @@ function endBackgroundAgent(state: ExecutorState, e: Any): void {
   const agents = state.agents;
   if (!agents?.length) return;
   const text = String(e?.text ?? e?.prompt ?? '');
-  if (!/task-notification/i.test(text)) {
-    // A fresh parent turn that is not a notification: foreground subagents never signal an end, so none is live.
-    agents.length = 0;
-    return;
-  }
+  // AISDLC-1225: only a task notification ends a background agent here. A parent turn with other text (a status
+  // line, a wake) says nothing about it; the agent's own end event (`turn.complete` with its agentId) also ends it.
+  if (!/task-notification/i.test(text)) return;
   const named = agents.find((id) => text.includes(id));
   agents.splice(named ? agents.indexOf(named) : 0, 1);
 }

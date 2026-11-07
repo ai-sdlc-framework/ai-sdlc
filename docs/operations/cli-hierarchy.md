@@ -292,8 +292,12 @@ module writes `executorState` into the claim's `inflight/<task>.state.json` (it 
 `turn.complete` and a subagent `session.start`: `turn-running` (a main-loop turn is running),
 `idle-awaiting-clear` (no turn and no background agent) and `background-agent-running` (at least one subagent
 `session.start` not yet ended; it outranks the turn state because a backgrounded developer ends the main turn at
-once). The host delivers no subagent end event, so the next parent `turn.start` (the task-notification turn)
-ends one agent, the one the notification text names or else the oldest; agents are tracked per `agentId`.
+once). A background agent is considered ended only on its own end event (`turn.complete` carrying its `agentId`)
+or on the parent `turn.start` that carries a task notification, which ends the agent the text names or else the
+oldest; a parent turn with any other text (a status line, a wake) never ends one (AISDLC-1225, DEC-0392). Agents are
+tracked per `agentId`. The reap also spares an `idle-awaiting-clear` claim whose last heartbeat or state publish is
+younger than 30 seconds (no host probe for a running background agent exists), and `down`/`restart` answer the host's
+"Background work is running" exit dialog with "Exit and stop tasks" instead of leaving the pane parked on it.
 The `MODULE` column (AISDLC-1061) is the hierarchy hooks module's heartbeat for the session, read from
 `<board-dir>/handoff/module-<name>.json` (`{state, reason, version, at}`): `loaded`, `refused: <reason>`,
 `absent` (no file: the session has no hierarchy role, or the module never ran in it) or, for the dispatch

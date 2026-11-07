@@ -56,6 +56,11 @@ export interface StallDeps {
    * backgrounded verification keeps the session idle while real work runs.
    */
   hasLiveNextStep?: (worker: string) => boolean;
+  /**
+   * AISDLC-1225: a claim whose last heartbeat or state publish is younger than this is spared (no host probe
+   * for a running background agent exists). Default {@link STATE_PUBLISH_FLOOR_MS}.
+   */
+  floorMs?: number;
   /** Called when a claim that would be reaped is spared, with the reason. */
   onSpared?: (o: { taskId: string; worker: string; ageMs: number; reason: string }) => void;
   /** Clears (and so restarts) one executor; undefined when the grant is missing. */
@@ -63,6 +68,9 @@ export interface StallDeps {
   /** Open pull request number of the task, when one exists. */
   findPr?: (taskId: string) => number | undefined;
 }
+
+/** One host tick: a state publish younger than this is too fresh to trust as idle. */
+export const STATE_PUBLISH_FLOOR_MS = 30_000;
 
 function hasVerdict(boardDir: string, taskId: string): boolean {
   return ['done', 'failed'].some((d) =>
@@ -131,6 +139,19 @@ export async function reapStalledClaims(
     const ageMs = Number.isNaN(last) ? 0 : Math.max(0, nowMs - last);
     const worker = heartbeat.workerId ?? 'unknown';
     const reason: StalledReport['reason'] = 'idle-with-claim';
+    if (ageMs < (deps.floorMs ?? STATE_PUBLISH_FLOOR_MS)) {
+      try {
+        deps.onSpared?.({
+          taskId,
+          worker,
+          ageMs,
+          reason: 'idle state published less than one tick ago (a background agent may be running)',
+        });
+      } catch {
+        /* reporting must not break the tick */
+      }
+      continue;
+    }
     if (deps.hasLiveNextStep && worker !== 'unknown' && safeProbe(deps.hasLiveNextStep, worker)) {
       try {
         deps.onSpared?.({
