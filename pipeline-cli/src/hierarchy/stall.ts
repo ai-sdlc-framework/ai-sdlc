@@ -151,13 +151,30 @@ export function paneHasLiveNextStep(run: CommandRunner, panePid: number): boolea
   return false;
 }
 
-/** Build the resume note: the stalled step and the existing pull request. */
+/**
+ * True when the stalled step is past implementation (numbered step 10 or later, or a named
+ * review/ship step), so the resume continues from the pull request without a developer round.
+ */
+function developerDone(step: string): boolean {
+  const n = /^(\d+)/.exec(step);
+  if (n) return Number(n[1]) >= 10;
+  return /^(review|ship|sign|signing|merge)/i.test(step);
+}
+
+/**
+ * Build the resume note from the resume path it accompanies (AISDLC-1199): only a path that cannot
+ * run the developer says so; an earlier step leaves a developer round open.
+ */
 export function stallResumeNote(step: string, prNumber?: number): string {
+  const head = `The previous executor stalled at step ${step}. `;
+  if (prNumber === undefined) {
+    return head + 'No pull request exists yet; start from the task branch if it has commits.';
+  }
   return (
-    `The previous executor stalled at step ${step}. ` +
-    (prNumber !== undefined
+    head +
+    (developerDone(step)
       ? `Pull request #${prNumber} already exists; continue from it and do not re-run the developer.`
-      : 'No pull request exists yet; start from the task branch if it has commits.')
+      : `Pull request #${prNumber} already exists; continue from it, and run the developer only if the work is incomplete or a review round requires it.`)
   );
 }
 

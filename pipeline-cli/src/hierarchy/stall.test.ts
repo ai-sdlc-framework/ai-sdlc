@@ -44,6 +44,17 @@ describe('stallResumeNote', () => {
     expect(stallResumeNote('ship', 9)).toContain('#9');
     expect(stallResumeNote('ship')).toContain('No pull request');
   });
+
+  it('says do not re-run the developer only on post-implementation paths', () => {
+    for (const step of ['ship', '10-signing', '11b-pr-opened', 'review']) {
+      expect(stallResumeNote(step, 9)).toContain('do not re-run the developer');
+    }
+    for (const step of ['unknown', 'claimed', '5-implement', 'developer']) {
+      expect(stallResumeNote(step, 9)).not.toContain('do not re-run the developer');
+      expect(stallResumeNote(step, 9)).toContain('run the developer only if');
+    }
+    expect(stallResumeNote('unknown')).not.toContain('do not re-run');
+  });
 });
 
 describe('findOpenPrNumber', () => {
