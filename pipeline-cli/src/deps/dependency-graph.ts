@@ -547,24 +547,35 @@ export function validate(graph: DependencyGraph): ValidateReport {
     }
   }
 
+  const cycles = findCycles(graph.nodes.keys(), (key) => {
+    const node = graph.nodes.get(key);
+    return node ? node.dependencies.map((d) => d.toLowerCase()) : [];
+  }).map((cycle) => cycle.map((k) => graph.nodes.get(k)?.id ?? k));
+
+  return { ok: cycles.length === 0 && dangling.length === 0, cycles, dangling };
+}
+
+/**
+ * Generic iterative cycle finder over an arbitrary string-keyed graph. This is
+ * the single DAG engine: `validate` and the orchestrator task decomposer both
+ * use it (AISDLC-1212). `depsOf` yields the keys a node depends on; keys not in
+ * `keys` are ignored (dangling refs are the caller's concern).
+ */
+export function findCycles(
+  keys: Iterable<string>,
+  depsOf: (key: string) => Iterable<string>,
+): string[][] {
+  const known = new Set(keys);
   const cycles: string[][] = [];
   const seenCycles = new Set<string>();
   const visited = new Set<string>();
 
-  for (const startKey of graph.nodes.keys()) {
+  for (const startKey of known) {
     if (visited.has(startKey)) continue;
-    // Iterative DFS, tracking the current path so we can extract cycles.
-    const path: string[] = [];
-    const onPath = new Set<string>();
+    const path: string[] = [startKey];
+    const onPath = new Set<string>([startKey]);
     type Frame = { key: string; iter: Iterator<string> };
-    const stack: Frame[] = [
-      {
-        key: startKey,
-        iter: depsIterator(graph, startKey),
-      },
-    ];
-    onPath.add(startKey);
-    path.push(startKey);
+    const stack: Frame[] = [{ key: startKey, iter: depsOf(startKey)[Symbol.iterator]() }];
 
     while (stack.length > 0) {
       const top = stack[stack.length - 1];
@@ -576,40 +587,88 @@ export function validate(graph: DependencyGraph): ValidateReport {
         stack.pop();
         continue;
       }
-      const childKey = next.value.toLowerCase();
-      if (!graph.nodes.has(childKey)) {
-        // Dangling — already recorded above; skip recursion.
-        continue;
-      }
+      const childKey = next.value;
+      if (!known.has(childKey)) continue;
       if (onPath.has(childKey)) {
-        // Cycle: extract the slice of `path` from childKey onward, append the
-        // closing node, and canonicalise.
-        const idx = path.indexOf(childKey);
-        const cyclePath = path.slice(idx).concat(childKey);
+        const cyclePath = path.slice(path.indexOf(childKey)).concat(childKey);
         const canon = canonicalCycleKey(cyclePath);
         if (!seenCycles.has(canon)) {
           seenCycles.add(canon);
-          // Map keys back to canonical IDs.
-          cycles.push(cyclePath.map((k) => graph.nodes.get(k)?.id ?? k));
+          cycles.push(cyclePath);
         }
         continue;
       }
-      if (visited.has(childKey)) {
-        continue;
-      }
+      if (visited.has(childKey)) continue;
       onPath.add(childKey);
       path.push(childKey);
-      stack.push({ key: childKey, iter: depsIterator(graph, childKey) });
+      stack.push({ key: childKey, iter: depsOf(childKey)[Symbol.iterator]() });
     }
   }
-
-  return { ok: cycles.length === 0 && dangling.length === 0, cycles, dangling };
+  return cycles;
 }
 
-function depsIterator(graph: DependencyGraph, key: string): Iterator<string> {
-  const node = graph.nodes.get(key);
-  const deps = node ? node.dependencies : [];
-  return deps[Symbol.iterator]();
+/**
+ * Dependency-first (post-order DFS) ordering: every node appears after the
+ * nodes it depends on, roots visited in `keys` order. Throws with the cycle
+ * path when the graph is cyclic. Dependencies outside `keys` are ignored.
+ */
+export function topologicalOrder(
+  keys: readonly string[],
+  depsOf: (key: string) => Iterable<string>,
+): string[] {
+  const cycles = findCycles(keys, depsOf);
+  if (cycles.length > 0) {
+    throw new Error(`Dependency cycle detected: ${cycles[0].join(' -> ')}`);
+  }
+  const known = new Set(keys);
+  const visited = new Set<string>();
+  const sorted: string[] = [];
+  for (const root of known) {
+    if (visited.has(root)) continue;
+    visited.add(root);
+    const stack = [{ key: root, iter: depsOf(root)[Symbol.iterator]() }];
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1];
+      const next = top.iter.next();
+      if (next.done) {
+        sorted.push(top.key);
+        stack.pop();
+      } else if (known.has(next.value) && !visited.has(next.value)) {
+        visited.add(next.value);
+        stack.push({ key: next.value, iter: depsOf(next.value)[Symbol.iterator]() });
+      }
+    }
+  }
+  return sorted;
+}
+
+/**
+ * Kahn-style layering: each layer holds nodes whose dependencies are all in
+ * earlier layers (insertion order preserved within a layer). Throws with the
+ * cycle path when the graph is cyclic, so no partial layers are ever produced.
+ * Dependencies outside `keys` are ignored.
+ */
+export function topologicalLayers(
+  keys: readonly string[],
+  depsOf: (key: string) => Iterable<string>,
+): string[][] {
+  const cycles = findCycles(keys, depsOf);
+  if (cycles.length > 0) {
+    throw new Error(`Dependency cycle detected: ${cycles[0].join(' -> ')}`);
+  }
+  const known = new Set(keys);
+  const done = new Set<string>();
+  const remaining = [...known];
+  const layers: string[][] = [];
+  while (remaining.length > 0) {
+    const layer = remaining.filter((k) =>
+      [...depsOf(k)].every((d) => !known.has(d) || done.has(d)),
+    );
+    for (const k of layer) done.add(k);
+    layers.push(layer);
+    remaining.splice(0, remaining.length, ...remaining.filter((k) => !done.has(k)));
+  }
+  return layers;
 }
 
 function canonicalCycleKey(path: string[]): string {

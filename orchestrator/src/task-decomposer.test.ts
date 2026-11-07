@@ -364,3 +364,76 @@ describe('getExecutionLayers', () => {
     expect(layers[2]).toHaveLength(1); // d
   });
 });
+
+describe('single DAG engine (AISDLC-1212)', () => {
+  const mod = (name: string): ModuleInfo => ({
+    name,
+    path: `src/${name}`,
+    fileCount: 1,
+    dependencies: [],
+    dependents: [],
+  });
+  const sub = (id: string, dependsOn: string[]) => ({
+    id,
+    title: id,
+    description: '',
+    filePatterns: [],
+    concern: 'code' as const,
+    estimatedComplexity: 1,
+    dependsOn,
+  });
+
+  it('getExecutionLayers throws with the cycle path and yields no layers', () => {
+    const graph: TaskGraph = {
+      issueNumber: 1,
+      issueTitle: 't',
+      complexity: 7,
+      decomposed: true,
+      subtasks: [sub('x', []), sub('a', ['b']), sub('b', ['c']), sub('c', ['a'])],
+    };
+    expect(() => getExecutionLayers(graph)).toThrow(/a -> b -> c -> a/);
+    expect(validateTaskGraph(graph)[0]).toContain('a -> b -> c -> a');
+  });
+
+  it('decomposeTask throws on a cyclic module graph', () => {
+    const modules = [mod('a'), mod('b')];
+    const moduleGraph = makeModuleGraph(modules, [
+      { from: 'a', to: 'b' },
+      { from: 'b', to: 'a' },
+    ]);
+    expect(() =>
+      decomposeTask(
+        makeContext({
+          complexity: 7,
+          moduleGraph,
+          affectedFiles: ['src/a/x.ts', 'src/b/y.ts'],
+        }),
+      ),
+    ).toThrow(/cycle/i);
+  });
+
+  it('acyclic decomposition output is unchanged (snapshot)', () => {
+    const modules = [mod('api'), mod('core'), mod('util')];
+    const moduleGraph = makeModuleGraph(modules, [
+      { from: 'api', to: 'core' },
+      { from: 'core', to: 'util' },
+    ]);
+    const graph = decomposeTask(
+      makeContext({
+        complexity: 7,
+        moduleGraph,
+        affectedFiles: ['src/api/a.ts', 'src/core/b.ts', 'src/util/c.ts'],
+      }),
+    );
+    expect(graph.subtasks.map((s) => [s.module, s.dependsOn.length])).toEqual([
+      ['util', 0],
+      ['core', 1],
+      ['api', 1],
+    ]);
+    expect(getExecutionLayers(graph).map((l) => l.map((s) => s.module))).toEqual([
+      ['util'],
+      ['core'],
+      ['api'],
+    ]);
+  });
+});

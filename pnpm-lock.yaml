@@ -236,6 +236,9 @@ importers:
 
   orchestrator:
     dependencies:
+      '@ai-sdlc/pipeline-cli':
+        specifier: workspace:*
+        version: link:../pipeline-cli
       '@ai-sdlc/reference':
         specifier: workspace:*
         version: link:../reference
