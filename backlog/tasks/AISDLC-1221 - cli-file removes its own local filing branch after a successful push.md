@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1221
 title: 'cli-file removes its own local filing branch after a successful push'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-07'
 labels:
