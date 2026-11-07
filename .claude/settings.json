@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/ai-sdlc-plugin/hooks/enforce-blocked-actions.sh\"",
+            "command": "R=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\"; R=\"${R%/.git}\"; bash \"${R:-$CLAUDE_PROJECT_DIR}/ai-sdlc-plugin/hooks/enforce-blocked-actions.sh\"",
             "if": "Bash(*)",
             "statusMessage": "Checking action policy..."
           }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/ai-sdlc-plugin/hooks/enforce-blocked-actions.sh\"",
+            "command": "R=\"$(git -C \"$CLAUDE_PROJECT_DIR\" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)\"; R=\"${R%/.git}\"; bash \"${R:-$CLAUDE_PROJECT_DIR}/ai-sdlc-plugin/hooks/enforce-blocked-actions.sh\"",
             "statusMessage": "Checking write policy..."
           }
         ]

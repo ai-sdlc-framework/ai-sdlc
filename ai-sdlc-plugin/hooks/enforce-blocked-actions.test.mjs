@@ -1168,6 +1168,19 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-720 round 2)', () 
     assert.ok(isDenied(bash('sed -i s/a/b/ .husky/pre-push', U)));
   });
 
+  it('#4b AISDLC-731 untrusted: .git/hooks and .git/config are refused; trusted is unaffected', () => {
+    for (const rel of ['.git/hooks/pre-push', '.git/config']) {
+      assert.ok(isDenied(run('Write', join(dir, rel), U)), rel);
+      assert.ok(isDenied(run('Edit', join(dir, rel), U)), rel);
+      assert.ok(!isDenied(run('Write', join(dir, rel))), `trusted ${rel}`);
+    }
+  });
+
+  it('#4c AISDLC-731 trusted: a plain git push and git config stay unprompted', () => {
+    assert.ok(!isDenied(bash('git push -u origin HEAD')));
+    assert.ok(!isDenied(bash('git config user.name x')));
+  });
+
   it('#5 both plugin.json copies register MultiEdit on the write matcher', () => {
     const root = join(__dirname, '..');
     for (const f of ['plugin.json', join('.claude-plugin', 'plugin.json')]) {

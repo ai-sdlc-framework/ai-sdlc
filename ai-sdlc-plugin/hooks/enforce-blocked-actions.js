@@ -28,6 +28,12 @@
  *
  * 4. **Own-branch lease push** (AISDLC-1005, lib/lease-push-guard.js).
  *
+ * AISDLC-731: for an UNTRUSTED run `.git/hooks/**` and `.git/config` are refused for
+ * Write/Edit (UNTRUSTED_PROTECTED); trusted runs are unaffected. The hook itself is run
+ * from the plugin root or the main checkout, never a worktree copy: the resolution order is
+ * documented in enforce-blocked-actions.sh (CLAUDE_PLUGIN_ROOT, then the main checkout via
+ * `git rev-parse --git-common-dir`, then the script's own directory).
+ *
  * AISDLC-1014 (DEC-0267): the command-text matcher (blockedActions glob
  * patterns, the raw landing, API landing, stash and policy-root text checks) is
  * deleted. It matched free text and refused JSON field names, paths, echo
@@ -298,6 +304,9 @@ const UNTRUSTED_PROTECTED = [
   ['.claude'],
   ['.husky'],
   ['ai-sdlc-plugin', 'hooks'],
+  // AISDLC-731: git hooks and repo config run with operator privileges on the next commit/push.
+  ['.git', 'hooks'],
+  ['.git', 'config'],
   // AISDLC-730: worktree admin dirs hold the untrusted marker.
   ['.git', 'worktrees'],
 ];
