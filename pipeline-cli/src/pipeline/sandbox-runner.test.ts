@@ -3600,6 +3600,34 @@ describe('SANDBOX_PR_DIFF_B64 env var injection (AISDLC-509 AC-1)', () => {
       expect(envDriver.capturedEnv?.['AI_SDLC_SIGNING_KEY']).toBeUndefined();
     }),
   );
+
+  it(
+    'sandboxEnv SANDBOX_FIXTURE_B64 reaches the spawn env (AISDLC-515.1)',
+    withIntegrationFlag(async () => {
+      class EnvCapturingDriver extends DockerSandboxDriver {
+        public capturedEnv: Record<string, string> | undefined;
+
+        protected _spawnProcess(
+          _cmd: string,
+          args: string[],
+          options: import('node:child_process').SpawnOptions,
+        ): import('node:child_process').ChildProcess {
+          this.capturedEnv = options.env as Record<string, string> | undefined;
+          const proc = new FakeProcess(
+            args,
+          ) as unknown as import('node:child_process').ChildProcess;
+          setImmediate(() => (proc as unknown as FakeProcess).emitClose(0));
+          return proc;
+        }
+      }
+      const envDriver = new EnvCapturingDriver();
+      await envDriver.spawn({
+        ...LIFECYCLE_INPUT,
+        sandboxEnv: { SANDBOX_FIXTURE_B64: 'Zml4dHVyZQ==' },
+      });
+      expect(envDriver.capturedEnv?.['SANDBOX_FIXTURE_B64']).toBe('Zml4dHVyZQ==');
+    }),
+  );
 });
 
 // ── AISDLC-515.1: gVisor driver + config-time refusal ────────────────────────

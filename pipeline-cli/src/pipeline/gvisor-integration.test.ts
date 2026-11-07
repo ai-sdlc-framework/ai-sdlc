@@ -66,8 +66,6 @@ describe('GVisorSandboxDriver differential test (integration)', () => {
     'returns the same result shape as the Docker driver',
     async () => {
       const tmpDir = mkdtempSync(join(tmpdir(), 'gvisor-integration-'));
-      const prevFixture = process.env['SANDBOX_FIXTURE_B64'];
-      process.env['SANDBOX_FIXTURE_B64'] = buildUcvgDemoFixtureB64();
       try {
         const result = await runSandbox({
           prNumber: FIXTURE_BENIGN.prNumber,
@@ -79,6 +77,7 @@ describe('GVisorSandboxDriver differential test (integration)', () => {
           },
           workDir: tmpDir,
           driverOverride: new GVisorSandboxDriver(),
+          sandboxEnv: { SANDBOX_FIXTURE_B64: buildUcvgDemoFixtureB64() },
         });
         if (result.outcome !== 'success') {
           console.error(
@@ -92,8 +91,6 @@ describe('GVisorSandboxDriver differential test (integration)', () => {
           );
         }
       } finally {
-        if (prevFixture === undefined) delete process.env['SANDBOX_FIXTURE_B64'];
-        else process.env['SANDBOX_FIXTURE_B64'] = prevFixture;
         removeFixtureDir(tmpDir);
       }
     },
