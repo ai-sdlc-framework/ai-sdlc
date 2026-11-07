@@ -206,11 +206,6 @@ export function replaceQueuedBranch(boardDir: string, taskId: string, branch: st
  */
 export function retireQueued(boardDir: string, taskId: string, reason: string): string {
   ensureBoardDirs(boardDir);
-  if (existsSync(manifestPathIn(boardDir, 'inflight', taskId))) {
-    throw new Error(
-      `dispatch.dequeue: ${taskId} is inflight (claimed); release it or write a verdict instead`,
-    );
-  }
   if (
     [VERDICT_SUFFIX, COMPLETED_SUFFIX].some((x) =>
       existsSync(path.join(boardDir, 'done', `${taskId}${x}`)),
@@ -218,6 +213,11 @@ export function retireQueued(boardDir: string, taskId: string, reason: string): 
   ) {
     throw new Error(
       `dispatch.dequeue: ${taskId} has a verdict in done/; use reenter or remove-verdict instead`,
+    );
+  }
+  if (existsSync(manifestPathIn(boardDir, 'inflight', taskId))) {
+    throw new Error(
+      `dispatch.dequeue: ${taskId} is inflight (claimed); release it or write a verdict instead`,
     );
   }
   const src = manifestPathIn(boardDir, 'queue', taskId);

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1228
 title: reenter and the pane-exit requeue tolerate a plain queue manifest beside an iterate-needed verdict
-status: To Do
+status: In Progress
 priority: high
 labels: [bug, hierarchy, dispatch]
 dependencies: []
