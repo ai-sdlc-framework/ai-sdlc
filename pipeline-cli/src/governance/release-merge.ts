@@ -522,6 +522,32 @@ export async function validateReleaseContent(
   return null;
 }
 
+/**
+ * AISDLC-717: the release content allowlist as a stand-alone check, re-run by CI on
+ * every push to the release branch so content that was not eligible when the PR was
+ * armed cannot merge. Returns a refusal naming the offending path, or null.
+ */
+export async function releaseContentRefusal(
+  baseSha: string,
+  headSha: string,
+  repoSlug: string,
+  runner: Runner,
+  cwd?: string,
+): Promise<string | null> {
+  const changed = await fetchChangedFiles(baseSha, headSha, repoSlug, runner, cwd);
+  if (!changed) {
+    return 'could not list every changed file (error or 300-file cap); failing closed';
+  }
+  if (changed.length === 0) return 'the release PR changes no files';
+  const extra = nonReleaseFiles(changed);
+  if (extra.length > 0) {
+    return `not release artifacts: ${extra.slice(0, 5).join(', ')}${
+      extra.length > 5 ? `, +${extra.length - 5} more` : ''
+    }`;
+  }
+  return validateReleaseContent(changed, baseSha, headSha, repoSlug, runner, cwd);
+}
+
 // ── Audit log ───────────────────────────────────────────────────────────
 
 export interface ReleaseAuditRecord {
