@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +20,6 @@ import {
   parseDifferentialTestOutput,
   runSandbox,
 } from './sandbox-runner.js';
-import { FIXTURE_BENIGN } from './ucvg-threat-fixtures.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 /**
@@ -59,17 +58,65 @@ function probeRunsc(): { ok: boolean; reason: string } {
   return { ok: false, reason };
 }
 
+/**
+ * Well-formed patch adding `src/multiply.js` and `test/multiply.test.js` to
+ * ucvg-demo (hunk counts match the bodies), so its `node --test` suite runs it.
+ */
+const MULTIPLY_DIFF = `diff --git a/src/multiply.js b/src/multiply.js
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/src/multiply.js
+@@ -0,0 +1,4 @@
++function multiply(a, b) {
++  return a * b;
++}
++module.exports = { multiply };
+diff --git a/test/multiply.test.js b/test/multiply.test.js
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/test/multiply.test.js
+@@ -0,0 +1,10 @@
++const test = require('node:test');
++const assert = require('node:assert');
++const { multiply } = require('../src/multiply');
++
++test('multiplies two numbers', () => {
++  assert.strictEqual(multiply(3, 4), 12);
++});
++test('multiplies by zero', () => {
++  assert.strictEqual(multiply(5, 0), 0);
++});
+`;
+
+/** Fail fast with git's own error text if the diff does not apply to an empty tree. */
+function assertDiffApplies(diff: string): void {
+  const dir = mkdtempSync(join(tmpdir(), 'gvisor-diff-check-'));
+  try {
+    const work = join(dir, 'work');
+    mkdirSync(work);
+    const patch = join(dir, 'p.diff');
+    writeFileSync(patch, diff);
+    const r = spawnSync('git', ['apply', '--check', patch], { cwd: work, encoding: 'utf8' });
+    if (r.status !== 0) throw new Error(`MULTIPLY_DIFF does not apply: ${r.stderr}`);
+  } finally {
+    removeFixtureDir(dir);
+  }
+}
+
 const PROBE = probeRunsc();
 
 describe('GVisorSandboxDriver differential test (integration)', () => {
   it.skipIf(!PROBE.ok)(
     'returns the same result shape as the Docker driver',
     async () => {
+      assertDiffApplies(MULTIPLY_DIFF);
       const tmpDir = mkdtempSync(join(tmpdir(), 'gvisor-integration-'));
       try {
         const result = await runSandbox({
-          prNumber: FIXTURE_BENIGN.prNumber,
-          prDiff: FIXTURE_BENIGN.prDiff,
+          prNumber: 1,
+          prDiff: MULTIPLY_DIFF,
           upstreamMainRef: 'https://github.com/ai-sdlc-framework/ai-sdlc-test-fixture.git',
           config: {
             ...DEFAULT_SANDBOX_CONFIG,
