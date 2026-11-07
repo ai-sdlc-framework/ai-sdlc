@@ -49,6 +49,9 @@ export const TASK_ACTIONS: Record<PrState, string> = {
   'no-match': 'route-to-planner',
 };
 
+/** AISDLC-1202: reason logged when a failing check is not counted against a live claim. */
+export const LIVE_CLAIM_NOTE = 'failure not counted: task is inflight with a live claim';
+
 /** Docs set: one action per classifier state. */
 export const DOCS_ACTIONS: Record<PrState, string> = {
   merged: 'mark-landed',
@@ -240,6 +243,11 @@ export function decide(
   const delivered = f.merged === true || f.draft === false || record?.delivered !== undefined;
   const takeover = f.executorDead === true;
   if (!delivered && !takeover) return { ...base, action: 'none' };
+  // AISDLC-1202: a red check on a PR whose task is inflight with a live claim is a round in progress
+  // (the reviewers have not signed the new head); it is not counted as a failure and nothing runs.
+  if (c.state === 'real-failure' && f.manifestState === 'inflight' && !takeover) {
+    return { ...base, action: 'none', note: LIVE_CLAIM_NOTE };
+  }
   let action = TASK_ACTIONS[c.state];
   // A green, CLEAN, unarmed ready task PR is armed by the reconciler (AISDLC-1091).
   if (c.state === 'no-match' && f.draft !== true && isGreenCleanUnarmed(f)) action = 'arm';
@@ -508,6 +516,8 @@ export interface ReconcileReport {
    * per threshold window), not as a repeated message.
    */
   stalls: { pr: number; headSha?: string; note: string; ageMinutes: number }[];
+  /** AISDLC-1202: failing checks not counted because the task has a live claim, with the reason. */
+  skippedFailures: { pr: number; taskId: string; reason: string }[];
   /** AISDLC-929: `main: RED at <sha>`, `main: green` or `main: unknown`; undefined when not checked. */
   main?: string;
   /** Set once per red sha: the item the tick routes to the planner. */
@@ -742,6 +752,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     reported: [],
     suppressed: 0,
     stalls: [],
+    skippedFailures: [],
   };
   const stuckMs = (opts.stuckAfterMinutes ?? DEFAULT_ROUTE_STUCK_MINUTES) * 60_000;
   if (opts.mainHealth)
@@ -755,6 +766,10 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     const existing = readLanding(opts.boardDir, f.prNumber);
     const ruled = rulingFacts(opts.boardDir, f, facts);
     let d = decide(f, existing, ruled, opts.maxSameHeadActions);
+    if (d.note === LIVE_CLAIM_NOTE) {
+      report.skippedFailures.push({ pr: f.prNumber, taskId: f.taskId, reason: d.note });
+      console.error(`[reconcile] PR #${f.prNumber} ${f.taskId}: ${d.note}`);
+    }
     if (d.action === 'route-to-planner' && opts.closeSuperseded && f.merged !== true) {
       const by = opts.closeSuperseded(f.prNumber);
       if (by !== undefined) {
