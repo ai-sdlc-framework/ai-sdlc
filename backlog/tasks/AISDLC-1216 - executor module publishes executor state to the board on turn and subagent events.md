@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1216
 title: 'Executor module publishes executor state to the board on turn and subagent events'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-07'
 labels:

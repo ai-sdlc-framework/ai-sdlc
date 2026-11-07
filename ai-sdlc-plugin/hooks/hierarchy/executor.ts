@@ -59,8 +59,6 @@ export const RESUME_COMMAND = 'ai-sdlc:executor';
 export const ROTATION_TTL_MS = 10 * 60 * 1000;
 /** Longest last reply carried into the planner's resume command arguments. */
 export const LAST_REPLY_MAX_CHARS = 4000;
-/** A task with no turn activity for this long is treated as ended, so a lost verdict cannot mute wakes. */
-export const ACTIVE_STALE_MS = 30 * 60 * 1000;
 
 export const LOG_KEY = 'hierarchy/log';
 export const ROTATION_KEY = 'hierarchy/rotation';
@@ -316,10 +314,8 @@ export interface ExecutorState {
   enabled?: boolean;
   /** Roster name, keys the stored last measure. */
   name?: string;
-  /** A task is in progress: from the first main-loop turn after a wake to its verdict or idle marker. */
-  active: boolean;
-  /** Epoch ms of the last main-loop turn event while a task runs; a stale task no longer mutes wakes. */
-  lastActivity?: number;
+  /** Background agents (subagent `session.start` agentIds) not yet ended, oldest first (AISDLC-1216). */
+  agents?: string[];
   /** A mod-run clear ended the session and the resume command has not run in the new one yet. */
   resumePending?: boolean;
   /** Resolved rotation threshold in tokens (config.json `contextThresholds`); the role constant when unset. */
@@ -444,7 +440,7 @@ export async function resumeAfterClear(p: Ports, state: ExecutorState): Promise<
     resume.args = `last-reply: ${state.lastReply.slice(0, LAST_REPLY_MAX_CHARS)}`;
   }
   const r = await safe(() => p.runCommand(resume));
-  if (ran(r)) state.active = true;
+  if (ran(r)) state.turnInFlight = true;
   else await log(p, `resume after clear refused: ${JSON.stringify(r.value ?? null)}`);
 }
 
@@ -466,16 +462,80 @@ export async function startPinnedTask(
   const r = await safe(() => p.runCommand({ command: RESUME_COMMAND }));
   if (ran(r)) {
     await logWake(p, state, 'session.start', 'run', `pinned ${taskId}`);
-    state.active = true;
-    state.lastActivity = Date.now();
+    state.turnInFlight = true;
   } else await log(p, `start for ${taskId} refused: ${JSON.stringify(r.value ?? null)}`);
 }
 
-/** True while a task is believed to run: set at a wake, cleared at the verdict, stale after ACTIVE_STALE_MS. */
+/** True while a main-loop turn runs (set at a wake or `turn.start`, cleared at `turn.complete`). */
 function taskRunning(state: ExecutorState): boolean {
-  if (!state.active) return false;
-  if (Date.now() - (state.lastActivity ?? 0) > ACTIVE_STALE_MS) state.active = false;
-  return state.active;
+  return state.turnInFlight === true;
+}
+
+/** The three values the module publishes into the claim's `.state.json` (AISDLC-1216, DEC-0392). */
+export type ExecutorBoardState =
+  'turn-running' | 'idle-awaiting-clear' | 'background-agent-running';
+
+/** A background agent outranks the turn state: the main turn ends at once while the agent works. */
+export function executorBoardState(state: ExecutorState): ExecutorBoardState {
+  if ((state.agents?.length ?? 0) > 0) return 'background-agent-running';
+  return state.turnInFlight ? 'turn-running' : 'idle-awaiting-clear';
+}
+
+/**
+ * Sets `executorState` (argv[3]) in `inflight/<task>.state.json` of the claim whose manifest or heartbeat names
+ * worker argv[2], under board dir argv[1]. An atomic rewrite; a claim with no heartbeat file is left alone.
+ */
+export const PUBLISH_SCRIPT =
+  "const fs=require('fs'),p=require('path');const[d,n,v]=process.argv.slice(1);try{const dir=p.join(d,'inflight');for(const f of fs.readdirSync(dir)){if(!f.endsWith('.dispatch.json'))continue;const id=f.slice(0,-14);let mf={},hb=null;try{mf=JSON.parse(fs.readFileSync(p.join(dir,f),'utf8'))}catch(e){}const sf=p.join(dir,id+'.state.json');try{hb=JSON.parse(fs.readFileSync(sf,'utf8'))}catch(e){}if(!hb||(hb.workerId!==n&&mf.workerId!==n))continue;hb.executorState=v;const t=sf+'.'+process.pid+'.tmp';fs.writeFileSync(t,JSON.stringify(hb,null,2)+'\\n');fs.renameSync(t,sf)}}catch(e){}";
+
+/** Publish the current state to the board; a host without `process.run` or an unnamed worker publishes nothing. */
+export async function publishExecutorState(p: Ports, state: ExecutorState): Promise<void> {
+  if (!p.runProcess || !state.name) return;
+  const dir = state.boardDir ?? '.ai-sdlc/dispatch';
+  await safe(() =>
+    p.runProcess!({
+      command: 'node',
+      args: ['-e', PUBLISH_SCRIPT, dir, state.name!, executorBoardState(state)],
+    }),
+  );
+}
+
+/** A subagent `session.start`: record the agent and publish `background-agent-running`. */
+export async function executorSubagentStart(
+  state: ExecutorState,
+  $: Any,
+  e: Any,
+  next: Any,
+): Promise<Any> {
+  if (!state.enabled) return next(e);
+  const id = String(e.agentId);
+  const agents = (state.agents ??= []);
+  if (!agents.includes(id)) agents.push(id);
+  await publishExecutorState(portsOf($), state);
+  return next(e);
+}
+
+/**
+ * The host delivers no subagent end event, so the parent `turn.start` that carries a task notification ends a
+ * background agent: the agent the notification names, else the oldest recorded one (one per notification).
+ */
+function endBackgroundAgent(state: ExecutorState, e: Any): void {
+  const agents = state.agents;
+  if (!agents?.length) return;
+  const text = String(e?.text ?? e?.prompt ?? '');
+  const named = agents.find((id) => text.includes(id));
+  agents.splice(named ? agents.indexOf(named) : 0, 1);
+}
+
+function portsOf($: Any): Ports {
+  return {
+    storeGet: (k) => $.store.get(k),
+    storeSet: (k, v) => $.store.set(k, v),
+    runCommand: (a) => $.command.run(a),
+    compact: (a) => $.session.compact(a),
+    submit: (a) => $.prompt.submit(a),
+    runProcess: (a) => $.process.run([a.command, ...a.args]),
+  };
 }
 
 /** Event handlers, called by the module's single registration point (register.tsx) for the armed role. */
@@ -510,8 +570,6 @@ export async function executorSessionReceive(
         if (ran(r)) {
           await logWake(p, state, 'enqueue', 'run', 'board holds nothing');
           state.turnInFlight = true;
-          state.active = true;
-          state.lastActivity = Date.now();
         } else await log(p, `wake refused: ${JSON.stringify(r.value ?? null)}`);
       } else {
         await logWake(p, state, 'enqueue', 'skip', 'turn state says a task runs');
@@ -553,8 +611,8 @@ export async function executorTurnStart(
   await resumeAfterClear(p, state);
   if (!e?.agentId) {
     state.turnInFlight = true;
-    state.active = true;
-    state.lastActivity = Date.now();
+    endBackgroundAgent(state, e);
+    await publishExecutorState(p, state);
   }
   return next(e);
 }
@@ -578,14 +636,10 @@ export async function executorTurnComplete(
   state.turnInFlight = false;
   const reply = String(e?.text ?? e?.reply ?? '');
   if (reply) state.lastReply = reply;
-  state.lastActivity = Date.now();
-  // AISDLC-1100: the host's turn.complete carries no reply text; the turn boundary itself then ends the
-  // task, so a pending threshold rotation can fire.
-  if (!reply && state.pendingRotate) state.active = false;
-  if (state.pendingRotate && !taskRunning(state)) await rotateUnlessHeld(p, state, 'turn.complete');
-  // A main-thread turn that ends with no rotation pending leaves the executor idle (dispatch owns the clear
-  // after a verdict), so the next enqueue wake must run the executor command rather than be consumed.
-  else if (!state.pendingRotate) state.active = false;
+  await publishExecutorState(p, state);
+  // The turn boundary ends the task for the wake predicate, so a pending threshold rotation fires here
+  // (rotateUnlessHeld still defers while the board holds a claim); an idle executor takes the next wake.
+  if (state.pendingRotate) await rotateUnlessHeld(p, state, 'turn.complete');
   return next(e);
 }
 

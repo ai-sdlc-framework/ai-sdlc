@@ -1395,7 +1395,11 @@ export function writeHeartbeat(boardDir: string, heartbeat: InflightHeartbeat): 
   ensureBoardDirs(boardDir);
   const target = boardFile(boardDir, 'inflight', heartbeat.taskId, STATE_SUFFIX);
   const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmp, JSON.stringify(heartbeat, null, 2) + '\n', 'utf-8');
+  // The hooks module publishes `executorState` into this file (AISDLC-1216); a worker heartbeat keeps it.
+  const executorState =
+    heartbeat.executorState ?? readHeartbeat(boardDir, heartbeat.taskId)?.executorState;
+  const body = executorState ? { ...heartbeat, executorState } : heartbeat;
+  writeFileSync(tmp, JSON.stringify(body, null, 2) + '\n', 'utf-8');
   renameSync(tmp, target);
   return target;
 }

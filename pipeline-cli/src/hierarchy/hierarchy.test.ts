@@ -1384,6 +1384,16 @@ describe('hierarchy down', () => {
     // AC2: status joins the inflight task to the executor ...
     const row = hierarchyStatus(deps).rows.find((r) => r.entry.name === alpha.name);
     expect(row?.inflightTask).toBe('AISDLC-700');
+    // AISDLC-1216: the state the hooks module published shows next to the task
+    writeHeartbeat(boardDir, {
+      ...readHeartbeat(boardDir, 'AISDLC-700')!,
+      executorState: 'background-agent-running',
+    });
+    const shown = hierarchyStatus(deps);
+    expect(shown.rows.find((r) => r.entry.name === alpha.name)?.executorState).toBe(
+      'background-agent-running',
+    );
+    expect(formatStatus(shown).join('\n')).toContain('AISDLC-700 (background-agent-running)');
 
     // ... and down returns its manifest to the queue.
     const r = await hierarchyDown({ role: 'executor-alpha' }, deps);
