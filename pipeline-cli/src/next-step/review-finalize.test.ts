@@ -250,6 +250,16 @@ describe('finalizeReview', () => {
     expect(res.verdict.stagedAdvisory).toEqual(stagedRejection);
   });
 
+  it('approves a resumed staged-fallback round when the required reviewers approve, with no coverage warning (AISDLC-1229)', async () => {
+    markPersisted();
+    const st = makeState(h.root, { review: review(), iteration: 2 });
+    const res = await finalizeReview(h.ctx, st, approvals());
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.verdict.decision).toBe('APPROVED');
+    expect(res.warnings.join('\n')).not.toContain('coverage short');
+  });
+
   it('still blocks on a classic CHANGES_REQUESTED beside a staged verdict', async () => {
     markPersisted();
     const st = makeState(h.root, {
@@ -513,6 +523,20 @@ describe('enforceReviewerCoverage (AISDLC-1197)', () => {
     expect(verdict.decision).toBe('CHANGES_REQUESTED');
     expect(verdict.verdictRecordDraft).toBeUndefined();
     expect(JSON.stringify(verdict.verdicts)).toContain('security-reviewer');
+  });
+
+  it('reports both sets when coverage is short (AISDLC-1229)', async () => {
+    h = makeHarness();
+    state = makeState(h.root);
+    h.runner.on(/^git diff --name-only/, ok('docs/readme.md\n'));
+    const verdict = await aggregateRound(
+      [{ agentId: 'correctness-reviewer', harness: 'claude-code', approved: true, findings: [] }],
+      '',
+    );
+    const sets = { ran: [] as string[], required: [] as string[] };
+    await enforceReviewerCoverage(h.ctx, state, verdict, sets);
+    expect(sets.ran).toContain('correctness-reviewer');
+    expect(sets.required).toEqual(['correctness-reviewer', 'security-reviewer']);
   });
 
   it('leaves a fully covered round approved', async () => {

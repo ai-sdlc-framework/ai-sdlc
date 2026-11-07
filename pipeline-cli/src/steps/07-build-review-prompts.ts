@@ -29,7 +29,8 @@ import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { BuildReviewPromptsResult, ReviewPrompt, ReviewerType, TaskSpec } from '../types.js';
 import { resolveTargetBranch } from './02-compute-branch.js';
-import { THREE_REVIEWER_SET, reduceForReviewScope, selectReviewerSet } from './reviewer-set.js';
+import { computeRequiredReviewers } from '../attestation/review-coverage.js';
+import { reduceForReviewScope, selectReviewerSet } from './reviewer-set.js';
 import { diffHasBinaryHunk } from './review-judgment-support.js';
 import { routeReviewers } from './review-routing.js';
 import { buildJudgmentContext } from '../judgment/context.js';
@@ -281,11 +282,16 @@ export async function buildReviewPrompts(
       // The staged set is a pipeline (risk map, plan, probes, synthesis) that `/ai-sdlc execute`
       // drives through `cli-staged-review`; these prompts are only the reviewer fan-out. A caller
       // that reaches here with the staged set in force would otherwise review with the standalone
-      // security reviewer alone, so it gets the default three-reviewer set instead.
+      // security reviewer alone, so it gets the set the coverage rule requires for these paths
+      // (AISDLC-1229): the same set the verdict gate checks, never a larger or smaller one.
+      const required = computeRequiredReviewers({
+        changedPaths: diffUnavailable ? null : changedFiles,
+        requireThree: selection.classifier.reason === 'config:require-three',
+      });
       process.stderr.write(
-        "[reviewer-set] reviewerSet 'staged' is driven by /ai-sdlc execute; this path reviews with the 'three' set\n",
+        `[reviewer-set] reviewerSet 'staged' is driven by /ai-sdlc execute; this path reviews with the coverage-rule set (${required.required.join(', ')})\n`,
       );
-      selected = [...THREE_REVIEWER_SET];
+      selected = required.required as ReviewerType[];
     } else {
       // AISDLC-723: test-only / docs-adjacent diffs run the correctness reviewer alone, unless
       // the repository requires three always (`reviewerSet: three`).

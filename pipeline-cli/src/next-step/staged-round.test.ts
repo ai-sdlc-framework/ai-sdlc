@@ -102,9 +102,8 @@ describe('prepareReview with reviewerSet staged', () => {
     expect(res.review.nonce).toBe('nonce-1');
     // DEC-0149: the classifier's normal set runs beside the advisory staged verdict.
     expect(res.review.staged?.beside?.map((b) => b.reviewer).sort()).toEqual([
-      'code-reviewer',
+      'correctness-reviewer',
       'security-reviewer',
-      'test-reviewer',
     ]);
     // Trusted backlog work only: the CLI is told the source kind.
     const prep = h.runner.calls.find((c) => c.args[1] === 'prepare');
@@ -128,9 +127,8 @@ describe('prepareReview with reviewerSet staged', () => {
     if (res.kind !== 'spawn') throw new Error(`expected spawn, got ${res.kind}`);
     expect(res.review.staged).toBeUndefined();
     expect(res.review.spawned.map((s) => s.reviewer).sort()).toEqual([
-      'code-reviewer',
+      'correctness-reviewer',
       'security-reviewer',
-      'test-reviewer',
     ]);
     const warning = h.logs.find((l) => l.includes('cannot review this change'));
     expect(warning).toContain('plan-rejected');
@@ -143,7 +141,7 @@ describe('prepareReview with reviewerSet staged', () => {
     const res = await prepareReview(h.ctx, state, 1);
     if (res.kind !== 'spawn') throw new Error('expected spawn');
     expect(res.review.staged).toBeUndefined();
-    expect(res.review.spawned).toHaveLength(3);
+    expect(res.review.spawned).toHaveLength(2);
   });
 
   it('does not start the staged review when the incremental gate says unchanged', async () => {
