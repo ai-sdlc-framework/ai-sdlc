@@ -337,6 +337,15 @@ report to the planner. `cli-hierarchy status` prints the open stall as a `drain-
 `--json`). The record closes by itself when the board moves or the condition lapses. Nothing is recorded while
 the board is held.
 
+### A reaped claim is never restarted from zero (AISDLC-1219, DEC-0392)
+
+The stall reap (heartbeat past `staleMs`, or a holder idle on a claim past the grace) writes the `failed/<id>.diagnostic.json`
+record (cause `stale-worker`) and clears the holder, but it does not move the task back to `queue/`. A fresh executor
+starting the developer over in the same worktree lost half-done work (AISDLC-1209 lost 31 minutes). The planner routing
+line names the task and the diagnostic (`Reaped stalled <id> ... not re-queued (DEC-0392), diagnostic failed/<id>.diagnostic.json`).
+The planner decides: `cli-dispatch requeue` (still limited by `DEFAULT_REQUEUE_RETRY_LIMIT`) or `cli-reenter` on the existing pull request.
+A step that can hang owns its own budget: see the developer round budget in the execute command.
+
 ### Every failed verdict reaches a terminal state (AISDLC-1156, DEC-0291)
 
 A pipeline that depends on a human noticing a failure is a workflow failure. The tick checks one invariant

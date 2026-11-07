@@ -22,7 +22,6 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { writeHeartbeat, writeVerdict } from '../dispatch/board.js';
-import { requeueFailed } from '../dispatch/requeue.js';
 import { clearHold, readHold, writeHold } from './hold.js';
 import type { LiveState } from './status.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
@@ -992,7 +991,6 @@ describe('nextWakeSec (idle hibernation)', () => {
 describe('stall check (AISDLC-826)', () => {
   const MIN = 60_000;
   let states: Map<string, LiveState>;
-  let requeueCalls: { id: string; note: string }[];
 
   /** Claim a task for a worker: a real manifest moved to inflight/ plus its heartbeat. */
   function claim(taskId: string, worker: string, ageMs: number, step = '05-dev-running'): void {
@@ -1022,10 +1020,6 @@ describe('stall check (AISDLC-826)', () => {
       stall: {
         liveness: () => states,
         findPr: (id) => (id === 'AISDLC-71' ? 4242 : undefined),
-        requeue: (id, note) => {
-          requeueCalls.push({ id, note });
-          requeueFailed(board, id, {});
-        },
       },
       ...over,
     });
@@ -1033,10 +1027,9 @@ describe('stall check (AISDLC-826)', () => {
 
   beforeEach(() => {
     states = new Map([['executor-alpha', 'busy']]);
-    requeueCalls = [];
   });
 
-  it('reaps a stale heartbeat, clears the holder and re-queues with a resume note', async () => {
+  it('reaps a stale heartbeat, clears the holder and does not re-queue (DEC-0392)', async () => {
     claim('AISDLC-71', 'executor-alpha', 31 * MIN, '06-review');
     const r = await runDispatchTick(stallDeps());
     expect(r.stalled).toHaveLength(1);
@@ -1046,23 +1039,22 @@ describe('stall check (AISDLC-826)', () => {
       step: '06-review',
       reason: 'stale-heartbeat',
       prNumber: 4242,
-      requeue: { done: true },
+      diagnostic: 'failed/AISDLC-71.diagnostic.json',
     });
     expect(cleared).toEqual([{ executor: 'executor-alpha', taskId: 'AISDLC-71' }]);
-    expect(requeueCalls[0]!.note).toContain('06-review');
-    expect(requeueCalls[0]!.note).toContain('#4242');
-    expect(existsSync(path.join(board, 'queue', 'AISDLC-71.dispatch.json'))).toBe(true);
+    expect(existsSync(path.join(board, 'queue', 'AISDLC-71.dispatch.json'))).toBe(false);
+    expect(existsSync(path.join(board, 'failed', 'AISDLC-71.diagnostic.json'))).toBe(true);
     expect(existsSync(path.join(board, 'inflight', 'AISDLC-71.dispatch.json'))).toBe(false);
-    expect(r.reports.some((x) => x.text.includes('Reaped stalled AISDLC-71'))).toBe(true);
+    const line = r.reports.find((x) => x.text.includes('Reaped stalled AISDLC-71'));
+    expect(line!.text).toContain('failed/AISDLC-71.diagnostic.json');
+    expect(line!.text).toContain('DEC-0392');
     expect(r.escalations).toEqual([]);
     expect(r.wakeReason).toBe('pending');
   });
 
   it('records the failure with cause stale-worker, the last step and the heartbeat age', async () => {
     claim('AISDLC-71', 'executor-alpha', 40 * MIN, 'ship');
-    await runDispatchTick(
-      stallDeps({ stall: { liveness: () => states } }), // no requeue: the record stays
-    );
+    await runDispatchTick(stallDeps({ stall: { liveness: () => states } }));
     const rec = JSON.parse(
       readFileSync(path.join(board, 'failed', 'AISDLC-71.diagnostic.json'), 'utf-8'),
     );
@@ -1131,12 +1123,11 @@ describe('stall check (AISDLC-826)', () => {
     expect(playbooked).toEqual([]);
   });
 
-  it('does not clear the holder twice when the re-queue is refused', async () => {
+  it('does not clear the holder twice', async () => {
     claim('AISDLC-71', 'executor-alpha', 31 * MIN);
     const withoutRequeue = (): LoopDeps =>
       stallDeps({ operational: new Set(['clear-executor-context']) });
-    const first = await runDispatchTick(withoutRequeue());
-    expect(first.stalled![0]!.requeue.done).toBe(false);
+    await runDispatchTick(withoutRequeue());
     await runDispatchTick(withoutRequeue());
     expect(cleared).toHaveLength(1);
     expect(playbooked).toEqual([]);
@@ -1171,15 +1162,11 @@ describe('stall check (AISDLC-826)', () => {
           findPr: () => {
             throw new Error('gh down');
           },
-          requeue: () => {
-            throw new Error('limit');
-          },
         },
       }),
     );
     expect(r.stalled![0]!.clear!.status).toBe('refused');
-    expect(r.stalled![0]!.requeue).toEqual({ done: false, reason: 'limit' });
-    expect(r.reports.some((x) => x.text.includes('not re-queued (limit)'))).toBe(true);
+    expect(r.reports.some((x) => x.text.includes('not re-queued (DEC-0392)'))).toBe(true);
   });
 
   it('lists PRs needing a human, with a stall line past 24h (AISDLC-888)', async () => {

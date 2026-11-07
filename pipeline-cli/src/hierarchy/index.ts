@@ -307,7 +307,6 @@ export {
   paneHasLiveNextStep,
   reapStalledClaims,
   STALE_WORKER_CAUSE,
-  stallResumeNote,
   stallThresholdsFromEnv,
   type StalledReport,
 } from './stall.js';

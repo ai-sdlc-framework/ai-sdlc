@@ -90,7 +90,6 @@ import { requeueFailed } from '../dispatch/requeue.js';
 import { backupBoard, backupDirFor, boardRecoveryHint } from '../dispatch/board-recovery.js';
 import { backupMemory, backupRepoMemory, memoryBackupHint } from '../memory-dream/backup.js';
 import { resolveMemoryDir } from '../memory-dream/resolve-dir.js';
-import { reenter } from '../hierarchy/reenter.js';
 import { now as clockNow } from '../clock.js';
 import { runDemo, type DemoDeps } from '../hierarchy/demo.js';
 import { createPlannerNotifier } from '../hierarchy/planner-notify.js';
@@ -1377,27 +1376,6 @@ export async function runHierarchyCli(
               );
             },
             onSpared: (o) => emit({ type: 'StallSpared', ...o }),
-            requeue: (id, note, pr) => {
-              if (pr === undefined) {
-                void requeueFailed(
-                  deps.boardDir,
-                  id,
-                  retryLimit === undefined ? {} : { retryLimit },
-                );
-                return;
-              }
-              void reenter(
-                { target: String(pr), note },
-                {
-                  boardDir: deps.boardDir,
-                  run: extras.ghRun ?? deps.run,
-                  cwd: repoRoot,
-                  reenteredBy: worker,
-                  resolveBaseSha: () => resolveBaseSha(repoRoot),
-                  resolveTaskFile: (tid) => findTaskFileRelative(tid, repoRoot),
-                },
-              );
-            },
             findPr: (id) => findOpenPrNumber(extras.ghRun ?? deps.run, repoRoot, id),
           },
           parentHead: () => readParentHead(repoRoot),

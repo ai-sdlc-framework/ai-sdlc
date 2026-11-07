@@ -21,7 +21,15 @@ import type { AggregatedVerdict, ReviewerVerdict } from '../types.js';
 import { loadReviewState } from '../incremental-review/review-rounds.js';
 import { approvedWithoutReviewers } from './review-finalize.js';
 import { bootstrapPromptFor } from './review-prepare.js';
-import { extractJson, nextStep, readState, writeState, type NextStepDeps } from './next-step.js';
+import {
+  DEFAULT_DEVELOPER_BUDGET_MINUTES,
+  developerBudgetMinutes,
+  extractJson,
+  nextStep,
+  readState,
+  writeState,
+  type NextStepDeps,
+} from './next-step.js';
 import type {
   DoneInstruction,
   Instruction,
@@ -656,6 +664,36 @@ describe('iteration (Step 9) and the human-attention cap', () => {
     expect(counters.devPrompts[0].feedback).toContain('fix me');
     expect(last).toMatchObject({ action: 'done', outcome: 'approved', iterations: 2 });
     expect(counters.rebased).toBe(1);
+  });
+
+  it('turns a developer round over its budget into an iterate-needed note and reuses the worktree (AISDLC-1219)', async () => {
+    let t = Date.parse('2026-10-09T12:00:00.000Z');
+    ctx.now = () => new Date(t);
+    const d = deps();
+    let out = await nextStep(ctx, { task: 'AISDLC-900' }, d);
+    expect(out.instruction.action).toBe('spawn-developer');
+    t += 50 * 60_000;
+    out = await nextStep(ctx, { task: 'AISDLC-900', result: DEV_JSON }, d);
+    expect(out.instruction).toMatchObject({
+      action: 'spawn-developer',
+      iteration: 2,
+      cwd: worktree,
+    });
+    expect(counters.devPrompts[0].feedback).toContain('iterate-needed');
+    expect(counters.devPrompts[0].feedback).toContain('50 minutes');
+    expect(counters.devPrompts[0].feedback).toContain(worktree);
+    expect(counters.prepared).toBe(0);
+    t += 5 * 60_000;
+    out = await nextStep(ctx, { task: 'AISDLC-900', result: DEV_JSON }, d);
+    expect(out.instruction.action).toBe('spawn-reviewers');
+  });
+
+  it('reads the budget from the environment, falling back to the default', () => {
+    expect(developerBudgetMinutes({ AI_SDLC_DEVELOPER_BUDGET_MINUTES: '5' })).toBe(5);
+    expect(developerBudgetMinutes({ AI_SDLC_DEVELOPER_BUDGET_MINUTES: 'x' })).toBe(
+      DEFAULT_DEVELOPER_BUDGET_MINUTES,
+    );
+    expect(developerBudgetMinutes({})).toBe(DEFAULT_DEVELOPER_BUDGET_MINUTES);
   });
 
   it('opens the PR for a human after two failed passes instead of aborting', async () => {

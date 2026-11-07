@@ -12,7 +12,6 @@ import {
   paneHasLiveNextStep,
   endsWithQuestion,
   reapStalledClaims,
-  stallResumeNote,
   stallThresholdsFromEnv,
 } from './stall.js';
 import type { CommandRunner } from './types.js';
@@ -35,14 +34,6 @@ describe('stallThresholdsFromEnv', () => {
     expect(stallThresholdsFromEnv({ AI_SDLC_DISPATCH_STALE_MS: 'abc' })).toEqual({
       staleMs: DEFAULT_STALL_STALE_MS,
     });
-  });
-});
-
-describe('stallResumeNote', () => {
-  it('names the step and the pull request', () => {
-    expect(stallResumeNote('ship', 9)).toContain('step ship');
-    expect(stallResumeNote('ship', 9)).toContain('#9');
-    expect(stallResumeNote('ship')).toContain('No pull request');
   });
 });
 
