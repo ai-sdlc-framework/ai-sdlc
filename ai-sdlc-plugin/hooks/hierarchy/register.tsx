@@ -10,7 +10,6 @@ import {
   pickRole,
   executorSessionMeasure,
   executorSessionReceive,
-  executorSubagentStart,
   executorTurnComplete,
   executorTurnStart,
   resumeAfterClear,
@@ -124,10 +123,7 @@ export const register = (on: Any, options?: Any): void => {
   on('ui.render', ($: Any, e: Any, next: Any) => onRender(router, $, e, next));
   on('session.start', async ($: Any, e: Any, next: Any) => {
     // AISDLC-1124: a subagent's session.start is never an executor start.
-    if (e?.agentId) {
-      // AISDLC-1216: a subagent start is never an executor start, but the executor records it (background agent).
-      return router.current === 'executor' ? executorSubagentStart(state, $, e, next) : next(e);
-    }
+    if (e?.agentId) return next(e);
     const p: Ports = {
       storeGet: (k) => $.store.get(k),
       storeSet: (k, v) => $.store.set(k, v),

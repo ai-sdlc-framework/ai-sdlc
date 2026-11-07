@@ -286,8 +286,8 @@ export interface InflightHeartbeat {
   currentStep?: string;
   startedAt: string;
   lastHeartbeat: string;
-  /** Written by the executor hooks module (AISDLC-1216): what the holding executor is doing now. */
-  executorState?: 'turn-running' | 'idle-awaiting-clear' | 'background-agent-running';
+  /** Written by `next-step` (AISDLC-1226): where the pipeline is. `done` and `aborted` are terminal. */
+  phase?: 'awaiting-developer' | 'awaiting-reviewers' | 'done' | 'aborted';
 }
 
 /** Outcome of a claim attempt. */

@@ -75,8 +75,8 @@ export interface StatusRow {
   attached: boolean;
   /** Task the session holds in `inflight/`, when its heartbeat names it. */
   inflightTask?: string;
-  /** Executor state the hooks module published for that task (AISDLC-1216). */
-  executorState?: string;
+  /** Pipeline phase of that task (AISDLC-1226). */
+  phase?: string;
   /** The PR this executor is landing and its state, e.g. `#12 ci-pending` (AISDLC-816). */
   landing?: string;
   /**
@@ -307,7 +307,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
       ...(moduleTokens !== undefined ? { moduleTokens } : {}),
       attached: alive && isAttached(entry.tmuxSession),
       inflightTask: held?.taskId,
-      ...(held?.executorState ? { executorState: held.executorState } : {}),
+      ...(held?.phase ? { phase: held.phase } : {}),
       ...(owned
         ? {
             landing: `#${owned.pr} ${owned.delivered ? 'delivered' : 'undelivered'}:${owned.state}`,
@@ -521,7 +521,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     r.attached ? 'yes' : 'no',
     r.entry.model,
     r.entry.permissionMode,
-    r.inflightTask ? `${r.inflightTask}${r.executorState ? ` (${r.executorState})` : ''}` : '-',
+    r.inflightTask ? `${r.inflightTask}${r.phase ? ` (${r.phase})` : ''}` : '-',
     r.landing ?? '-',
     r.launchEnv ?? '-',
     r.nodeVersion ? `${r.nodeVersion}${r.nodeMismatch ? ' MISMATCH' : ''}` : '-',

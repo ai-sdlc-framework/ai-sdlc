@@ -1,13 +1,12 @@
 /**
- * The idle-with-claim check the dispatch tick runs on every wake (AISDLC-826, AISDLC-1218).
+ * The idle-with-claim check the dispatch tick runs on every wake (AISDLC-826, AISDLC-1218, AISDLC-1226).
  *
- * The executor publishes its real state to the claim (`executorState`, AISDLC-1216), so no
- * heartbeat age or pane-text guess is needed (DEC-0392): a claim whose holder is
- * `idle-awaiting-clear` and that has no verdict is reaped with cause `idle-with-claim`, the
- * holder is cleared (which restarts its executor loop) and the task is put back on `queue/`
- * through `requeueFailed`. A claim in `turn-running` or `background-agent-running` is never
- * reaped, however old its heartbeat. An executor whose pane exits is handled at once by
- * `pane-exited` (AISDLC-1217).
+ * The pipeline (`next-step`) is the single writer of progress: it refreshes the claim's
+ * `inflight/<task>.state.json` (step marker, `lastHeartbeat`, `phase`) at every step boundary. A claim is
+ * idle-with-claim only when (a) its phase is `done` or `aborted` and no verdict was written, or (b) its
+ * `lastHeartbeat` is older than `stallMs`; in both cases only when no live `next-step` runs under the
+ * holder. The holder is cleared (which restarts its executor loop) and the task goes back to `queue/`
+ * through `requeueFailed`. An executor whose pane exits is handled at once by `pane-exited` (AISDLC-1217).
  */
 
 import { existsSync } from 'node:fs';
@@ -56,11 +55,8 @@ export interface StallDeps {
    * backgrounded verification keeps the session idle while real work runs.
    */
   hasLiveNextStep?: (worker: string) => boolean;
-  /**
-   * AISDLC-1225: a claim whose last heartbeat or state publish is younger than this is spared (no host probe
-   * for a running background agent exists). Default {@link STATE_PUBLISH_FLOOR_MS}.
-   */
-  floorMs?: number;
+  /** A claim whose heartbeat is older than this is stalled (AISDLC-1226). Default {@link DEFAULT_STALL_MS}. */
+  stallMs?: number;
   /** Called when a claim that would be reaped is spared, with the reason. */
   onSpared?: (o: { taskId: string; worker: string; ageMs: number; reason: string }) => void;
   /** Clears (and so restarts) one executor; undefined when the grant is missing. */
@@ -69,8 +65,8 @@ export interface StallDeps {
   findPr?: (taskId: string) => number | undefined;
 }
 
-/** One host tick: a state publish younger than this is too fresh to trust as idle. */
-export const STATE_PUBLISH_FLOOR_MS = 30_000;
+/** Default stall window: the pipeline refreshes the heartbeat at every step boundary (AISDLC-1226). */
+export const DEFAULT_STALL_MS = 20 * 60_000;
 
 function hasVerdict(boardDir: string, taskId: string): boolean {
   return ['done', 'failed'].some((d) =>
@@ -134,24 +130,12 @@ export async function reapStalledClaims(
     const manifest = readInflightManifest(deps.boardDir, taskId);
     if (!manifest) continue;
     const heartbeat = readHeartbeat(deps.boardDir, taskId);
-    if (heartbeat?.executorState !== 'idle-awaiting-clear') continue;
-    const last = Date.parse(heartbeat.lastHeartbeat ?? manifest.dispatchedAt);
+    const last = Date.parse(heartbeat?.lastHeartbeat ?? manifest.dispatchedAt);
     const ageMs = Number.isNaN(last) ? 0 : Math.max(0, nowMs - last);
-    const worker = heartbeat.workerId ?? 'unknown';
+    const worker = heartbeat?.workerId ?? manifest.workerId ?? 'unknown';
     const reason: StalledReport['reason'] = 'idle-with-claim';
-    if (ageMs < (deps.floorMs ?? STATE_PUBLISH_FLOOR_MS)) {
-      try {
-        deps.onSpared?.({
-          taskId,
-          worker,
-          ageMs,
-          reason: 'idle state published less than one tick ago (a background agent may be running)',
-        });
-      } catch {
-        /* reporting must not break the tick */
-      }
-      continue;
-    }
+    const terminal = heartbeat?.phase === 'done' || heartbeat?.phase === 'aborted';
+    if (!terminal && ageMs <= (deps.stallMs ?? DEFAULT_STALL_MS)) continue;
     if (deps.hasLiveNextStep && worker !== 'unknown' && safeProbe(deps.hasLiveNextStep, worker)) {
       try {
         deps.onSpared?.({

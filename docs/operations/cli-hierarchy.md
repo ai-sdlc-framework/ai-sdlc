@@ -286,18 +286,12 @@ binary) for callers that spawn `gh` directly. Lines older than 24 hours are drop
 GitHub reads (human-attention list, mark-ready, landing) and reports the skip when the lowest remaining bucket is below the floor
 (default 300, override with `AI_SDLC_GH_QUOTA_FLOOR`). The gate workflow prints the Actions quota at the start (`detect`) and end
 (`pr-ready`) of each run in the job summary.
-The `INFLIGHT` column appends the executor state in parentheses (AISDLC-1216, DEC-0392). The executor hooks
-module writes `executorState` into the claim's `inflight/<task>.state.json` (it holds no fs, so it runs a small
-`node -e` through `process.run`; only a claim whose heartbeat file exists is touched) on `turn.start`,
-`turn.complete` and a subagent `session.start`: `turn-running` (a main-loop turn is running),
-`idle-awaiting-clear` (no turn and no background agent) and `background-agent-running` (at least one subagent
-`session.start` not yet ended; it outranks the turn state because a backgrounded developer ends the main turn at
-once). A background agent is considered ended only on its own end event (`turn.complete` carrying its `agentId`)
-or on the parent `turn.start` that carries a task notification, which ends the agent the text names or else the
-oldest; a parent turn with any other text (a status line, a wake) never ends one (AISDLC-1225, DEC-0392). Agents are
-tracked per `agentId`. The reap also spares an `idle-awaiting-clear` claim whose last heartbeat or state publish is
-younger than 30 seconds (no host probe for a running background agent exists), and `down`/`restart` answer the host's
-"Background work is running" exit dialog with "Exit and stop tasks" instead of leaving the pane parked on it.
+The `INFLIGHT` column appends the pipeline phase in parentheses (AISDLC-1226, DEC-0392). `next-step` is the single
+writer of progress: at every step boundary (`01-validated`, `05-dev-running`, `06-dev-done`, `07-reviewers-running`,
+`10-signing`, `done`, or an abort) it refreshes the claim's `inflight/<task>.state.json` with `currentStep`, a fresh
+`lastHeartbeat` and `phase` (`awaiting-developer`, `awaiting-reviewers`, `done` or `aborted`). The hooks module publishes
+no executor state; `down`/`restart` answer the host's "Background work is running" exit dialog with "Exit and stop
+tasks" instead of leaving the pane parked on it.
 The `MODULE` column (AISDLC-1061) is the hierarchy hooks module's heartbeat for the session, read from
 `<board-dir>/handoff/module-<name>.json` (`{state, reason, version, at}`): `loaded`, `refused: <reason>`,
 `absent` (no file: the session has no hierarchy role, or the module never ran in it) or, for the dispatch
@@ -344,11 +338,12 @@ the board is held.
 ### A reaped claim is never restarted from zero (AISDLC-1219, DEC-0392)
 
 No claim is reaped by heartbeat age (AISDLC-1218, DEC-0392): a step longer than 30 minutes used to be failed while the
-executor was working (AISDLC-1209). The executor publishes `executorState` to the claim (AISDLC-1216), and the stall
-reap fires only for `idle-awaiting-clear` with no verdict in `done/` or `failed/`. It writes the
+executor was working (AISDLC-1209). The reap reads the pipeline-written heartbeat (AISDLC-1226) and fires only with no verdict in
+`done/` or `failed/`, and no live `next-step` under the holder, when either (a) the claim's `phase` is `done` or `aborted`,
+or (b) its `lastHeartbeat` is older than `stallMs` (default 20 minutes). It writes the
 `failed/<id>.diagnostic.json` record (cause `idle-with-claim`), clears the holder and sends the task back through
 `requeueFailed` (still limited by `DEFAULT_REQUEUE_RETRY_LIMIT`; a refusal leaves the failure record and the progress line says
-`not re-queued`). A claim in `turn-running` or `background-agent-running` is never reaped.
+`not re-queued`). A claim in `awaiting-developer` or `awaiting-reviewers` with a heartbeat inside the window is never reaped; the enqueue wake skips any executor holding a non-terminal claim, whatever its heartbeat age.
 A step that can hang owns its own budget: see the developer round budget in the execute command.
 
 ### Every failed verdict reaches a terminal state (AISDLC-1156, DEC-0291)
@@ -383,7 +378,7 @@ the session is still live, and a second call for the same session does nothing. 
 ### Stall thresholds (AISDLC-1103)
 
 The stall reaper has no threshold (AISDLC-1218, DEC-0392): `staleMs`, `AI_SDLC_DISPATCH_STALE_MS` and the `stall` block of
-`pr-lifecycle.yaml` are removed. It reads the claim's `executorState` only, for every worker, roster or ephemeral.
+`pr-lifecycle.yaml` are removed. It reads the claim's pipeline `phase` and `lastHeartbeat` (AISDLC-1226), for every worker, roster or ephemeral.
 There is no grace for a dead holder: `spawn` installs a tmux `pane-exited` hook that runs
 `cli-hierarchy pane-exited <session>` (AISDLC-1217, DEC-0392). It writes a `failed/` diagnostic with
 `cause: executor-exited`, returns the claim to `queue/`, clears the heartbeat and drops the roster entry; a
@@ -1233,10 +1228,9 @@ pending check turns green later. The tick result carries `landed` (`landed`, `re
 `error`). Without the grant the tick makes no arm or squash call.
 
 **Stall check (AISDLC-826).** Every tick also checks each inflight claim once. The
-claim's `executorState` (`turn-running`, `idle-awaiting-clear` or
-`background-agent-running`, written by the executor hooks module, AISDLC-1216) is the only input; heartbeat age is
-not read (AISDLC-1218, DEC-0392). A claim is stalled when its holder is
-`idle-awaiting-clear` and there is no verdict in `done/` or `failed/`. It moves to `failed/` with
+claim's pipeline record (`phase`, `currentStep`, `lastHeartbeat`, written by `next-step`, AISDLC-1226) is the only
+input. A claim is stalled when it has no verdict in `done/` or `failed/`, no live `next-step` runs under its holder, and
+either its `phase` is `done` or `aborted`, or its `lastHeartbeat` is older than `stallMs` (default 20 minutes). It moves to `failed/` with
 `cause: idle-with-claim`, `lastStep` and `heartbeatAgeMs` (informational); the holder is cleared (which restarts its
 executor loop with `/ai-sdlc:executor`) and the task goes back to `queue/` through `requeueFailed`. An idle executor
 with a live `next-step` process (a backgrounded verification) is spared.

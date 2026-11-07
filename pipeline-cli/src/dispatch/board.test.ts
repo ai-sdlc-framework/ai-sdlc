@@ -394,13 +394,13 @@ describe('releaseInflight', () => {
     expect(readHeartbeat(boardDir, 'AISDLC-701')).toBeUndefined();
   });
 
-  it('a worker heartbeat keeps the executorState the hooks module published (AISDLC-1216)', () => {
+  it('a worker heartbeat keeps the phase next-step wrote (AISDLC-1226)', () => {
     const boardDir = mkBoard();
     writeManifest(boardDir, mkManifest('AISDLC-702'));
     claimNext(boardDir, 'in-session-agent');
-    writeHeartbeat(boardDir, mkHeartbeat('AISDLC-702', { executorState: 'turn-running' }));
+    writeHeartbeat(boardDir, mkHeartbeat('AISDLC-702', { phase: 'awaiting-developer' }));
     writeHeartbeat(boardDir, mkHeartbeat('AISDLC-702'));
-    expect(readHeartbeat(boardDir, 'AISDLC-702')?.executorState).toBe('turn-running');
+    expect(readHeartbeat(boardDir, 'AISDLC-702')?.phase).toBe('awaiting-developer');
   });
 });
 

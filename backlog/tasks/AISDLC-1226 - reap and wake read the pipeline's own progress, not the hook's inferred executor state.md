@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1226
 title: reap and wake read the pipeline's own progress, not the hook's inferred executor state
-status: To Do
+status: In Progress
 priority: critical
 labels: [bug, hierarchy, dispatch]
 dependencies: [AISDLC-1225]

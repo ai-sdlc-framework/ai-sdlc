@@ -314,8 +314,6 @@ export interface ExecutorState {
   enabled?: boolean;
   /** Roster name, keys the stored last measure. */
   name?: string;
-  /** Background agents (subagent `session.start` agentIds) not yet ended, oldest first (AISDLC-1216). */
-  agents?: string[];
   /** A mod-run clear ended the session and the resume command has not run in the new one yet. */
   resumePending?: boolean;
   /** Resolved rotation threshold in tokens (config.json `contextThresholds`); the role constant when unset. */
@@ -329,12 +327,12 @@ export interface ExecutorState {
   boardDir?: string;
 }
 
-/** A heartbeat younger than this, naming the worker, means the board says it holds the task (AISDLC-1124). */
-export const BUSY_HEARTBEAT_MS = 30 * 60 * 1000;
-
-/** Prints `{"held":"<task>"|null}`: the inflight task whose manifest or heartbeat names argv[2] and is fresh. */
+/**
+ * Prints `{"held":"<task>"|null}`: the inflight task whose manifest or heartbeat names argv[2] and whose pipeline
+ * phase (written by `next-step`, AISDLC-1226) is not terminal. No heartbeat age is consulted.
+ */
 export const BUSY_SCRIPT =
-  "const fs=require('fs'),p=require('path');const[d,n,m]=process.argv.slice(1);let h=null;try{const dir=p.join(d,'inflight');for(const f of fs.readdirSync(dir)){if(!f.endsWith('.dispatch.json'))continue;const id=f.slice(0,-14);let mf={},hb={};try{mf=JSON.parse(fs.readFileSync(p.join(dir,f),'utf8'))}catch(e){}try{hb=JSON.parse(fs.readFileSync(p.join(dir,id+'.state.json'),'utf8'))}catch(e){}if(hb.workerId!==n&&mf.workerId!==n)continue;const t=Date.parse(hb.lastHeartbeat||mf.dispatchedAt);if(Number.isFinite(t)&&Date.now()-t<Number(m)){h=id;break}}}catch(e){}console.log(JSON.stringify({held:h}))";
+  "const fs=require('fs'),p=require('path');const[d,n]=process.argv.slice(1);let h=null;try{const dir=p.join(d,'inflight');for(const f of fs.readdirSync(dir)){if(!f.endsWith('.dispatch.json'))continue;const id=f.slice(0,-14);let mf={},hb={};try{mf=JSON.parse(fs.readFileSync(p.join(dir,f),'utf8'))}catch(e){}try{hb=JSON.parse(fs.readFileSync(p.join(dir,id+'.state.json'),'utf8'))}catch(e){}if(hb.workerId!==n&&mf.workerId!==n)continue;if(hb.phase==='done'||hb.phase==='aborted')continue;h=id;break}}catch(e){}console.log(JSON.stringify({held:h}))";
 
 /**
  * The one busy predicate (AISDLC-1124): the board names this worker as the holder of a task. Turn state is
@@ -347,7 +345,7 @@ export async function heldTask(p: Ports, state: ExecutorState): Promise<string |
   const r = await safe(() =>
     p.runProcess!({
       command: 'node',
-      args: ['-e', BUSY_SCRIPT, dir, state.name!, String(BUSY_HEARTBEAT_MS)],
+      args: ['-e', BUSY_SCRIPT, dir, state.name!],
     }),
   );
   const out = String(((r.value ?? {}) as Any).stdout ?? '');
@@ -471,65 +469,6 @@ function taskRunning(state: ExecutorState): boolean {
   return state.turnInFlight === true;
 }
 
-/** The three values the module publishes into the claim's `.state.json` (AISDLC-1216, DEC-0392). */
-export type ExecutorBoardState =
-  'turn-running' | 'idle-awaiting-clear' | 'background-agent-running';
-
-/** A background agent outranks the turn state: the main turn ends at once while the agent works. */
-export function executorBoardState(state: ExecutorState): ExecutorBoardState {
-  if ((state.agents?.length ?? 0) > 0) return 'background-agent-running';
-  return state.turnInFlight ? 'turn-running' : 'idle-awaiting-clear';
-}
-
-/**
- * Sets `executorState` (argv[3]) in `inflight/<task>.state.json` of the claim whose manifest or heartbeat names
- * worker argv[2], under board dir argv[1]. An atomic rewrite; a claim with no heartbeat file is left alone.
- */
-export const PUBLISH_SCRIPT =
-  "const fs=require('fs'),p=require('path');const[d,n,v]=process.argv.slice(1);try{const dir=p.join(d,'inflight');for(const f of fs.readdirSync(dir)){if(!f.endsWith('.dispatch.json'))continue;const id=f.slice(0,-14);let mf={},hb=null;try{mf=JSON.parse(fs.readFileSync(p.join(dir,f),'utf8'))}catch(e){}const sf=p.join(dir,id+'.state.json');try{hb=JSON.parse(fs.readFileSync(sf,'utf8'))}catch(e){}if(!hb||(hb.workerId!==n&&mf.workerId!==n))continue;hb.executorState=v;const t=sf+'.'+process.pid+'.tmp';fs.writeFileSync(t,JSON.stringify(hb,null,2)+'\\n');fs.renameSync(t,sf)}}catch(e){}";
-
-/** Publish the current state to the board; a host without `process.run` or an unnamed worker publishes nothing. */
-export async function publishExecutorState(p: Ports, state: ExecutorState): Promise<void> {
-  if (!p.runProcess || !state.name) return;
-  const dir = state.boardDir ?? '.ai-sdlc/dispatch';
-  await safe(() =>
-    p.runProcess!({
-      command: 'node',
-      args: ['-e', PUBLISH_SCRIPT, dir, state.name!, executorBoardState(state)],
-    }),
-  );
-}
-
-/** A subagent `session.start`: record the agent and publish `background-agent-running`. */
-export async function executorSubagentStart(
-  state: ExecutorState,
-  $: Any,
-  e: Any,
-  next: Any,
-): Promise<Any> {
-  if (!state.enabled) return next(e);
-  const id = String(e.agentId);
-  const agents = (state.agents ??= []);
-  if (!agents.includes(id)) agents.push(id);
-  await publishExecutorState(portsOf($), state);
-  return next(e);
-}
-
-/**
- * The host delivers no subagent end event, so the parent `turn.start` that carries a task notification ends a
- * background agent: the agent the notification names, else the oldest recorded one (one per notification).
- */
-function endBackgroundAgent(state: ExecutorState, e: Any): void {
-  const agents = state.agents;
-  if (!agents?.length) return;
-  const text = String(e?.text ?? e?.prompt ?? '');
-  // AISDLC-1225: only a task notification ends a background agent here. A parent turn with other text (a status
-  // line, a wake) says nothing about it; the agent's own end event (`turn.complete` with its agentId) also ends it.
-  if (!/task-notification/i.test(text)) return;
-  const named = agents.find((id) => text.includes(id));
-  agents.splice(named ? agents.indexOf(named) : 0, 1);
-}
-
 function portsOf($: Any): Ports {
   return {
     storeGet: (k) => $.store.get(k),
@@ -614,8 +553,6 @@ export async function executorTurnStart(
   await resumeAfterClear(p, state);
   if (!e?.agentId) {
     state.turnInFlight = true;
-    endBackgroundAgent(state, e);
-    await publishExecutorState(p, state);
   }
   return next(e);
 }
@@ -635,20 +572,11 @@ export async function executorTurnComplete(
     submit: (a) => $.prompt.submit(a),
     runProcess: (a) => $.process.run([a.command, ...a.args]),
   };
-  if (e?.agentId) {
-    // A subagent's own turn.complete is its end: a foreground agent must not linger in the tracked set.
-    const agents = state.agents;
-    const i = agents?.indexOf(String(e.agentId)) ?? -1;
-    if (agents && i >= 0) {
-      agents.splice(i, 1);
-      await publishExecutorState(p, state);
-    }
-    return next(e);
-  }
+  // A subagent's own turn.complete never ends the main thread's turn.
+  if (e?.agentId) return next(e);
   state.turnInFlight = false;
   const reply = String(e?.text ?? e?.reply ?? '');
   if (reply) state.lastReply = reply;
-  await publishExecutorState(p, state);
   // The turn boundary ends the task for the wake predicate, so a pending threshold rotation fires here
   // (rotateUnlessHeld still defers while the board holds a claim); an idle executor takes the next wake.
   if (state.pendingRotate) await rotateUnlessHeld(p, state, 'turn.complete');
