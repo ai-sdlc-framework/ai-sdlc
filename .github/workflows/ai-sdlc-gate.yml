@@ -591,6 +591,39 @@ jobs:
             --head "$HEAD_SHA" --base "$BASE_SHA" --repository "$REPOSITORY" \
             --pull-request "$PR_NUMBER" --post-status
 
+  # AISDLC-717: re-run the release content allowlist on every push to the release-please branch,
+  # so a release PR armed for auto-merge cannot merge content that was not eligible when armed.
+  # Runs the BASE tree's CLI (trusted); the head is read through the GitHub API only.
+  release-content:
+    name: Release content allowlist
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.ref == 'release-please--branches--main' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter "@ai-sdlc/pipeline-cli..." build
+      - name: Check every changed path is a release artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          node pipeline-cli/bin/cli-release-content-check.mjs \
+            --base "$BASE_SHA" --head "$HEAD_SHA" --repository "$REPOSITORY"
+
   # ── Dependency review gate (npm + github-actions; issue #791 follow-up) ──
   # Folds dependency-review into the pr-ready rollup so it is a REAL blocking
   # gate. A path-filtered standalone REQUIRED check would deadlock non-dep PRs
@@ -1319,6 +1352,7 @@ jobs:
         test-python,
         test-go,
         verdict-check,
+        release-content,
         dependency-review-gate,
         dor-readiness-gate,
         governance-gate,
@@ -1374,7 +1408,8 @@ jobs:
             test-python,
             test-go,
             verdict-check,
-                dependency-review-gate,
+            release-content,
+            dependency-review-gate,
             dor-readiness-gate,
             rfc-lifecycle,
             issue-link

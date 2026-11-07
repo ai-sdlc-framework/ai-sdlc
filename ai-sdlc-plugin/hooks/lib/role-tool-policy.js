@@ -403,7 +403,7 @@ const SHELL_WORDS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
  * runs it from text (`sh -c`, `eval`, `xargs`, `node -e`), or null when the CLI is
  * only mentioned (an argument of grep, cat, echo, git and the like).
  */
-function invocationPoint(tokens) {
+function invocationPoint(tokens, cliName = 'cli-decisions', isCli = isDecisionsCli) {
   let c = 0;
   while (
     c < tokens.length &&
@@ -414,9 +414,9 @@ function invocationPoint(tokens) {
   const word = tokens[c];
   if (word === undefined) return null;
   const base = word.split('/').pop();
-  if (isDecisionsCli(word)) return c + 1;
+  if (isCli(word)) return c + 1;
   const rest = tokens.slice(c + 1);
-  const mentionsCli = tokens.some((t) => t.includes('cli-decisions'));
+  const mentionsCli = tokens.some((t) => t.includes(cliName));
   if (base === 'eval' || base === 'xargs') return mentionsCli ? 'indirect' : null;
   if (SHELL_WORDS.has(base)) {
     return rest.some((t) => /^-[a-z]*c[a-z]*$/.test(t)) && mentionsCli ? 'indirect' : null;
@@ -426,7 +426,7 @@ function invocationPoint(tokens) {
   }
   // Node, runners and anything else: the first token that IS the CLI is the invocation,
   // unless the command word is a known reader/mover of text (a mention).
-  const k = rest.findIndex((t) => isDecisionsCli(t));
+  const k = rest.findIndex((t) => isCli(t));
   if (k === -1) return null;
   if (NODE_WORDS.has(base) || RUNNER_WORDS.has(base)) return c + 1 + k + 1;
   if (MENTION_WORDS.has(base)) return null;
@@ -464,6 +464,51 @@ function decisionMutationIn(command) {
         ? decisionInvocationRefusal(tokens, at.lenientAt, true)
         : decisionInvocationRefusal(tokens, at);
     if (why) return why;
+  }
+  return null;
+}
+
+/** True for a path or bare word naming the merge CLI (any directory, any extension). */
+function isMergeCli(token) {
+  return /^cli-merge-if-eligible(?:\.(?:mjs|js|cjs|ts))?$/.test(token.split('/').pop());
+}
+
+/** True when the tokens after the merge CLI select the release source kind. */
+function selectsReleaseKind(tokens, from) {
+  for (let i = from; i < tokens.length; i += 1) {
+    const t = tokens[i];
+    if (t === '--source-kind') {
+      if (tokens[i + 1] === 'release') return true;
+    } else if (t === '--source-kind=release') {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Why a shell command is refused for INVOKING the merge CLI with
+ * `--source-kind release` (AISDLC-717), or null. Same invocation detection as
+ * decisionMutationIn: command position, node path form, runners, wrappers
+ * (`sh -c`, `eval`, `xargs`, `node -e`) fail closed; a mere mention (grep, cat) passes.
+ */
+function releaseMergeIn(command) {
+  if (typeof command !== 'string' || command === '') return null;
+  if (!normalizeCommand(command).includes('cli-merge-if-eligible')) return null;
+  if (command.length > MAX_SCANNED_COMMAND) return 'a command too long to inspect';
+  for (const segment of commandSegments(command)) {
+    if (!segment.includes('cli-merge-if-eligible')) continue;
+    const tokens = segment.split(/\s+/).filter(Boolean);
+    const at = invocationPoint(tokens, 'cli-merge-if-eligible', isMergeCli);
+    if (at === null) continue;
+    if (at === 'indirect') {
+      if (tokens.some((t) => t.includes('release'))) {
+        return 'an indirect invocation (sh -c, eval, xargs or node -e)';
+      }
+      continue;
+    }
+    const from = typeof at === 'object' ? at.lenientAt : at;
+    if (selectsReleaseKind(tokens, from)) return '--source-kind release';
   }
   return null;
 }
@@ -575,6 +620,20 @@ const MATCHERS = Object.freeze({
     test(input) {
       const why = decisionMutationIn(input.command);
       return why ? `the command runs \`cli-decisions ${why}\`` : null;
+    },
+  }),
+  releaseMerge: Object.freeze({
+    next: 'releases are run by the planner or dispatch session; escalate to your dispatch session',
+    text:
+      'Never run `cli-merge-if-eligible` with `--source-kind release`. Landing a release PR is ' +
+      'not part of an executor task: releases are run by the planner or dispatch session. ' +
+      '`--source-kind backlog` for your own task PR is fine.',
+    quick: (input) =>
+      typeof input.command === 'string' &&
+      normalizeCommand(input.command).includes('cli-merge-if-eligible'),
+    test(input) {
+      const why = releaseMergeIn(input.command);
+      return why ? `the command runs \`cli-merge-if-eligible\` with ${why}` : null;
     },
   }),
   topLevelTask: Object.freeze({
@@ -730,6 +789,7 @@ const DEFAULT_ROLE_BLOCKED_TOOLS = Object.freeze({
     rule({ id: 'top-level-task', tool: 'mcp__*__task_create', match: 'topLevelTask' }),
     rule({ id: 'new-task-file', tool: 'Write|Edit|MultiEdit', match: 'newTaskFile' }),
     rule({ id: 'backlog-cli-create', tool: 'Bash', match: 'backlogCliCreate' }),
+    rule({ id: 'release-merge', tool: 'Bash', match: 'releaseMerge' }),
   ]),
   'operator-dispatch': Object.freeze([]),
   planner: Object.freeze([]),
@@ -1153,6 +1213,7 @@ module.exports = {
   readPolicyText,
   loadRoleBlockedTools,
   decisionMutationIn,
+  releaseMergeIn,
   toolMatches,
   ruleCouldMatch,
   evaluateRule,

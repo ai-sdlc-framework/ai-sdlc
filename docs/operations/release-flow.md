@@ -98,3 +98,24 @@ git log --oneline --diff-filter=M -- '*/CHANGELOG.md' origin/main..HEAD
 
 Then remove those CHANGELOG changes from the regular PR and push. The rolling PR
 will reconstruct them from commit history.
+
+## Hook-level control and CI re-check
+
+Landing a release is a planner or dispatch decision (DEC-0042). The role check inside
+`cli-merge-if-eligible --source-kind release` is a mistake guard (DEC-0038), so the boundary lives
+in the PreToolUse role tool policy (`ai-sdlc-plugin/hooks/lib/role-tool-policy.js`, AISDLC-717):
+
+- The executor default rule `release-merge` refuses a Bash command that INVOKES
+  `cli-merge-if-eligible` with `--source-kind release` (or `--source-kind=release`). Detection is
+  the same as the executor `cli-decisions` rule: command position, node path form, runners; `sh -c`,
+  `eval`, `xargs` and `node -e` wrappers fail closed; a `grep` or `cat` that only mentions the
+  command passes.
+- The refusal says: releases are run by the planner or dispatch session; escalate to your dispatch
+  session. It never sends the agent to the operator.
+- Planner and dispatch roles have no default rules, so planner-run releases work with nothing
+  configured. `--source-kind backlog` for an executor's own task PR is unaffected.
+- CI job `release-content` (in `ai-sdlc-gate.yml`, part of the `ai-sdlc/pr-ready` rollup) runs
+  `cli-release-content-check` on every push to `release-please--branches--main`. It re-runs the
+  release content allowlist (paths and version-only content), so a release PR armed for auto-merge
+  cannot merge content that was not eligible when it was armed. The failure message names the
+  offending path.
