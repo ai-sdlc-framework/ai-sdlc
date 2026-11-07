@@ -100,6 +100,30 @@ describe('reapStalledClaims on executor state (AISDLC-1218)', () => {
     expect(existsSync(path.join(dir, 'inflight', 'AISDLC-9.dispatch.json'))).toBe(false);
   });
 
+  it('spares an idle claim whose state publish is younger than the floor (AISDLC-1225)', async () => {
+    hold('idle-awaiting-clear');
+    const spared: { reason: string }[] = [];
+    const fresh = {
+      now: () => new Date(T0 + 5_000),
+      onSpared: (o: { reason: string }) => spared.push(o),
+    };
+    expect(await reap(fresh)).toEqual([]);
+    expect(spared[0]?.reason).toContain('less than one tick');
+    // the same claim, once past the floor, is reaped (AISDLC-1218 AC-2 still holds)
+    expect(await reap({ now: () => new Date(T0 + 60_000) })).toHaveLength(1);
+  });
+
+  it('swallows a throwing onSpared on the floor path', async () => {
+    hold('idle-awaiting-clear');
+    const r = await reap({
+      now: () => new Date(T0 + 1_000),
+      onSpared: () => {
+        throw new Error('x');
+      },
+    });
+    expect(r).toEqual([]);
+  });
+
   it('skips an idle claim whose verdict is in done/', async () => {
     hold('idle-awaiting-clear');
     mkdirSync(path.join(dir, 'done'), { recursive: true });
