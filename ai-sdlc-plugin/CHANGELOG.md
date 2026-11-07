@@ -5,6 +5,43 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.41.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.40.0...ai-sdlc-plugin-v0.41.0) (2026-11-07)
+
+
+### Features
+
+* context profiles schema, role defaults and change path (AISDLC-781) ([#2276](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2276)) ([a0dbd7e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a0dbd7e67f2e189df4de7cd842c8502d60ff4a46))
+* data-room read-only root, write denial and protected partition (AISDLC-787) ([#2261](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2261)) ([251e591](https://github.com/ai-sdlc-framework/ai-sdlc/commit/251e5912ce677e52b542a8c2ba883d5224869add))
+* emit the fixed prefix at SessionStart; shrink planner.md and CLAUDE.md (AISDLC-1152) ([#2293](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2293)) ([bdef1c2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bdef1c2f0011a32dad110d48d334d6baeaeef667))
+* hook-env-hygiene doctor check and parent-checkout escalations (AISDLC-1129) ([#2268](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2268)) ([5a94c66](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5a94c66ab16772dd3c9b0ff13a2139ae1e492689))
+* **hooks:** executor module publishes executor state to the board (AISDLC-1216) ([#2483](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2483)) ([c328a7e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c328a7e4c75bdde6ded1488cf32149d502ac5e8c))
+* one-command first-run setup (AISDLC-1178) ([#2412](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2412)) ([161ed6d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/161ed6ddabd9e7ec3877220b67ec2ca8ad0cdabf))
+* **pipeline-cli:** --file writes decision events through cli-file from the parent (AISDLC-1161) ([#2303](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2303)) ([70870d2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/70870d2b460e4228831364826763e1307629f66e))
+* **pipeline-cli:** cut over to the verdict check, drop v6 gate (AISDLC-1172) ([#2399](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2399)) ([ed94201](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ed942013c1fe1bb81418681d6b44e20541c74427))
+* **pipeline-cli:** next-step runs verification itself, delete test waiver (AISDLC-1086) ([#2256](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2256)) ([c70e9fb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c70e9fba7fec32bffd88ce46640d1144b5b54823))
+* **pipeline-cli:** rotate at configured thresholds and carry pending asks (AISDLC-1163) ([#2307](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2307)) ([9d6beea](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9d6beea678460b0a26dbeca73f4de4f31f6add82))
+* **pipeline-cli:** route planner reports to the planner (AISDLC-1190) ([#2414](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2414)) ([da25d1d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/da25d1d2649d52db7e333885b847f6d0ee775aca))
+* **pipeline-cli:** tick sweeps closed, no-PR and stale worktrees (AISDLC-1108) ([#2272](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2272)) ([dee9b4f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/dee9b4fc6724c7f1bb86b803afd3301c40897e24))
+* **pipeline-cli:** usage ingest is single-instance and spaced out (AISDLC-1191) ([#2411](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2411)) ([2cd45a9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2cd45a9fe59343df9e58b46da5a11242634db55f))
+* **pipeline-cli:** verdict record for untrusted PRs via clean-room artifact (AISDLC-1171) ([#2341](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2341)) ([d552650](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d552650b4d6fa5e243efc3bf87f07f8d915708c3))
+* **pipeline-cli:** verdict record, atomic verdict ref push and OQ-8 fence (AISDLC-1168) ([#2333](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2333)) ([f7f4ac0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f7f4ac01e9379ed56a44a93ba7dbe103406ac81c))
+* planner rotation runs the handoff routine as a model turn before the clear (AISDLC-1159) ([#2302](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2302)) ([73ff66a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/73ff66af5fa7873f19dfe13f4e3a54dded0364f4))
+* **plugin:** wire RFC-0053 surfacing hooks (AISDLC-779) ([#2255](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2255)) ([b373bd1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b373bd16698c8b6cea8f8ac172db8cb4f3b15a63))
+
+
+### Bug Fixes
+
+* consume rotate wakes in executor module, skip unclaimable spawns (AISDLC-1121) ([#2266](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2266)) ([c6a9d8e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c6a9d8e53f65dfecafebe9e168636c7eababe9de))
+* hook signer binds the workflow digest and ship classifies push failures by cause (AISDLC-1164) ([#2314](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2314)) ([b5567d2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b5567d2ac6f5aea48f200c8d9edc1d5630f66ec1))
+* **hooks:** hierarchy module registers without a process global (AISDLC-1205) ([#2442](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2442)) ([0704bcb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0704bcbbb66f590a205f7d8d6b6f65e731ecf059))
+* make cli-hierarchy down safe inside the hierarchy (AISDLC-1106) ([#2252](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2252)) ([259b5b1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/259b5b1b8ae85489908f2ddc97d88e236a7dc624))
+* narrow backlog-drift gate to errors, add creates: deliverables (AISDLC-1148) ([#2249](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2249)) ([abfb485](https://github.com/ai-sdlc-framework/ai-sdlc/commit/abfb48524588982753abdee2879a9a744a2571ea))
+* **pipeline-cli:** cli-file removes its own local filing branch after push (AISDLC-1221) ([#2479](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2479)) ([582ca2e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/582ca2e803c690c24ae50c529abe76fc2e5716b6))
+* **pipeline-cli:** developer round owns its budget, no restart from zero (AISDLC-1219) ([#2489](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2489)) ([a6bbc55](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a6bbc55d46056fdd741905996c5dedd167c9056e))
+* **pipeline-cli:** idle-with-claim reap spares live background agents (AISDLC-1225) ([#2510](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2510)) ([d6d2a3b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d6d2a3b960e6be9967146f43b6909c7cd08934b1))
+* re-entered review round always ends with a verdict ref (AISDLC-1196) ([#2427](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2427)) ([da9bd76](https://github.com/ai-sdlc-framework/ai-sdlc/commit/da9bd769c208776afffd5ae755b6ea014e3d02b1))
+* resolve hierarchy handoff board path to an absolute project dir (AISDLC-1181) ([#2359](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2359)) ([6c5990a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6c5990afaf884d9814add516eda1f775a9b5cddc))
+
 ## [0.40.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.34.0...ai-sdlc-plugin-v0.40.0) (2026-11-01)
 
 
