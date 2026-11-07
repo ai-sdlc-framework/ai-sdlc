@@ -26,6 +26,7 @@ const {
   DEFAULT_ROLE_BLOCKED_TOOLS,
   ROLES,
   decisionMutationIn,
+  releaseMergeIn,
   decideForSession,
   defaultRoleBlockedTools,
   describeRule,
@@ -68,6 +69,7 @@ describe('defaults', () => {
       'top-level-task',
       'new-task-file',
       'backlog-cli-create',
+      'release-merge',
     ]);
     assert.deepEqual(ids(resolved.executor), DEFAULT_IDS);
     assert.deepEqual(resolved['operator-dispatch'], []);
@@ -1032,6 +1034,7 @@ describe('every refusal names a next step the agent can take itself', () => {
       ['Write', { file_path: file('aisdlc-901 - n.md') }, withBoard(held)],
       ['Write', { file_path: file('aisdlc-999.1 - n.md') }, withBoard(held)],
       ['Write', { file_path: file('aisdlc-684.1 - n.md') }, withBoard('/nonexistent')],
+      ['Bash', { command: 'cli-merge-if-eligible 1 --source-kind release' }, withBoard(held)],
       ['Bash', { command: 'backlog task create x' }, withBoard(held)],
       ['Bash', { command: 'backlog task create x --parent AISDLC-999' }, withBoard(held)],
       ['Bash', { command: 'backlog task create x --parent AISDLC-684' }, withBoard('/nonexistent')],
@@ -1092,7 +1095,103 @@ describe('every refusal names a next step the agent can take itself', () => {
     }
     // Each default rule's own next step names a command or a status line to dispatch.
     for (const r of DEFAULT_ROLE_BLOCKED_TOOLS.executor) {
-      assert.match(nextStep(r), /(`cli-[a-z-]+ |`backlog |send your one status line)/, r.id);
+      assert.match(
+        nextStep(r),
+        /(`cli-[a-z-]+ |`backlog |send your one status line|releases are run by the planner)/,
+        r.id,
+      );
     }
+  });
+});
+
+describe('release-merge rule (AISDLC-717)', () => {
+  const blocked = {
+    'node path form':
+      'node pipeline-cli/bin/cli-merge-if-eligible.mjs 12 --source-kind release --arm',
+    'equals form': 'node cli-merge-if-eligible.mjs 12 --source-kind=release',
+    'bare name': 'cli-merge-if-eligible 12 --source-kind release',
+    npx: 'npx cli-merge-if-eligible 12 --source-kind release',
+    'second command': 'echo hi && node cli-merge-if-eligible.mjs 12 --source-kind release',
+    'inside bash -c': 'bash -c "node cli-merge-if-eligible.mjs 12 --source-kind release"',
+    xargs: 'echo 12 | xargs node cli-merge-if-eligible.mjs --source-kind release',
+    obfuscated: 'node cli-merge-if${X}-eligible.mjs 12 --source-kind release',
+    'unrecognised wrapper': 'mywrap node cli-merge-if-eligible.mjs 12 --source-kind release',
+    'camel case option': 'node cli-merge-if-eligible.mjs 12 --sourceKind release --arm',
+    'snake case option': 'node cli-merge-if-eligible.mjs 12 --source_kind=RELEASE',
+    'variable value': 'node cli-merge-if-eligible.mjs 12 --source-kind "$K" --arm',
+    'variable then literal release':
+      'node cli-merge-if-eligible.mjs 12 --source-kind backlog --sourceKind release',
+    'missing value': 'node cli-merge-if-eligible.mjs 12 --source-kind',
+    'no source kind': 'node cli-merge-if-eligible.mjs 12',
+    'indirect without the word release':
+      'K=release; bash -c "node pipeline-cli/bin/cli-merge-if-eligible.mjs 13 --source-kind $K --arm"',
+  };
+  for (const [label, command] of Object.entries(blocked)) {
+    it(`blocks: ${label}`, () => {
+      assert.ok(releaseMergeIn(command), command);
+    });
+  }
+
+  const allowed = {
+    backlog: 'node pipeline-cli/bin/cli-merge-if-eligible.mjs 12 --source-kind backlog --arm',
+    'literal docs kind': 'node cli-merge-if-eligible.mjs 12 --sourceKind=docs',
+    grep: 'grep -rn "cli-merge-if-eligible 12 --source-kind release" docs',
+    cat: 'cat docs/cli-merge-if-eligible.md --source-kind release',
+    echo: 'echo cli-merge-if-eligible --source-kind release',
+    'release word elsewhere':
+      'node cli-merge-if-eligible.mjs 12 --source-kind backlog && echo release',
+    unrelated: 'git status',
+    empty: '',
+  };
+  for (const [label, command] of Object.entries(allowed)) {
+    it(`allows: ${label}`, () => {
+      assert.equal(releaseMergeIn(command), null, command);
+    });
+  }
+
+  it('refuses a command too long to inspect', () => {
+    const long = `cli-merge-if-eligible ${'x '.repeat(40000)}`;
+    assert.match(releaseMergeIn(long), /too long/);
+  });
+
+  const sess = (role) => ({ role, name: 'n', dispatchName: 'operator-dispatch' });
+  const cmd = { command: 'node cli-merge-if-eligible.mjs 12 --source-kind release --arm' };
+
+  it('refuses the executor and names the planner or dispatch next step', () => {
+    const msg = decideForSession(
+      sess('executor'),
+      () => defaultRoleBlockedTools().executor,
+      'Bash',
+      cmd,
+      '/x',
+    );
+    assert.match(msg, /release-merge/);
+    assert.match(
+      msg,
+      /releases are run by the planner or dispatch session; escalate to your dispatch session/,
+    );
+    assert.doesNotMatch(msg, /ask the operator/i);
+  });
+
+  it('does not affect planner or dispatch roles', () => {
+    for (const role of ['planner', 'operator-dispatch']) {
+      assert.equal(
+        decideForSession(sess(role), () => defaultRoleBlockedTools()[role], 'Bash', cmd, '/x'),
+        null,
+      );
+    }
+  });
+
+  it('leaves the executor backlog merge alone', () => {
+    assert.equal(
+      decideForSession(
+        sess('executor'),
+        () => defaultRoleBlockedTools().executor,
+        'Bash',
+        { command: 'node cli-merge-if-eligible.mjs 12 --source-kind backlog --arm' },
+        '/x',
+      ),
+      null,
+    );
   });
 });
