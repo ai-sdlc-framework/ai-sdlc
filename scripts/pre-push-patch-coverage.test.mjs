@@ -43,7 +43,18 @@ describe('packagesToCover', () => {
       ['pipeline-cli', 'vscode-hierarchy'],
     );
   });
+  it('maps the hierarchy hooks module to the mods package that covers it', () => {
+    const mods = { ...pkgs, 'ai-sdlc-plugin/mods': { scripts: { 'test:coverage': 'x' } } };
+    const read = (d) => mods[d] ?? null;
+    assert.deepEqual(packagesToCover(['ai-sdlc-plugin/hooks/hierarchy/executor.ts'], read), [
+      'ai-sdlc-plugin/mods',
+    ]);
+    assert.deepEqual(packagesToCover(['ai-sdlc-plugin/hooks/hierarchy/executor.ts'], readPkg), []);
+  });
   it('default reader resolves real workspace packages', () => {
+    assert.deepEqual(packagesToCover(['ai-sdlc-plugin/hooks/hierarchy/executor.ts']), [
+      'ai-sdlc-plugin/mods',
+    ]);
     assert.deepEqual(packagesToCover(['pipeline-cli/src/foo.ts']), ['pipeline-cli']);
     assert.deepEqual(packagesToCover(['vscode-hierarchy/src/clock.ts']), ['vscode-hierarchy']);
   });
