@@ -353,7 +353,8 @@ describe('cli-file', () => {
     it('a second filing for the same id is not refused', () => {
       fileTask(repo, writeTask(), { pr: true }, deps);
       sh(remote, 'branch', '-D', 'ai-sdlc/file-aisdlc-900');
-      expect(() => fileTask(repo, writeTask(), { pr: true }, deps)).not.toThrow(/already exists/);
+      expect(() => fileTask(repo, writeTask(), { pr: true }, deps)).not.toThrow();
+      expect(sh(repo, 'branch', '--list', 'ai-sdlc/file-aisdlc-900')).toBe('');
     });
   });
 
