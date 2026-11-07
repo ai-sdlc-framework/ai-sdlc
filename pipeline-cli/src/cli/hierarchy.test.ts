@@ -884,6 +884,14 @@ describe('clear, tick and route-decision', () => {
       expect(out.handoff).toContain('Queue, eligible: (none)');
     });
 
+    it('escalation-file repeated ticks leave one file (AISDLC-1200)', async () => {
+      seedBoardWithBrief();
+      const argv = ['escalation-file', '--task-id', 'AISDLC-1200', '--message', 'again'];
+      for (let i = 0; i < 4; i++) expect(await runHierarchyCli(argv, overrides())).toBe(0);
+      const files = new Set(logs.slice(-4).map((l) => (JSON.parse(l) as { file: string }).file));
+      expect(files.size).toBe(1);
+    });
+
     it('escalation-file validates its flags', async () => {
       seedBoardWithBrief();
       const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);

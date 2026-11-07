@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -80,6 +80,47 @@ describe('writeEscalationFile', () => {
       run: () => ok(''),
     });
     expect(JSON.parse(readFileSync(file, 'utf-8')).failureRecord).toEqual({ outcome: 'success' });
+  });
+});
+
+describe('writeEscalationFile idempotence (AISDLC-1200)', () => {
+  const go = (at: Date, message = 'stuck') =>
+    writeEscalationFile({
+      boardDir: board,
+      taskId: 'AISDLC-12',
+      message,
+      now: at,
+      run: () => ok(''),
+    });
+  const count = () => readdirSync(path.join(board, 'escalations')).length;
+
+  it('writes one file for repeated calls and returns its path', () => {
+    const first = go(now);
+    for (let i = 1; i <= 5; i++)
+      expect(go(new Date(now.getTime() + i * 60_000)).file).toBe(first.file);
+    expect(count()).toBe(1);
+  });
+
+  it('writes a new file for a different message or head', () => {
+    go(now);
+    go(new Date(now.getTime() + 1000), 'other');
+    expect(count()).toBe(2);
+    writeFileSync(
+      path.join(board, 'failed', 'AISDLC-12.diagnostic.json'),
+      JSON.stringify({ outcome: 'failed' }),
+    );
+    go(new Date(now.getTime() + 2000));
+    expect(count()).toBe(3);
+    go(new Date(now.getTime() + 3000));
+    expect(count()).toBe(3);
+  });
+
+  it('ignores unreadable and unrelated files', () => {
+    mkdirSync(path.join(board, 'escalations'), { recursive: true });
+    writeFileSync(path.join(board, 'escalations', 'AISDLC-12-1.json'), '{broken');
+    writeFileSync(path.join(board, 'escalations', '.notified.json'), '{}');
+    go(now);
+    expect(count()).toBe(3);
   });
 });
 
