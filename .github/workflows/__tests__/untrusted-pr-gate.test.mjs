@@ -1216,3 +1216,22 @@ describe('AISDLC-1171 — clean-room verdict artifact and trusted writer', () =>
     assert.match(String(withToken[0].run), /verdict-write/);
   });
 });
+
+describe('AISDLC-515.1 — effective driver availability refusal uses the degraded path', () => {
+  it('check-sandbox loads the sandbox config and degrades when it is refused', () => {
+    const wf = loadYaml(WORKFLOW_PATH);
+    const step = wf.jobs['sandbox-and-review'].steps.find((s) => s.id === 'check-sandbox');
+    assert.ok(step, 'check-sandbox step exists');
+    assert.match(step.run, /loadSandboxConfig/);
+    assert.match(step.run, /DRIVER_REFUSED/);
+    assert.match(step.run, /"\$DRIVER_REFUSED" == "false"/);
+    assert.match(step.run, /degraded=true/);
+  });
+
+  it('the degraded block step is wired to the check-sandbox output', () => {
+    const wf = loadYaml(WORKFLOW_PATH);
+    const steps = wf.jobs['sandbox-and-review'].steps;
+    const block = steps.find((s) => /BLOCK/.test(s.name ?? ''));
+    assert.equal(block.if, "steps.check-sandbox.outputs.degraded == 'true'");
+  });
+});

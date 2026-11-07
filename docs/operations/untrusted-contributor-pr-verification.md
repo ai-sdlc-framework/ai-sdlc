@@ -238,7 +238,10 @@ and default-deny network policy enforced at the container level.
 Google's user-space kernel that intercepts syscalls, providing stronger isolation
 than stock Docker on cloud-native stacks. Available behind the `SandboxDriver`
 abstraction as an upgrade path from Docker when a KVM-free higher-isolation option
-is needed.
+is needed. **Implemented (AISDLC-515.1):** `GVisorSandboxDriver` runs the same
+hardened `docker run` as the Docker driver with `--runtime=runsc`. It requires the
+`runsc` runtime on the host; the config loader refuses `sandboxDriver: gvisor` at
+load time when `runsc` is absent.
 
 - **Pros:** Strong kernel isolation; no KVM requirement; lower overhead than full VMs.
 - **Cons:** gVisor-specific syscall coverage gaps; some packages that use unusual syscalls may fail.
@@ -247,7 +250,11 @@ is needed.
 ### MicroVM/Firecracker — upgrade driver (RFC-0022 compliance path)
 
 Strongest isolation — each evaluation gets a dedicated microVM. This is the
-required driver for RFC-0022 compliance regimes:
+required driver for RFC-0022 compliance regimes. **Pending AISDLC-515.2:** the
+driver is still a stub. Until it lands, loading a config whose effective driver is
+`microvm` (including any `complianceRegime: hipaa|fedramp-high|pci-dss-level-1`)
+fails at config load on a host without `/dev/kvm`, with a message naming the driver,
+the regime override and the missing prerequisite:
 
 - **Pros:** Hardware-level isolation; Firecracker's security model is audited; zero shared-kernel risk.
 - **Cons:** Requires KVM-capable CI runners; higher resource overhead; most expensive per-evaluation.
@@ -285,6 +292,10 @@ sandboxDriver: kata    # or: docker | gvisor | microvm
 # Optional: explicit regime (also read from .ai-sdlc/compliance.yaml)
 complianceRegime: hipaa  # forces microvm regardless of sandboxDriver above
 ```
+
+An effective driver that is unavailable on the host (gvisor without `runsc`, microvm
+without `/dev/kvm`) is refused at config load, and `untrusted-pr-gate.yml` reports the
+same refusal through its fail-closed degraded path.
 
 Cross-reference: [RFC-0043 §OQ-5](../../spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md#open-questions--resolved), [RFC-0022](../../spec/rfcs/RFC-0022-compliance-posture-audit-surface.md)
 

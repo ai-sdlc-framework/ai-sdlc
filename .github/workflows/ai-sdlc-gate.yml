@@ -371,6 +371,28 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm --filter @ai-sdlc/reference test
+      # AISDLC-515.1: gVisor needs no /dev/kvm, so it runs on a hosted runner.
+      # Install runsc and run the gated differential test through
+      # GVisorSandboxDriver. Best-effort: when runsc cannot be installed the
+      # step is skipped (the test file is itself gated on runsc presence).
+      - name: Install gVisor (runsc)
+        id: gvisor
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" | sudo tee /etc/apt/sources.list.d/gvisor.list >/dev/null
+          sudo apt-get update -qq && sudo apt-get install -y -qq runsc
+          sudo runsc install
+          sudo systemctl reload docker || sudo systemctl restart docker
+          runsc --version
+      - name: gVisor differential test (gated on runsc presence)
+        if: steps.gvisor.outcome == 'success' && hashFiles('pipeline-cli/src/pipeline/gvisor-integration.test.ts') != ''
+        env:
+          AI_SDLC_GVISOR_INTEGRATION_TESTS: '1'
+          AI_SDLC_SANDBOX_INTEGRATION_TESTS: '1'
+          AI_SDLC_SANDBOX_IMAGE: node:22-bookworm
+        run: pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/pipeline/gvisor-integration.test.ts
 
   # ── Jobs moved from ci.yml (AISDLC-727) ─────────────────────────────────
   # ci.yml no longer runs on pull_request events; these four jobs existed only

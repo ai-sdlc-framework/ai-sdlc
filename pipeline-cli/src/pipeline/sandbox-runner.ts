@@ -64,7 +64,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { spawn, execFileSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -188,12 +188,81 @@ export function resolveEffectiveDriver(
  * Load sandbox runner config from `.ai-sdlc/untrusted-pr-gate.yaml`.
  * Falls back to `DEFAULT_SANDBOX_CONFIG` when the file is absent.
  */
-export function loadSandboxConfig(workDir: string = process.cwd()): SandboxConfig {
+export function loadSandboxConfig(
+  workDir: string = process.cwd(),
+  probe: HostProbe = DEFAULT_HOST_PROBE,
+): SandboxConfig {
   const configPath = join(workDir, '.ai-sdlc', 'untrusted-pr-gate.yaml');
-  if (!existsSync(configPath)) return DEFAULT_SANDBOX_CONFIG;
+  const config = existsSync(configPath)
+    ? parseSandboxConfig(readFileSync(configPath, 'utf8'))
+    : DEFAULT_SANDBOX_CONFIG;
+  assertSandboxDriverAvailable(config, probe);
+  return config;
+}
 
-  const raw = readFileSync(configPath, 'utf8');
-  return parseSandboxConfig(raw);
+// ── Host driver availability (AISDLC-515.1) ───────────────────────────────────
+
+/** Host inspection seam so availability checks are hermetic in tests. */
+export interface HostProbe {
+  fileExists(path: string): boolean;
+  commandSucceeds(cmd: string, args: string[]): boolean;
+}
+
+export const DEFAULT_HOST_PROBE: HostProbe = {
+  fileExists: (path) => existsSync(path),
+  commandSucceeds: (cmd, args) => {
+    try {
+      execFileSync(cmd, args, { stdio: 'ignore', timeout: 10_000 });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+};
+
+export interface DriverAvailability {
+  available: boolean;
+  /** The missing host prerequisite when unavailable. */
+  missing?: string;
+}
+
+/**
+ * Report whether a driver's host prerequisite is present.
+ * gvisor needs the `runsc` runtime; microvm needs `/dev/kvm`.
+ * Other drivers have no host prerequisite checked here.
+ */
+export function checkDriverAvailability(
+  kind: SandboxDriverKind,
+  probe: HostProbe = DEFAULT_HOST_PROBE,
+): DriverAvailability {
+  if (kind === 'gvisor' && !probe.commandSucceeds('runsc', ['--version'])) {
+    return { available: false, missing: 'the gVisor "runsc" runtime (not found on PATH)' };
+  }
+  if (kind === 'microvm' && !probe.fileExists('/dev/kvm')) {
+    return { available: false, missing: '/dev/kvm (KVM is not available on this host)' };
+  }
+  return { available: true };
+}
+
+/**
+ * Refuse a config whose effective driver (after the RFC-0022 regime override)
+ * cannot run on this host. Throws before any sandbox is started.
+ */
+export function assertSandboxDriverAvailable(
+  config: SandboxConfig,
+  probe: HostProbe = DEFAULT_HOST_PROBE,
+): void {
+  const { driver, overrideApplied, overrideReason } = resolveEffectiveDriver(
+    config.sandboxDriver,
+    config.complianceRegime ?? 'none',
+  );
+  const availability = checkDriverAvailability(driver, probe);
+  if (availability.available) return;
+  const regime =
+    overrideApplied && overrideReason ? ` Regime override applied: ${overrideReason}.` : '';
+  throw new Error(
+    `Sandbox driver "${driver}" is unavailable on this host: missing ${availability.missing}.${regime}`,
+  );
 }
 
 function parseSandboxConfig(yamlText: string): SandboxConfig {
@@ -840,6 +909,9 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
    */
   private containerId: string | null = null;
 
+  /** OCI runtime passed as `--runtime=`; subclasses (gVisor) override. */
+  protected readonly ociRuntime: string | undefined = undefined;
+
   /**
    * Path to the cidfile created per spawn invocation.
    * Lives in an isolated mkdtemp directory; cleaned up in `teardown()`.
@@ -991,6 +1063,7 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
     // extraDockerArgs carries AQ2 proxy host entries (e.g. --add-host=inference.local:<ip>)
     // so the container can reach the host-side inference proxy despite --network=none.
     const args = buildDockerRunArgs({
+      runtime: this.ociRuntime,
       resourceLimits,
       // Pass the seccomp FILE PATH (docker --security-opt seccomp=<path>), not
       // the inline JSON — see the seccompFilePath comment above.
@@ -1428,6 +1501,11 @@ cd "$WORK_DIR"
 # SHA or a known-scheme URL before being interpolated here.
 UPSTREAM_REF='${escapedRef}'
 
+if ! command -v git >/dev/null 2>&1; then
+  echo 'sandbox image lacks git (set AI_SDLC_SANDBOX_IMAGE)' >&2
+  exit 1
+fi
+
 if [ -n "\${SANDBOX_FIXTURE_B64:-}" ]; then
   # Fixture-demo mode (RFC-0043 AQ2 live demo — option B). The trusted base
   # tree is a tiny zero-dependency repo supplied as a base64 gzip tarball via
@@ -1589,6 +1667,8 @@ export interface DockerRunArgsInput {
    * Built by `buildProxyHostArg` from inference-proxy.ts.
    */
   extraDockerArgs?: string[];
+  /** OCI runtime (e.g. `runsc` for gVisor); emitted as `--runtime=<name>`. */
+  runtime?: string;
 }
 
 /**
@@ -1613,11 +1693,20 @@ export interface DockerRunArgsInput {
  *   --security-opt no-new-privileges
  */
 export function buildDockerRunArgs(opts: DockerRunArgsInput): string[] {
-  const { resourceLimits, seccompProfileJson, cidFilePath, image, command, extraDockerArgs } = opts;
+  const {
+    resourceLimits,
+    seccompProfileJson,
+    cidFilePath,
+    image,
+    command,
+    extraDockerArgs,
+    runtime,
+  } = opts;
 
   return [
     'run',
     '--rm',
+    ...(runtime ? [`--runtime=${runtime}`] : []),
     '--cidfile',
     cidFilePath,
     '--network=none',
@@ -1715,31 +1804,18 @@ export class KataSandboxDriver extends BaseSandboxDriver {
 }
 
 /**
- * gVisor sandbox driver — pluggable stub (OQ-5 middle-ground option).
+ * gVisor sandbox driver (AISDLC-515.1).
  *
- * Syscall interception via userspace kernel (runsc). ~10-15% runtime overhead.
- * Intercepted syscalls prevent many container-escape CVE classes without
- * requiring VM-level isolation.
+ * Runs the same hardened `docker run` as `DockerSandboxDriver` with
+ * `--runtime=runsc`, so syscalls are intercepted by the gVisor userspace
+ * kernel. Needs no `/dev/kvm`. ~10-15% runtime overhead.
  *
- * Activate by setting `untrusted-pr-gate.yaml: sandboxDriver: gvisor`.
+ * Activate by setting `untrusted-pr-gate.yaml: sandboxDriver: gvisor`. The
+ * config loader refuses this driver when `runsc` is not installed.
  */
-export class GVisorSandboxDriver extends BaseSandboxDriver {
+export class GVisorSandboxDriver extends DockerSandboxDriver {
   readonly kind: SandboxDriverKind = 'gvisor';
-
-  protected async doSpawn(_input: SandboxSpawnInput): Promise<SandboxResult> {
-    return {
-      outcome: 'error',
-      error:
-        'GVisorSandboxDriver is a pluggable stub. ' +
-        'gVisor requires the runsc runtime (Google gVisor). ' +
-        'Install gVisor and configure Docker/containerd to use runsc, then ' +
-        'provide a concrete implementation.',
-    };
-  }
-
-  async teardown(): Promise<void> {
-    // no-op (stub)
-  }
+  protected readonly ociRuntime: string | undefined = 'runsc';
 }
 
 /**
@@ -1760,7 +1836,7 @@ export class MicroVmSandboxDriver extends BaseSandboxDriver {
     return {
       outcome: 'error',
       error:
-        'MicroVmSandboxDriver is a pluggable stub. ' +
+        'MicroVmSandboxDriver is a pluggable stub (tracked by AISDLC-515.2). ' +
         'Firecracker MicroVM requires a KVM-capable host and the Firecracker VMM binary. ' +
         'See https://github.com/firecracker-microvm/firecracker for setup. ' +
         'This driver is required for HIPAA / FedRAMP High / PCI-DSS Level 1 compliance.',

@@ -220,7 +220,7 @@ new file mode 100644
 index 0000000..1234567
 --- /dev/null
 +++ b/src/utils/string-helpers.ts
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,9 @@
 +export function truncate(s: string, maxLen: number): string {
 +  if (s.length <= maxLen) return s;
 +  return s.slice(0, maxLen - 3) + '...';
@@ -235,7 +235,7 @@ new file mode 100644
 index 0000000..abcdef1
 --- /dev/null
 +++ b/src/utils/string-helpers.test.ts
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,8 @@
 +import { describe, it, expect } from 'vitest';
 +import { truncate, capitalize } from './string-helpers.js';
 +
