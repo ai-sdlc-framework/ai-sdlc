@@ -30,6 +30,18 @@ export interface StagedVerdict {
   promptInjectionDetected: boolean;
   /** Findings removed by grounding before aggregation. Set by `groundFindings`. */
   groundingDropped?: number;
+  /** Set to `incomplete-coverage` when a high-risk hunk had no covering review (DEC-0040). */
+  reason?: 'incomplete-coverage';
+  /** The hunks no review covered, with file and line range. Set with `reason`. */
+  uncoveredHunks?: UncoveredHunkRef[];
+}
+
+export interface UncoveredHunkRef {
+  id: string;
+  file: string;
+  startLine: number;
+  endLine: number;
+  risk: 'high' | 'other';
 }
 
 export type DropReason =

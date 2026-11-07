@@ -357,6 +357,12 @@ Eight phase tasks. AISDLC-672 and 673 have no dependencies within this RFC.
 
 ## Open Questions
 
+**Resolved point — uncovered high-risk hunks (operator ruling, DEC-0040, implemented as
+AISDLC-707):** the synthesizer fails closed. A high-risk hunk with no covering review
+yields `approved: false` with reason `incomplete-coverage` and the hunks listed by file
+and line range; uncovered medium and low risk hunks are reported without changing the
+verdict. Decision record: `.ai-sdlc/_decisions/events.jsonl` (DEC-0040).
+
 **OQ-1 — Does security review join the pipeline in v1, or stay a separate stage?**
 The staged pipeline carries the security probe set in its baseline checklist and the
 security remit in synthesis. AISDLC-617 kept the security reviewer separate on
