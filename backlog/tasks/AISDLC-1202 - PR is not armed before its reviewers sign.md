@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1202
 title: 'PR is not armed before its reviewers sign'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 updated_date: '2026-11-07 00:00'
