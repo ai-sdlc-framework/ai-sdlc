@@ -2,7 +2,7 @@
 id: AISDLC-717
 title: >-
   Hook-level deny of the release source kind for executor sessions
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-04'
 labels:

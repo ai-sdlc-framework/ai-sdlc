@@ -65,12 +65,6 @@
       "command": "node pipeline-cli/bin/cli-merge-if-eligible.mjs 12 --source-kind backlog"
     },
     {
-      "id": "release-arm-sanctioned",
-      "tool": "Bash",
-      "cwd": "main",
-      "command": "node pipeline-cli/bin/cli-merge-if-eligible.mjs 13 --source-kind release --arm"
-    },
-    {
       "id": "decision-add",
       "tool": "Bash",
       "cwd": "worktree",
