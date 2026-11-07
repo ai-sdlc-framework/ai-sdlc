@@ -288,13 +288,11 @@ describe('Step 7 — buildReviewPrompts', () => {
       try {
         const fake = new FakeRunner()
           .on(
-            /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+            / diff --text --no-ext-diff --no-textconv .*\.\.\.HEAD$/,
             ok('--- diff content ---\n'),
           )
-          .on(
-            /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
-            ok(`${paths.join('\0')}\0`),
-          );
+          .on(/ diff --name-only -z .*\.\.\.HEAD$/, ok(`${paths.join('\0')}\0`))
+          .on(/--numstat/, ok(''));
         const r = await buildReviewPrompts({
           taskId: 'AISDLC-1',
           task,
