@@ -109,7 +109,7 @@ describe('pr-lifecycle.yaml operational keys', () => {
       ...PR_LIFECYCLE_DEFAULTS.webhook,
       port: 9000,
     });
-    expect(c.stall).toEqual({ staleMs: 5, graceMs: PR_LIFECYCLE_DEFAULTS.stall.graceMs });
+    expect(c.stall).toEqual({ staleMs: 5 });
     expect(c.reconcile.timerOpenMs).toBe(7);
     for (const r of Object.values(PR_LIFECYCLE_KEY_READERS)) r(c);
   });

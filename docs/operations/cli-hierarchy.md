@@ -352,12 +352,22 @@ once per window as a stall in the reconcile report (`stalls`) and fires a deskto
 states are missing: `repair-or-delivery`, `decision`, `notification`), and `cli-hierarchy status --check`
 exits `1` when any entry is older than `stuckAfterMinutes`.
 
+### `pane-exited`
+
+`cli-hierarchy pane-exited <session>` records the exit of a spawned executor's pane (AISDLC-1217). The tmux
+`pane-exited` hook installed by `spawn` runs it; run it by hand only to repair a missed exit. It does nothing while
+the session is still live, and a second call for the same session does nothing. See Stall thresholds below.
+
 ### Stall thresholds (AISDLC-1103)
 
-The stall reaper uses two thresholds for every worker, roster or ephemeral. `graceMs` (default 10 minutes) applies
-only when the holder session is `gone` or `unknown`: the claim is then reaped as `holder-not-busy`. An `idle` holder is not reaped early (AISDLC-1124): a backgrounded developer leaves the pane idle for its whole pass, so the board (manifest plus a heartbeat under `staleMs`) decides busy. `staleMs`
+The stall reaper uses one threshold for every worker, roster or ephemeral. `staleMs`
 (default 30 minutes) applies whatever the session state: a heartbeat older than it is reaped as `stale-heartbeat`, so a
-busy developer pass is never reaped before 30 minutes.
+busy developer pass is never reaped before 30 minutes. An `idle` holder is not reaped early (AISDLC-1124).
+There is no grace for a dead holder: `spawn` installs a tmux `pane-exited` hook that runs
+`cli-hierarchy pane-exited <session>` (AISDLC-1217, DEC-0392). It writes a `failed/` diagnostic with
+`cause: executor-exited`, returns the claim to `queue/`, clears the heartbeat and drops the roster entry; a
+second call finds nothing inflight and does nothing. `down` removes the hook before it asks a session to
+exit, so a requested stop is not an exit. The `gone` state in `status` is display only.
 
 ### `stall-notice`
 
@@ -1206,8 +1216,7 @@ pipeline refreshes the claim's heartbeat (`inflight/<task>.state.json`, `lastHea
 `currentStep`) on every `next-step` transition, so a live executor is never silent for
 longer than one step. A claim is stalled when its heartbeat is older than the stale
 threshold (default 30 minutes, `AI_SDLC_DISPATCH_STALE_MS`), or when its holder session is
-`idle`, `gone` or `unknown` in `status` and the heartbeat is older than the grace (default
-10 minutes, `AI_SDLC_DISPATCH_STALL_GRACE_MS`) with no verdict in `done/` or `failed/`. A
+idle on a question, with no verdict in `done/` or `failed/`. A
 stalled claim moves to `failed/` with `cause: stale-worker`, `lastStep` and
 `heartbeatAgeMs`; the holder is cleared (which restarts its executor loop with
 `/ai-sdlc:executor`) and the task is sent back with a note naming the step it stalled at

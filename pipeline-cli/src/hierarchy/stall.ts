@@ -2,9 +2,8 @@
  * The stall check the dispatch tick runs on every wake (AISDLC-826).
  *
  * An inflight claim is stalled when its heartbeat is older than the stale
- * threshold, or when the session holding it is `idle`, `gone` or `unknown` and
- * its heartbeat is older than a short grace (the executor ended its turn
- * without writing a verdict). A stalled claim moves to `failed/` with cause
+ * threshold, or when its holder is idle on a question. An executor whose pane exits is
+ * handled at once by `pane-exited` (AISDLC-1217), not here. A stalled claim moves to `failed/` with cause
  * `stale-worker`, the holder is cleared (which restarts its executor loop) and
  * the task re-enters (`reenter` when a pull request exists, else a requeue) with a note naming the step it stalled at and
  * any pull request that already exists. This is operational: the planner is
@@ -29,8 +28,6 @@ import type { CommandRunner } from './types.js';
 
 /** Heartbeat age after which a claim is stalled (RFC-0041 OQ-3). */
 export const DEFAULT_STALL_STALE_MS = 30 * 60 * 1000;
-/** Heartbeat age after which a claim whose holder is not busy is stalled. */
-export const DEFAULT_STALL_GRACE_MS = 10 * 60 * 1000;
 /** Cause code written on the failure record of a reaped claim. */
 export const STALE_WORKER_CAUSE = 'stale-worker';
 
@@ -43,7 +40,7 @@ export interface StalledReport {
   /** Step the executor last reported, or `unknown`. */
   step: string;
   /** Why the claim counted as stalled. */
-  reason: 'stale-heartbeat' | 'holder-not-busy' | 'holder-asked-question';
+  reason: 'stale-heartbeat' | 'holder-asked-question';
   /** Pull request that already existed for the task, when one was found. */
   prNumber?: number;
   clear?: { status: string; reason?: string };
@@ -55,7 +52,6 @@ export interface StallDeps {
   boardDir: string;
   now: () => Date;
   staleMs?: number;
-  graceMs?: number;
   /** Live state of each roster session by name; absent means no holder check. */
   liveness?: () => ReadonlyMap<string, LiveState>;
   /**
@@ -98,13 +94,9 @@ export function endsWithQuestion(paneTail: string): boolean {
 /** Read a positive millisecond value from the environment, else the default. */
 export function stallThresholdsFromEnv(
   env: NodeJS.ProcessEnv,
-  defaults: { staleMs: number; graceMs: number } = {
-    staleMs: DEFAULT_STALL_STALE_MS,
-    graceMs: DEFAULT_STALL_GRACE_MS,
-  },
+  defaults: { staleMs: number } = { staleMs: DEFAULT_STALL_STALE_MS },
 ): {
   staleMs: number;
-  graceMs: number;
 } {
   const read = (v: string | undefined, d: number): number => {
     const n = v === undefined ? Number.NaN : Number(v);
@@ -112,7 +104,6 @@ export function stallThresholdsFromEnv(
   };
   return {
     staleMs: read(env.AI_SDLC_DISPATCH_STALE_MS, defaults.staleMs),
-    graceMs: read(env.AI_SDLC_DISPATCH_STALL_GRACE_MS, defaults.graceMs),
   };
 }
 
@@ -181,7 +172,6 @@ export async function reapStalledClaims(
   onReaped: (verdict: DispatchVerdict) => void = () => {},
 ): Promise<StalledReport[]> {
   const staleMs = deps.staleMs ?? DEFAULT_STALL_STALE_MS;
-  const graceMs = deps.graceMs ?? DEFAULT_STALL_GRACE_MS;
   const nowMs = deps.now().getTime();
   const reports: StalledReport[] = [];
   let live: ReadonlyMap<string, LiveState> | undefined;
@@ -207,11 +197,6 @@ export async function reapStalledClaims(
         safeIsQuestion(deps.lastOutputIsQuestion, heartbeat.workerId)
       ) {
         reason = 'holder-asked-question';
-      } else if (ageMs > graceMs && (state === 'gone' || state === 'unknown')) {
-        // AISDLC-1124: `idle` is not evidence here. A backgrounded developer leaves the pane and the
-        // registry idle for the whole pass while the manifest names the worker and the heartbeat is fresh,
-        // so an idle holder waits for the stale threshold like a busy one.
-        reason = 'holder-not-busy';
       }
     }
     if (!reason) continue;
@@ -245,7 +230,6 @@ export async function reapStalledClaims(
       cause: STALE_WORKER_CAUSE,
       notes:
         `stalled at step ${step}: heartbeat ${Math.round(ageMs / 1000)}s old` +
-        (reason === 'holder-not-busy' ? ', holder session not busy' : '') +
         (reason === 'holder-asked-question'
           ? ', holder idle on a question (no channel reaches an executor)'
           : ''),

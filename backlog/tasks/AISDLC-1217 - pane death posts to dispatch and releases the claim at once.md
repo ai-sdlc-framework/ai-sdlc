@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1217
 title: 'Pane death posts to dispatch and releases the claim at once'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-07'
 labels:

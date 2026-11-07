@@ -227,7 +227,8 @@ export function readLoopState(boardDir: string): LoopState {
   }
 }
 
-function saveState(boardDir: string, state: LoopState): void {
+/** Write the loop state. */
+export function saveLoopState(boardDir: string, state: LoopState): void {
   mkdirSync(boardDir, { recursive: true });
   const target = loopStatePath(boardDir);
   const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
@@ -563,12 +564,12 @@ function ingestBriefs(
       if (entries.length > 0) deps.enqueue(entries);
       state.ingested[file] = { tasks: entries.map((e) => e.taskId), summarised: false };
       delete state.rejected[file];
-      saveState(deps.boardDir, state);
+      saveLoopState(deps.boardDir, state);
       result.ingested.push({ file, tasks: entries.map((e) => e.taskId) });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       state.rejected[file] = { mtime, error, ...(head !== undefined ? { parentHead: head } : {}) };
-      saveState(deps.boardDir, state);
+      saveLoopState(deps.boardDir, state);
       result.ingestErrors.push({ file, error });
     }
   }
@@ -598,7 +599,7 @@ async function watchVerdicts(
     // and is processed on the first tick after `resume`.
     if (!held) {
       state.handled.push(key);
-      saveState(deps.boardDir, state);
+      saveLoopState(deps.boardDir, state);
     }
 
     // Everything below this line, and everything printed for the session, comes
@@ -777,7 +778,7 @@ async function checkStalls(
       },
       (v) => {
         state.handled.push(`failed:${v.taskId}:${v.completedAt}`);
-        saveState(deps.boardDir, state);
+        saveLoopState(deps.boardDir, state);
       },
     );
   } catch {
@@ -1271,7 +1272,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   state.lastSpawnErrors = ephemeral.report?.spawnErrors ?? [];
   state.lastTickAt = deps.now().toISOString();
   state.lastTickBy = deps.tickedBy ?? 'host';
-  saveState(deps.boardDir, state);
+  saveLoopState(deps.boardDir, state);
   try {
     pruneEvents(deps.boardDir, readGithub ? deps.openPrNumbers?.() : undefined);
   } catch {

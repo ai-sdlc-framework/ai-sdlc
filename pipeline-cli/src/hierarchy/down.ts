@@ -17,6 +17,7 @@
 
 import { releaseInflight } from '../dispatch/board.js';
 import { listInflight } from './inflight.js';
+import { removePaneExitHook } from './pane-exit.js';
 import { schedulerDown } from './reconcile-scheduler.js';
 import { readRosterChecked, writeRoster } from './roster.js';
 import { isSpawnedExecutorNameOf, splitSessionName } from './validate.js';
@@ -76,6 +77,8 @@ export async function stopSessionWindow(
   if (!isOpen()) return { forced: false };
   const first = gate();
   if ('reason' in first) return { refused: first.reason, verb: 'stopping' };
+  // AISDLC-1217: a requested stop is not an executor exit.
+  removePaneExitHook(deps.run, entry.tmuxSession);
   sendExit(deps.run, first.target);
   for (let i = 0; i < deps.pollAttempts && isOpen(); i++) await deps.sleep(deps.pollIntervalMs);
   if (!isOpen()) return { forced: false };

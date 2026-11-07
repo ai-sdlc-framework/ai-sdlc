@@ -119,6 +119,7 @@ import {
   createStreamEmitter,
   createSystemIdentity,
   executorStart,
+  hierarchyPaneExited,
   hierarchySpawn,
   reapOrphanExecutorSessions,
   resolveCaller,
@@ -251,6 +252,7 @@ Commands:
   handoff         Write or read a session's handoff file (handoff write|read --role <r>)
   transcript      Digest of the turns before a /clear (transcript recall --role <r>)
   send            Message a session listed in this project's roster; refuses any other name
+  pane-exited     Record the exit of a spawned executor's pane (run by the tmux hook; pane-exited <session>)
   spawn           Start one ephemeral executor session for one task (spawn <task-id> [--model <m>])
   executor-start  Executor identity, repository check and a blocking claim, as one call
   check-repo      Exit 0 only when the working directory is this roster's repository
@@ -837,6 +839,15 @@ export async function runHierarchyCli(
         deps.log(
           JSON.stringify({ name: spawned.name, taskId: spawned.taskId, created: spawned.created }),
         );
+        return 0;
+      }
+      case 'pane-exited': {
+        const session = firstPositional(argv);
+        if (!session) {
+          process.stderr.write(`cli-hierarchy: pane-exited needs a session name\n\n${USAGE}`);
+          return 2;
+        }
+        deps.log(JSON.stringify(hierarchyPaneExited(session, deps)));
         return 0;
       }
       case 'status': {

@@ -19,7 +19,7 @@ import {
   WORKTREE_SWEEP_DEFAULTS,
   type WorktreeSweepConfig,
 } from '../steps/00-worktree-disposition.js';
-import { DEFAULT_STALL_GRACE_MS, DEFAULT_STALL_STALE_MS } from './stall.js';
+import { DEFAULT_STALL_STALE_MS } from './stall.js';
 import { BUSY_INTERVAL_MS, IDLE_INTERVAL_MS } from './scheduler.js';
 
 export interface PrLifecycleConfig {
@@ -33,7 +33,7 @@ export interface PrLifecycleConfig {
     /** Minutes without an event, with PR activity, before health is down (AISDLC-1157). */
     downAfterMinutes: number;
   };
-  stall: { staleMs: number; graceMs: number };
+  stall: { staleMs: number };
   reconcile: { timerOpenMs: number; timerIdleMs: number };
   /** Ceiling for each wait of the executor clear handshake (AISDLC-1000). */
   clear: { handshakeCeilingMs: number };
@@ -57,7 +57,7 @@ export const PR_LIFECYCLE_DEFAULTS: PrLifecycleConfig = {
     staleAfterMinutes: DEFAULT_WEBHOOK_STALE_AFTER_MINUTES,
     downAfterMinutes: DEFAULT_WEBHOOK_DOWN_AFTER_MINUTES,
   },
-  stall: { staleMs: DEFAULT_STALL_STALE_MS, graceMs: DEFAULT_STALL_GRACE_MS },
+  stall: { staleMs: DEFAULT_STALL_STALE_MS },
   reconcile: { timerOpenMs: BUSY_INTERVAL_MS, timerIdleMs: IDLE_INTERVAL_MS },
   clear: { handshakeCeilingMs: DEFAULT_SETTLE_MS },
   hierarchy: { resourceGate: false, worktrees: { ...WORKTREE_SWEEP_DEFAULTS } },
@@ -136,7 +136,6 @@ export function loadPrLifecycleConfig(
       },
       stall: {
         staleMs: pick(stall?.staleMs, d.stall.staleMs),
-        graceMs: pick(stall?.graceMs, d.stall.graceMs),
       },
       reconcile: {
         timerOpenMs: pick(reconcile?.timerOpenMs, d.reconcile.timerOpenMs),

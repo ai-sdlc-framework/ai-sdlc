@@ -9,6 +9,7 @@
 import { existsSync } from 'node:fs';
 
 import { manifestPathIn } from '../dispatch/board.js';
+import { installPaneExitHook } from './pane-exit.js';
 import { readNvmrc } from './node-pin.js';
 import { rosterProject } from './peer-guard.js';
 import { readRosterChecked, writeRoster } from './roster.js';
@@ -103,6 +104,13 @@ export async function hierarchySpawn(
   );
   if ('failure' in launched) throw new Error(launched.failure);
 
+  // AISDLC-1217: the pane's exit posts to dispatch at once.
+  const hook = installPaneExitHook(deps.run, name, deps.binPath ?? process.argv[1] ?? '');
+  if (hook.status !== 0) {
+    warnings.push(
+      `could not install the pane-exited hook on '${name}'; the stall check will find it`,
+    );
+  }
   const entry: RosterEntry = { ...launched.entry, taskId };
   // Re-read just before the write so a concurrent spawn's entry is not dropped.
   const fresh = readRosterChecked(deps.boardDir).roster;
