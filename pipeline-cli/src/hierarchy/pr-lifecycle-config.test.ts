@@ -101,7 +101,7 @@ describe('pr-lifecycle.yaml operational keys', () => {
 
   it('reads overrides and ignores invalid values', () => {
     const d = repoWithBase(
-      'spec:\n  webhook: {port: 9000, debounceMs: -1}\n  stall: {staleMs: 5}\n  reconcile: {timerOpenMs: 7}\n',
+      'spec:\n  webhook: {port: 9000, debounceMs: -1}\n  reconcile: {timerOpenMs: 7}\n',
     );
     const c = loadPrLifecycleConfig(d);
     removeFixtureDir(d);
@@ -109,7 +109,6 @@ describe('pr-lifecycle.yaml operational keys', () => {
       ...PR_LIFECYCLE_DEFAULTS.webhook,
       port: 9000,
     });
-    expect(c.stall).toEqual({ staleMs: 5 });
     expect(c.reconcile.timerOpenMs).toBe(7);
     for (const r of Object.values(PR_LIFECYCLE_KEY_READERS)) r(c);
   });

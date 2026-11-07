@@ -23,8 +23,6 @@ spec:
   reconcile:
     timerOpenMs: 60000
     timerIdleMs: 900000
-  stall:
-    staleMs: 1800000
   clear:
     handshakeCeilingMs: 30000
   loopGuard:

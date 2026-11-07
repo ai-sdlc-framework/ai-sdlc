@@ -185,8 +185,10 @@ gains three fields:
 - `priority` and `wave`: ordering hints.
 
 Claim is atomic rename, as today. The claim logic skips a manifest whose `after` is
-unmet or whose group is busy. A stale inflight (no heartbeat beyond the configured
-limit, or its session gone from the roster) is returned to `queue/` by the reaper.
+unmet or whose group is busy. A claim is never reaped by heartbeat age (DEC-0392, AISDLC-1218): the executor
+publishes its state to the claim, and a claim whose holder is `idle-awaiting-clear` with no verdict is
+returned to `queue/` by the reaper (cause `idle-with-claim`); a holder whose pane exits is released at
+once by the `pane-exited` hook (AISDLC-1217).
 Messages never carry assignments.
 
 ### 5. The executor loop

@@ -162,15 +162,12 @@ import {
   readParentHead,
   runDispatchTick,
   hostTickStale,
-  endsWithQuestion,
   paneHasLiveNextStep,
   clearHold,
   writeHold,
   findOpenPrNumber,
-  paneTail,
   paneInfo,
   fetchHumanAttentionPrs,
-  stallThresholdsFromEnv,
   runPlaybook,
   NAMED_STEPS,
   type PlaybookDeps,
@@ -1351,18 +1348,6 @@ export async function runHierarchyCli(
           playbook: (verdict) => runPlaybook(verdict, playbookDeps(retryLimit)),
           operational,
           stall: {
-            ...stallThresholdsFromEnv(deps.env, loadPrLifecycleConfig(deps.cwd).stall),
-            liveness: () =>
-              new Map(hierarchyStatus(deps).rows.map((r) => [r.entry.name, r.state] as const)),
-            lastOutputIsQuestion: (name) => {
-              const entry = readRosterChecked(deps.boardDir).roster.sessions.find(
-                (e) => e.name === name,
-              );
-              return (
-                entry !== undefined &&
-                endsWithQuestion(paneTail(deps.run, entry.tmuxSession, entry.tmuxWindow))
-              );
-            },
             hasLiveNextStep: (name) => {
               const entry = readRosterChecked(deps.boardDir).roster.sessions.find(
                 (e) => e.name === name,

@@ -1,12 +1,13 @@
 /**
- * The stall check the dispatch tick runs on every wake (AISDLC-826).
+ * The idle-with-claim check the dispatch tick runs on every wake (AISDLC-826, AISDLC-1218).
  *
- * An inflight claim is stalled when its heartbeat is older than the stale
- * threshold, or when its holder is idle on a question. An executor whose pane exits is
- * handled at once by `pane-exited` (AISDLC-1217), not here. A stalled claim moves to `failed/` with cause
- * `stale-worker`, the holder is cleared (which restarts its executor loop) and
- * the task is NOT returned to `queue/` (DEC-0392, AISDLC-1219): a restart from zero loses the half-done
- * round, so the failure record stays and the planner routing line names the task and the diagnostic.
+ * The executor publishes its real state to the claim (`executorState`, AISDLC-1216), so no
+ * heartbeat age or pane-text guess is needed (DEC-0392): a claim whose holder is
+ * `idle-awaiting-clear` and that has no verdict is reaped with cause `idle-with-claim`, the
+ * holder is cleared (which restarts its executor loop) and the task is put back on `queue/`
+ * through `requeueFailed`. A claim in `turn-running` or `background-agent-running` is never
+ * reaped, however old its heartbeat. An executor whose pane exits is handled at once by
+ * `pane-exited` (AISDLC-1217).
  */
 
 import { existsSync } from 'node:fs';
@@ -18,31 +19,30 @@ import {
   TASK_ID_RE,
   writeDiagnostic,
 } from '../dispatch/board.js';
-import { snapshotFailedManifest } from '../dispatch/requeue.js';
+import { requeueFailed, snapshotFailedManifest } from '../dispatch/requeue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { listInflight } from './inflight.js';
 import { isOwnTaskBranch } from './playbook.js';
-import type { LiveState } from './status.js';
 import type { CommandRunner } from './types.js';
 
-/** Heartbeat age after which a claim is stalled (RFC-0041 OQ-3). */
-export const DEFAULT_STALL_STALE_MS = 30 * 60 * 1000;
 /** Cause code written on the failure record of a reaped claim. */
-export const STALE_WORKER_CAUSE = 'stale-worker';
+export const IDLE_WITH_CLAIM_CAUSE = 'idle-with-claim';
 
 /** One reaped claim, as reported on the tick result and the progress line. */
 export interface StalledReport {
   taskId: string;
   worker: string;
-  /** Age of the last heartbeat, in milliseconds. */
+  /** Age of the claim's last heartbeat write, in milliseconds (informational only). */
   ageMs: number;
   /** Step the executor last reported, or `unknown`. */
   step: string;
   /** Why the claim counted as stalled. */
-  reason: 'stale-heartbeat' | 'holder-asked-question';
+  reason: 'idle-with-claim';
   /** Pull request that already existed for the task, when one was found. */
   prNumber?: number;
   clear?: { status: string; reason?: string };
+  /** Whether the task went back to `queue/`, with the refusal reason when it did not. */
+  requeue?: { status: 'requeued' | 'refused'; reason?: string };
   /** Path of the `failed/` diagnostic the reap wrote (relative to the board). */
   diagnostic: string;
 }
@@ -51,18 +51,9 @@ export interface StalledReport {
 export interface StallDeps {
   boardDir: string;
   now: () => Date;
-  staleMs?: number;
-  /** Live state of each roster session by name; absent means no holder check. */
-  liveness?: () => ReadonlyMap<string, LiveState>;
-  /**
-   * Whether the named executor's last output is a question (AISDLC-948). No channel
-   * reaches an executor, so an idle holder that asked one waits forever: it is
-   * stalled on the next tick, without the idle grace.
-   */
-  lastOutputIsQuestion?: (worker: string) => boolean;
   /**
    * Whether the named executor has a live `next-step` descendant process (AISDLC-1198): a
-   * backgrounded verification keeps the session idle with an aging heartbeat while real work runs.
+   * backgrounded verification keeps the session idle while real work runs.
    */
   hasLiveNextStep?: (worker: string) => boolean;
   /** Called when a claim that would be reaped is spared, with the reason. */
@@ -73,35 +64,6 @@ export interface StallDeps {
   findPr?: (taskId: string) => number | undefined;
 }
 
-/**
- * True when the last line of real output in a captured pane tail is a question.
- * Lines that are only terminal chrome (box drawing, the input prompt) are skipped.
- */
-export function endsWithQuestion(paneTail: string): boolean {
-  const lines = paneTail
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l !== '' && !/^[─━│┃╭╮╰╯┌┐└┘❯>⏵\s]/u.test(l));
-  const last = lines[lines.length - 1];
-  return last !== undefined && last.endsWith('?');
-}
-
-/** Read a positive millisecond value from the environment, else the default. */
-export function stallThresholdsFromEnv(
-  env: NodeJS.ProcessEnv,
-  defaults: { staleMs: number } = { staleMs: DEFAULT_STALL_STALE_MS },
-): {
-  staleMs: number;
-} {
-  const read = (v: string | undefined, d: number): number => {
-    const n = v === undefined ? Number.NaN : Number(v);
-    return Number.isFinite(n) && n > 0 ? n : d;
-  };
-  return {
-    staleMs: read(env.AI_SDLC_DISPATCH_STALE_MS, defaults.staleMs),
-  };
-}
-
 function hasVerdict(boardDir: string, taskId: string): boolean {
   return ['done', 'failed'].some((d) =>
     ['.verdict.json', '.completed.json', '.diagnostic.json'].some((s) =>
@@ -110,7 +72,7 @@ function hasVerdict(boardDir: string, taskId: string): boolean {
   );
 }
 
-function safeIsQuestion(fn: (worker: string) => boolean, worker: string): boolean {
+function safeProbe(fn: (worker: string) => boolean, worker: string): boolean {
   try {
     return fn(worker);
   } catch {
@@ -156,47 +118,27 @@ export async function reapStalledClaims(
   deps: StallDeps,
   onReaped: (verdict: DispatchVerdict) => void = () => {},
 ): Promise<StalledReport[]> {
-  const staleMs = deps.staleMs ?? DEFAULT_STALL_STALE_MS;
   const nowMs = deps.now().getTime();
   const reports: StalledReport[] = [];
-  let live: ReadonlyMap<string, LiveState> | undefined;
   for (const item of listInflight(deps.boardDir)) {
     const { taskId } = item;
     if (!TASK_ID_RE.test(taskId) || hasVerdict(deps.boardDir, taskId)) continue;
     const manifest = readInflightManifest(deps.boardDir, taskId);
     if (!manifest) continue;
     const heartbeat = readHeartbeat(deps.boardDir, taskId);
-    const last = Date.parse(heartbeat?.lastHeartbeat ?? manifest.dispatchedAt);
-    if (Number.isNaN(last)) continue;
-    const ageMs = Math.max(0, nowMs - last);
-    const worker = heartbeat?.workerId ?? 'unknown';
-    let reason: StalledReport['reason'] | undefined;
-    if (ageMs > staleMs) {
-      reason = 'stale-heartbeat';
-    } else if (heartbeat?.workerId && deps.liveness) {
-      live ??= deps.liveness();
-      const state = live.get(heartbeat.workerId);
-      if (
-        state === 'idle' &&
-        deps.lastOutputIsQuestion &&
-        safeIsQuestion(deps.lastOutputIsQuestion, heartbeat.workerId)
-      ) {
-        reason = 'holder-asked-question';
-      }
-    }
-    if (!reason) continue;
-    if (
-      reason !== 'holder-asked-question' &&
-      deps.hasLiveNextStep &&
-      worker !== 'unknown' &&
-      safeIsQuestion(deps.hasLiveNextStep, worker)
-    ) {
+    if (heartbeat?.executorState !== 'idle-awaiting-clear') continue;
+    const last = Date.parse(heartbeat.lastHeartbeat ?? manifest.dispatchedAt);
+    const ageMs = Number.isNaN(last) ? 0 : Math.max(0, nowMs - last);
+    const worker = heartbeat.workerId ?? 'unknown';
+    const reason: StalledReport['reason'] = 'idle-with-claim';
+    if (deps.hasLiveNextStep && worker !== 'unknown' && safeProbe(deps.hasLiveNextStep, worker)) {
       try {
         deps.onSpared?.({
           taskId,
           worker,
           ageMs,
-          reason: `heartbeat ${Math.round(ageMs / 1000)}s old but a live next-step process is running under the executor (backgrounded verification)`,
+          reason:
+            'executor is idle but a live next-step process is running under it (backgrounded verification)',
         });
       } catch {
         /* reporting must not break the tick */
@@ -212,12 +154,8 @@ export async function reapStalledClaims(
       outcome: 'failed',
       completedAt: deps.now().toISOString(),
       workerId: worker,
-      cause: STALE_WORKER_CAUSE,
-      notes:
-        `stalled at step ${step}: heartbeat ${Math.round(ageMs / 1000)}s old` +
-        (reason === 'holder-asked-question'
-          ? ', holder idle on a question (no channel reaches an executor)'
-          : ''),
+      cause: IDLE_WITH_CLAIM_CAUSE,
+      notes: `executor idle with the claim and no verdict at step ${step} (no channel reaches an executor)`,
       lastStep: step,
       heartbeatAgeMs: ageMs,
     };
@@ -250,6 +188,15 @@ export async function reapStalledClaims(
       pr = undefined;
     }
     if (pr !== undefined) report.prNumber = pr;
+    try {
+      requeueFailed(deps.boardDir, taskId);
+      report.requeue = { status: 'requeued' };
+    } catch (err) {
+      report.requeue = {
+        status: 'refused',
+        reason: err instanceof Error ? err.message : String(err),
+      };
+    }
     reports.push(report);
   }
   return reports;
@@ -257,11 +204,13 @@ export async function reapStalledClaims(
 
 /** One line for the dispatch progress report. */
 export function formatStall(r: StalledReport): string {
-  const min = Math.round(r.ageMs / 60000);
+  const head =
+    `Reaped idle-with-claim ${r.taskId} (worker ${r.worker}, step ${r.step})` +
+    (r.prNumber !== undefined ? `, pull request #${r.prNumber}` : '');
+  if (r.requeue?.status === 'requeued') return `${head}; re-queued (DEC-0392)`;
   return (
-    `Reaped stalled ${r.taskId} (worker ${r.worker}, heartbeat ${min} min old, step ${r.step})` +
-    (r.prNumber !== undefined ? `, pull request #${r.prNumber}` : '') +
-    `; not re-queued (DEC-0392), diagnostic ${r.diagnostic}`
+    `${head}; not re-queued${r.requeue?.reason ? ` (${r.requeue.reason})` : ''}` +
+    ` (DEC-0392), diagnostic ${r.diagnostic}`
   );
 }
 

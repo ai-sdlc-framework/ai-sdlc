@@ -19,7 +19,6 @@ import {
   WORKTREE_SWEEP_DEFAULTS,
   type WorktreeSweepConfig,
 } from '../steps/00-worktree-disposition.js';
-import { DEFAULT_STALL_STALE_MS } from './stall.js';
 import { BUSY_INTERVAL_MS, IDLE_INTERVAL_MS } from './scheduler.js';
 
 export interface PrLifecycleConfig {
@@ -33,7 +32,6 @@ export interface PrLifecycleConfig {
     /** Minutes without an event, with PR activity, before health is down (AISDLC-1157). */
     downAfterMinutes: number;
   };
-  stall: { staleMs: number };
   reconcile: { timerOpenMs: number; timerIdleMs: number };
   /** Ceiling for each wait of the executor clear handshake (AISDLC-1000). */
   clear: { handshakeCeilingMs: number };
@@ -57,7 +55,6 @@ export const PR_LIFECYCLE_DEFAULTS: PrLifecycleConfig = {
     staleAfterMinutes: DEFAULT_WEBHOOK_STALE_AFTER_MINUTES,
     downAfterMinutes: DEFAULT_WEBHOOK_DOWN_AFTER_MINUTES,
   },
-  stall: { staleMs: DEFAULT_STALL_STALE_MS },
   reconcile: { timerOpenMs: BUSY_INTERVAL_MS, timerIdleMs: IDLE_INTERVAL_MS },
   clear: { handshakeCeilingMs: DEFAULT_SETTLE_MS },
   hierarchy: { resourceGate: false, worktrees: { ...WORKTREE_SWEEP_DEFAULTS } },
@@ -69,7 +66,6 @@ export const PR_LIFECYCLE_KEY_READERS: Readonly<Record<string, (c: PrLifecycleCo
     noTaskBranchPrefixes: () => undefined, // read by CI through scripts/read-pr-lifecycle.mjs
     loopGuard: (c) => c.maxSameHeadActions,
     webhook: (c) => c.webhook,
-    stall: (c) => c.stall,
     reconcile: (c) => c.reconcile,
     clear: (c) => c.clear,
     hierarchy: (c) => c.hierarchy,
@@ -107,7 +103,6 @@ export function loadPrLifecycleConfig(
   const defaults = (): PrLifecycleConfig => ({
     maxSameHeadActions: d.maxSameHeadActions,
     webhook: { ...d.webhook },
-    stall: { ...d.stall },
     reconcile: { ...d.reconcile },
     clear: { ...d.clear },
     hierarchy: { ...d.hierarchy, worktrees: { ...d.hierarchy.worktrees } },
@@ -117,7 +112,6 @@ export function loadPrLifecycleConfig(
   try {
     const spec = obj(obj(yamlLoad(text))?.spec);
     const webhook = obj(spec?.webhook);
-    const stall = obj(spec?.stall);
     const reconcile = obj(spec?.reconcile);
     const clear = obj(spec?.clear);
     const wt = obj(obj(spec?.hierarchy)?.worktrees);
@@ -133,9 +127,6 @@ export function loadPrLifecycleConfig(
         debounceMs: pick(webhook?.debounceMs, d.webhook.debounceMs),
         staleAfterMinutes: pick(webhook?.staleAfterMinutes, d.webhook.staleAfterMinutes),
         downAfterMinutes: pick(webhook?.downAfterMinutes, d.webhook.downAfterMinutes),
-      },
-      stall: {
-        staleMs: pick(stall?.staleMs, d.stall.staleMs),
       },
       reconcile: {
         timerOpenMs: pick(reconcile?.timerOpenMs, d.reconcile.timerOpenMs),

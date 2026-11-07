@@ -7,6 +7,7 @@
 import {
   existsSync,
   mkdirSync,
+  copyFileSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -23,7 +24,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { writeHeartbeat, writeVerdict } from '../dispatch/board.js';
 import { clearHold, readHold, writeHold } from './hold.js';
-import type { LiveState } from './status.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { listUnbriefed, writeAutoBrief } from './auto-brief.js';
@@ -988,12 +988,19 @@ describe('nextWakeSec (idle hibernation)', () => {
   });
 });
 
-describe('stall check (AISDLC-826)', () => {
+describe('idle-with-claim check (AISDLC-826, AISDLC-1218)', () => {
   const MIN = 60_000;
-  let states: Map<string, LiveState>;
+  const HOUR = 3_600_000;
+  type ExecState = 'turn-running' | 'idle-awaiting-clear' | 'background-agent-running';
 
   /** Claim a task for a worker: a real manifest moved to inflight/ plus its heartbeat. */
-  function claim(taskId: string, worker: string, ageMs: number, step = '05-dev-running'): void {
+  function claim(
+    taskId: string,
+    worker: string,
+    executorState: ExecState,
+    ageMs = 0,
+    step = '05-dev-running',
+  ): void {
     enqueueTasks(board, [{ taskId, wave: 1 }], {
       baseSha: 'abc1234',
       dispatchedBy: 'operator-dispatch',
@@ -1012,110 +1019,64 @@ describe('stall check (AISDLC-826)', () => {
       currentStep: step,
       startedAt: at,
       lastHeartbeat: at,
+      executorState,
     });
   }
 
   function stallDeps(over: Partial<LoopDeps> = {}): LoopDeps {
     return deps({
       stall: {
-        liveness: () => states,
         findPr: (id) => (id === 'AISDLC-71' ? 4242 : undefined),
       },
       ...over,
     });
   }
 
-  beforeEach(() => {
-    states = new Map([['executor-alpha', 'busy']]);
-  });
-
-  it('reaps a stale heartbeat, clears the holder and does not re-queue (DEC-0392)', async () => {
-    claim('AISDLC-71', 'executor-alpha', 31 * MIN, '06-review');
+  it('reaps an idle holder with no verdict, clears it and re-queues the task (DEC-0392)', async () => {
+    claim('AISDLC-71', 'executor-alpha', 'idle-awaiting-clear', 2 * MIN, '06-review');
     const r = await runDispatchTick(stallDeps());
     expect(r.stalled).toHaveLength(1);
     expect(r.stalled![0]).toMatchObject({
       taskId: 'AISDLC-71',
       worker: 'executor-alpha',
       step: '06-review',
-      reason: 'stale-heartbeat',
+      reason: 'idle-with-claim',
       prNumber: 4242,
       diagnostic: 'failed/AISDLC-71.diagnostic.json',
+      requeue: { status: 'requeued' },
     });
     expect(cleared).toEqual([{ executor: 'executor-alpha', taskId: 'AISDLC-71' }]);
-    expect(existsSync(path.join(board, 'queue', 'AISDLC-71.dispatch.json'))).toBe(false);
-    expect(existsSync(path.join(board, 'failed', 'AISDLC-71.diagnostic.json'))).toBe(true);
+    expect(existsSync(path.join(board, 'queue', 'AISDLC-71.dispatch.json'))).toBe(true);
     expect(existsSync(path.join(board, 'inflight', 'AISDLC-71.dispatch.json'))).toBe(false);
-    const line = r.reports.find((x) => x.text.includes('Reaped stalled AISDLC-71'));
-    expect(line!.text).toContain('failed/AISDLC-71.diagnostic.json');
-    expect(line!.text).toContain('DEC-0392');
+    const line = r.reports.find((x) => x.text.includes('Reaped idle-with-claim AISDLC-71'));
+    expect(line!.text).toContain('re-queued (DEC-0392)');
     expect(r.escalations).toEqual([]);
-    expect(r.wakeReason).toBe('pending');
   });
 
-  it('records the failure with cause stale-worker, the last step and the heartbeat age', async () => {
-    claim('AISDLC-71', 'executor-alpha', 40 * MIN, 'ship');
-    await runDispatchTick(stallDeps({ stall: { liveness: () => states } }));
-    const rec = JSON.parse(
-      readFileSync(path.join(board, 'failed', 'AISDLC-71.diagnostic.json'), 'utf-8'),
-    );
-    expect(rec).toMatchObject({
-      cause: 'stale-worker',
-      lastStep: 'ship',
-      heartbeatAgeMs: 40 * MIN,
-      outcome: 'failed',
-    });
-  });
-
-  it('leaves a gone holder alone inside the stale period (AISDLC-1217)', async () => {
-    claim('AISDLC-71', 'executor-alpha', 11 * MIN);
-    states.set('executor-alpha', 'gone');
-    const r = await runDispatchTick(stallDeps());
-    expect(r.stalled ?? []).toEqual([]);
-    expect(cleared).toHaveLength(0);
-  });
-
-  it('leaves an idle holder alone inside the grace', async () => {
-    claim('AISDLC-71', 'executor-alpha', 5 * MIN);
-    states.set('executor-alpha', 'gone');
-    const r = await runDispatchTick(stallDeps());
-    expect(r.stalled).toBeUndefined();
-    expect(existsSync(path.join(board, 'inflight', 'AISDLC-71.dispatch.json'))).toBe(true);
-  });
-
-  it('reaps an idle holder whose last output is a question on the next tick, inside the grace (AISDLC-948)', async () => {
-    claim('AISDLC-71', 'executor-alpha', 1 * MIN);
-    states.set('executor-alpha', 'idle');
-    const r = await runDispatchTick(
-      stallDeps({ stall: { liveness: () => states, lastOutputIsQuestion: () => true } }),
-    );
-    expect(r.stalled![0]!.reason).toBe('holder-asked-question');
-  });
-
-  it('leaves an idle holder inside the grace alone when its output is not a question, or the check throws', async () => {
-    claim('AISDLC-71', 'executor-alpha', 1 * MIN);
-    states.set('executor-alpha', 'idle');
-    for (const lastOutputIsQuestion of [
-      () => false,
-      () => {
-        throw new Error('tmux gone');
-      },
-    ]) {
-      const r = await runDispatchTick(
-        stallDeps({ stall: { liveness: () => states, lastOutputIsQuestion } }),
-      );
+  it.each(['turn-running', 'background-agent-running'] as const)(
+    'never reaps a %s claim, whatever the heartbeat age',
+    async (state) => {
+      claim('AISDLC-71', 'executor-alpha', state, 3 * HOUR);
+      const r = await runDispatchTick(stallDeps());
       expect(r.stalled).toBeUndefined();
-    }
-  });
+      expect(cleared).toEqual([]);
+    },
+  );
 
-  it('leaves a busy holder with a fresh heartbeat alone', async () => {
-    claim('AISDLC-71', 'executor-alpha', 11 * MIN);
+  it('reports a re-queue refusal and keeps the failure record', async () => {
+    claim('AISDLC-71', 'executor-alpha', 'idle-awaiting-clear');
+    copyFileSync(
+      path.join(board, 'inflight', 'AISDLC-71.dispatch.json'),
+      path.join(board, 'queue', 'AISDLC-71.dispatch.json'),
+    );
     const r = await runDispatchTick(stallDeps());
-    expect(r.stalled).toBeUndefined();
-    expect(cleared).toEqual([]);
+    expect(r.stalled![0]!.requeue).toMatchObject({ status: 'refused' });
+    expect(existsSync(path.join(board, 'failed', 'AISDLC-71.diagnostic.json'))).toBe(true);
+    expect(r.reports.some((x) => x.text.includes('not re-queued'))).toBe(true);
   });
 
   it('records a reap once: the next tick neither reaps nor clears again', async () => {
-    claim('AISDLC-71', 'executor-alpha', 31 * MIN);
+    claim('AISDLC-71', 'executor-alpha', 'idle-awaiting-clear');
     await runDispatchTick(stallDeps());
     const again = await runDispatchTick(stallDeps());
     expect(again.stalled).toBeUndefined();
@@ -1123,24 +1084,14 @@ describe('stall check (AISDLC-826)', () => {
     expect(playbooked).toEqual([]);
   });
 
-  it('does not clear the holder twice', async () => {
-    claim('AISDLC-71', 'executor-alpha', 31 * MIN);
-    const withoutRequeue = (): LoopDeps =>
-      stallDeps({ operational: new Set(['clear-executor-context']) });
-    await runDispatchTick(withoutRequeue());
-    await runDispatchTick(withoutRequeue());
-    expect(cleared).toHaveLength(1);
-    expect(playbooked).toEqual([]);
-  });
-
   it('does not clear when clear-executor-context is not granted', async () => {
-    claim('AISDLC-71', 'executor-alpha', 31 * MIN);
+    claim('AISDLC-71', 'executor-alpha', 'idle-awaiting-clear');
     await runDispatchTick(stallDeps({ operational: new Set(['requeue']) }));
     expect(cleared).toEqual([]);
   });
 
   it('skips a claim that already has a verdict and never runs without a stall config', async () => {
-    claim('AISDLC-71', 'executor-alpha', 31 * MIN);
+    claim('AISDLC-71', 'executor-alpha', 'idle-awaiting-clear');
     verdict('AISDLC-72');
     const none = await runDispatchTick(deps());
     expect(none.stalled).toBeUndefined();
@@ -1150,15 +1101,14 @@ describe('stall check (AISDLC-826)', () => {
     expect(r.stalled).toBeUndefined();
   });
 
-  it('honours configured thresholds and survives a failing clear, PR lookup and liveness', async () => {
-    claim('AISDLC-71', 'executor-alpha', 2 * MIN);
+  it('survives a failing clear and PR lookup', async () => {
+    claim('AISDLC-71', 'executor-alpha', 'idle-awaiting-clear');
     clearImpl = async () => {
       throw new Error('tmux gone');
     };
     const r = await runDispatchTick(
       deps({
         stall: {
-          staleMs: MIN,
           findPr: () => {
             throw new Error('gh down');
           },
@@ -1166,7 +1116,7 @@ describe('stall check (AISDLC-826)', () => {
       }),
     );
     expect(r.stalled![0]!.clear!.status).toBe('refused');
-    expect(r.reports.some((x) => x.text.includes('not re-queued (DEC-0392)'))).toBe(true);
+    expect(r.reports.some((x) => x.text.includes('(DEC-0392)'))).toBe(true);
   });
 
   it('lists PRs needing a human, with a stall line past 24h (AISDLC-888)', async () => {
