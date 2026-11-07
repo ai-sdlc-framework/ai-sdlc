@@ -2,7 +2,7 @@
 id: AISDLC-731
 title: >-
   Untrusted runs: pipeline push runs worktree code with operator privileges; .git hooks and config are unprotected
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-05'
 updated_date: '2026-11-07 00:00'
