@@ -16,16 +16,18 @@ references:
   - pipeline-cli/src/attestation/harness-transcript.ts
   - pipeline-cli/src/cli/attestation.ts
   - ai-sdlc-plugin/scripts/persist-reviewer-artifacts.sh
-  - ai-sdlc-plugin/commands/execute.md
   - docs/operations/independence-policy.md
 priority: low
-dispatchable: false
+dispatchable: true
+dispatchableReason: 'Unparked 2026-11-07 by operator ruling (planner critical-path review).'
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
+Unparked 2026-11-07 by operator ruling (planner critical-path review).
+
+**Re-briefed 2026-11-07.** The v6 signer and verifier are deleted (AISDLC-1173, #2407) and `execute.md` is now a thin loop over `next-step` (AISDLC-762), so scope item 4 (the inline Step 7b.5 marker-lookup snippet) and the `execute.md` wording items in 5 no longer exist and are dropped. Still-live targets: `pipeline-cli/src/attestation/verdict-class.ts` (independent versus self-authored classification), `findMatchingSubagentMarker` in `pipeline-cli/src/attestation/harness-transcript.ts` (still exported, no non-test caller), and `ai-sdlc-plugin/scripts/persist-reviewer-artifacts.sh`, which has no `--nonce-marker` option. Re-check each scope item against main before starting; where a referenced surface is gone, record it in the PR body and move on.
 
 Pull request 1182 binds each attestation leaf to its own reviewer run: the harness
 marker is selected by reviewer role and agent id, and a marker found in a directory
@@ -60,17 +62,15 @@ Start this task only once that pull request is on `main`.
    `independent` only to the process that wins the claim.
 3. **Nonce check before persisting.** `persist-reviewer-artifacts.sh` accepts an optional
    `--nonce-marker` and refuses, with a distinct exit code, when the resolved harness
-   transcript does not contain it. `execute.md` passes it. This stops another task's
+   transcript does not contain it; the `next-step` persistence step passes it. This stops another task's
    transcript from being copied in as this task's when a wrong agent id is supplied.
-4. **Marker lookup as a tested script.** Move the inline node snippet in `execute.md`
-   Step 7b.5 into `ai-sdlc-plugin/scripts/`, with tests for zero markers, one, several,
-   a marker of another role, and a plugin-prefixed role. Add an age filter matching the
-   30-minute window so stale unconsumed markers do not make it refuse. `execute.md`
-   calls the script.
+4. **Marker lookup as a tested script.** Dropped 2026-11-07: `execute.md` no longer
+   carries an inline marker-lookup snippet (AISDLC-762). If the lookup in
+   `pipeline-cli/src/next-step/` lacks tests for zero markers, one, several, a marker of
+   another role, a plugin-prefixed role and the 30-minute age filter, add them there.
 5. **Cleanups from the review.** Update the stale comment above the
    `bindLeafToReviewerRun` call in `emit-leaf`. Remove `findMatchingSubagentMarker`, or
-   mark it test-only, since no non-test code calls it. Make the two `execute.md`
-   sentences that still say "most recent marker" match the behaviour. In
+   mark it test-only, since no non-test code calls it. In
    `docs/operations/independence-policy.md`, state that the nonce shows the run was
    given this nonce in its prompt, and correct the parallel-task sentence to what scope
    item 1 makes true.
@@ -82,7 +82,7 @@ Start this task only once that pull request is on `main`.
 - [ ] The opt-in flag restores the local role-matched rule and prints a notice; every caller in this repository that needed it is listed in the PR body.
 - [ ] Two concurrent `emit-leaf` runs for the same leaf yield exactly one `independent` leaf (test with two processes or an injected claim race).
 - [ ] The persist helper refuses a transcript that lacks the nonce marker when `--nonce-marker` is given, and behaves as before without it.
-- [ ] The marker lookup script's tests cover the five cases and the age filter, and `execute.md` contains no inline copy of the logic.
+- [ ] The marker lookup in `pipeline-cli/src/next-step/` has tests for the five cases and the age filter (or the PR body shows they already exist).
 - [ ] No non-test caller of `findMatchingSubagentMarker` remains, or the function is gone.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 

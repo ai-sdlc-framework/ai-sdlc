@@ -10,6 +10,10 @@ labels:
 created: 2026-09-14
 ---
 
+## Resolution
+
+Superseded (operator, 2026-11-07, closing the 2026-10-30 ruling): AISDLC-1014 (#1845) deleted the stash and merge command-text guards; nothing left to do.
+
 Superseded (operator, 2026-10-30): AISDLC-1014 (#1845) deleted the stash and merge command-text guards this task hardens; nothing left to do.
 
 ## Context

@@ -2,7 +2,7 @@
 id: AISDLC-590
 title: >-
   RFC-0046 Phase 3 — isolated tier: internal reviewers via RFC-0043 sandbox + clean-room signer
-status: To Do
+status: Superseded
 assignee: []
 created_date: '2026-09-06'
 labels:
@@ -23,6 +23,10 @@ dispatchableReason: 'BLOCKED on RFC-0047 anchor design — do not re-dispatch un
 blocked:
   reason: 'PR #1021 held (CRITICAL: self-asserted anchor forgeable by same-machine coordinator, 2026-09-06 3-reviewer reconcile). The isolated-tier anchor mechanism is deferred to RFC-0047 (operator decision 2026-09-06). Do NOT re-implement against RFC-0046 as written — the producible design lands after RFC-0047 OQ walkthrough.'
 ---
+
+## Resolution
+
+Superseded (operator, 2026-11-07): the isolated-tier anchor was re-designed in RFC-0047 and delivered by AISDLC-593..597, all in `backlog/completed/`.
 
 > **⛔ DEFERRED (2026-09-06).** This task's original approach shipped a
 > **forgeable** `isolated` anchor (self-asserted `provenance.deployment: 'ci'`

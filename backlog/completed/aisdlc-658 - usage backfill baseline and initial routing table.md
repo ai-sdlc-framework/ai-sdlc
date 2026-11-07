@@ -2,7 +2,7 @@
 id: AISDLC-658
 title: >-
   RFC-0050 operator task: backfill before transcripts are pruned, first reports and snapshots, initial routing table
-status: To Do
+status: Superseded
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -21,6 +21,10 @@ priority: high
 dispatchable: false
 dispatchableReason: "Operator-only: needs the operator machine, the provider usage screen and decisions about which cells to explore"
 ---
+
+## Resolution
+
+Superseded (operator, 2026-11-07): `.ai-sdlc/model-routing.yaml` is on main through AISDLC-982, AISDLC-1003 and AISDLC-1151, and the usage ingest hook (`ai-sdlc-plugin/hooks/usage-ingest.js`) is live; the transcript backfill window has passed, so the remaining steps cannot be run as written.
 
 ## Description
 

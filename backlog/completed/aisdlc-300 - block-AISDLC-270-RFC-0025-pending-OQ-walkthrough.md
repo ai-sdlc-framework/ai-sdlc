@@ -15,14 +15,14 @@ blocked:
 dependencies: []
 references:
   - spec/rfcs/RFC-0025-framework-quality-monitoring.md
-  - backlog/tasks/aisdlc-270 - chore-complete-RFC-0025-quality-monitoring-auto-classification.md
+  - backlog/completed/aisdlc-270 - chore-complete-RFC-0025-quality-monitoring-auto-classification.md
   - spec/rfcs/README.md
 finalSummary: |
   ## Summary
   Blocked AISDLC-270 from dispatch by adding `blocked.reason` to its frontmatter, swept all `chore-complete-RFC-*` tasks in `backlog/tasks/` and `backlog/completed/`, and wrote an audit report documenting findings.
 
   ## Changes
-  - `backlog/tasks/aisdlc-270 - chore-complete-RFC-0025-quality-monitoring-auto-classification.md` (modified): added `blocked.reason` field referencing RFC-0025 OQ status and lifecycle; existing `dispatchable: false` retained.
+  - `backlog/completed/aisdlc-270 - chore-complete-RFC-0025-quality-monitoring-auto-classification.md` (modified): added `blocked.reason` field referencing RFC-0025 OQ status and lifecycle; existing `dispatchable: false` retained.
   - `docs/audits/2026-05-15-premature-impl-task-sweep.md` (new): audit report listing all 3 chore-complete-RFC-* tasks, their RFC lifecycle + OQ status, block verdicts, and RFC-0025 walkthrough status.
 
   ## Design decisions
@@ -55,7 +55,7 @@ AISDLC-270 sits in `backlog/tasks/` correctly only because no one has dispatched
 
 ### Part A — block AISDLC-270
 
-- Edit `backlog/tasks/aisdlc-270 - chore-complete-RFC-0025-quality-monitoring-auto-classification.md` frontmatter:
+- Edit `backlog/completed/aisdlc-270 - chore-complete-RFC-0025-quality-monitoring-auto-classification.md` frontmatter:
   - Add `blocked: { reason: "RFC-0025 has 10 unresolved OQs (§13). Operator walkthrough required before dispatch. Block lifts when RFC-0025 lifecycle ≥ Signed Off." }`
   - Optionally also `dispatchable: false` with `dispatchableReason` per AISDLC-243 convention.
 

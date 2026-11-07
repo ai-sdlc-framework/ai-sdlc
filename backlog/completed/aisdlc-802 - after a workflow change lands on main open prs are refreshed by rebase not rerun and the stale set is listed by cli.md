@@ -2,7 +2,7 @@
 id: AISDLC-802
 title: >-
   After a `.github/workflows/**` change lands on main, open PRs are refreshed by a rebase push, never a re-run; `cli-ci stale-workflow-prs` lists them and dispatch queues the resumes
-status: To Do
+status: Superseded
 assignee: []
 created_date: '2026-10-10'
 labels:
@@ -20,6 +20,10 @@ priority: low
 dispatchable: false
 dispatchableReason: "Withdrawn after the five-step review: folded into the AISDLC-800 note template; no separate build."
 ---
+
+## Resolution
+
+Superseded (operator, 2026-11-07): self-withdrawn into the AISDLC-800 note template (AISDLC-800 complete); with `strict: false` on main a stale workflow version on an open PR is harmless.
 
 ## Description
 

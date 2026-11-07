@@ -10,27 +10,27 @@ labels:
   - hierarchy
 dependencies: []
 references:
+  - pipeline-cli/src/hierarchy/session-role.ts
   - pipeline-cli/src/hierarchy/caller-identity.ts
   - pipeline-cli/src/hierarchy/caller-identity.test.ts
   - ai-sdlc-plugin/hooks/lib/hierarchy-role.js
   - pipeline-cli/src/cli/complete-task.ts
 priority: low
-dispatchable: false
+dispatchable: true
+dispatchableReason: 'Unparked 2026-11-07 by operator ruling (planner critical-path review).'
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
+Unparked 2026-11-07 by operator ruling (planner critical-path review).
 
 Session role is resolved in three places (`session-role.ts`, `hierarchy-role.js`, and
 `caller-identity.ts`), and `completeTask` carries its own inline claim check. They were
 written at different times against different review findings and can disagree, so a guard
 may refuse in one path and allow in another.
 
-Notes: `session-role.ts` does not exist on origin/main yet (it is in an in-flight PR), so
-it is described here in prose; the implementer locates it after that PR lands. Run this
-after the project-scoped session names task, which touches the same code.
+Notes (2026-11-07): the three copies are on main: `pipeline-cli/src/hierarchy/session-role.ts` (carries a LOCKSTEP comment and test against `ai-sdlc-plugin/hooks/lib/hierarchy-role.js`), `pipeline-cli/src/hierarchy/caller-identity.ts`, and the inline claim check in `pipeline-cli/src/cli/complete-task.ts`. The project-scoped session names work has landed.
 
 ## Conventions
 - Hermetic `node --test` tests; temporary directories come from `mkdtemp`, never a shared

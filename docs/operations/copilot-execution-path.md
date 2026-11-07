@@ -636,5 +636,5 @@ dispatchable.**
 - [`pipeline-cli/src/cli/execute.ts`](../../pipeline-cli/src/cli/execute.ts) — `SpawnerKind`, `SPAWNER_KINDS`, `resolveSpawner()`; Phase 2 extends all three.
 - [`spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md`](../../spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md) — §8 `SubagentSpawner` contract.
 - [`spec/rfcs/RFC-0035-decision-catalog-operator-routing.md`](../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md) — the routing mechanism for the open questions above.
-- Parent task: `backlog/tasks/aisdlc-429 - feat-copilot-cli-spawner-for-pipeline-execute-and-orchestrator.md`.
+- Parent task: `backlog/completed/aisdlc-429 - feat-copilot-cli-spawner-for-pipeline-execute-and-orchestrator.md`.
 - This phase: `backlog/completed/aisdlc-429.1 - Phase-1-document-copilot-execution-path-and-identify-gaps.md`.
