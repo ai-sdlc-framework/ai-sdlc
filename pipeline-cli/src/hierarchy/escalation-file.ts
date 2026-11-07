@@ -7,7 +7,7 @@
  * dispatch model is never prompted.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import type { CommandRunner } from './types.js';
@@ -51,7 +51,36 @@ function readJson(file: string): Record<string, unknown> | null {
   }
 }
 
-/** Write the escalation file; returns its path. @throws on an invalid task id. */
+/**
+ * AISDLC-1200: an existing file for the same task, message and head (the failure record the
+ * escalation was written against), or undefined. Unreadable files never match.
+ */
+function findExistingEscalation(
+  dir: string,
+  taskId: string,
+  message: string,
+  failureRecord: Record<string, unknown> | null,
+): string | undefined {
+  let names: string[];
+  try {
+    names = readdirSync(dir).sort();
+  } catch {
+    return undefined;
+  }
+  const prefix = `${taskId}-`;
+  const head = JSON.stringify(failureRecord);
+  for (const name of names) {
+    if (!name.startsWith(prefix) || !/^\d+\.json$/.test(name.slice(prefix.length))) continue;
+    const file = path.join(dir, name);
+    const prior = readJson(file);
+    if (prior && prior.taskId === taskId && prior.message === message) {
+      if (JSON.stringify(prior.failureRecord ?? null) === head) return file;
+    }
+  }
+  return undefined;
+}
+
+/** Write the escalation file, or return the path of the identical one already written. @throws on an invalid task id. */
 export function writeEscalationFile(inputs: EscalationInputs): { file: string } {
   const { boardDir, taskId, message, now, run } = inputs;
   if (!TASK_ID_RE.test(taskId)) throw new Error(`'${taskId}' is not a valid task id`);
@@ -59,6 +88,9 @@ export function writeEscalationFile(inputs: EscalationInputs): { file: string } 
     readJson(path.join(boardDir, 'failed', `${taskId}.diagnostic.json`)) ??
     readJson(path.join(boardDir, 'failed', `${taskId}.verdict.json`)) ??
     readJson(path.join(boardDir, 'done', `${taskId}.verdict.json`));
+  const dir = path.join(boardDir, 'escalations');
+  const existing = findExistingEscalation(dir, taskId, message, failureRecord);
+  if (existing) return { file: existing };
   const notes = typeof failureRecord?.notes === 'string' ? failureRecord.notes : '';
   const logTail = notes.split('\n').filter(Boolean).slice(-LOG_TAIL_LINES);
   const pr = failureRecord?.prNumber;
@@ -76,7 +108,6 @@ export function writeEscalationFile(inputs: EscalationInputs): { file: string } 
     logTail,
     prCheckSummary,
   };
-  const dir = path.join(boardDir, 'escalations');
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${taskId}-${now.getTime()}.json`);
   writeFileSync(file, JSON.stringify(body, null, 2) + '\n', 'utf-8');

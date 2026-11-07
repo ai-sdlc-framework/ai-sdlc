@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1200
 title: 'An escalation is announced once, not re-announced in a loop'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:
