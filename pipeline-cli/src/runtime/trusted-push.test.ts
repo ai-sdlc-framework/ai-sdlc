@@ -120,6 +120,34 @@ describe('trusted pipeline push (AISDLC-731)', () => {
     expect(r.stderr).toMatch(/push refused/);
   });
 
+  it('resets credential.helper and pins core.askPass, re-adding global helpers', () => {
+    const t = buildTrustedPush(
+      { mainCheckout: '/m', credentialHelpers: ['store'], askPass: '/a' },
+      ['push'],
+    );
+    const i = t.args.indexOf('credential.helper=');
+    expect(i).toBeGreaterThan(0);
+    expect(t.args[i + 2]).toBe('credential.helper=store');
+    expect(t.args).toContain('core.askPass=/a');
+    expect(buildTrustedPush({ mainCheckout: '/m' }, ['push']).args).toContain('core.askPass=');
+  });
+
+  it('does not run a planted credential.helper or core.askPass', async () => {
+    const f = fixture();
+    const marker = join(f.root, 'cred-ran');
+    script(join(f.root, 'helper'), `echo ran >> ${marker}`);
+    git(f.wt, 'config', 'credential.helper', `!${f.root}/helper`);
+    git(f.wt, 'config', 'core.askPass', `${f.root}/helper`);
+    const r = await runTrustedPush(defaultRunner, { mainCheckout: f.main, worktree: f.wt }, [
+      'push',
+      '--no-verify',
+      'origin',
+      'HEAD:refs/heads/c',
+    ]);
+    expect(r.code).toBe(0);
+    expect(existsSync(marker)).toBe(false);
+  });
+
   it('works with no remote url readable (falls back to hooks and ssh pinning only)', () => {
     const inputs = resolveTrustedPushInputs('/m', tmp());
     expect(inputs.remoteUrl).toBeNull();

@@ -12,6 +12,9 @@
  *  - `-c core.sshCommand=<operator value>`, `-c core.fsmonitor=false`,
  *    `-c protocol.ext.allow=never`: scalar keys that execute a program are pinned on the
  *    command line, which outranks every config file.
+ *  - `-c credential.helper=` resets the (multi-valued) helper list so a worktree-planted
+ *    helper never runs; the operator's GLOBAL helpers are re-added after the reset.
+ *    `-c core.askPass=<operator global value or empty>` pins the askpass program likewise.
  *  - `url.*.insteadOf` / `pushInsteadOf` are multi-valued, so they cannot be unset by
  *    `-c`. Instead the raw remote URL is pinned with a rewrite of itself, which wins
  *    git's longest-prefix match; `resolveTrustedPushInputs` verifies the effective push
@@ -37,6 +40,10 @@ export interface TrustedPushInputs {
   remoteUrl?: string | null;
   /** Operator's `core.sshCommand` (global scope), default `ssh`. */
   sshCommand?: string;
+  /** Operator's global `credential.helper` values, re-added after the reset. */
+  credentialHelpers?: string[];
+  /** Operator's global `core.askPass`, default empty. */
+  askPass?: string;
 }
 
 export interface TrustedPush {
@@ -53,6 +60,9 @@ export function buildTrustedPush(inputs: TrustedPushInputs, pushArgs: string[]):
     `core.sshCommand=${inputs.sshCommand ?? 'ssh'}`,
     'core.fsmonitor=false',
     'protocol.ext.allow=never',
+    'credential.helper=',
+    ...(inputs.credentialHelpers ?? []).map((h) => `credential.helper=${h}`),
+    `core.askPass=${inputs.askPass ?? ''}`,
   ];
   if (inputs.remoteUrl) {
     overrides.push(
@@ -95,8 +105,12 @@ export function resolveTrustedPushInputs(
     git(worktree, ['config', '--get', 'remote.origin.pushurl']) ||
     git(worktree, ['config', '--get', 'remote.origin.url']);
   const ssh = git(worktree, ['config', '--global', '--get', 'core.sshCommand']);
+  const helpers = git(worktree, ['config', '--global', '--get-all', 'credential.helper']);
+  const askPass = git(worktree, ['config', '--global', '--get', 'core.askPass']);
   const inputs: TrustedPushInputs = {
     mainCheckout,
+    ...(helpers ? { credentialHelpers: helpers.split('\n').filter(Boolean) } : {}),
+    ...(askPass ? { askPass } : {}),
     remoteUrl: raw || null,
     ...(ssh ? { sshCommand: ssh } : {}),
   };
