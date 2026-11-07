@@ -6,9 +6,9 @@
   "license": "Apache-2.0",
   "engines": {
     "node": ">=22.22.1",
-    "pnpm": ">=9"
+    "pnpm": ">=10"
   },
-  "packageManager": "pnpm@9.15.4",
+  "packageManager": "pnpm@10.34.9",
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
