@@ -458,6 +458,23 @@ describe('reenter refusals', () => {
     expect(() => reenter({ target: TASK }, deps(fail))).toThrow(/has no pull request/);
   });
 
+  it('a PR-less task takes --note into its resume slot and requeues (AISDLC-1203)', () => {
+    writeManifest(board, manifest());
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+    completeTask(board, { taskId: TASK, outcome: 'failed', workerId: 'exec-a' });
+    const none: CommandRunner = () => ({ status: 1, stdout: '', stderr: 'none' });
+    expect(() => reenter({ target: TASK }, deps(none))).toThrow(/has no pull request/);
+    expect(queued()).toEqual([]);
+    const r = reenter({ target: TASK, note: 'raise the next-step timeout' }, deps(none));
+    expect(r.kind).toBe('task-note');
+    expect(queued()).toEqual([`${TASK}.dispatch.json`]);
+    const m = JSON.parse(
+      readFileSync(path.join(board, 'queue', `${TASK}.dispatch.json`), 'utf-8'),
+    ) as DispatchManifest;
+    expect(m.resume?.note).toContain('raise the next-step timeout');
+    expect(failedFiles()).toEqual([]);
+  });
+
   it('refuses a task with no verdict, writing nothing', () => {
     expect(() => reenter({ target: '7' }, deps(gh()))).toThrow(/not in done/);
     expect(queued()).toEqual([]);

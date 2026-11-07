@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1203
 title: 'A CLI channel can attach a note to a reaped task'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 updated_date: '2026-11-07 00:00'

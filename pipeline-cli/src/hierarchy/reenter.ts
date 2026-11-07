@@ -47,7 +47,9 @@ export type ReenterResult =
       queuePath: string;
       resume: ResumeFeedback;
     }
-  | { kind: 'machine'; pr: number; state: PrState; action: string; note?: string };
+  | { kind: 'machine'; pr: number; state: PrState; action: string; note?: string }
+  /** AISDLC-1203: a task with no PR; the note is in the resume slot of a fresh queued round. */
+  | { kind: 'task-note'; taskId: string; queuePath: string; resume: ResumeFeedback };
 
 export interface ReenterInput {
   /** A PR number or a task id. */
@@ -205,8 +207,31 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
     throw new Error(`'${target}' is neither a pull request number nor a task id`);
   }
   if (pr === undefined || !Number.isSafeInteger(pr) || pr < 1) {
+    const prose = input.note?.trim();
+    if (taskIdArg && prose) {
+      // AISDLC-1203: a reaped or failed task with no PR takes the planner's note into the
+      // same resume slot the PR arms fill, and gets a fresh round.
+      const resumed = resumeDone(
+        deps.boardDir,
+        taskIdArg,
+        { note: prose, ...(input.developerRound ? { developerRound: true } : {}) },
+        {
+          resumedBy: deps.reenteredBy,
+          now,
+          allowDiagnosticOnly: true,
+          ...(deps.resolveTaskFile ? { resolveTaskFile: deps.resolveTaskFile } : {}),
+          ...(deps.resolveBaseSha ? { resolveBaseSha: deps.resolveBaseSha } : {}),
+        },
+      );
+      return {
+        kind: 'task-note',
+        taskId: taskIdArg,
+        queuePath: resumed.queuePath,
+        resume: resumed.resume,
+      };
+    }
     throw new Error(
-      `${target} has no pull request; reenter works on PRs, use \`cli-dispatch requeue\` for a PR-less failure`,
+      `${target} has no pull request; reenter works on PRs, use \`cli-dispatch requeue\` for a PR-less failure, or pass --note to attach a note and requeue a fresh round`,
     );
   }
 
