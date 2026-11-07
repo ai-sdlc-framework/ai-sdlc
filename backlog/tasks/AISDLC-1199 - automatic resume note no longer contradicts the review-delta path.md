@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1199
 title: 'Automatic resume note no longer contradicts the review-delta path'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:
