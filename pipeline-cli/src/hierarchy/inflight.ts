@@ -15,8 +15,8 @@ const MANIFEST_SUFFIX = '.dispatch.json';
 export interface InflightItem {
   taskId: string;
   workerId?: string;
-  /** Executor state the hooks module published into the heartbeat (AISDLC-1216). */
-  executorState?: string;
+  /** Phase `next-step` wrote into the heartbeat (AISDLC-1226). */
+  phase?: string;
 }
 
 /** List inflight manifests. Entries whose task id is malformed are skipped. */
@@ -29,7 +29,7 @@ export function listInflight(boardDir: string): InflightItem[] {
     const taskId = file.slice(0, -MANIFEST_SUFFIX.length);
     if (!isValidTaskId(taskId)) continue;
     const hb = readHeartbeat(boardDir, taskId);
-    items.push({ taskId, workerId: hb?.workerId, executorState: hb?.executorState });
+    items.push({ taskId, workerId: hb?.workerId, phase: hb?.phase });
   }
   return items.sort((a, b) => a.taskId.localeCompare(b.taskId));
 }

@@ -9,22 +9,70 @@
  * @module next-step/session
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type { NextStepContext } from './types.js';
 
 /** Relative path (under the project root) of the canonical heartbeat helper. */
 export const UPDATE_SESSION_STATE_LIB = 'lib/update-session-state.sh';
 
+/** Phase the pipeline reports on the claim's heartbeat (AISDLC-1226). */
+export type ClaimPhase = 'awaiting-developer' | 'awaiting-reviewers' | 'done' | 'aborted';
+
+const STEP_PHASE: Record<string, ClaimPhase> = {
+  '05-dev-running': 'awaiting-developer',
+  '07-reviewers-running': 'awaiting-reviewers',
+  done: 'done',
+  aborted: 'aborted',
+};
+
+/**
+ * AISDLC-1226: the pipeline is the single writer of progress. Refresh `inflight/<task>.state.json` with the step
+ * marker, a fresh `lastHeartbeat` and the phase (when the step implies one). A no-op when the task holds no claim
+ * heartbeat (standalone run); never throws.
+ */
+export function refreshClaimHeartbeat(
+  ctx: NextStepContext,
+  taskIdLower: string,
+  step: string,
+  phase?: ClaimPhase,
+): void {
+  try {
+    const dir = join(ctx.workDir, '.ai-sdlc', 'dispatch', 'inflight');
+    const name = readdirSync(dir).find((f) => f.toLowerCase() === `${taskIdLower}.state.json`);
+    if (!name) return;
+    const file = join(dir, name);
+    const hb = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    hb['currentStep'] = step;
+    hb.lastHeartbeat = ctx.now().toISOString();
+    const next = phase ?? STEP_PHASE[step];
+    if (next) hb.phase = next;
+    const tmp = `${file}.tmp-${process.pid}`;
+    writeFileSync(tmp, JSON.stringify(hb, null, 2) + '\n');
+    renameSync(tmp, file);
+  } catch {
+    // non-fatal by contract
+  }
+}
+
 /**
  * Write `currentStep` + `lastHeartbeat` to the session file when one exists
- * (no-op for standalone runs). Delegates to the canonical shell helper.
+ * (no-op for standalone runs). Delegates to the canonical shell helper. Also refreshes the claim heartbeat.
  */
 export async function updateSessionState(
   ctx: NextStepContext,
   taskIdLower: string,
   step: string,
 ): Promise<void> {
+  refreshClaimHeartbeat(ctx, taskIdLower, step);
   const lib = join(ctx.pluginScriptsDir, UPDATE_SESSION_STATE_LIB);
   if (!ctx.exists(lib)) return;
   if (

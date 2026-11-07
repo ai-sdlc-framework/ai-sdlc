@@ -6,6 +6,7 @@ import { ok } from '../__test-helpers/fake-runner.js';
 import {
   UPDATE_SESSION_STATE_LIB,
   checkCancelSignal,
+  refreshClaimHeartbeat,
   recordSessionPr,
   updateSessionState,
 } from './session.js';
@@ -49,19 +50,37 @@ describe('updateSessionState', () => {
   });
 });
 
-describe('claim heartbeat (AISDLC-1218)', () => {
-  it('leaves the claim heartbeat as written at claim time on a step transition', async () => {
+describe('claim heartbeat (AISDLC-1226)', () => {
+  it('refreshes the step marker, a fresh lastHeartbeat and the phase at each step boundary', async () => {
     const inflight = join(h.root, '.ai-sdlc', 'dispatch', 'inflight');
     mkdirSync(inflight, { recursive: true });
     const file = join(inflight, 'AISDLC-900.state.json');
-    const body = JSON.stringify({
-      taskId: 'AISDLC-900',
-      workerId: 'alpha',
-      lastHeartbeat: '2000-01-01T00:00:00.000Z',
-    });
-    writeFileSync(file, body);
+    writeFileSync(
+      file,
+      JSON.stringify({
+        taskId: 'AISDLC-900',
+        workerId: 'alpha',
+        lastHeartbeat: '2000-01-01T00:00:00.000Z',
+      }),
+    );
+    const expected: [string, string | undefined][] = [
+      ['05-dev-running', 'awaiting-developer'],
+      ['06-dev-done', 'awaiting-developer'],
+      ['07-reviewers-running', 'awaiting-reviewers'],
+    ];
+    for (const [step, phase] of expected) {
+      await updateSessionState(h.ctx, 'aisdlc-900', step);
+      const hb = JSON.parse(readFileSync(file, 'utf8'));
+      expect(hb).toMatchObject({ currentStep: step, workerId: 'alpha', phase });
+      expect(hb.lastHeartbeat).toBe(h.ctx.now().toISOString());
+    }
+    refreshClaimHeartbeat(h.ctx, 'aisdlc-900', 'aborted', 'aborted');
+    expect(JSON.parse(readFileSync(file, 'utf8')).phase).toBe('aborted');
+  });
+
+  it('is a no-op without a claim heartbeat', async () => {
     await updateSessionState(h.ctx, 'aisdlc-900', '05-dev-running');
-    expect(readFileSync(file, 'utf8')).toBe(body);
+    expect(existsSync(join(h.root, '.ai-sdlc', 'dispatch', 'inflight'))).toBe(false);
   });
 });
 

@@ -12,7 +12,6 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BUSY_SCRIPT,
-  PUBLISH_SCRIPT,
   LAST_REPLY_MAX_CHARS,
   RESUME_COMMAND,
   ROTATION_TTL_MS,
@@ -384,10 +383,10 @@ describe('hierarchy module: board busy predicate (AISDLC-1124)', () => {
     expect(s.next).toHaveBeenCalledTimes(1);
   });
 
-  it('BUSY_SCRIPT names a fresh heartbeat holder and ignores a stale or other one', () => {
+  it('BUSY_SCRIPT names a non-terminal claim whatever its heartbeat age, and ignores done, aborted or other holders', () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'busy-'));
     mkdirSync(path.join(dir, 'inflight'));
-    const put = (id: string, worker: string, ago: number) => {
+    const put = (id: string, worker: string, ago: number, phase?: string) => {
       writeFileSync(
         path.join(dir, 'inflight', `${id}.dispatch.json`),
         JSON.stringify({ dispatchedAt: new Date().toISOString() }),
@@ -397,40 +396,38 @@ describe('hierarchy module: board busy predicate (AISDLC-1124)', () => {
         JSON.stringify({
           workerId: worker,
           lastHeartbeat: new Date(Date.now() - ago).toISOString(),
+          ...(phase ? { phase } : {}),
         }),
       );
     };
     const run = (name: string) =>
-      JSON.parse(
-        execFileSync('node', ['-e', BUSY_SCRIPT, dir, name, String(30 * 60_000)], {
-          encoding: 'utf8',
-        }),
-      ).held;
-    put('AISDLC-1', 'w1', 60_000);
-    put('AISDLC-2', 'w2', 31 * 60_000);
+      JSON.parse(execFileSync('node', ['-e', BUSY_SCRIPT, dir, name], { encoding: 'utf8' })).held;
+    put('AISDLC-1', 'w1', 60_000, 'awaiting-developer');
+    put('AISDLC-2', 'w2', 31 * 60_000, 'awaiting-developer');
+    put('AISDLC-3', 'w3', 60_000, 'done');
+    put('AISDLC-4', 'w4', 60_000, 'aborted');
     expect(run('w1')).toBe('AISDLC-1');
-    expect(run('w2')).toBeNull();
+    expect(run('w2')).toBe('AISDLC-2');
     expect(run('w3')).toBeNull();
+    expect(run('w4')).toBeNull();
+    expect(run('w5')).toBeNull();
     expect(
       JSON.parse(
-        execFileSync('node', ['-e', BUSY_SCRIPT, '/nonexistent', 'w1', '1'], { encoding: 'utf8' }),
+        execFileSync('node', ['-e', BUSY_SCRIPT, '/nonexistent', 'w1'], { encoding: 'utf8' }),
       ).held,
     ).toBeNull();
   });
-});
 
-describe('hierarchy module: executor state on the board (AISDLC-1216)', () => {
-  function boarded() {
-    const dir = mkdtempSync(path.join(os.tmpdir(), 'pub-'));
+  it('an enqueue wake is a skip while the claim is awaiting-developer, turn idle and heartbeat stale (AISDLC-1226)', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'wake-'));
     mkdirSync(path.join(dir, 'inflight'));
     writeFileSync(path.join(dir, 'inflight', 'AISDLC-9.dispatch.json'), '{}');
-    const sf = path.join(dir, 'inflight', 'AISDLC-9.state.json');
     writeFileSync(
-      sf,
+      path.join(dir, 'inflight', 'AISDLC-9.state.json'),
       JSON.stringify({
-        taskId: 'AISDLC-9',
         workerId: 'w1',
-        lastHeartbeat: new Date().toISOString(),
+        phase: 'awaiting-developer',
+        lastHeartbeat: new Date(Date.now() - 45 * 60_000).toISOString(),
       }),
     );
     const s = setup({ name: 'w1', board: dir });
@@ -438,79 +435,14 @@ describe('hierarchy module: executor state on the board (AISDLC-1216)', () => {
       exitCode: 0,
       stdout: execFileSync(a[0], a.slice(1), { encoding: 'utf8' }),
     }));
-    const state = () => JSON.parse(readFileSync(sf, 'utf8')).executorState;
-    return { s, state, sf };
-  }
-
-  it('writes turn-running at turn.start and idle-awaiting-clear at turn.complete', async () => {
-    const { s, state, sf } = boarded();
     await s.start();
-    await s.handlers.get('turn.start')(s.$, {}, s.next);
-    expect(state()).toBe('turn-running');
-    await s.handlers.get('turn.complete')(s.$, { text: 'x' }, s.next);
-    expect(state()).toBe('idle-awaiting-clear');
-    expect(JSON.parse(readFileSync(sf, 'utf8')).workerId).toBe('w1');
-  });
-
-  it('tracks two background agents separately and ends them on task-notification turns', async () => {
-    const { s, state } = boarded();
-    await s.start();
-    const h = (n: string) => s.handlers.get(n);
-    await h('turn.start')(s.$, {}, s.next);
-    await h('session.start')(s.$, { agentId: 'a1' }, s.next);
-    await h('session.start')(s.$, { agentId: 'a2' }, s.next);
-    await h('turn.complete')(s.$, { text: 'backgrounded' }, s.next);
-    expect(state()).toBe('background-agent-running');
-    await h('turn.start')(s.$, { text: 'task-notification a2 done' }, s.next);
-    expect(state()).toBe('background-agent-running');
-    await h('turn.complete')(s.$, { text: 'x' }, s.next);
-    expect(state()).toBe('background-agent-running');
-    await h('turn.start')(s.$, { text: 'task-notification' }, s.next);
-    expect(state()).toBe('turn-running');
-    await h('turn.complete')(s.$, { text: 'x' }, s.next);
-    expect(state()).toBe('idle-awaiting-clear');
-  });
-
-  it('foreground subagents never leave the board stuck on background-agent-running', async () => {
-    const { s, state } = boarded();
-    await s.start();
-    const h = (n: string) => s.handlers.get(n);
-    await h('turn.start')(s.$, {}, s.next);
-    for (const id of ['f1', 'f2', 'f3']) {
-      await h('session.start')(s.$, { agentId: id }, s.next);
-      await h('turn.complete')(s.$, { agentId: id, text: 'done' }, s.next);
-    }
-    await h('turn.complete')(s.$, { text: 'x' }, s.next);
-    expect(state()).toBe('idle-awaiting-clear');
-  });
-
-  it('keeps background-agent-running across a non-notification parent turn (AISDLC-1225)', async () => {
-    const { s, state } = boarded();
-    await s.start();
-    const h = (n: string) => s.handlers.get(n);
-    await h('turn.start')(s.$, {}, s.next);
-    await h('session.start')(s.$, { agentId: 'g1' }, s.next);
-    await h('turn.complete')(s.$, { text: 'backgrounded' }, s.next);
-    await h('turn.start')(s.$, { text: 'dispatch status line' }, s.next);
-    await h('turn.complete')(s.$, { text: 'x' }, s.next);
-    expect(state()).toBe('background-agent-running');
-    await h('turn.complete')(s.$, { agentId: 'g1', text: 'done' }, s.next);
-    await h('turn.start')(s.$, { text: 'next' }, s.next);
-    expect(state()).toBe('turn-running');
-    await h('turn.complete')(s.$, { text: 'x' }, s.next);
-    expect(state()).toBe('idle-awaiting-clear');
-  });
-
-  it('publishes nothing without a heartbeat file, a worker name or process.run', async () => {
-    const s = setup({ name: 'w1', board: '/nonexistent' });
-    await s.start();
-    await s.handlers.get('turn.start')(s.$, {}, s.next);
-    execFileSync('node', ['-e', PUBLISH_SCRIPT, '/nonexistent', 'w1', 'turn-running']);
-    const none = setup({ omit: 'process.run' });
-    await none.start();
-    await none.handlers.get('turn.start')(none.$, {}, none.next);
-    await none.handlers.get('session.start')(none.$, { agentId: 'z' }, none.next);
-    expect(none.s?.$ ?? none.$).toBeDefined();
+    const r = await s.handlers.get('session.receive')(
+      s.$,
+      { text: env('ai-sdlc-operator-dispatch', 'enqueue AISDLC-1') },
+      vi.fn(),
+    );
+    expect(r).toEqual({ consumed: 'hierarchy:enqueue' });
+    expect(ran(s)).toEqual([]);
   });
 });
 

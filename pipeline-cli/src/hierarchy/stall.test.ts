@@ -34,9 +34,9 @@ describe('findOpenPrNumber', () => {
 
 const T0 = Date.parse('2026-11-06T10:00:00Z');
 const HOUR = 3_600_000;
-type ExecState = 'turn-running' | 'idle-awaiting-clear' | 'background-agent-running';
+type Phase = 'awaiting-developer' | 'awaiting-reviewers' | 'done' | 'aborted';
 
-describe('reapStalledClaims on executor state (AISDLC-1218)', () => {
+describe('reapStalledClaims on the pipeline progress record (AISDLC-1226)', () => {
   let dir: string;
   beforeEach(() => {
     dir = mkdtempSync(path.join(os.tmpdir(), 'stall-reap-'));
@@ -58,15 +58,15 @@ describe('reapStalledClaims on executor state (AISDLC-1218)', () => {
   });
   afterEach(() => removeFixtureDir(dir));
 
-  const hold = (executorState?: ExecState) =>
+  const hold = (phase?: Phase, lastHeartbeat = T0) =>
     writeHeartbeat(dir, {
       taskId: 'AISDLC-9',
       workerId: 'eph-1',
       workerKind: 'any',
       startedAt: new Date(T0).toISOString(),
-      lastHeartbeat: new Date(T0).toISOString(),
+      lastHeartbeat: new Date(lastHeartbeat).toISOString(),
       currentStep: '05-dev-running',
-      ...(executorState ? { executorState } : {}),
+      ...(phase ? { phase } : {}),
     } as never);
 
   const reap = (
@@ -74,65 +74,54 @@ describe('reapStalledClaims on executor state (AISDLC-1218)', () => {
     onReaped?: Parameters<typeof reapStalledClaims>[1],
   ) => reapStalledClaims({ boardDir: dir, now: () => new Date(T0 + 3 * HOUR), ...extra }, onReaped);
 
-  it('does not reap a background-agent-running claim with a 3 hour old heartbeat', async () => {
-    hold('background-agent-running');
-    expect(await reap()).toEqual([]);
+  it('spares an awaiting-developer claim whose heartbeat is 2 minutes old', async () => {
+    hold('awaiting-developer');
+    expect(await reap({ now: () => new Date(T0 + 2 * 60_000) })).toEqual([]);
   });
 
-  it('does not reap a turn-running claim or one with no published state', async () => {
-    hold('turn-running');
-    expect(await reap()).toEqual([]);
-    hold();
-    expect(await reap()).toEqual([]);
-  });
-
-  it('reaps an idle-awaiting-clear claim with cause idle-with-claim', async () => {
-    hold('idle-awaiting-clear');
+  it('reaps a done claim with no verdict and no live next-step, cause idle-with-claim', async () => {
+    hold('done', T0 + 3 * HOUR - 1_000);
     const reaped: { cause?: string; lastStep?: string; heartbeatAgeMs?: number }[] = [];
     const r = await reap({}, (v) => reaped.push(v));
     expect(r[0]).toMatchObject({ reason: 'idle-with-claim', requeue: { status: 'requeued' } });
     expect(reaped[0]).toMatchObject({
       cause: 'idle-with-claim',
       lastStep: '05-dev-running',
-      heartbeatAgeMs: 3 * HOUR,
+      heartbeatAgeMs: 1_000,
     });
     expect(existsSync(path.join(dir, 'queue', 'AISDLC-9.dispatch.json'))).toBe(true);
     expect(existsSync(path.join(dir, 'inflight', 'AISDLC-9.dispatch.json'))).toBe(false);
   });
 
-  it('spares an idle claim whose state publish is younger than the floor (AISDLC-1225)', async () => {
-    hold('idle-awaiting-clear');
-    const spared: { reason: string }[] = [];
-    const fresh = {
-      now: () => new Date(T0 + 5_000),
-      onSpared: (o: { reason: string }) => spared.push(o),
-    };
-    expect(await reap(fresh)).toEqual([]);
-    expect(spared[0]?.reason).toContain('less than one tick');
-    // the same claim, once past the floor, is reaped (AISDLC-1218 AC-2 still holds)
-    expect(await reap({ now: () => new Date(T0 + 60_000) })).toHaveLength(1);
+  it('reaps an aborted claim with no verdict', async () => {
+    hold('aborted', T0 + 3 * HOUR);
+    expect(await reap()).toHaveLength(1);
   });
 
-  it('swallows a throwing onSpared on the floor path', async () => {
-    hold('idle-awaiting-clear');
-    const r = await reap({
-      now: () => new Date(T0 + 1_000),
-      onSpared: () => {
-        throw new Error('x');
-      },
-    });
-    expect(r).toEqual([]);
+  it('reaps a claim whose heartbeat is older than stallMs, default and configured', async () => {
+    hold('awaiting-reviewers', T0);
+    expect(await reap({ now: () => new Date(T0 + 19 * 60_000) })).toEqual([]);
+    expect(await reap({ now: () => new Date(T0 + 21 * 60_000) })).toHaveLength(1);
+  });
+
+  it('honours a configured stallMs', async () => {
+    hold('awaiting-developer', T0);
+    expect(await reap({ now: () => new Date(T0 + 5 * 60_000), stallMs: 60_000 })).toHaveLength(1);
+  });
+
+  it('reaps a claim with no heartbeat file once the manifest is older than stallMs', async () => {
+    expect(await reap()).toHaveLength(1);
   });
 
   it('skips an idle claim whose verdict is in done/', async () => {
-    hold('idle-awaiting-clear');
+    hold('done');
     mkdirSync(path.join(dir, 'done'), { recursive: true });
     writeFileSync(path.join(dir, 'done', 'AISDLC-9.verdict.json'), '{}');
     expect(await reap()).toEqual([]);
   });
 
   it('spares an idle executor with a live next-step and records why', async () => {
-    hold('idle-awaiting-clear');
+    hold('done');
     const spared: { reason: string }[] = [];
     expect(await reap({ hasLiveNextStep: () => true, onSpared: (o) => spared.push(o) })).toEqual(
       [],
@@ -149,7 +138,7 @@ describe('reapStalledClaims on executor state (AISDLC-1218)', () => {
       },
     ],
   ])('reaps when the live next-step probe %s', async (_n, probe) => {
-    hold('idle-awaiting-clear');
+    hold('done');
     expect(await reap({ hasLiveNextStep: probe })).toHaveLength(1);
   });
 });

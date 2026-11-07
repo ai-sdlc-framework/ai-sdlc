@@ -56,7 +56,7 @@ import {
   type ReviewerReport,
 } from './review-finalize.js';
 import { advanceStagedRound, STAGED_REPORT_SHAPE } from './staged-round.js';
-import { checkCancelSignal, updateSessionState } from './session.js';
+import { checkCancelSignal, refreshClaimHeartbeat, updateSessionState } from './session.js';
 import { leasePreflightStep, preSignRebase, shipTask, type PreSignRebaseResult } from './ship.js';
 import type { DeveloperReturn } from '../types.js';
 import type { LeasePreflight } from '../hierarchy/lease-preflight.js';
@@ -316,6 +316,7 @@ export async function failRun(
     state.result = stop;
     delete state.pending;
     writeState(ctx.statePath, state);
+    refreshClaimHeartbeat(ctx, state.taskIdLower, 'aborted', 'aborted');
   }
   return stop;
 }

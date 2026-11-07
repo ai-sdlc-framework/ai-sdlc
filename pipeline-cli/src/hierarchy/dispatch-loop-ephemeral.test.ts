@@ -73,7 +73,7 @@ function claim(
   taskId: string,
   worker: string,
   ageMs: number,
-  executorState: 'turn-running' | 'idle-awaiting-clear' = 'turn-running',
+  phase: 'awaiting-developer' | 'done' = 'awaiting-developer',
 ): void {
   queue(taskId);
   mkdirSync(path.join(board, 'inflight'), { recursive: true });
@@ -89,7 +89,7 @@ function claim(
     currentStep: '05-dev-running',
     startedAt: at,
     lastHeartbeat: at,
-    executorState,
+    phase,
   });
 }
 
@@ -173,15 +173,15 @@ describe('ephemeral executors in the tick', () => {
 
   it('downs an executor idle with its claim and re-queues the task (AISDLC-1218)', async () => {
     writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71')] });
-    claim('AISDLC-71', 'ai-sdlc-executor-aisdlc-71', 31 * MIN, 'idle-awaiting-clear');
+    claim('AISDLC-71', 'ai-sdlc-executor-aisdlc-71', 31 * MIN, 'done');
     const r = await runDispatchTick(deps({ stall: {} }));
     expect(downs).toEqual(['ai-sdlc-executor-aisdlc-71']);
     expect(r.stalled?.[0]?.clear?.status).toBe('downed');
   });
 
-  it('keeps a running executor whatever its heartbeat age', async () => {
+  it('keeps a running executor with a fresh heartbeat', async () => {
     writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71')] });
-    claim('AISDLC-71', 'ai-sdlc-executor-aisdlc-71', 3 * 60 * MIN);
+    claim('AISDLC-71', 'ai-sdlc-executor-aisdlc-71', 2 * MIN);
     await runDispatchTick(deps({ stall: {} }));
     expect(downs).toEqual([]);
   });
