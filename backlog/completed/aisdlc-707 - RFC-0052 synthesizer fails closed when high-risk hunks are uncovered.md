@@ -2,7 +2,7 @@
 id: AISDLC-707
 title: >-
   RFC-0052 synthesizer fails closed when high-risk hunks are uncovered
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-03'
 labels:
