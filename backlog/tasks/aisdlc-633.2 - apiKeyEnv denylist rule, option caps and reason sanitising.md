@@ -17,13 +17,14 @@ references:
   - reference/src/judgment/openai-compatible-provider.ts
   - docs/operations/judgment-layer.md
 priority: low
-dispatchable: false
+dispatchable: true
+dispatchableReason: 'Unparked 2026-11-07 by operator ruling (decision rubric, planner session).'
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
+Unparked 2026-11-07 by operator ruling (decision rubric, planner session).
 
 Security-reviewer findings parked from AISDLC-633.1 (PR #1149), operator-approved
 for filing 2026-10-02. They close before any adopter configures a real
@@ -34,6 +35,10 @@ for filing 2026-10-02. They close before any adopter configures a real
 - Hermetic tests: the provider takes `env` through its `deps` argument, never
   `process.env`.
 - Keep the allowlist validator as the single place options are checked.
+
+## Ruling 2026-11-07 (operator, decision rubric)
+
+Option A, go live. The judgment layer shipped in October but AISDLC-641 never ran for want of a live key; the operator provisioned the key on 2026-11-07. The three code blockers (redaction hardening 630.3/630.4, capability-liveness doctor 644) have value without Jev and were parked only by the 2026-10-06 batch. Counter-argument considered: merging them without validation risks dead code; rejected because redaction already runs in the reference package today. 633.2 and 636.1 ride along; 635.1 still waits on 641's shadow data.
 
 ## Scope
 1. **`apiKeyEnv` rule:** the fixed denylist misses `GH_TOKEN`, `NODE_AUTH_TOKEN`,

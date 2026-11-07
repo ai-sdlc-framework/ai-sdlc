@@ -2,7 +2,7 @@
 id: AISDLC-663.4
 title: >-
   RFC-0051 follow-up (security): run the governance hook from a trusted root, guard git config code paths, extend default blockedPaths
-status: To Do
+status: Superseded
 assignee: []
 created_date: '2026-10-01'
 labels:
@@ -19,13 +19,20 @@ references:
   - ai-sdlc-plugin/plugin.json
 priority: low
 dispatchable: false
+dispatchableReason: 'Superseded 2026-11-07 by operator ruling (decision rubric, planner session); folded into AISDLC-731.'
 ---
+
+## Resolution
+
+Folded into AISDLC-731 by operator ruling 2026-11-07. §1 (governance hook executes from a trusted root) carried into 731; §2 done or obsolete since AISDLC-720 (untrusted runs already block `.claude/**` and `ai-sdlc-plugin/hooks/**`, `enforce-blocked-actions.js:393`); §3 (Bash text matcher on `git config`) rejected under DEC-0267 / AISDLC-1014; the force-push protection item is done (`main` shows `force:false`).
+
+## Ruling 2026-11-07 (operator, decision rubric)
+
+Superseded as part of the AISDLC-731 scoping ruling (untrusted runs only; push-time `core.hooksPath` override and a trusted hook root, no command-text matcher). The full rationale is recorded on AISDLC-731.
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
-
 Follow-up filed from executor and reviewer reports on the parent task, approved by the
 operator on 2026-10-01. The parent's conventions apply (strict TypeScript, ESM,
 hermetic tests, no writes under `.ai-sdlc/` by the developer agent, no edits to RFC
