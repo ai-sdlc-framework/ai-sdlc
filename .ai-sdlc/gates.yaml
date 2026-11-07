@@ -89,6 +89,12 @@ gates:
     owner: security
     property: code PRs carry a valid or carried-forward review verdict record (refs/ai-sdlc/verdicts/<head>); posts ai-sdlc/attestation
     decision: DEC-0375
+  - id: gate-job:release-content
+    surface: pr-ready-job
+    origin: AISDLC-717
+    owner: engineering
+    property: every path changed on the release-please branch is a release artifact, re-checked on every push
+    decision: DEC-0048
   - id: gate-job:dependency-review-gate
     surface: pr-ready-job
     origin: AISDLC-712.1
