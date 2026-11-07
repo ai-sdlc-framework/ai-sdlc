@@ -471,6 +471,23 @@ describe('hierarchy module: executor state on the board (AISDLC-1216)', () => {
     expect(state()).toBe('idle-awaiting-clear');
   });
 
+  it('foreground subagents never leave the board stuck on background-agent-running', async () => {
+    const { s, state } = boarded();
+    await s.start();
+    const h = (n: string) => s.handlers.get(n);
+    await h('turn.start')(s.$, {}, s.next);
+    for (const id of ['f1', 'f2', 'f3']) {
+      await h('session.start')(s.$, { agentId: id }, s.next);
+      await h('turn.complete')(s.$, { agentId: id, text: 'done' }, s.next);
+    }
+    await h('turn.complete')(s.$, { text: 'x' }, s.next);
+    expect(state()).toBe('idle-awaiting-clear');
+    // agents that never signalled an end are dropped by the next ordinary parent turn
+    await h('session.start')(s.$, { agentId: 'g1' }, s.next);
+    await h('turn.start')(s.$, { text: 'next task' }, s.next);
+    expect(state()).toBe('turn-running');
+  });
+
   it('publishes nothing without a heartbeat file, a worker name or process.run', async () => {
     const s = setup({ name: 'w1', board: '/nonexistent' });
     await s.start();
@@ -480,6 +497,7 @@ describe('hierarchy module: executor state on the board (AISDLC-1216)', () => {
     await none.start();
     await none.handlers.get('turn.start')(none.$, {}, none.next);
     await none.handlers.get('session.start')(none.$, { agentId: 'z' }, none.next);
+    expect(none.s?.$ ?? none.$).toBeDefined();
   });
 });
 

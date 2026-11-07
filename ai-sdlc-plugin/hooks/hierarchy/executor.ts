@@ -523,6 +523,11 @@ function endBackgroundAgent(state: ExecutorState, e: Any): void {
   const agents = state.agents;
   if (!agents?.length) return;
   const text = String(e?.text ?? e?.prompt ?? '');
+  if (!/task-notification/i.test(text)) {
+    // A fresh parent turn that is not a notification: foreground subagents never signal an end, so none is live.
+    agents.length = 0;
+    return;
+  }
   const named = agents.find((id) => text.includes(id));
   agents.splice(named ? agents.indexOf(named) : 0, 1);
 }
@@ -632,7 +637,16 @@ export async function executorTurnComplete(
     submit: (a) => $.prompt.submit(a),
     runProcess: (a) => $.process.run([a.command, ...a.args]),
   };
-  if (e?.agentId) return next(e);
+  if (e?.agentId) {
+    // A subagent's own turn.complete is its end: a foreground agent must not linger in the tracked set.
+    const agents = state.agents;
+    const i = agents?.indexOf(String(e.agentId)) ?? -1;
+    if (agents && i >= 0) {
+      agents.splice(i, 1);
+      await publishExecutorState(p, state);
+    }
+    return next(e);
+  }
   state.turnInFlight = false;
   const reply = String(e?.text ?? e?.reply ?? '');
   if (reply) state.lastReply = reply;
