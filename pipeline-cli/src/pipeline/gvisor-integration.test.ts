@@ -8,10 +8,11 @@
  * runsc and sets the flag, so the run is visible there.
  */
 import { describe, it, expect } from 'vitest';
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_SANDBOX_CONFIG,
   GVisorSandboxDriver,
@@ -21,6 +22,19 @@ import {
 } from './sandbox-runner.js';
 import { FIXTURE_BENIGN } from './ucvg-threat-fixtures.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
+
+/**
+ * Build the base64 gzip tarball of the repo-root `ucvg-demo/` directory, the
+ * same `tar -C <dir> -cz . | base64` the fixture-demo mode of cli/ucvg.ts
+ * uses. The sandbox runs under --network=none, so the test stages this
+ * fixture offline instead of cloning upstreamMainRef.
+ */
+export function buildUcvgDemoFixtureB64(): string {
+  const dir = resolve(dirname(fileURLToPath(import.meta.url)), '../../../ucvg-demo');
+  return execFileSync('tar', ['-C', dir, '-cz', '.'], {
+    maxBuffer: 32 * 1024 * 1024,
+  }).toString('base64');
+}
 
 const ENABLED =
   process.env['AI_SDLC_GVISOR_INTEGRATION_TESTS'] === '1' &&
@@ -52,13 +66,13 @@ describe('GVisorSandboxDriver differential test (integration)', () => {
     'returns the same result shape as the Docker driver',
     async () => {
       const tmpDir = mkdtempSync(join(tmpdir(), 'gvisor-integration-'));
+      const prevFixture = process.env['SANDBOX_FIXTURE_B64'];
+      process.env['SANDBOX_FIXTURE_B64'] = buildUcvgDemoFixtureB64();
       try {
         const result = await runSandbox({
           prNumber: FIXTURE_BENIGN.prNumber,
           prDiff: FIXTURE_BENIGN.prDiff,
-          upstreamMainRef:
-            process.env['AI_SDLC_TEST_UPSTREAM_REF'] ??
-            'https://github.com/ai-sdlc-framework/ai-sdlc-test-fixture.git',
+          upstreamMainRef: 'https://github.com/ai-sdlc-framework/ai-sdlc-test-fixture.git',
           config: {
             ...DEFAULT_SANDBOX_CONFIG,
             sandboxDriver: 'gvisor',
@@ -78,9 +92,25 @@ describe('GVisorSandboxDriver differential test (integration)', () => {
           );
         }
       } finally {
+        if (prevFixture === undefined) delete process.env['SANDBOX_FIXTURE_B64'];
+        else process.env['SANDBOX_FIXTURE_B64'] = prevFixture;
         removeFixtureDir(tmpDir);
       }
     },
     240_000,
   );
+});
+
+describe('buildUcvgDemoFixtureB64', () => {
+  it('produces a tarball that extracts to ucvg-demo/package.json', () => {
+    const out = mkdtempSync(join(tmpdir(), 'ucvg-fixture-'));
+    try {
+      const buf = Buffer.from(buildUcvgDemoFixtureB64(), 'base64');
+      execFileSync('tar', ['-C', out, '-xz'], { input: buf });
+      expect(existsSync(join(out, 'package.json'))).toBe(true);
+      expect(JSON.parse(readFileSync(join(out, 'package.json'), 'utf8'))).toBeTypeOf('object');
+    } finally {
+      removeFixtureDir(out);
+    }
+  });
 });
