@@ -51,7 +51,7 @@ export function refreshClaimHeartbeat(
     if (!name) return;
     const file = join(dir, name);
     const hb = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-    hb.currentStep = step;
+    hb['currentStep'] = step;
     hb.lastHeartbeat = ctx.now().toISOString();
     const next = phase ?? STEP_PHASE[step];
     if (next) hb.phase = next;
