@@ -774,7 +774,6 @@ async function checkStalls(
         boardDir: deps.boardDir,
         now: deps.now,
         clear: stallClear,
-        requeue: deps.operational.has('requeue') ? stall.requeue : undefined,
       },
       (v) => {
         state.handled.push(`failed:${v.taskId}:${v.completedAt}`);

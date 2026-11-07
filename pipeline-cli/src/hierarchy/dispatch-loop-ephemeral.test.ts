@@ -8,7 +8,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { writeHeartbeat, writeVerdict } from '../dispatch/board.js';
 import { enqueueTasks } from '../dispatch/enqueue.js';
-import { requeueFailed } from '../dispatch/requeue.js';
 import { readLoopState, runDispatchTick, type LoopDeps } from './dispatch-loop.js';
 import { readRosterChecked, writeRoster } from './roster.js';
 import type { RosterEntry } from './types.js';
@@ -166,22 +165,11 @@ describe('ephemeral executors in the tick', () => {
     expect(downs).toEqual([]);
   });
 
-  it('downs a crashed executor (no heartbeat for 30 minutes) and requeues its manifest', async () => {
+  it('downs a crashed executor (no heartbeat for 30 minutes) without re-queueing it (DEC-0392)', async () => {
     writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71')] });
     claim('AISDLC-71', 'ai-sdlc-executor-aisdlc-71', 31 * MIN);
-    const requeued: string[] = [];
-    const r = await runDispatchTick(
-      deps({
-        stall: {
-          requeue: (id) => {
-            requeued.push(id);
-            requeueFailed(board, id, {});
-          },
-        },
-      }),
-    );
+    const r = await runDispatchTick(deps({ stall: {} }));
     expect(downs).toEqual(['ai-sdlc-executor-aisdlc-71']);
-    expect(requeued).toEqual(['AISDLC-71']);
     expect(r.stalled?.[0]?.clear?.status).toBe('downed');
   });
 

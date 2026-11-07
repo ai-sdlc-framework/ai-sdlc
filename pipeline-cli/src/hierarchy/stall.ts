@@ -5,9 +5,8 @@
  * threshold, or when its holder is idle on a question. An executor whose pane exits is
  * handled at once by `pane-exited` (AISDLC-1217), not here. A stalled claim moves to `failed/` with cause
  * `stale-worker`, the holder is cleared (which restarts its executor loop) and
- * the task re-enters (`reenter` when a pull request exists, else a requeue) with a note naming the step it stalled at and
- * any pull request that already exists. This is operational: the planner is
- * never asked.
+ * the task is NOT returned to `queue/` (DEC-0392, AISDLC-1219): a restart from zero loses the half-done
+ * round, so the failure record stays and the planner routing line names the task and the diagnostic.
  */
 
 import { existsSync } from 'node:fs';
@@ -44,7 +43,8 @@ export interface StalledReport {
   /** Pull request that already existed for the task, when one was found. */
   prNumber?: number;
   clear?: { status: string; reason?: string };
-  requeue: { done: boolean; reason?: string };
+  /** Path of the `failed/` diagnostic the reap wrote (relative to the board). */
+  diagnostic: string;
 }
 
 /** Collaborators of {@link reapStalledClaims}. */
@@ -69,11 +69,6 @@ export interface StallDeps {
   onSpared?: (o: { taskId: string; worker: string; ageMs: number; reason: string }) => void;
   /** Clears (and so restarts) one executor; undefined when the grant is missing. */
   clear?: (o: { executor: string; taskId: string }) => Promise<{ status: string; reason?: string }>;
-  /**
-   * Sends the reaped task back to an executor; undefined when the grant is missing. With
-   * a pull request it is a `reenter` carrying the step note; without one, a plain requeue.
-   */
-  requeue?: (taskId: string, note: string, pr?: number) => void;
   /** Open pull request number of the task, when one exists. */
   findPr?: (taskId: string) => number | undefined;
 }
@@ -149,16 +144,6 @@ export function paneHasLiveNextStep(run: CommandRunner, panePid: number): boolea
     level = next;
   }
   return false;
-}
-
-/** Build the resume note: the stalled step and the existing pull request. */
-export function stallResumeNote(step: string, prNumber?: number): string {
-  return (
-    `The previous executor stalled at step ${step}. ` +
-    (prNumber !== undefined
-      ? `Pull request #${prNumber} already exists; continue from it and do not re-run the developer.`
-      : 'No pull request exists yet; start from the task branch if it has commits.')
-  );
 }
 
 /**
@@ -246,7 +231,7 @@ export async function reapStalledClaims(
       ageMs,
       step,
       reason,
-      requeue: { done: false },
+      diagnostic: `failed/${taskId}.diagnostic.json`,
     };
     if (worker !== 'unknown' && deps.clear) {
       try {
@@ -265,19 +250,6 @@ export async function reapStalledClaims(
       pr = undefined;
     }
     if (pr !== undefined) report.prNumber = pr;
-    if (deps.requeue) {
-      try {
-        deps.requeue(taskId, stallResumeNote(step, pr), pr);
-        report.requeue = { done: true };
-      } catch (err) {
-        report.requeue = {
-          done: false,
-          reason: err instanceof Error ? err.message : String(err),
-        };
-      }
-    } else {
-      report.requeue = { done: false, reason: 'requeue is not granted' };
-    }
     reports.push(report);
   }
   return reports;
@@ -288,7 +260,8 @@ export function formatStall(r: StalledReport): string {
   const min = Math.round(r.ageMs / 60000);
   return (
     `Reaped stalled ${r.taskId} (worker ${r.worker}, heartbeat ${min} min old, step ${r.step})` +
-    (r.requeue.done ? ', re-queued' : `, not re-queued (${r.requeue.reason ?? 'unknown'})`)
+    (r.prNumber !== undefined ? `, pull request #${r.prNumber}` : '') +
+    `; not re-queued (DEC-0392), diagnostic ${r.diagnostic}`
   );
 }
 

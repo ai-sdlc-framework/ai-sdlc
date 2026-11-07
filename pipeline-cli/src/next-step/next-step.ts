@@ -121,6 +121,15 @@ export interface NextStepOutput {
   exitCode: number;
 }
 
+/** AISDLC-1219 (DEC-0392): minutes a developer round may take before the next round is an iterate. */
+export const DEFAULT_DEVELOPER_BUDGET_MINUTES = 45;
+
+/** The round budget in minutes: `AI_SDLC_DEVELOPER_BUDGET_MINUTES` when a positive number, else the default. */
+export function developerBudgetMinutes(env: NodeJS.ProcessEnv): number {
+  const n = Number(env.AI_SDLC_DEVELOPER_BUDGET_MINUTES);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_DEVELOPER_BUDGET_MINUTES;
+}
+
 /** A fixable reviewer-report slip may be corrected this many times per run. */
 export const MAX_REPORT_RETRIES = 2;
 
@@ -534,9 +543,43 @@ class Machine {
     await updateSessionState(this.ctx, state.taskIdLower, '05-dev-running');
     const instruction = buildSpawnDeveloper(this.ctx, state, promptFile, model);
     state.phase = 'awaiting-developer';
+    state.developerSpawnedAt = this.ctx.now().toISOString();
     state.pending = instruction;
     this.save(state);
     return instruction;
+  }
+
+  /**
+   * AISDLC-1219 (DEC-0392): a developer round longer than its budget is an `iterate-needed` verdict
+   * note carrying the elapsed minutes. The next round reuses this worktree; nothing restarts from zero.
+   */
+  private async overBudgetIterate(state: NextStepState): Promise<Instruction | null> {
+    const { ctx, deps } = this;
+    if (!state.developerSpawnedAt || state.iteration >= state.maxIterations) return null;
+    const elapsedMin = Math.round(
+      (ctx.now().getTime() - Date.parse(state.developerSpawnedAt)) / 60000,
+    );
+    const budget = developerBudgetMinutes(ctx.env);
+    if (!(elapsedMin > budget)) return null;
+    const note = `iterate-needed: the developer round took ${elapsedMin} minutes, over the ${budget} minute budget (DEC-0392). Continue in the existing worktree ${state.worktreePath}; its commits and files stay, do not start over.`;
+    ctx.logger.warn(note);
+    state.iteration += 1;
+    state.postRebaseReviewed = false;
+    const built = await deps.buildDeveloperPrompt({
+      taskId: state.taskId,
+      task: state.task,
+      branch: state.branch,
+      worktreePath: state.worktreePath,
+      iteration: state.iteration,
+      reviewerFeedback: note,
+      sourceKind: 'backlog',
+    });
+    const file = writeRunFile(ctx, `developer-prompt-${state.iteration}.md`, built.prompt);
+    return this.spawnDeveloper(
+      state,
+      file,
+      built.model && built.modelArm !== 'default' ? built.model : undefined,
+    );
   }
 
   private async onDeveloper(state: NextStepState, text: string): Promise<Instruction> {
@@ -575,6 +618,8 @@ class Machine {
     if (gate.kind === 'fix') return this.spawnDeveloper(state, gate.file, gate.model);
     state.developer = gate.developer;
     this.recordDeveloperResponse(state);
+    const overBudget = await this.overBudgetIterate(state);
+    if (overBudget) return overBudget;
     if (state.developerRoundPending) {
       // AISDLC-1053: the ordered round ran. Clear the flag so a later resume of this manifest
       // takes the normal path, then pick the review from the new patch id (delta, or full).
