@@ -429,9 +429,13 @@ export async function finalizeReview(
   const verdict = await aggregateRound(verdicts, review.harnessNote);
   await attachVerdictRecordDraft(ctx, state, verdict, tiers);
   // A staged round (RFC-0052) covers correctness through its synthesizer, not a named reviewer.
-  const missing = review.staged ? [] : await enforceReviewerCoverage(ctx, state, verdict);
+  const sets: CoverageSets = { ran: [], required: [] };
+  const missing = review.staged ? [] : await enforceReviewerCoverage(ctx, state, verdict, sets);
   if (missing.length > 0)
-    warnings.push(`coverage short: missing ${missing.join(', ')}; not approved`);
+    warnings.push(
+      `coverage short: ran ${sets.ran.join(', ') || 'none'}; required ${sets.required.join(', ')}; ` +
+        `missing ${missing.join(', ')}; not approved`,
+    );
   if (review.staged?.verdict) verdict.stagedAdvisory = review.staged.verdict;
   writeRunFile(ctx, 'aggregate.json', JSON.stringify(verdict, null, 2));
   return { ok: true, verdict, warnings };
@@ -484,10 +488,18 @@ export async function aggregateRound(
  * roles, so the round iterates instead of shipping a verdict the gate will refuse.
  * Returns the missing roles (empty when covered).
  */
+export interface CoverageSets {
+  /** Reviewers whose verdicts were in the aggregate. */
+  ran: string[];
+  /** Reviewers the coverage rule requires for the touched paths. */
+  required: string[];
+}
+
 export async function enforceReviewerCoverage(
   ctx: NextStepContext,
   state: NextStepState,
   verdict: AggregatedVerdict,
+  sets?: CoverageSets,
 ): Promise<string[]> {
   // A round with no reviewers selected (empty diff) is approved by construction.
   if (!verdict.approved || verdict.verdicts.length === 0) return [];
@@ -501,6 +513,10 @@ export async function enforceReviewerCoverage(
   );
   const missing = draft.coverage.required.filter((r) => !have.has(role(r)));
   if (missing.length === 0) return [];
+  if (sets) {
+    sets.ran = verdict.verdicts.map((v) => v.agentId);
+    sets.required = [...draft.coverage.required];
+  }
   const message = `required reviewers did not approve this head: missing ${missing.join(', ')}; run them before approval`;
   verdict.approved = false;
   verdict.decision = 'CHANGES_REQUESTED';

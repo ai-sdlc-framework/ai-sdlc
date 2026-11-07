@@ -37,7 +37,7 @@ references:
 - [ ] #2 b is tested
 `;
 
-function makeRepo(withTask = true): { repo: string; artifacts: string } {
+function makeRepo(withTask: boolean | 'completed' = true): { repo: string; artifacts: string } {
   const repo = realpathSync(mkdtempSync(join(tmpdir(), 'staged-cli-')));
   roots.push(repo);
   const git = (...a: string[]) => execFileSync('git', a, { cwd: repo, stdio: 'ignore' });
@@ -47,7 +47,12 @@ function makeRepo(withTask = true): { repo: string; artifacts: string } {
   git('config', 'commit.gpgsign', 'false');
   mkdirSync(join(repo, 'src'));
   mkdirSync(join(repo, 'backlog', 'tasks'), { recursive: true });
-  if (withTask) writeFileSync(join(repo, 'backlog', 'tasks', `aisdlc-676 - staged.md`), TASK_FILE);
+  if (withTask === 'completed') {
+    mkdirSync(join(repo, 'backlog', 'completed'), { recursive: true });
+    writeFileSync(join(repo, 'backlog', 'completed', 'aisdlc-676 - staged.md'), TASK_FILE);
+  } else if (withTask) {
+    writeFileSync(join(repo, 'backlog', 'tasks', `aisdlc-676 - staged.md`), TASK_FILE);
+  }
   writeFileSync(join(repo, 'src', 'a.ts'), 'export const a = 1;\n');
   writeFileSync(join(repo, 'src', 'a.test.ts'), "test('a', () => {});\n");
   git('add', '-A');
@@ -241,6 +246,12 @@ describe('cli-staged-review', () => {
       status: 'fallback',
       fallbackSet: 'three',
     });
+  });
+
+  it('reads a task file that is under backlog/completed/ (AISDLC-1229)', async () => {
+    const f = makeRepo('completed');
+    const r = await run(prepArgs(f));
+    expect(r).not.toMatchObject({ reason: 'task-unreadable' });
   });
 
   it('answers fallback when the task cannot be read', async () => {

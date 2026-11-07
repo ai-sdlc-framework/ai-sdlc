@@ -102,7 +102,7 @@ node pipeline-cli/bin/cli-staged-review.mjs prepare --task-id <TASK-ID> --source
 node pipeline-cli/bin/cli-staged-review.mjs status --task-id <TASK-ID>
 ```
 
-Phases in order: `prepare` (risk map, baseline, planner prompt), the planner agent, `plan` (validate, one retry, then the code-built plan), `execute` (probes, evidence), `synth-prompt`, the synthesizer agent, `finalize` (validate, ground, write the verdict and leaf manifest). When the staged review cannot review a change, `prepare` or `finalize` answers `ok: false` with `fallbackSet: "three"` and the reasons, and the existing reviewer set runs. The same record is kept in `<artifacts>/_staged-review/<task-id>/dispatch.json`.
+Phases in order: `prepare` (risk map, baseline, planner prompt), the planner agent, `plan` (validate, one retry, then the code-built plan), `execute` (probes, evidence), `synth-prompt`, the synthesizer agent, `finalize` (validate, ground, write the verdict and leaf manifest). When the staged review cannot review a change, `prepare` or `finalize` answers `ok: false` with `fallbackSet: "three"` and the reasons, and the existing reviewer set runs. The staged mode builds the classifier's coverage-rule set (`computeRequiredReviewers`: two reviewers, or three for a trust-chain path), and a fallback reviews with that same set (AISDLC-1229). The same record is kept in `<artifacts>/_staged-review/<task-id>/dispatch.json`.
 
 ## Shadow comparison
 

@@ -1,3 +1,4 @@
+import { computeRequiredReviewers } from '../attestation/review-coverage.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, writeFileSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -266,48 +267,55 @@ describe('Step 7 — buildReviewPrompts', () => {
     }
   });
 
-  it('reviews with the three-reviewer set when the staged set is in force, since this path cannot run the pipeline', async () => {
-    const prevEnv = process.env.AI_SDLC_REVIEWER_SET;
-    process.env.AI_SDLC_REVIEWER_SET = 'staged';
-    const chunks: string[] = [];
-    const savedErr = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((c: string | Uint8Array) => {
-      chunks.push(typeof c === 'string' ? c : Buffer.from(c).toString('utf8'));
-      return true;
-    }) as typeof process.stderr.write;
-    try {
-      const fake = new FakeRunner()
-        .on(
-          /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
-          ok('--- diff content ---\n'),
-        )
-        .on(
-          /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
-          ok('a.ts\0b.ts\0'),
-        );
-      const r = await buildReviewPrompts({
-        taskId: 'AISDLC-1',
-        task,
-        branch: 'b',
-        worktreePath: tmp,
-        workDir: tmp,
-        runner: fake.toRunner(),
-        codexAvailable: false,
-        sourceKind: 'backlog',
-      });
-      // Never the standalone security reviewer alone: code and test review are kept.
-      expect(r.prompts.map((p) => p.reviewer)).toEqual([
-        'code-reviewer',
-        'test-reviewer',
-        'security-reviewer',
-      ]);
-      expect(chunks.join('')).toContain('driven by /ai-sdlc execute');
-    } finally {
-      process.stderr.write = savedErr;
-      if (prevEnv === undefined) delete process.env.AI_SDLC_REVIEWER_SET;
-      else process.env.AI_SDLC_REVIEWER_SET = prevEnv;
-    }
-  });
+  it.each([
+    ['no trust-chain path', ['a.ts', 'b.ts'], ['correctness-reviewer', 'security-reviewer']],
+    [
+      'a trust-chain path',
+      ['.github/workflows/ci.yml', 'b.ts'],
+      ['code-reviewer', 'test-reviewer', 'security-reviewer'],
+    ],
+  ])(
+    'reviews with the coverage-rule set when the staged set is in force: %s (AISDLC-1229)',
+    async (_label, paths, expected) => {
+      const prevEnv = process.env.AI_SDLC_REVIEWER_SET;
+      process.env.AI_SDLC_REVIEWER_SET = 'staged';
+      const chunks: string[] = [];
+      const savedErr = process.stderr.write.bind(process.stderr);
+      process.stderr.write = ((c: string | Uint8Array) => {
+        chunks.push(typeof c === 'string' ? c : Buffer.from(c).toString('utf8'));
+        return true;
+      }) as typeof process.stderr.write;
+      try {
+        const fake = new FakeRunner()
+          .on(
+            /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+            ok('--- diff content ---\n'),
+          )
+          .on(
+            /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv origin\/main\.\.\.HEAD$/,
+            ok(`${paths.join('\0')}\0`),
+          );
+        const r = await buildReviewPrompts({
+          taskId: 'AISDLC-1',
+          task,
+          branch: 'b',
+          worktreePath: tmp,
+          workDir: tmp,
+          runner: fake.toRunner(),
+          codexAvailable: false,
+          sourceKind: 'backlog',
+        });
+        const required = computeRequiredReviewers({ changedPaths: paths }).required;
+        expect(r.prompts.map((p) => p.reviewer)).toEqual(expected);
+        expect(r.prompts.map((p) => p.reviewer)).toEqual(required);
+        expect(chunks.join('')).toContain('driven by /ai-sdlc execute');
+      } finally {
+        process.stderr.write = savedErr;
+        if (prevEnv === undefined) delete process.env.AI_SDLC_REVIEWER_SET;
+        else process.env.AI_SDLC_REVIEWER_SET = prevEnv;
+      }
+    },
+  );
 
   // AISDLC-617 AC-4 — default reviewerSet is unchanged (three) even with an
   // unrelated config file present.

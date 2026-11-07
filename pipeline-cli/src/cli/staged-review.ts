@@ -160,7 +160,7 @@ export function buildStagedReviewCli(
 
         let criteria: string[] = [];
         let references: string[] = [];
-        const taskFile = findTaskFile(taskId, workDir);
+        const taskFile = findTaskFile(taskId, workDir, { includeCompleted: true });
         if (taskFile) {
           try {
             const task = parseTaskFile(taskFile);
