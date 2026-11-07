@@ -22,7 +22,7 @@ describe('Provenance tracking', () => {
   it('hashes prompt text when provided', () => {
     const prov = createPipelineProvenance({ promptText: 'fix the bug' });
     expect(prov.promptHash).not.toBe('no-prompt');
-    expect(prov.promptHash).toHaveLength(16);
+    expect(prov.promptHash).toHaveLength(64);
   });
 
   it('creates deterministic prompt hashes', () => {

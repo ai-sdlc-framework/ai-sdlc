@@ -27,10 +27,10 @@ implementedBy:
 
 **Document type:** Normative
 **Status:** Ready for Review v0.3 — operator OQ re-walkthrough complete 2026-05-21 with **full rigor rubric** (problem statement → industry research → 3-4 options → recommendation + counter-argument per OQ) after the 2026-05-16 first-pass walkthrough was flagged as too shallow. Refinements over v0.2: (OQ-1) scale-escalation heuristic codified — swap JSONL→sqlite at >100K entries OR p95 read >250ms; (OQ-2) per-consumer `staleVectorPolicy` API parameter ADDED on top of per-org default — RFC-0009 Eτ drift consumer pins fail-loud at API site to preserve historical-trajectory fidelity; (OQ-3) split — strict no-op cross-PROVIDER, cross-VERSION-within-provider delegates to OQ-2 (resolves logical conflict with v0.2); (OQ-4) per-adapter `defaultGracePeriodDays` declaration + catalog dedup via per-Decision-key counter (emit at 1/7/30/60/89-day milestones, NOT per-load); (OQ-5) explicit `spec/schemas/` placement for both `embedding-adapter.v1.schema.json` AND `vector-store-entry.v1.schema.json`; (OQ-6) per-consumer `consumerLabel` dimension on cost-tracker (enables 'drift cost vs PPA cost' attribution without re-instrumentation); (OQ-7) per-adapter `billingModel: 'pay-per-token' \| 'subscription-quota'` + cost-tracker `unified-cost-report` view aggregating across substrates. Operator-impacting events (stale-vector, cross-provider, deprecation, cost-budget) **route through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md)** — pipeline never halts. §15.1 config schema updated to reflect refinements. Implementation phase tasks AISDLC-337..340 amended; AISDLC-341 unchanged.
-**Lifecycle:** Ready for Review
+**Lifecycle:** Implemented
 **Author:** Dominique Legault (with Claude assist)
 **Created:** 2026-05-03
-**Updated:** 2026-05-16
+**Updated:** 2026-05-27
 **Target Spec Version:** v1alpha1
 
 ---

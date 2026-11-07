@@ -7,7 +7,7 @@ Regression suite for the AI-SDLC Definition-of-Ready evaluator
 
 ```
 spec/dor-corpus/
-  ready/                              # 30 fixtures — Stage A admit
+  ready/                              # 32 fixtures — Stage A admit
   needs-clarification/
     gate-1-untestable-ac/             # 5 fixtures — block on Gate 1
     gate-2-markers/                   # 5 fixtures — block on Gate 2
@@ -16,7 +16,7 @@ spec/dor-corpus/
     gate-5-no-surface/                # 5 fixtures — block on Gate 5
     gate-6-no-done-state/             # 5 fixtures — Gate 6 is fully Stage B; Stage A captures the soft-heuristic outputs
     gate-7-invisible-deps/            # 5 fixtures — block on Gate 7
-  edge-cases/                         # 10 fixtures — auto-pass shortcuts, vacuous passes, multi-gate failures
+  edge-cases/                         # 11 fixtures — auto-pass shortcuts, vacuous passes, multi-gate failures
 ```
 
 Each fixture is a markdown body file plus an `<name>.expected.json`

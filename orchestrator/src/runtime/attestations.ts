@@ -5,9 +5,14 @@
  * before pushing. CI then re-ran the same reviewers via `Post Review Results` —
  * burning tokens on duplicate work.
  *
- * This module provides the primitives `/ai-sdlc execute` and the
- * `verify-attestation.yml` workflow share to skip CI review when a valid local
- * attestation exists. The shape is a DSSE envelope (in-toto / SLSA pattern)
+ * HISTORICAL (RFC-0061, DEC-0284): signing and verification were removed. The
+ * merge gate now reads a verdict record in `refs/ai-sdlc/verdicts/*`, and the
+ * v3 to v6 envelope versions are refused. What follows describes the retired
+ * design; the hash helpers below are still used for content hashing.
+ *
+ * This module provided the primitives `/ai-sdlc execute` and the
+ * `verify-attestation.yml` workflow shared to skip CI review when a valid local
+ * attestation existed. The shape is a DSSE envelope (in-toto / SLSA pattern)
  * carrying a versioned predicate that commits to the commit SHA, diff hash,
  * policy hash, and reviewer agent file hashes — so CI can reject envelopes
  * after force-push, after a policy edit, or after a reviewer agent change.

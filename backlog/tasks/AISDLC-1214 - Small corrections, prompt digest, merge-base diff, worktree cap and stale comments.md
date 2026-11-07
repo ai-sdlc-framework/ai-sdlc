@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1214
 title: 'Small corrections: prompt digest, merge-base diff, worktree cap and stale comments'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:
