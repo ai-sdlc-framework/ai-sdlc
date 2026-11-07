@@ -16,6 +16,7 @@ import {
   allowedAuthors,
   gatherFacts,
   gatherMainHealth,
+  LIVE_CLAIM_NOTE,
   prBelongsToTask,
   listLanding,
   normaliseCheck,
@@ -1425,5 +1426,38 @@ describe('route-to-planner is not a terminal state (AISDLC-1156, DEC-0291)', () 
   it('honours stuckAfterMinutes from the options', () => {
     run('2026-11-02T10:00:00.000Z', { stuckAfterMinutes: 5 });
     expect(run('2026-11-02T10:06:00.000Z', { stuckAfterMinutes: 5 }).stalls).toHaveLength(1);
+  });
+});
+
+describe('failing check on a live claim (AISDLC-1202)', () => {
+  const red = [{ name: 'ai-sdlc/pr-ready', conclusion: 'failure' as const, summary: 'boom' }];
+
+  it('does not count or act on a failure while the task is inflight with a live claim', () => {
+    const execute = vi.fn(() => ({ ran: true }));
+    const errs = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const report = reconcile([taskPr({ checks: red, manifestState: 'inflight' })], {
+      boardDir: board,
+      execute,
+      now: fixedNow,
+    });
+    errs.mockRestore();
+    expect(execute).not.toHaveBeenCalled();
+    expect(report.acted).toHaveLength(0);
+    expect(report.skippedFailures).toEqual([
+      { pr: 10, taskId: 'AISDLC-1', reason: LIVE_CLAIM_NOTE },
+    ]);
+    expect(readLanding(board, 10)?.history.filter((h) => h.action === 'reenter')).toHaveLength(0);
+  });
+
+  it('counts the same failure once the claim is released', () => {
+    const execute = vi.fn(() => ({ ran: true }));
+    const report = reconcile([taskPr({ checks: red })], {
+      boardDir: board,
+      execute,
+      now: fixedNow,
+    });
+    expect(report.skippedFailures).toHaveLength(0);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(readLanding(board, 10)?.history.filter((h) => h.action === 'reenter')).toHaveLength(1);
   });
 });
