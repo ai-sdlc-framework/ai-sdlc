@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1222
 title: 'Enable staged review shadow on main: add .ai-sdlc/review-config.yaml with reviewerSet staged (starts the RFC-0052 50-PR window)'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-07'
 labels:
