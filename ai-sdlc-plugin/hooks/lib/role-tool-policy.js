@@ -473,17 +473,25 @@ function isMergeCli(token) {
   return /^cli-merge-if-eligible(?:\.(?:mjs|js|cjs|ts))?$/.test(token.split('/').pop());
 }
 
-/** True when the tokens after the merge CLI select the release source kind. */
+const NON_RELEASE_KINDS = new Set(['backlog', 'gh-issue', 'decisions-sync', 'docs', 'deps']);
+
+/**
+ * True unless every source-kind option after the merge CLI (pair and `=` forms,
+ * `--source-kind`, `--sourceKind`, `--source_kind`) carries a literal value from the
+ * non-release set, and at least one is visible. A value hidden by a variable
+ * (normalized to nothing) or a missing option fails closed (AISDLC-717).
+ */
 function selectsReleaseKind(tokens, from) {
+  let seen = false;
   for (let i = from; i < tokens.length; i += 1) {
-    const t = tokens[i];
-    if (t === '--source-kind') {
-      if (tokens[i + 1] === 'release') return true;
-    } else if (t === '--source-kind=release') {
-      return true;
-    }
+    const t = tokens[i].toLowerCase();
+    const m = /^--source[-_]?kind(?:=(.*))?$/.exec(t);
+    if (!m) continue;
+    const value = m[1] !== undefined ? m[1] : tokens[i + 1]?.toLowerCase();
+    if (value === undefined || !NON_RELEASE_KINDS.has(value)) return true;
+    seen = true;
   }
-  return false;
+  return !seen;
 }
 
 /**
@@ -502,13 +510,11 @@ function releaseMergeIn(command) {
     const at = invocationPoint(tokens, 'cli-merge-if-eligible', isMergeCli);
     if (at === null) continue;
     if (at === 'indirect') {
-      if (tokens.some((t) => t.includes('release'))) {
-        return 'an indirect invocation (sh -c, eval, xargs or node -e)';
-      }
-      continue;
+      return 'an indirect invocation (sh -c, eval, xargs or node -e)';
     }
     const from = typeof at === 'object' ? at.lenientAt : at;
-    if (selectsReleaseKind(tokens, from)) return '--source-kind release';
+    if (selectsReleaseKind(tokens, from))
+      return '--source-kind release (or no literal non-release kind)';
   }
   return null;
 }

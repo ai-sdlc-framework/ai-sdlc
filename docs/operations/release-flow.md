@@ -106,10 +106,12 @@ Landing a release is a planner or dispatch decision (DEC-0042). The role check i
 in the PreToolUse role tool policy (`ai-sdlc-plugin/hooks/lib/role-tool-policy.js`, AISDLC-717):
 
 - The executor default rule `release-merge` refuses a Bash command that INVOKES
-  `cli-merge-if-eligible` with `--source-kind release` (or `--source-kind=release`). Detection is
-  the same as the executor `cli-decisions` rule: command position, node path form, runners; `sh -c`,
-  `eval`, `xargs` and `node -e` wrappers fail closed; a `grep` or `cat` that only mentions the
-  command passes.
+  `cli-merge-if-eligible` unless every source-kind option (`--source-kind`, `--sourceKind`,
+  `--source_kind`, pair or `=` form) carries a literal non-release value (`backlog`, `gh-issue`,
+  `decisions-sync`, `docs`, `deps`). A hidden value (`$K`), a missing value or no source-kind option
+  fails closed. Detection is the same as the executor `cli-decisions` rule: command position, node
+  path form, runners; any `sh -c`, `eval`, `xargs` or `node -e` wrapper that mentions the command is
+  refused; a `grep` or `cat` that only mentions the command passes.
 - The refusal says: releases are run by the planner or dispatch session; escalate to your dispatch
   session. It never sends the agent to the operator.
 - Planner and dispatch roles have no default rules, so planner-run releases work with nothing

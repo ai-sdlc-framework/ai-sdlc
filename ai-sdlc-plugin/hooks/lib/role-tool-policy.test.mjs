@@ -1116,6 +1116,15 @@ describe('release-merge rule (AISDLC-717)', () => {
     xargs: 'echo 12 | xargs node cli-merge-if-eligible.mjs --source-kind release',
     obfuscated: 'node cli-merge-if${X}-eligible.mjs 12 --source-kind release',
     'unrecognised wrapper': 'mywrap node cli-merge-if-eligible.mjs 12 --source-kind release',
+    'camel case option': 'node cli-merge-if-eligible.mjs 12 --sourceKind release --arm',
+    'snake case option': 'node cli-merge-if-eligible.mjs 12 --source_kind=RELEASE',
+    'variable value': 'node cli-merge-if-eligible.mjs 12 --source-kind "$K" --arm',
+    'variable then literal release':
+      'node cli-merge-if-eligible.mjs 12 --source-kind backlog --sourceKind release',
+    'missing value': 'node cli-merge-if-eligible.mjs 12 --source-kind',
+    'no source kind': 'node cli-merge-if-eligible.mjs 12',
+    'indirect without the word release':
+      'K=release; bash -c "node pipeline-cli/bin/cli-merge-if-eligible.mjs 13 --source-kind $K --arm"',
   };
   for (const [label, command] of Object.entries(blocked)) {
     it(`blocks: ${label}`, () => {
@@ -1125,7 +1134,7 @@ describe('release-merge rule (AISDLC-717)', () => {
 
   const allowed = {
     backlog: 'node pipeline-cli/bin/cli-merge-if-eligible.mjs 12 --source-kind backlog --arm',
-    'no source kind': 'node cli-merge-if-eligible.mjs 12',
+    'literal docs kind': 'node cli-merge-if-eligible.mjs 12 --sourceKind=docs',
     grep: 'grep -rn "cli-merge-if-eligible 12 --source-kind release" docs',
     cat: 'cat docs/cli-merge-if-eligible.md --source-kind release',
     echo: 'echo cli-merge-if-eligible --source-kind release',
@@ -1133,7 +1142,6 @@ describe('release-merge rule (AISDLC-717)', () => {
       'node cli-merge-if-eligible.mjs 12 --source-kind backlog && echo release',
     unrelated: 'git status',
     empty: '',
-    'indirect without release': 'bash -c "node cli-merge-if-eligible.mjs 12 --source-kind backlog"',
   };
   for (const [label, command] of Object.entries(allowed)) {
     it(`allows: ${label}`, () => {
