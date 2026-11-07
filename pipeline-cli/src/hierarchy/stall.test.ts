@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ensureBoardDirs, writeHeartbeat, writeManifest } from '../dispatch/board.js';
 
 import {
-  DEFAULT_STALL_GRACE_MS,
   DEFAULT_STALL_STALE_MS,
   findOpenPrNumber,
   paneHasLiveNextStep,
@@ -20,27 +19,22 @@ import type { CommandRunner } from './types.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 describe('stallThresholdsFromEnv', () => {
-  it('defaults to 30 and 10 minutes', () => {
-    expect(stallThresholdsFromEnv({})).toEqual({
-      staleMs: DEFAULT_STALL_STALE_MS,
-      graceMs: DEFAULT_STALL_GRACE_MS,
-    });
+  it('defaults to 30 minutes', () => {
+    expect(stallThresholdsFromEnv({})).toEqual({ staleMs: DEFAULT_STALL_STALE_MS });
     expect(DEFAULT_STALL_STALE_MS).toBe(30 * 60_000);
-    expect(DEFAULT_STALL_GRACE_MS).toBe(10 * 60_000);
   });
   it('uses the supplied defaults when the environment is empty', () => {
-    expect(stallThresholdsFromEnv({}, { staleMs: 7, graceMs: 3 })).toEqual({
-      staleMs: 7,
-      graceMs: 3,
-    });
+    expect(stallThresholdsFromEnv({}, { staleMs: 7 })).toEqual({ staleMs: 7 });
   });
   it('reads positive numbers and ignores junk', () => {
     expect(
       stallThresholdsFromEnv({
         AI_SDLC_DISPATCH_STALE_MS: '1000',
-        AI_SDLC_DISPATCH_STALL_GRACE_MS: 'abc',
       }),
-    ).toEqual({ staleMs: 1000, graceMs: DEFAULT_STALL_GRACE_MS });
+    ).toEqual({ staleMs: 1000 });
+    expect(stallThresholdsFromEnv({ AI_SDLC_DISPATCH_STALE_MS: 'abc' })).toEqual({
+      staleMs: DEFAULT_STALL_STALE_MS,
+    });
   });
 });
 
@@ -120,7 +114,6 @@ describe('reapStalledClaims thresholds (AISDLC-1103)', () => {
       boardDir: dir,
       now: () => new Date(T0 + ageMin * MIN),
       staleMs: 30 * MIN,
-      graceMs: 10 * MIN,
       liveness: state ? () => new Map([['eph-1', state]]) : undefined,
     });
 
@@ -135,11 +128,9 @@ describe('reapStalledClaims thresholds (AISDLC-1103)', () => {
   });
 
   it.each(['gone', 'unknown'] as const)(
-    'reaps a %s holder after the grace period as holder-not-busy',
+    'leaves a %s holder to pane-exited inside the stale period (AISDLC-1217)',
     async (state) => {
-      const r = await reap(11, state);
-      expect(r).toHaveLength(1);
-      expect(r[0]?.reason).toBe('holder-not-busy');
+      expect(await reap(11, state)).toEqual([]);
     },
   );
 
@@ -185,7 +176,6 @@ describe('reapStalledClaims live next-step (AISDLC-1198)', () => {
       boardDir: dir,
       now: () => new Date(T0 + 40 * MIN),
       staleMs: 30 * MIN,
-      graceMs: 10 * MIN,
       hasLiveNextStep: live,
       onSpared: (o) => spared.push(o),
     });

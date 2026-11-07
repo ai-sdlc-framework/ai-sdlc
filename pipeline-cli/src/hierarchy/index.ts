@@ -173,6 +173,13 @@ export {
   type OperationalPolicy,
 } from './operational.js';
 export {
+  EXECUTOR_EXITED_CAUSE,
+  hierarchyPaneExited,
+  installPaneExitHook,
+  removePaneExitHook,
+  type PaneExitResult,
+} from './pane-exit.js';
+export {
   hierarchySpawn,
   reapOrphanExecutorSessions,
   type SpawnOptions,
@@ -294,7 +301,6 @@ export {
 } from './validate.js';
 
 export {
-  DEFAULT_STALL_GRACE_MS,
   DEFAULT_STALL_STALE_MS,
   endsWithQuestion,
   findOpenPrNumber,

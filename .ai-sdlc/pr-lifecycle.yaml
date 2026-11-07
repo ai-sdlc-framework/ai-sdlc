@@ -25,7 +25,6 @@ spec:
     timerIdleMs: 900000
   stall:
     staleMs: 1800000
-    graceMs: 600000
   clear:
     handshakeCeilingMs: 30000
   loopGuard:

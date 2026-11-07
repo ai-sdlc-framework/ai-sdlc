@@ -1074,12 +1074,12 @@ describe('stall check (AISDLC-826)', () => {
     });
   });
 
-  it('reaps a gone holder with no verdict once the grace has passed', async () => {
+  it('leaves a gone holder alone inside the stale period (AISDLC-1217)', async () => {
     claim('AISDLC-71', 'executor-alpha', 11 * MIN);
     states.set('executor-alpha', 'gone');
     const r = await runDispatchTick(stallDeps());
-    expect(r.stalled![0]!.reason).toBe('holder-not-busy');
-    expect(cleared).toHaveLength(1);
+    expect(r.stalled ?? []).toEqual([]);
+    expect(cleared).toHaveLength(0);
   });
 
   it('leaves an idle holder alone inside the grace', async () => {
