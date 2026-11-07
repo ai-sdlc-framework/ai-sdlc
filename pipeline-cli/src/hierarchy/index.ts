@@ -301,13 +301,10 @@ export {
 } from './validate.js';
 
 export {
-  DEFAULT_STALL_STALE_MS,
-  endsWithQuestion,
+  IDLE_WITH_CLAIM_CAUSE,
   findOpenPrNumber,
   paneHasLiveNextStep,
   reapStalledClaims,
-  STALE_WORKER_CAUSE,
-  stallThresholdsFromEnv,
   type StalledReport,
 } from './stall.js';
 export {

@@ -365,7 +365,7 @@ Supervisor moves:  inflight/AISDLC-305.dispatch.json → done/AISDLC-305.dispatc
 Conductor polls:   sees done/AISDLC-305.verdict.json → triggers reviewer fan-out
 ```
 
-**Heartbeat** — Workers update `inflight/<id>.state.json` every 60s with `{lastHeartbeat, currentStep, pid}`. Supervisor's stale-detector sweeps `inflight/` every 5 min; any worker with `lastHeartbeat > 35 min ago` is presumed dead, manifest is moved to `failed/` with diagnostic `{cause: "stale-heartbeat"}`, PID is `kill -TERM`ed for cleanup. This is the supervisor-side equivalent of the Anthropic 600s watchdog — but our threshold is 35 min, which comfortably accommodates the longest observed local `pnpm test` (~12 min).
+**Heartbeat** — `inflight/<id>.state.json` is written once at claim with `{lastHeartbeat, currentStep, pid}`, and the executor hooks module adds `executorState` (`turn-running`, `idle-awaiting-clear` or `background-agent-running`, AISDLC-1216). The dispatch tick's stall check no longer reads heartbeat age (the 30 minute `staleMs` of OQ-3 is removed, DEC-0392, AISDLC-1218): a claim is reaped only when its holder is `idle-awaiting-clear` with no verdict (cause `idle-with-claim`, requeued), and a dead holder is released at once by the `pane-exited` hook (AISDLC-1217). A step longer than 30 minutes is therefore never reaped while the executor is running.
 
 ### 4.4 Environment isolation
 

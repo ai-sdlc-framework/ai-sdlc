@@ -69,7 +69,12 @@ function queue(taskId: string): void {
   });
 }
 
-function claim(taskId: string, worker: string, ageMs: number): void {
+function claim(
+  taskId: string,
+  worker: string,
+  ageMs: number,
+  executorState: 'turn-running' | 'idle-awaiting-clear' = 'turn-running',
+): void {
   queue(taskId);
   mkdirSync(path.join(board, 'inflight'), { recursive: true });
   renameSync(
@@ -84,6 +89,7 @@ function claim(taskId: string, worker: string, ageMs: number): void {
     currentStep: '05-dev-running',
     startedAt: at,
     lastHeartbeat: at,
+    executorState,
   });
 }
 
@@ -165,17 +171,17 @@ describe('ephemeral executors in the tick', () => {
     expect(downs).toEqual([]);
   });
 
-  it('downs a crashed executor (no heartbeat for 30 minutes) without re-queueing it (DEC-0392)', async () => {
+  it('downs an executor idle with its claim and re-queues the task (AISDLC-1218)', async () => {
     writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71')] });
-    claim('AISDLC-71', 'ai-sdlc-executor-aisdlc-71', 31 * MIN);
+    claim('AISDLC-71', 'ai-sdlc-executor-aisdlc-71', 31 * MIN, 'idle-awaiting-clear');
     const r = await runDispatchTick(deps({ stall: {} }));
     expect(downs).toEqual(['ai-sdlc-executor-aisdlc-71']);
     expect(r.stalled?.[0]?.clear?.status).toBe('downed');
   });
 
-  it('keeps an executor with a fresh heartbeat', async () => {
+  it('keeps a running executor whatever its heartbeat age', async () => {
     writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71')] });
-    claim('AISDLC-71', 'ai-sdlc-executor-aisdlc-71', 2 * MIN);
+    claim('AISDLC-71', 'ai-sdlc-executor-aisdlc-71', 3 * 60 * MIN);
     await runDispatchTick(deps({ stall: {} }));
     expect(downs).toEqual([]);
   });

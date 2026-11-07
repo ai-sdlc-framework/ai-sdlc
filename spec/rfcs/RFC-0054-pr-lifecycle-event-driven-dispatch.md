@@ -850,9 +850,6 @@ spec:
   reconcile:
     timerOpenMs: 60000                # while any task or docs PR is open
     timerIdleMs: 900000
-  stall:
-    staleMs: 1800000                  # AISDLC-826 defaults, moved here
-    graceMs: 600000
   loopGuard:
     maxSameHeadActions: 1             # OQ-3: the second identical (action, headSha) parks
   flipPreconditions:

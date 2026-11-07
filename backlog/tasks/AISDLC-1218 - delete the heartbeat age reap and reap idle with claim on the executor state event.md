@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1218
 title: 'Delete the heartbeat-age reap; reap idle-with-claim on the executor state event'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-07'
 labels:

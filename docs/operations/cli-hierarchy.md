@@ -339,11 +339,12 @@ the board is held.
 
 ### A reaped claim is never restarted from zero (AISDLC-1219, DEC-0392)
 
-The stall reap (heartbeat past `staleMs`, or a holder idle on a claim past the grace) writes the `failed/<id>.diagnostic.json`
-record (cause `stale-worker`) and clears the holder, but it does not move the task back to `queue/`. A fresh executor
-starting the developer over in the same worktree lost half-done work (AISDLC-1209 lost 31 minutes). The planner routing
-line names the task and the diagnostic (`Reaped stalled <id> ... not re-queued (DEC-0392), diagnostic failed/<id>.diagnostic.json`).
-The planner decides: `cli-dispatch requeue` (still limited by `DEFAULT_REQUEUE_RETRY_LIMIT`) or `cli-reenter` on the existing pull request.
+No claim is reaped by heartbeat age (AISDLC-1218, DEC-0392): a step longer than 30 minutes used to be failed while the
+executor was working (AISDLC-1209). The executor publishes `executorState` to the claim (AISDLC-1216), and the stall
+reap fires only for `idle-awaiting-clear` with no verdict in `done/` or `failed/`. It writes the
+`failed/<id>.diagnostic.json` record (cause `idle-with-claim`), clears the holder and sends the task back through
+`requeueFailed` (still limited by `DEFAULT_REQUEUE_RETRY_LIMIT`; a refusal leaves the failure record and the progress line says
+`not re-queued`). A claim in `turn-running` or `background-agent-running` is never reaped.
 A step that can hang owns its own budget: see the developer round budget in the execute command.
 
 ### Every failed verdict reaches a terminal state (AISDLC-1156, DEC-0291)
@@ -377,9 +378,8 @@ the session is still live, and a second call for the same session does nothing. 
 
 ### Stall thresholds (AISDLC-1103)
 
-The stall reaper uses one threshold for every worker, roster or ephemeral. `staleMs`
-(default 30 minutes) applies whatever the session state: a heartbeat older than it is reaped as `stale-heartbeat`, so a
-busy developer pass is never reaped before 30 minutes. An `idle` holder is not reaped early (AISDLC-1124).
+The stall reaper has no threshold (AISDLC-1218, DEC-0392): `staleMs`, `AI_SDLC_DISPATCH_STALE_MS` and the `stall` block of
+`pr-lifecycle.yaml` are removed. It reads the claim's `executorState` only, for every worker, roster or ephemeral.
 There is no grace for a dead holder: `spawn` installs a tmux `pane-exited` hook that runs
 `cli-hierarchy pane-exited <session>` (AISDLC-1217, DEC-0392). It writes a `failed/` diagnostic with
 `cause: executor-exited`, returns the claim to `queue/`, clears the heartbeat and drops the roster entry; a
@@ -1229,20 +1229,16 @@ pending check turns green later. The tick result carries `landed` (`landed`, `re
 `error`). Without the grant the tick makes no arm or squash call.
 
 **Stall check (AISDLC-826).** Every tick also checks each inflight claim once. The
-pipeline refreshes the claim's heartbeat (`inflight/<task>.state.json`, `lastHeartbeat` and
-`currentStep`) on every `next-step` transition, so a live executor is never silent for
-longer than one step. A claim is stalled when its heartbeat is older than the stale
-threshold (default 30 minutes, `AI_SDLC_DISPATCH_STALE_MS`), or when its holder session is
-idle on a question, with no verdict in `done/` or `failed/`. A
-stalled claim moves to `failed/` with `cause: stale-worker`, `lastStep` and
-`heartbeatAgeMs`; the holder is cleared (which restarts its executor loop with
-`/ai-sdlc:executor`) and the task is sent back with a note naming the step it stalled at
-and any existing pull request number (`cli-dispatch reenter <pr> --note` when a PR exists,
-so no developer re-runs; a plain `requeue` when none does).
-The tick result carries `stalled` (`taskId`, `worker`, `ageMs`, `step`) and a progress line
+claim's `executorState` (`turn-running`, `idle-awaiting-clear` or
+`background-agent-running`, written by the executor hooks module, AISDLC-1216) is the only input; heartbeat age is
+not read (AISDLC-1218, DEC-0392). A claim is stalled when its holder is
+`idle-awaiting-clear` and there is no verdict in `done/` or `failed/`. It moves to `failed/` with
+`cause: idle-with-claim`, `lastStep` and `heartbeatAgeMs` (informational); the holder is cleared (which restarts its
+executor loop with `/ai-sdlc:executor`) and the task goes back to `queue/` through `requeueFailed`. An idle executor
+with a live `next-step` process (a backgrounded verification) is spared.
+The tick result carries `stalled` (`taskId`, `worker`, `ageMs`, `step`, `requeue`) and a progress line
 per reap. This is operational: the planner is not asked. Clearing needs
-`clear-executor-context` and the re-queue needs `requeue`; the playbook treats both
-`stale-worker` and `stale-heartbeat` failures as re-queue-with-resume-note shapes.
+`clear-executor-context`.
 
 **PRs needing a human (AISDLC-888).** Every tick lists each open PR whose title contains
 `[needs-human-attention]`, or whose `done/` verdict is `iterate-needed` with the iteration
@@ -2610,9 +2606,9 @@ the roster gives the planner no route to it, and the dispatch session may not me
 into its pane. An executor therefore never waits on a question. When a step cannot proceed, it
 writes the exact refusal and the options into the verdict notes, reports `failed` or
 `iterate-needed` with `cli-dispatch complete`, releases nothing by force, and stops; the dispatch
-tick routes that verdict to the planner. The stall check backs this up: an executor that is idle
-with a question as its last output is reaped on the next tick (reason `holder-asked-question`),
-without waiting for the idle grace.
+tick routes that verdict to the planner. The stall check backs this up: an executor that is
+`idle-awaiting-clear` with the claim and no verdict is reaped on the next tick (cause `idle-with-claim`,
+AISDLC-1218, DEC-0392), whether or not it asked a question.
 
 ## The operator-dispatch loop
 
