@@ -59,6 +59,7 @@ import {
 import { budgetStatus, formatBudget, type BudgetStatus } from './budget.js';
 import { dynamicExecutors } from './ephemeral-tick.js';
 import { executorCap, formatExecutorCap, type ExecutorCap } from './executor-cap.js';
+import { formatOpenPrs, openPrState, type OpenPrState } from './open-pr-limit.js';
 import { readRotateRequests } from './rotate-request.js';
 import { resolveThresholds } from './thresholds.js';
 import type { HierarchyDeps, HierarchyRole, RosterEntry } from './types.js';
@@ -119,6 +120,8 @@ export interface StatusResult {
   budget?: BudgetStatus;
   /** Spawn cap: min of executors.max and the pacer allowance (AISDLC-1076). */
   executorCap?: ExecutorCap;
+  /** Open task PRs against the limit that holds new tasks (AISDLC-1189). */
+  openPrs?: OpenPrState;
   /** Dispatchable tasks on no brief and not on the board (AISDLC-930); absent when none. */
   unbriefed?: string[];
   /** Tasks parked in `blocked/` with the reason (AISDLC-1043); absent when none. */
@@ -405,6 +408,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     contextThresholds: thresholdsByRole,
     ...(budgetNow ? { budget: budgetNow } : {}),
     executorCap: capNow,
+    openPrs: openPrState(deps.boardDir, deps.env),
     ...(unbriefed.length > 0 ? { unbriefed } : {}),
     ...(blocked.length > 0 ? { blocked } : {}),
   };
@@ -438,6 +442,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
   const budgetLine = [
     ...(result.budget ? [formatBudget(result.budget)] : []),
     ...(result.executorCap ? [formatExecutorCap(result.executorCap)] : []),
+    ...(result.openPrs ? [formatOpenPrs(result.openPrs)] : []),
   ];
   const unbriefed = result.unbriefed?.length
     ? [

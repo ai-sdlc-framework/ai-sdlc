@@ -1298,7 +1298,7 @@ questions, the operator answers them, a brief goes to dispatch, an executor open
 lands.
 
 ```bash
-cli-hierarchy demo --scenario pipeline-cli/demo/scenarios/home-page.json --out demo-out
+cli-hierarchy demo --scenario <file> --out demo-out
 cli-hierarchy demo run --scenario <file> --out <dir>
 cli-hierarchy demo cut --cast <dir>/hierarchy.cast --beats <dir>/beats.json --out <dir>/hierarchy.cut.cast
 cli-hierarchy demo render --cast <dir>/hierarchy.cut.cast --out <dir>
@@ -1314,8 +1314,10 @@ answer, rationale }`, `answer` being one of the option ids), `brief` (`{ tasks: 
 
 **Scenario tasks are reserved.** The task a scenario names is held out of every brief until the
 demo run consumes it (the run is what lands it). When a scenario's task has landed by another path,
-retire the scenario in the same PR; the loader test fails until you do. The current scenario is
-`home-page.json` (AISDLC-1106), consumed by ai-sdlc.io (`shorts/scripts/render-demo.mjs`).
+retire the scenario in the same PR; the loader test fails until you do. No scenario ships at present: `home-page.json` was retired because no open `To Do` task was
+free of every brief and queue. Add one under `pipeline-cli/demo/scenarios/` when a reservable task
+exists; the loader test checks every file there. The test fixture is
+`pipeline-cli/src/hierarchy/fixtures/demo-scenario.json`.
 
 **Stages.**
 
@@ -1712,13 +1714,29 @@ session; `unknown` means it is open but absent from the registry. `inflightTask`
 task the session's heartbeat holds; an executor with `idle` and no `inflightTask` is ready
 to claim. `board.queued` of 0 with all executors idle means the queue is drained.
 
+## Land and repair before new tasks (AISDLC-1189, DEC-0373)
+
+Each dispatch tick, on a fresh GitHub read, runs in this order before any executor is spawned:
+landing (`landEligible`), then one in-tick `cli-dispatch reconcile` pass that queues repairs, then
+the spawn step. A repair queued by that pass is spawned in the same tick, ahead of brief entries.
+The in-tick pass and `reconcile --watch` never run a pass at once: both take
+`<board>/reconcile.lock` (stale after 10 minutes), and the watch skips a pass while the tick holds it.
+
+New tasks wait while open task PRs are at the limit; repair entries are still claimed. The limit
+resolves `AI_SDLC_OPEN_PR_LIMIT`, then `<board>/config.json` `{ "executors": { "openPrLimit": N } }`,
+then `executors.max`; an invalid value falls through to the next source. Landing records with
+`landed` or `closedUnlanded`, and non-task kinds (docs, decisions-sync, deps), do not count. When
+entries are held the tick logs a reason line naming the open PRs, and `status` prints
+`OPEN PRS <n> of limit <m>`.
+
 ## Claim order and reprioritize (AISDLC-904)
 
 A worker claims the eligible queue entry that sorts first by: `wave` ascending (absent is 0),
 then `priority` ascending (any finite number; an absent priority sorts last), then enqueue time
 (file mtime, oldest first). Inside one priority band the order is first-in-first-out, so a late
 critical task waits behind everything filed before it unless its priority is lowered. A resume
-manifest has no special rank. `peek --order` prints the eligible entries in exactly this order,
+(repair) manifest sorts ahead of brief entries because resuming clears its `wave`; it has no other
+special rank. `peek --order` prints the eligible entries in exactly this order,
 each with `wave`, `priority` and `dispatchedAt`:
 
 ```bash

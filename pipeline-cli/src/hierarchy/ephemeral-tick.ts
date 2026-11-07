@@ -8,6 +8,7 @@
  */
 
 import { collectVerdicts, peekQueueOrder } from '../dispatch/board.js';
+import { openPrHoldReason } from './open-pr-limit.js';
 import { readRosterChecked } from './roster.js';
 import type { RosterEntry } from './types.js';
 import { isSpawnedExecutorNameOf } from './validate.js';
@@ -25,6 +26,8 @@ export interface EphemeralDeps {
   reapOrphans?: () => string[];
   /** Maximum number of live dynamic executors, given how many are live now (the load headroom counts them). */
   cap: (live?: number) => number;
+  /** Open task PRs and their limit (AISDLC-1189); absent means no limit. */
+  openPrs?: () => { limit: number; open: number[]; atLimit: boolean };
   /** Sweep delay; default {@link EPHEMERAL_SWEEP_MS}. */
   sweepMs?: number;
 }
@@ -44,6 +47,8 @@ export interface EphemeralReport {
   orphansReaped?: string[];
   /** Queued tasks no roster executor may claim; each is reported once, never spawned (AISDLC-1121). */
   unclaimable?: { taskId: string; reason: string }[];
+  /** New-task entries held because open PRs are at the limit (AISDLC-1189); the reason names the PRs. */
+  heldForOpenPrs?: { taskIds: string[]; reason: string };
 }
 
 /** Dynamic (spawned) executors in the roster: a task id and a name derived from it. */
@@ -166,8 +171,20 @@ export async function spawnForEligibleClaims(
       reason: 'its workerKind is not claimable by an in-session executor; not spawning',
     });
   }
-  for (const { taskId } of claimable) {
+  let atLimit: ReturnType<NonNullable<EphemeralDeps['openPrs']>> | undefined;
+  try {
+    const st = deps.openPrs?.();
+    if (st?.atLimit) atLimit = st;
+  } catch {
+    /* an unreadable landing record must not stop the spawn step */
+  }
+  const heldIds: string[] = [];
+  for (const { taskId, repair } of claimable) {
     if (slots <= 0) break;
+    if (atLimit && !repair) {
+      if (!liveTasks.has(taskId.toUpperCase())) heldIds.push(taskId);
+      continue;
+    }
     if (liveTasks.has(taskId.toUpperCase())) continue;
     try {
       await deps.spawn(taskId);
@@ -176,6 +193,9 @@ export async function spawnForEligibleClaims(
     } catch (err) {
       out.spawnErrors.push({ taskId, error: err instanceof Error ? err.message : String(err) });
     }
+  }
+  if (atLimit && heldIds.length > 0) {
+    out.heldForOpenPrs = { taskIds: heldIds, reason: openPrHoldReason(atLimit, heldIds) };
   }
 }
 

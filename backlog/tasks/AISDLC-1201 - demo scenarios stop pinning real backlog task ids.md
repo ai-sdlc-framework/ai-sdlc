@@ -1,16 +1,27 @@
 ---
 id: AISDLC-1201
-title: 'Demo scenarios stop pinning real backlog task ids'
+title: Demo scenarios stop pinning real backlog task ids
 status: To Do
 assignee: []
 created_date: '2026-11-06'
 labels:
   - pipeline-cli demo defect triage
 dependencies: []
-references:
-  - pipeline-cli/demo/scenarios/home-page.json
 priority: low
 dispatchable: false
+drift_status: flagged
+drift_checked: '2026-11-07'
+drift_log:
+  - date: '2026-11-07'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/demo/scenarios/home-page.json
+    resolution: flagged
+  - date: '2026-11-07'
+    type: refs-orphaned
+    detail: All referenced files have been deleted
+    resolution: flagged
 ---
 
 ## Description

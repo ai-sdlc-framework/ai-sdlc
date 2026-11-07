@@ -1125,6 +1125,8 @@ export interface QueueOrderEntry {
   wave: number;
   priority: number | null;
   dispatchedAt: string;
+  /** True for a resume (repair) manifest; set only then (AISDLC-1189). */
+  repair?: true;
 }
 
 /** Eligible queue entries in claim order: wave, priority ascending (absent last), then enqueue time. */
@@ -1140,6 +1142,7 @@ export function peekQueueOrder(
     wave: manifest.wave ?? 0,
     priority: typeof manifest.priority === 'number' ? manifest.priority : null,
     dispatchedAt: manifest.dispatchedAt,
+    ...(manifest.resume ? { repair: true as const } : {}),
   }));
 }
 

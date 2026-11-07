@@ -59,6 +59,7 @@
 import { listVerifySlots } from '../runtime/verify-slots.js';
 import { fetchClosedUnmergedPrs } from '../kpi/closed-unmerged.js';
 import { executorCap, resolveExecutorsMax } from '../hierarchy/executor-cap.js';
+import { openPrState } from '../hierarchy/open-pr-limit.js';
 import { clearScaleCeiling, writeScaleCeiling } from '../hierarchy/scale.js';
 import { parseQuota, parseQuotaFloor } from '../hierarchy/gh-calls.js';
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -667,6 +668,8 @@ export async function runHierarchyCli(
     ghRun?: CommandRunner;
     /** Replaces the landing pass of the `land-eligible-prs` action (tests). */
     landEligible?: () => Promise<LandReport>;
+    /** Replaces the in-tick reconcile pass (tests). */
+    reconcileNow?: () => void | Promise<void>;
     /** Replaces the parent upkeep pass of the tick (tests). */
     parentUpkeep?: () => Promise<ParentUpkeepResult>;
     /** Replaces the per-tick usage ingest launch (tests). */
@@ -1434,6 +1437,8 @@ export async function runHierarchyCli(
                     await hierarchySpawn({ taskId }, deps);
                   },
                   reapOrphans: () => reapOrphanExecutorSessions(deps),
+                  // AISDLC-1189: new tasks wait while open task PRs are at the limit.
+                  openPrs: () => openPrState(deps.boardDir, deps.env),
                   // AISDLC-1076: min(executors.max, budget pacer allowance), read every tick.
                   cap: (live) =>
                     executorCap(deps.boardDir, deps.now().getTime(), deps.env, undefined, {
@@ -1513,6 +1518,16 @@ export async function runHierarchyCli(
                 ),
                 land: createLander({ repoRoot }),
               })),
+          // AISDLC-1189: one reconcile pass before the spawn step, so repairs queue ahead of new tasks.
+          reconcileNow:
+            extras.reconcileNow ??
+            (() => {
+              const bin = path.join(repoRoot, 'pipeline-cli', 'bin', 'cli-dispatch.mjs');
+              if (!existsSync(bin)) return;
+              deps.run(process.execPath, [bin, 'reconcile', '--board-dir', deps.boardDir], {
+                cwd: repoRoot,
+              });
+            }),
           // AISDLC-1023: a red pipeline canary files its hotfix through cli-file.
           fileHotfix: ({ sha, detail }) => {
             const id = hotfixTaskId(sha);
