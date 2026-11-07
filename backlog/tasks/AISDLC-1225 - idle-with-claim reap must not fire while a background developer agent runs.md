@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1225
 title: idle-with-claim reap must not fire while a background developer agent runs
-status: To Do
+status: In Progress
 priority: critical
 labels: [bug, hierarchy, dispatch]
 dependencies: [AISDLC-1218, AISDLC-1216]
