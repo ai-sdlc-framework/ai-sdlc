@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1215
 title: 'Bounded policy consistency check at config validation'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:
