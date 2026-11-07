@@ -20,6 +20,8 @@
 
 import * as yaml from '../../util/yaml.js';
 
+import { checkPolicyConsistency, type ConsistencyArtefact } from './policy-consistency.js';
+
 export interface YamlValidationIssue {
   /** 1-based line number when known, else null. */
   line: number | null;
@@ -28,7 +30,7 @@ export interface YamlValidationIssue {
   /** Human-readable message. */
   message: string;
   /** 'parse' = YAML syntax error; 'schema' = JSON Schema mismatch. */
-  source: 'parse' | 'schema';
+  source: 'parse' | 'schema' | 'consistency';
   /** JSON-pointer path within the document (schema errors only). */
   path?: string;
 }
@@ -42,6 +44,8 @@ export interface YamlValidationResult {
   valid: boolean;
   /** The `kind:` field discovered (or null when none/unknown). */
   detectedKind: string | null;
+  /** Policy consistency artefact (RFC-0062 OQ-6) when the kind is checked and findings exist. */
+  consistencyArtefact?: ConsistencyArtefact;
 }
 
 /**
@@ -127,6 +131,17 @@ export function validateYaml(opts: ValidateYamlOpts): YamlValidationResult {
     }
   }
 
+  let consistencyArtefact: ConsistencyArtefact | undefined;
+  if (detectedKind) {
+    const artefact = checkPolicyConsistency(detectedKind, parsed);
+    if (artefact && artefact.findings.length > 0) {
+      consistencyArtefact = artefact;
+      for (const f of artefact.findings) {
+        issues.push({ line: 1, column: null, message: f.message, source: 'consistency' });
+      }
+    }
+  }
+
   issues.sort((a, b) => (a.line ?? 0) - (b.line ?? 0));
 
   return {
@@ -134,6 +149,7 @@ export function validateYaml(opts: ValidateYamlOpts): YamlValidationResult {
     issues,
     valid: issues.length === 0,
     detectedKind,
+    ...(consistencyArtefact ? { consistencyArtefact } : {}),
   };
 }
 
