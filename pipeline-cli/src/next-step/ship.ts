@@ -40,6 +40,7 @@ import {
   MARKER_PREFIX,
 } from '../incremental-review/incremental.js';
 import { attachVerdictRecordDraft } from './review-finalize.js';
+import { runTrustedPush } from '../runtime/trusted-push.js';
 import { buildVerdictRefspec } from './verdict-ref-push.js';
 import { markTaskDone } from './task-done.js';
 import { recordSessionPr, updateSessionState } from './session.js';
@@ -380,8 +381,9 @@ async function leasePushOwnRebaseShip(
     timeout: 30_000,
   });
   if (fetched.code !== 0 || (await sha()) !== recorded) return null;
-  return runner(
-    'git',
+  return runTrustedPush(
+    runner,
+    { mainCheckout: ctx.workDir, worktree: wt },
     [
       'push',
       '-u',
@@ -391,7 +393,7 @@ async function leasePushOwnRebaseShip(
       `HEAD:refs/heads/${branch}`,
       ...(verdictRefspec ? [verdictRefspec] : []),
     ],
-    { cwd: wt, allowFailure: true, timeout: PUSH_TIMEOUT_MS, env },
+    { allowFailure: true, timeout: PUSH_TIMEOUT_MS, env },
   );
 }
 async function shipInner(
@@ -500,12 +502,12 @@ async function shipInner(
     const pushArgs = verdictRef.refspec
       ? ['push', '-u', '--atomic', 'origin', state.branch, verdictRef.refspec]
       : ['push', '-u', 'origin', state.branch];
-    const push = await runner('git', pushArgs, {
-      cwd: wt,
-      allowFailure: true,
-      timeout: PUSH_TIMEOUT_MS,
-      env: pushEnv,
-    });
+    const push = await runTrustedPush(
+      runner,
+      { mainCheckout: ctx.workDir, worktree: wt },
+      pushArgs,
+      { allowFailure: true, timeout: PUSH_TIMEOUT_MS, env: pushEnv },
+    );
     pushRc = push.code;
     pushErr = (push.stderr || push.stdout).trim();
     if (pushRc === 0) break;

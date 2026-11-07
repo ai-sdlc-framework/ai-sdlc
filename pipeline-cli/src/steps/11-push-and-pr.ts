@@ -34,6 +34,7 @@ import { checkOwnWorktreeForOperator, isProtectedBranch } from '../hierarchy/lea
 import { leasePushPreflight, type LeasePreflight } from '../hierarchy/lease-preflight.js';
 import { loadOperationalPolicy } from '../hierarchy/operational.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
+import { runTrustedPush } from '../runtime/trusted-push.js';
 import {
   DEFAULT_LOGGER,
   type PipelineLogger,
@@ -370,8 +371,9 @@ async function leasePushOwnRebase(
     allowFailure: true,
   });
   if (ancestor.code !== 0) return null;
-  return runner(
-    'git',
+  return runTrustedPush(
+    runner,
+    { mainCheckout: opts.workDir, worktree: cwd },
     [
       'push',
       '-u',
@@ -379,7 +381,7 @@ async function leasePushOwnRebase(
       'origin',
       `HEAD:refs/heads/${opts.branch}`,
     ],
-    { cwd, allowFailure: true },
+    { allowFailure: true },
   );
 }
 
@@ -416,10 +418,12 @@ async function fastForwardPush(
     allowFailure: true,
   });
   if (ancestor.code !== 0) return { result: null, remote, head };
-  const result = await runner('git', ['push', '-u', 'origin', `HEAD:refs/heads/${opts.branch}`], {
-    cwd,
-    allowFailure: true,
-  });
+  const result = await runTrustedPush(
+    runner,
+    { mainCheckout: opts.workDir, worktree: cwd },
+    ['push', '-u', 'origin', `HEAD:refs/heads/${opts.branch}`],
+    { allowFailure: true },
+  );
   return { result, remote, head };
 }
 
@@ -600,10 +604,12 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
         `HEAD:refs/heads/${opts.branch}`,
       ]
     : ['push', '-u', 'origin', opts.branch];
-  let pushResult = await runner('git', pushArgs, {
-    cwd: opts.worktreePath,
-    allowFailure: true,
-  });
+  let pushResult = await runTrustedPush(
+    runner,
+    { mainCheckout: opts.workDir, worktree: opts.worktreePath },
+    pushArgs,
+    { allowFailure: true },
+  );
   let diverged: { remote: string; head: string | null } | null = null;
   if (pushResult.code !== 0 && /non-fast-forward|rejected|stale info/i.test(pushResult.stderr)) {
     // AISDLC-1016: the remote may hold only the pre-rebase copy of this very branch.

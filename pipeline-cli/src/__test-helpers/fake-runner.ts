@@ -11,6 +11,16 @@ export interface FakeRunnerCall {
   command: string;
   args: string[];
   opts?: ExecOptions;
+  /** The argv as received, including leading `git -c k=v` overrides (AISDLC-731). */
+  rawArgs?: string[];
+}
+
+/** Drop the leading `-c key=value` pairs the trusted push builder prepends (AISDLC-731). */
+function stripGitConfigOverrides(command: string, args: string[]): string[] {
+  if (command !== 'git' || !args[1]?.startsWith('core.hooksPath=')) return args;
+  let i = 0;
+  while (args[i] === '-c' && i + 1 < args.length) i += 2;
+  return args.slice(i);
 }
 
 export interface FakeRunnerHandler {
@@ -38,8 +48,9 @@ export class FakeRunner {
    * Returns the underlying Runner for injection into step functions.
    */
   toRunner(): Runner {
-    return async (command, args, opts) => {
-      this.calls.push({ command, args, opts });
+    return async (command, rawArgs, opts) => {
+      const args = stripGitConfigOverrides(command, rawArgs);
+      this.calls.push({ command, args, opts, rawArgs });
       for (const h of this.handlers) {
         if (h.match(command, args)) {
           const r = typeof h.result === 'function' ? h.result(args) : h.result;
