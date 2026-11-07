@@ -420,7 +420,21 @@ jobs:
           # on self-hosted runners or environments where Docker is unavailable.
           # OpenShell was the original planned runtime; Docker is the shipped runtime.
           # When unavailable: degrade fail-closed per RFC-0043 §Degradation path.
-          if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+          # AISDLC-515.1: the configured effective driver (after the RFC-0022
+          # regime override) must also be available on this host, e.g. gvisor
+          # needs runsc and a hipaa regime needs /dev/kvm. loadSandboxConfig
+          # throws a message naming the driver and the missing prerequisite;
+          # that refusal degrades through the same fail-closed path below.
+          CONFIG_REFUSAL=""
+          if ! CONFIG_REFUSAL=$(node -e "import('./pipeline-cli/dist/pipeline/sandbox-runner.js').then(m => { m.loadSandboxConfig(process.cwd()); }).catch(e => { console.error(e.message); process.exit(1); })" 2>&1); then
+            echo "[stage-2] Sandbox config refused: $CONFIG_REFUSAL"
+            echo "::error::Sandbox config refused: $CONFIG_REFUSAL"
+            DRIVER_REFUSED=true
+          else
+            DRIVER_REFUSED=false
+          fi
+
+          if [[ "$DRIVER_REFUSED" == "false" ]] && command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
             echo "available=true" >> "$GITHUB_OUTPUT"
             echo "degraded=false" >> "$GITHUB_OUTPUT"
             echo "[stage-2] Docker available — full sandbox mode (DockerSandboxDriver)"
