@@ -130,7 +130,7 @@ node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" complete --board-dir "$BOARD_DIR" \
 ```
 
 `success` and `iterate-needed` land in `done/`, the rest in `failed/`. `--worker` must equal the claim-time name
-(a guard, not authentication). Pass a `next-step` stop's `cause` as `--cause "<cause>"`. If `complete` refuses, say so; do not retry. The executor writes the verdict, the dispatch tick spares a `done` claim for `terminalGraceMs` (5 minutes) after the phase flip, and a `complete` that finds a verdict with the same outcome is a no-op while a different outcome is refused naming both (AISDLC-1230).
+(a guard, not authentication). Pass a `next-step` stop's `cause` as `--cause "<cause>"`. If `complete` refuses, say so; do not retry. The executor writes the verdict, the dispatch tick spares a `done` claim for `terminalGraceMs` (5 minutes) after the phase flip, and a `complete` that finds a verdict with the same outcome is a no-op while a different outcome is refused naming both.
 
 **`iterate-needed`** leaves the claim in place: release it right after reporting (`cli-dispatch.mjs release --board-dir "$BOARD_DIR" --task-id "$TASK_ID"`; it refuses while unpushed or uncommitted work exists, and `--force` drops work). Dispatch continues the task with `reenter`. Details: "Continuation" in `docs/operations/cli-hierarchy.md`.
 
