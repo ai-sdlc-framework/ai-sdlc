@@ -731,7 +731,16 @@ export async function finalizeStagedReview(
     return { ok: false, reason: 'insufficient-evidence', rejections, fallbackSet: 'three' };
   }
 
-  const grounded = groundFindings(parsed as StagedVerdict, evidence);
+  // The coverage gate is the only source of `reason` and `uncoveredHunks`; drop any the synthesizer wrote.
+  const {
+    reason: _r,
+    uncoveredHunks: _u,
+    ...synthesized
+  } = parsed as StagedVerdict & {
+    reason?: unknown;
+    uncoveredHunks?: unknown;
+  };
+  const grounded = groundFindings(synthesized as StagedVerdict, evidence);
   const kept = grounded.verdict;
   const blocking = kept.findings.some((f) => f.severity === 'critical' || f.severity === 'major');
   // Tighten only: a screen that did not come back clean marks the verdict, and a verdict
