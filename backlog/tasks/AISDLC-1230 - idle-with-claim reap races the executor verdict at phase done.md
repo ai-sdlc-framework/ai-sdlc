@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1230
 title: idle-with-claim reap races the executor verdict at phase done
-status: To Do
+status: In Progress
 priority: high
 labels: [bug, pipeline-cli, dispatch]
 dependencies: []

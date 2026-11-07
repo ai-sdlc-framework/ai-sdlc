@@ -80,17 +80,26 @@ describe('reapStalledClaims on the pipeline progress record (AISDLC-1226)', () =
   });
 
   it('reaps a done claim with no verdict and no live next-step, cause idle-with-claim', async () => {
-    hold('done', T0 + 3 * HOUR - 1_000);
-    const reaped: { cause?: string; lastStep?: string; heartbeatAgeMs?: number }[] = [];
+    hold('done', T0 + 3 * HOUR - 6 * 60_000);
+    const reaped: { cause?: string; lastStep?: string; heartbeatAgeMs?: number; notes?: string }[] =
+      [];
     const r = await reap({}, (v) => reaped.push(v));
     expect(r[0]).toMatchObject({ reason: 'idle-with-claim', requeue: { status: 'requeued' } });
     expect(reaped[0]).toMatchObject({
       cause: 'idle-with-claim',
       lastStep: '05-dev-running',
-      heartbeatAgeMs: 1_000,
+      heartbeatAgeMs: 6 * 60_000,
     });
+    expect(reaped[0]?.notes).toMatch(/phase done at .*, reaped at .*, verdict expected from eph-1/);
     expect(existsSync(path.join(dir, 'queue', 'AISDLC-9.dispatch.json'))).toBe(true);
     expect(existsSync(path.join(dir, 'inflight', 'AISDLC-9.dispatch.json'))).toBe(false);
+  });
+
+  it('spares a done claim within terminalGraceMs of the flip and reaps it after (AISDLC-1230)', async () => {
+    hold('done', T0 + 3 * HOUR - 250);
+    expect(await reap()).toEqual([]);
+    expect(await reap({ now: () => new Date(T0 + 3 * HOUR + 5 * 60_000 - 300) })).toEqual([]);
+    expect(await reap({ now: () => new Date(T0 + 3 * HOUR + 5 * 60_000 + 1_000) })).toHaveLength(1);
   });
 
   it('reaps an aborted claim with no verdict', async () => {

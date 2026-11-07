@@ -57,6 +57,12 @@ export interface StallDeps {
   hasLiveNextStep?: (worker: string) => boolean;
   /** A claim whose heartbeat is older than this is stalled (AISDLC-1226). Default {@link DEFAULT_STALL_MS}. */
   stallMs?: number;
+  /**
+   * A `phase: 'done'` claim is not reaped until this long after the flip (AISDLC-1230): the executor
+   * reports the verdict on its next turn, which runs after the phase flips. Default
+   * {@link DEFAULT_TERMINAL_GRACE_MS}. `aborted` is never graced.
+   */
+  terminalGraceMs?: number;
   /** Called when a claim that would be reaped is spared, with the reason. */
   onSpared?: (o: { taskId: string; worker: string; ageMs: number; reason: string }) => void;
   /** Clears (and so restarts) one executor; undefined when the grant is missing. */
@@ -67,6 +73,9 @@ export interface StallDeps {
 
 /** Default stall window: the pipeline refreshes the heartbeat at every step boundary (AISDLC-1226). */
 export const DEFAULT_STALL_MS = 20 * 60_000;
+
+/** Grace between the `done` phase flip and the idle-with-claim reap (AISDLC-1230). */
+export const DEFAULT_TERMINAL_GRACE_MS = 5 * 60_000;
 
 function hasVerdict(boardDir: string, taskId: string): boolean {
   return ['done', 'failed'].some((d) =>
@@ -135,6 +144,8 @@ export async function reapStalledClaims(
     const worker = heartbeat?.workerId ?? manifest.workerId ?? 'unknown';
     const reason: StalledReport['reason'] = 'idle-with-claim';
     const terminal = heartbeat?.phase === 'done' || heartbeat?.phase === 'aborted';
+    if (heartbeat?.phase === 'done' && ageMs <= (deps.terminalGraceMs ?? DEFAULT_TERMINAL_GRACE_MS))
+      continue;
     if (!terminal && ageMs <= (deps.stallMs ?? DEFAULT_STALL_MS)) continue;
     if (deps.hasLiveNextStep && worker !== 'unknown' && safeProbe(deps.hasLiveNextStep, worker)) {
       try {
@@ -152,15 +163,19 @@ export async function reapStalledClaims(
     }
 
     const step = heartbeat?.currentStep ?? 'unknown';
+    const reapedAt = deps.now().toISOString();
+    const flipNote = terminal
+      ? `phase ${heartbeat?.phase} at ${new Date(last).toISOString()}, reaped at ${reapedAt}, verdict expected from ${worker}; `
+      : '';
     snapshotFailedManifest(deps.boardDir, manifest);
     const verdict: DispatchVerdict = {
       schemaVersion: 'v1',
       taskId,
       outcome: 'failed',
-      completedAt: deps.now().toISOString(),
+      completedAt: reapedAt,
       workerId: worker,
       cause: IDLE_WITH_CLAIM_CAUSE,
-      notes: `executor idle with the claim and no verdict at step ${step} (no channel reaches an executor)`,
+      notes: `${flipNote}executor idle with the claim and no verdict at step ${step} (no channel reaches an executor)`,
       lastStep: step,
       heartbeatAgeMs: ageMs,
     };

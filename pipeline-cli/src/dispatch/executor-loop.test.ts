@@ -373,7 +373,7 @@ describe('completeTask', () => {
           '--task-id',
           'AISDLC-704',
           '--outcome',
-          'success',
+          'failed',
           '--worker',
           'executor-b',
         ])

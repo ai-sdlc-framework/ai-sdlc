@@ -10,6 +10,8 @@
  * manifest stays so the worker keeps the slot across the iteration.
  */
 
+import path from 'node:path';
+
 import {
   collectVerdicts,
   patchDoneVerdict,
@@ -149,6 +151,26 @@ export function completeTask(boardDir: string, opts: CompleteOptions): CompleteR
   }
   const inflight = readInflightManifest(boardDir, opts.taskId);
   if (!inflight) {
+    // A verdict already on the board (written by the host at phase done, AISDLC-1230) makes
+    // `complete` a confirmation: the same outcome is a no-op, a different one is refused.
+    const existing = collectVerdicts(boardDir)
+      .filter((v) => v.taskId === opts.taskId)
+      .pop();
+    if (existing) {
+      if (existing.outcome !== opts.outcome) {
+        throw new Error(
+          `${opts.taskId} already has a '${existing.outcome}' verdict; refusing to record '${opts.outcome}'`,
+        );
+      }
+      const state =
+        existing.outcome === 'success' || existing.outcome === 'iterate-needed' ? 'done' : 'failed';
+      const file = path.join(
+        boardDir,
+        state,
+        `${opts.taskId}.${existing.cause === 'idle-with-claim' ? 'diagnostic' : 'verdict'}.json`,
+      );
+      return { verdictPath: file, state, verdict: existing };
+    }
     throw new Error(`${opts.taskId} is not inflight; there is nothing to complete`);
   }
   // The supplied worker name must equal the name the claim recorded on the
