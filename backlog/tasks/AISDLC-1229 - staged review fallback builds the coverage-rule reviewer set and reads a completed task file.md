@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1229
 title: staged review fallback builds the coverage-rule reviewer set and reads a completed task file
-status: To Do
+status: In Progress
 priority: high
 labels: [bug, pipeline-cli, review]
 dependencies: []
