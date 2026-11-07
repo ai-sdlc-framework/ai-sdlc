@@ -114,7 +114,7 @@ Each stage halts the pipeline on abort, so a PR that fails Stage 1 never reaches
 
 ## 6. Composition with Compliance Regimes (RFC-0022)
 
-Organizations with a declared compliance posture get stricter defaults automatically. Under RFC-0022 regime overrides, HIPAA / FedRAMP / PCI-DSS Level 1 environments force a MicroVM-class sandbox driver rather than the default container isolation. Non-regulated repositories keep the lighter default. The gate's behavior is therefore a function of the repository's declared regime, not a per-PR decision a contributor can influence.
+Organizations with a declared compliance posture get stricter defaults automatically. Under RFC-0022 regime overrides, HIPAA / FedRAMP / PCI-DSS Level 1 environments force a MicroVM-class sandbox driver rather than the default container isolation. Non-regulated repositories keep the lighter default. gVisor (`runsc`) is implemented as a KVM-free upgrade driver; the MicroVM driver is pending (AISDLC-515.2), and a configuration whose effective driver is unavailable on the host is refused at config load rather than failing at spawn time. The gate's behavior is therefore a function of the repository's declared regime, not a per-PR decision a contributor can influence.
 
 ## 7. What This Unlocks
 

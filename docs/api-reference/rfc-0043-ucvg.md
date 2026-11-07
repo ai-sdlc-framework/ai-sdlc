@@ -371,7 +371,9 @@ There are no `beforeSpawn`, `afterSpawn`, or `onResourceBreach` hooks on `Sandbo
 
 #### `createSandboxDriver(config: SandboxConfig, overrideDriver?: SandboxDriver): { driver, regimeOverrideApplied, regimeOverrideReason? }`
 
-Factory that applies the RFC-0022 regime override and returns the appropriate driver. `DockerSandboxDriver` is fully implemented. `PodmanSandboxDriver`, `KataSandboxDriver`, `GVisorSandboxDriver`, and `MicroVmSandboxDriver` are pluggable stubs that return `{ outcome: 'error' }` until a concrete implementation is provided.
+`loadSandboxConfig` also refuses, at load time, a config whose effective driver is unavailable on the host (`checkDriverAvailability`: gvisor needs `runsc`, microvm needs `/dev/kvm`); the error names the driver, the regime override when applied, and the missing prerequisite.
+
+Factory that applies the RFC-0022 regime override and returns the appropriate driver. `DockerSandboxDriver` and `GVisorSandboxDriver` (Docker with `--runtime=runsc`, AISDLC-515.1) are fully implemented. `PodmanSandboxDriver`, `KataSandboxDriver`, and `MicroVmSandboxDriver` (pending AISDLC-515.2) are pluggable stubs that return `{ outcome: 'error' }` until a concrete implementation is provided.
 
 ---
 
