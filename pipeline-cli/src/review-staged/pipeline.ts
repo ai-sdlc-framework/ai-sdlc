@@ -77,7 +77,7 @@ import {
   type ExecuteLeafSource,
   type LeafManifestEntry,
 } from './leaves.js';
-import { toReviewerVerdict } from './verdict.js';
+import { applyCoverageGate, toReviewerVerdict } from './verdict.js';
 import type { EvaluateJudgmentContext } from '@ai-sdlc/reference';
 import type { StructuralProvider } from '../review-risk-map/structural.js';
 import type { RiskMapVerifications } from '../review-risk-map/types.js';
@@ -700,23 +700,18 @@ export async function finalizeStagedReview(
     return { ok: false, reason: 'invalid-verdict', rejections, fallbackSet: 'three' };
   }
 
-  // Fail closed: a verdict that rests on no evidence, or that leaves a high-risk hunk with
-  // no probe evidence, is not a review of this change. The existing set handles it.
+  // Fail closed: a verdict that rests on no evidence is not a review of this change. The
+  // existing set handles it. A high-risk hunk with no evidence yields `incomplete-coverage`
+  // below, an unapproved verdict that names the hunks (DEC-0040).
   const probeCounts = countProbes(evidence);
   const uncoveredAll = uncoveredHunkIds(
     riskMap.hunks.map((h) => h.id),
     plan.probes,
     evidence,
   );
-  const uncoveredHigh = riskMap.hunks
-    .filter((h) => uncoveredAll.includes(h.id) && isHighRisk(h, config.riskThreshold))
-    .map((h) => h.id);
   const withEvidence = evidence.entries.filter(holdsEvidence).length;
-  if (withEvidence === 0 || uncoveredHigh.length > 0) {
-    const detail =
-      withEvidence === 0
-        ? 'no probe returned evidence, so the verdict rests on nothing'
-        : `high-risk hunk(s) have no probe evidence: ${uncoveredHigh.slice(0, 10).join(', ')}`;
+  if (withEvidence === 0) {
+    const detail = 'no probe returned evidence, so the verdict rests on nothing';
     const rejections: Rejection[] = [
       { reason: 'unreviewable-input', detail: `${detail}; use the existing reviewer set` },
     ];
@@ -741,9 +736,15 @@ export async function finalizeStagedReview(
   const blocking = kept.findings.some((f) => f.severity === 'critical' || f.severity === 'major');
   // Tighten only: a screen that did not come back clean marks the verdict, and a verdict
   // that still holds a blocking finding after grounding is not approved.
+  const gated = applyCoverageGate(kept, riskMap.hunks, uncoveredAll, (h) =>
+    isHighRisk(
+      riskMap.hunks.find((x) => x.id === h.id)!,
+      config.riskThreshold,
+    ),
+  );
   const verdict: StagedVerdict = {
-    ...kept,
-    approved: kept.approved && !blocking,
+    ...gated,
+    approved: gated.approved && !blocking,
     promptInjectionDetected:
       kept.promptInjectionDetected || riskMap.injectionScreen.status === 'suspicious',
   };
@@ -768,7 +769,7 @@ export async function finalizeStagedReview(
     JSON.stringify({
       approved: verdict.approved,
       findings: verdict.findings,
-      summary: verdict.summary,
+      summary: reviewerVerdict.summary,
     }),
     'utf8',
   );
