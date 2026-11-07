@@ -3,7 +3,7 @@ id: AISDLC-487
 title: >-
   fix: strict up-to-date branch protection causes merge starvation for
   slow-CI PRs when main is active (no-queue race)
-status: To Do
+status: Superseded
 assignee: []
 created_date: '2026-05-31 00:00'
 labels:
@@ -17,6 +17,10 @@ references: []
 priority: low
 dispatchable: false
 ---
+
+## Resolution
+
+Superseded (operator, 2026-11-07): retired by DEC-0275 (#2103) and folded into AISDLC-1097, which is complete.
 
 ## Description
 

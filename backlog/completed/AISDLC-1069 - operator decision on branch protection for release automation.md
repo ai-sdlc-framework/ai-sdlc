@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1069
 title: 'operator decision: branch protection on main (enforce_admins) versus release automation that must land pins after a release'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-23'
 labels:
@@ -16,6 +16,10 @@ references:
   - docs/operations/release-flow.md
   - docs/operations/decision-authority.md
 ---
+
+## Resolution
+
+Done (operator, 2026-11-07): decided by DEC-0278 (link-versions, the release PR carries the pin bump) and implemented by AISDLC-1142 and AISDLC-1115, both complete.
 
 ## Description
 

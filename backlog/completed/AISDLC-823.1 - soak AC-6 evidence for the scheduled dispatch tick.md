@@ -1,7 +1,7 @@
 ---
 id: AISDLC-823.1
 title: 'soak: AC-6 evidence for the scheduled dispatch tick (AISDLC-823)'
-status: To Do
+status: Superseded
 assignee: []
 created_date: '2026-10-14'
 labels: [soak, hierarchy, dispatch]
@@ -14,6 +14,10 @@ priority: medium
 dispatchable: false
 dispatchableReason: Soak phase collected over 48 hours of real drain time; human-observed evidence, no code to dispatch.
 ---
+
+## Resolution
+
+Superseded (operator, 2026-11-07): the tick was redesigned after AISDLC-823 (AISDLC-1061, AISDLC-1125) and `.ai-sdlc/dispatch/log/reconcile.log` now holds live drain evidence from 2026-10-31 onward, far more than the 48-hour soak window.
 
 ## Context
 

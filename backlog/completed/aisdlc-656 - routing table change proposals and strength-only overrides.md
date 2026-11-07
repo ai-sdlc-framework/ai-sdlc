@@ -2,7 +2,7 @@
 id: AISDLC-656
 title: >-
   RFC-0050 OQ-3: weekly downshift proposals as one Decision, approval to pull request, automatic revert to a stronger model
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -23,6 +23,10 @@ priority: high
 dispatchable: false
 dispatchableReason: 'Split on 2026-10-02 into AISDLC-656.1 (bar evaluation and weekly proposal), AISDLC-656.2 (route apply) and AISDLC-656.3 (automatic revert and strength-only overrides). This umbrella is not dispatched; it completes when all three merge.'
 ---
+
+## Resolution
+
+Done (operator, 2026-11-07): umbrella; children AISDLC-656.1 (#1161), 656.3 (#1351) and 656.2 (#2070) are all merged and in `backlog/completed/`.
 
 ## Description
 

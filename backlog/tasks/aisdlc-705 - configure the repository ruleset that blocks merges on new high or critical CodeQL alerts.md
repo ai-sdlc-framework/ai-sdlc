@@ -12,13 +12,14 @@ dependencies:
   - AISDLC-704
 references: []
 priority: low
-dispatchable: false
+dispatchable: true
+dispatchableReason: 'Unparked 2026-11-07 by operator ruling (planner critical-path review).'
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
+Unparked 2026-11-07 by operator ruling (planner critical-path review).
 
 The operator chose this ruleset on 2026-10-03 and it was waiting for him to click it.
 Under DEC-0039 administration is agent work: configure it through the GitHub API with the

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-429
 title: 'feat(pipeline-cli): add `copilot` spawner kind — GitHub Copilot CLI as a coding harness alongside `claude` / `codex` / `api-key`'
-status: To Do
+status: Done
 labels:
   - enhancement
   - pipeline-cli
@@ -30,6 +30,10 @@ blocked:
     - AISDLC-429.2
     - AISDLC-429.3
 ---
+
+## Resolution
+
+Done (operator, 2026-11-07): umbrella; children AISDLC-429.1, 429.2 and 429.3 are complete (PRs #704, #711, #740, #759 merged) and `pipeline-cli/src/runtime/spawners/copilot-harness.ts` ships.
 
 ## Description
 

@@ -20,6 +20,10 @@ references:
 priority: medium
 ---
 
+## Resolution
+
+Superseded (operator, 2026-11-07): replaced by the AISDLC-302..307 Refit chain, all six in `backlog/completed/`; RFC-0025 frontmatter reads `status: Implemented`.
+
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->

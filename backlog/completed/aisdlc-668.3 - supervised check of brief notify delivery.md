@@ -2,7 +2,7 @@
 id: AISDLC-668.3
 title: >-
   RFC-0051: supervised check that brief notify reaches a live dispatch session
-status: To Do
+status: Superseded
 assignee: []
 created_date: '2026-09-30'
 labels:
@@ -16,6 +16,10 @@ references:
 priority: low
 dispatchable: false
 ---
+
+## Resolution
+
+Superseded (operator, 2026-11-07): brief-notify delivery was fixed with `SUBMIT_DELAY_MS` in `pipeline-cli/src/hierarchy/brief-notify.ts` (AISDLC-1099, #2052) and 82 briefs have been delivered in practice (`.ai-sdlc/dispatch/briefs`).
 
 ## Description
 

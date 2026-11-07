@@ -13,13 +13,14 @@ references:
   - .github/workflows/ai-sdlc-gate.yml
   - docs/operations/quality-gate.md
 priority: low
-dispatchable: false
+dispatchable: true
+dispatchableReason: 'Unparked 2026-11-07 by operator ruling (planner critical-path review).'
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
+Unparked 2026-11-07 by operator ruling (planner critical-path review).
 
 Follow-up approved by the operator on 2026-10-01. Merge skew between two green PRs
 broke `tsc --noEmit` on `main` while every per-PR check stayed green: no PR check runs

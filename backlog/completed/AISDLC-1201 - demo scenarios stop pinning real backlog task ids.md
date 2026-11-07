@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1201
 title: Demo scenarios stop pinning real backlog task ids
-status: To Do
+status: Superseded
 assignee: []
 created_date: '2026-11-06'
 labels:
@@ -23,6 +23,10 @@ drift_log:
     detail: All referenced files have been deleted
     resolution: flagged
 ---
+
+## Resolution
+
+Superseded (operator, 2026-11-07): #2413 (AISDLC-1189) replaced the real task ids in the demo scenarios with `pipeline-cli/src/hierarchy/fixtures/demo-scenario.json`; the referenced `home-page.json` no longer exists.
 
 ## Description
 

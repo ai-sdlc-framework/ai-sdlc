@@ -11,12 +11,13 @@ references:
   - pipeline-cli/src/dispatch/board.ts
   - pipeline-cli/src/cli/dispatch.ts
 priority: low
-dispatchable: false
+dispatchable: true
+dispatchableReason: 'Unparked 2026-11-07 by operator ruling (planner critical-path review).'
 ---
 
 ## Description
 
-**Source.** Planner session 2026-11-06; filed on operator go (decision rubric, same day). Non-dispatchable until triaged.
+**Source.** Planner session 2026-11-06; filed on operator go (decision rubric, same day). Triaged; Unparked 2026-11-07 by operator ruling (planner critical-path review).
 
 AISDLC-1191 landed at 2cd45a9f (#2411), but its board record stays in `blocked/` with reason "awaiting gate re-run". The only exit, `cli-dispatch unblock`, moves the task back to the queue, which would re-dispatch landed work. `cli-hierarchy status` keeps listing it as blocked.
 
