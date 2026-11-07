@@ -22,7 +22,8 @@ references:
   - ai-sdlc-plugin/commands/operator-dispatch.md
   - ai-sdlc-plugin/commands/executor.md
 priority: high
-dispatchable: false
+dispatchable: true
+dispatchableReason: 'Unparked 2026-11-07 by operator ruling (decision rubric, planner session). Held on the board by its dependency on AISDLC-671 until that task lands.'
 ---
 
 ## Description
@@ -32,7 +33,7 @@ The operator is recording a screenshare video of the typical workflow: planner, 
 
 Deliverables: `docs/demo/walkthrough.md` (shot list with the exact commands per pane, timings and what the viewer should see), `scripts/demo/seed-demo-repo.sh` that creates a demo repo with 3 small self-contained tasks whose implementations are 10 to 30 lines and pass review on the first round, a tmux layout (or `cli-hierarchy terminals` output) for the panes, a reset script to return the demo repo to its start state, and a dry-run checklist.
 
-Sequencing: the hierarchy idle and self-clear work (AISDLC-759, AISDLC-760, AISDLC-766), the context-meter mod (AISDLC-743) and the first supervised run (AISDLC-671) should land first so the recording shows shipped behaviour.
+Sequencing: the hierarchy idle and self-clear work (AISDLC-759, AISDLC-760, AISDLC-766), the context-meter mod (AISDLC-743) and the RFC-0051 results note (AISDLC-671) should land first so the recording shows shipped behaviour.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -43,6 +44,6 @@ Sequencing: the hierarchy idle and self-clear work (AISDLC-759, AISDLC-760, AISD
 - [ ] The reset script restores the start state (test).
 - [ ] `docs/demo/walkthrough.md` names the three north-star features shown: hierarchy, operator TUI and context-meter mod.
 
-## Dispatch note (2026-10-30)
+## Ruling 2026-11-07 (operator, decision rubric)
 
-`dispatchable: false` (operator ruling 2026-10-30): the task depends on AISDLC-671, an operator-run supervised hierarchy run (DEC-0274) that no executor can perform. The demo waits for that run; the operator flips this back to `true` once AISDLC-671 is done.
+`dispatchable: true`. AISDLC-671 was re-scoped on 2026-11-07 from an operator-run supervised hierarchy run to a dispatchable results note written from production logs (see the ruling recorded on AISDLC-671; it supersedes the 2026-10-30 non-dispatchable note here). The dependency on AISDLC-671 stays and keeps this task held on the board until that note lands; nothing else about the demo changes.

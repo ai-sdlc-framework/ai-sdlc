@@ -8,7 +8,8 @@ created_date: '2026-10-04'
 labels:
   - refactor
   - hierarchy
-dependencies: []
+dependencies:
+  - AISDLC-717
 references:
   - pipeline-cli/src/hierarchy/session-role.ts
   - pipeline-cli/src/hierarchy/caller-identity.ts

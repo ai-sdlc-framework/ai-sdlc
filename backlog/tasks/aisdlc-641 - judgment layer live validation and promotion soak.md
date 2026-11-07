@@ -30,7 +30,7 @@ references:
   - docs/operations/dor-promotion.md
 priority: medium
 dispatchable: false
-dispatchableReason: "Operator-only: needs the live API key, operator judgment on thresholds, and a soak window; no code work to dispatch"
+dispatchableReason: "Operator-only: needs the live API key (provisioned locally 2026-11-07), operator judgment on thresholds, and a soak window; no code work to dispatch"
 ---
 
 ## Description
@@ -40,6 +40,16 @@ Operator-run. The first point in the series that needs a live typesafe.ai API ke
 Everything before it is verified against recorded fixtures built from the provider's
 documentation, so the first job here is to find out where the documentation and the
 live API differ.
+
+Status 2026-11-07: the operator provisioned the typesafe.ai key on 2026-11-07 in the
+local root `.env` as `TYPESAFE_AI_API_KEY`. The code reads `TYPESAFE_API_KEY`, so export
+the value under that name when running step 1 (the key value is never written anywhere
+in the repository). The code prerequisites AISDLC-630.3, AISDLC-630.4 and AISDLC-644 are
+now dispatched (operator ruling 2026-11-07); this task starts once they land.
+
+## Ruling 2026-11-07 (operator, decision rubric)
+
+Option A, go live. The judgment layer shipped in October but AISDLC-641 never ran for want of a live key; the operator provisioned the key on 2026-11-07. The three code blockers (redaction hardening 630.3/630.4, capability-liveness doctor 644) have value without Jev and were parked only by the 2026-10-06 batch. Counter-argument considered: merging them without validation risks dead code; rejected because redaction already runs in the reference package today. 633.2 and 636.1 ride along; 635.1 still waits on 641's shadow data.
 
 ## Scope
 1. Export `TYPESAFE_API_KEY` locally. Run the live contract test

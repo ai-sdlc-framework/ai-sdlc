@@ -17,13 +17,14 @@ references:
   - pipeline-cli/src/dor/ingress-claude.ts
   - pipeline-cli/src/dor/composite.ts
 priority: low
-dispatchable: false
+dispatchable: true
+dispatchableReason: 'Unparked 2026-11-07 by operator ruling (decision rubric, planner session).'
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
+Unparked 2026-11-07 by operator ruling (decision rubric, planner session).
 
 Follow-up filed from an executor or reviewer report on the parent task, approved by the
 operator on 2026-10-01. The parent's conventions apply (strict TypeScript, ESM,
@@ -36,6 +37,10 @@ Security finding on AISDLC-636 (#1144): `refineBacklogTask` hard-codes
 files. A permissive `dor.stage-b-pass` outcome could therefore be granted to a task
 file that did not come from the trusted backlog. Must land before `dor.stage-b-pass`
 is promoted to `enforce`.
+
+## Ruling 2026-11-07 (operator, decision rubric)
+
+Option A, go live. The judgment layer shipped in October but AISDLC-641 never ran for want of a live key; the operator provisioned the key on 2026-11-07. The three code blockers (redaction hardening 630.3/630.4, capability-liveness doctor 644) have value without Jev and were parked only by the 2026-10-06 batch. Counter-argument considered: merging them without validation risks dead code; rejected because redaction already runs in the reference package today. 633.2 and 636.1 ride along; 635.1 still waits on 641's shadow data.
 
 ## Scope
 1. Define task-file origin as a property of the file, resolved by code: `trusted` when

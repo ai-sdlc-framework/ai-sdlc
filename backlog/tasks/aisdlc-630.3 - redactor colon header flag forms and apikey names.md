@@ -15,18 +15,23 @@ references:
   - spec/rfcs/RFC-0049-system-one-judgment-layer.md
   - reference/src/security/secret-redact.ts
 priority: low
-dispatchable: false
+dispatchable: true
+dispatchableReason: 'Unparked 2026-11-07 by operator ruling (decision rubric, planner session).'
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
+Unparked 2026-11-07 by operator ruling (decision rubric, planner session).
 
 Follow-up filed from the security review of AISDLC-630.2 (#1143), approved by the
 operator on 2026-10-01. The parent's conventions apply (strict TypeScript, ESM, hermetic
 tests, fixtures only ever contain fake secrets). AISDLC-641 depends on this task, so no
 judgment provider is enabled while it is open.
+
+## Ruling 2026-11-07 (operator, decision rubric)
+
+Option A, go live. The judgment layer shipped in October but AISDLC-641 never ran for want of a live key; the operator provisioned the key on 2026-11-07. The three code blockers (redaction hardening 630.3/630.4, capability-liveness doctor 644) have value without Jev and were parked only by the 2026-10-06 batch. Counter-argument considered: merging them without validation risks dead code; rejected because redaction already runs in the reference package today. 633.2 and 636.1 ride along; 635.1 still waits on 641's shadow data.
 
 ## Scope
 Extend `SECRET_PATTERNS` in `reference/src/security/secret-redact.ts` to redact, with a

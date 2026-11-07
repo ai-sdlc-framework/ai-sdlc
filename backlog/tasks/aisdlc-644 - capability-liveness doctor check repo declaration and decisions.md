@@ -25,13 +25,14 @@ references:
   - docs/operations/README.md
   - docs/operations/fail-soft-at-the-adopter-boundary.md
 priority: low
-dispatchable: false
+dispatchable: true
+dispatchableReason: 'Unparked 2026-11-07 by operator ruling (decision rubric, planner session).'
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
+Unparked 2026-11-07 by operator ruling (decision rubric, planner session).
 
 Makes a degraded capability visible to the operator without blocking anything.
 RFC-0049 section 9.3 and the OQ-7 resolution: doctor reports `fail`, the orchestrator
@@ -48,13 +49,17 @@ degraded.
   dark-code gate passes (`pnpm dark-code:check`).
 - Strings an adopter can see (errors, CLI output, templates) carry no internal task ids.
 
-## Files under `.ai-sdlc/` are never written by the developer agent
-The governance hook refuses every agent `Write`/`Edit` under `.ai-sdlc/**`, and policy
-is read from the base branch only. Templates are shipped from
+## Files under `.ai-sdlc/`
+Policy is read from the base branch only. Templates are shipped from
 `orchestrator/src/cli/commands/init-templates.ts` (the map that already carries
-`framework-bug-report.md`), not as files under `.ai-sdlc/templates/`. Any change to
-this repository's own `.ai-sdlc/*.yaml` is an operator step, listed separately below,
-and is never an acceptance criterion the developer must satisfy.
+`framework-bug-report.md`), not as files under `.ai-sdlc/templates/`. Under AISDLC-720
+the developer may write a `.ai-sdlc/` file when the task names the file and the change;
+this task names `.ai-sdlc/capabilities.yaml` and the change in step 6. No other file under
+`.ai-sdlc/` is touched.
+
+## Ruling 2026-11-07 (operator, decision rubric)
+
+Option A, go live. The judgment layer shipped in October but AISDLC-641 never ran for want of a live key; the operator provisioned the key on 2026-11-07. The three code blockers (redaction hardening 630.3/630.4, capability-liveness doctor 644) have value without Jev and were parked only by the 2026-10-06 batch. Counter-argument considered: merging them without validation risks dead code; rejected because redaction already runs in the reference package today. 633.2 and 636.1 ride along; 635.1 still waits on 641's shadow data.
 
 ## Scope
 1. **Schema and loader:** new `spec/schemas/capabilities-config.v1.schema.json` for
@@ -86,10 +91,11 @@ and is never an acceptance criterion the developer must satisfy.
    required list to the template map in
    `orchestrator/src/cli/commands/init-templates.ts`, keyed
    `.ai-sdlc/templates/capabilities.yaml`.
-6. **Operator step (not a developer AC):** after merge, the operator commits
-   `.ai-sdlc/capabilities.yaml` to `main` requiring the eight capabilities that have an
-   owning wiring task in the RFC-0049 section 9.1 table. Put the exact YAML in the PR
-   body, tested against the schema, for the operator to apply.
+6. **Repository declaration (named `.ai-sdlc/` change, AISDLC-720):** this task names
+   `.ai-sdlc/capabilities.yaml` and the change: the PR adds that file with `spec.required`
+   listing the eight capabilities that have an owning wiring task in the RFC-0049
+   section 9.1 table, validated against the new schema. The loader reads it from the
+   base ref, so the doctor table reflects it after the PR lands.
 7. **Docs:** `docs/operations/capability-liveness.md` (what a capability is, the three
    outcomes, the state file, the doctor table, how to declare requirements, what the
    Decision means and how to answer it), linked from `docs/operations/README.md`, and
@@ -105,7 +111,7 @@ and is never an acceptance criterion the developer must satisfy.
 - [ ] `CapabilityDegraded` validates against the updated events schema and appears in the type union.
 - [ ] The config schema is registered with AJV, `generated-schemas.ts` is regenerated and committed, and `pnpm validate-schemas` passes.
 - [ ] The loader ignores a working-tree copy of the file and reads only the base ref.
-- [ ] The `capabilities.yaml` template in the init-templates map validates against the schema with an empty required list, and the PR body carries the tested YAML for this repository's eight required capabilities for the operator to commit.
+- [ ] The `capabilities.yaml` template in the init-templates map validates against the schema with an empty required list, and the PR adds `.ai-sdlc/capabilities.yaml` for this repository with the eight required capabilities, validated against the schema.
 - [ ] `docs/operations/capability-liveness.md` exists, cites `RFC-0049`, is linked from `docs/operations/README.md`, and contains no internal task ids.
 - [ ] `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass, including `pnpm dark-code:check`.
 <!-- SECTION:DESCRIPTION:END -->
