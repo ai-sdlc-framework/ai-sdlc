@@ -8,6 +8,7 @@
  * runsc and sets the flag, so the run is visible there.
  */
 import { describe, it, expect } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,8 +27,28 @@ const ENABLED =
   process.env['AI_SDLC_SANDBOX_INTEGRATION_TESTS'] === '1' &&
   checkDriverAvailability('gvisor').available;
 
+/**
+ * Probe a trivial `docker run --runtime=runsc` so a runner whose runsc cannot
+ * start a sandbox (no KVM or ptrace platform) skips with a logged reason
+ * instead of failing the differential test.
+ */
+function probeRunsc(): { ok: boolean; reason: string } {
+  if (!ENABLED) return { ok: false, reason: 'integration env flags or runsc not present' };
+  const image = process.env['AI_SDLC_SANDBOX_IMAGE'] ?? 'node:22-slim';
+  const r = spawnSync('docker', ['run', '--rm', '--runtime=runsc', image, 'true'], {
+    encoding: 'utf8',
+    timeout: 120_000,
+  });
+  if (r.status === 0) return { ok: true, reason: '' };
+  const reason = `docker run --runtime=runsc probe failed (status=${r.status}): ${r.stderr || r.error?.message || ''}`;
+  console.warn(`[gvisor-integration] skipping differential test: ${reason}`);
+  return { ok: false, reason };
+}
+
+const PROBE = probeRunsc();
+
 describe('GVisorSandboxDriver differential test (integration)', () => {
-  it.skipIf(!ENABLED)(
+  it.skipIf(!PROBE.ok)(
     'returns the same result shape as the Docker driver',
     async () => {
       const tmpDir = mkdtempSync(join(tmpdir(), 'gvisor-integration-'));
@@ -45,7 +66,12 @@ describe('GVisorSandboxDriver differential test (integration)', () => {
           workDir: tmpDir,
           driverOverride: new GVisorSandboxDriver(),
         });
-        expect(result.outcome).toBe('success');
+        if (result.outcome !== 'success') {
+          console.error(
+            `[gvisor-integration] outcome=${result.outcome} detail=${JSON.stringify(result)}`,
+          );
+        }
+        expect(result.outcome, JSON.stringify(result)).toBe('success');
         if (result.outcome === 'success') {
           expect(Object.keys(result.differentialTest).sort()).toEqual(
             Object.keys(parseDifferentialTestOutput('')).sort(),
