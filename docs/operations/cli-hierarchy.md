@@ -530,6 +530,12 @@ running dispatch session for `--notify`).
 cli-hierarchy brief --rfc RFC-0051 --notify
 ```
 
+**Local filing branch (AISDLC-1221).** After a successful push and `gh pr create`, `cli-file --pr`
+removes the `.worktrees/file-<id>` worktree and the local `ai-sdlc/file-<id>` branch it created, so
+a later filing for the same id (`cli-decisions add` then `answer`) is not refused. The remote
+branch and the PR remain. If the local sha differs from the pushed remote sha, the branch is kept
+and one warning is printed.
+
 **Auto-brief (AISDLC-930).** `cli-file task <path> --pr` also writes
 `.ai-sdlc/dispatch/briefs/tasks-<id>.md` on the local board: one entry, no `after`, wave 1,
 priority from the task frontmatter. The next tick ingests it, so a filed task reaches the

@@ -46,7 +46,7 @@ const PROMPT_RULES = [
   },
   {
     id: 'branch-delete',
-    text: '**Delete branches:** never (`git branch -D`/`-d`); leave cleanup to `/ai-sdlc cleanup` (instruction only, no hook).',
+    text: '**Delete branches:** never (`git branch -D`/`-d`); leave cleanup to `/ai-sdlc cleanup`; `cli-file --pr` removes its own local `ai-sdlc/file-<id>` branch after the push (AISDLC-1221) (instruction only, no hook).',
     detect: /git branch -D/g,
   },
   {

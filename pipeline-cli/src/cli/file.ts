@@ -250,8 +250,29 @@ function publish(
     if (r.status !== 0) throw new Error(`gh pr create failed: ${r.stderr.trim()}`);
     prUrl = r.stdout.trim().split('\n').pop() ?? null;
     recordFiling(p.repo);
+    removeLocalFilingBranch(deps, p, wt);
   }
   return { branch: p.branch, prUrl };
+}
+
+/**
+ * After a successful push and PR, the remote branch is the record: remove the worktree and local
+ * branch this call created so a later filing for the same id is not refused (AISDLC-1221). The
+ * branch is kept, with one warning, when its sha differs from the pushed remote sha.
+ */
+function removeLocalFilingBranch(deps: FileDeps, p: Publish, wt: string): void {
+  const local = deps.exec('git', ['rev-parse', 'HEAD'], wt).stdout.trim();
+  const ls = deps.exec('git', ['ls-remote', 'origin', `refs/heads/${p.branch}`], p.repo);
+  const remote = ls.stdout.trim().split(/\s+/)[0] ?? '';
+  if (local === '' || local !== remote) {
+    console.error(
+      `warning: local branch ${p.branch} (${local || 'unknown'}) differs from the pushed remote ` +
+        `(${remote || 'unknown'}); keeping it and ${wt}`,
+    );
+    return;
+  }
+  deps.exec('git', ['worktree', 'remove', '--force', wt], p.repo);
+  deps.exec('git', ['branch', '-D', p.branch], p.repo);
 }
 
 /** Filing PRs are never drafts: the docs lane arms them straight away (AISDLC-878). */
@@ -591,7 +612,7 @@ export function fileTask(
     writeAutoBrief(repo, abs, undefined, fixesOf(deps, repo, opts.fixesPr));
   }
   // Only a source inside the parent's own backlog/tasks is a leftover (AISDLC-931 sources are elsewhere).
-  if (abs === join(repo, rel)) removeSourceCopy(deps, repo, abs, rel, res.branch);
+  if (abs === join(repo, rel)) removeSourceCopy(deps, repo, abs, rel, `origin/${res.branch}`);
   return res;
 }
 
@@ -714,7 +735,7 @@ export function fileDecision(
   if (!useLegacy) {
     for (const line of fresh) {
       const rel = `${EVENTS_DIR_REL}/${eventFileName(JSON.parse(line) as DecisionEvent, line)}`;
-      removeSourceCopy(deps, repo, join(repo, rel), rel, res.branch);
+      removeSourceCopy(deps, repo, join(repo, rel), rel, `origin/${res.branch}`);
     }
   }
   return res;
