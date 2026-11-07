@@ -391,6 +391,7 @@ jobs:
         env:
           AI_SDLC_GVISOR_INTEGRATION_TESTS: '1'
           AI_SDLC_SANDBOX_INTEGRATION_TESTS: '1'
+          AI_SDLC_SANDBOX_IMAGE: node:22-bookworm
         run: pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/pipeline/gvisor-integration.test.ts
 
   # ── Jobs moved from ci.yml (AISDLC-727) ─────────────────────────────────

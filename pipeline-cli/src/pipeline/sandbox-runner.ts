@@ -1501,6 +1501,11 @@ cd "$WORK_DIR"
 # SHA or a known-scheme URL before being interpolated here.
 UPSTREAM_REF='${escapedRef}'
 
+if ! command -v git >/dev/null 2>&1; then
+  echo 'sandbox image lacks git (set AI_SDLC_SANDBOX_IMAGE)' >&2
+  exit 1
+fi
+
 if [ -n "\${SANDBOX_FIXTURE_B64:-}" ]; then
   # Fixture-demo mode (RFC-0043 AQ2 live demo — option B). The trusted base
   # tree is a tiny zero-dependency repo supplied as a base64 gzip tarball via

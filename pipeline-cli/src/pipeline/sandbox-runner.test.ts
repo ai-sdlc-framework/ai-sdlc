@@ -1552,6 +1552,14 @@ describe('buildDifferentialTestScript — fixture-demo mode (AISDLC-522 AC-6)', 
     expect(script).toContain('${SANDBOX_FIXTURE_B64:-}');
   });
 
+  it('generated script fails with a named error when the image lacks git', () => {
+    const script = buildDifferentialTestScript('https://github.com/example/repo.git');
+    const check = script.indexOf('command -v git');
+    expect(check).toBeGreaterThan(-1);
+    expect(script).toContain('sandbox image lacks git (set AI_SDLC_SANDBOX_IMAGE)');
+    expect(check).toBeLessThan(script.indexOf('git clone'));
+  });
+
   it('generated script still contains the URL-clone branch (non-fixture mode)', () => {
     const script = buildDifferentialTestScript('https://github.com/example/repo.git');
     expect(script).toContain('git clone');
