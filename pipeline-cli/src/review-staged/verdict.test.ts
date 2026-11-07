@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { aggregateVerdicts } from '../steps/08-aggregate-verdicts.js';
 import type { StagedVerdict } from '../review-synth/types.js';
-import { toReviewerVerdict } from './verdict.js';
+import { applyCoverageGate, toReviewerVerdict } from './verdict.js';
 
 const base = (over: Partial<StagedVerdict> = {}): StagedVerdict => ({
   approved: true,
@@ -103,5 +103,42 @@ describe('Step 8 over a set of one verdict', () => {
       ],
     });
     expect(blocked.decision).toBe('CHANGES_REQUESTED');
+  });
+});
+
+describe('applyCoverageGate (DEC-0040)', () => {
+  const hunks = [
+    { id: 'h1', file: 'src/a.ts', startLine: 1, endLine: 5 },
+    { id: 'h2', file: 'src/b.ts', startLine: 10, endLine: 20 },
+  ];
+  const isHigh = (h: { id: string }) => h.id === 'h1';
+
+  it('leaves the verdict alone when every hunk is covered', () => {
+    const v = base();
+    expect(applyCoverageGate(v, hunks, [], isHigh)).toBe(v);
+  });
+
+  it('fails closed on an uncovered high-risk hunk, naming file and range', () => {
+    const v = applyCoverageGate(base(), hunks, ['h1'], isHigh);
+    expect(v.approved).toBe(false);
+    expect(v.reason).toBe('incomplete-coverage');
+    expect(v.uncoveredHunks).toEqual([
+      { id: 'h1', file: 'src/a.ts', startLine: 1, endLine: 5, risk: 'high' },
+    ]);
+    expect(toReviewerVerdict(v, ['h1']).summary).toContain('src/a.ts:1-5');
+  });
+
+  it('reports an uncovered medium or low hunk without flipping the verdict', () => {
+    const v = applyCoverageGate(base(), hunks, ['h2'], isHigh);
+    expect(v.approved).toBe(true);
+    expect(v.reason).toBeUndefined();
+    expect(v.uncoveredHunks).toEqual([
+      { id: 'h2', file: 'src/b.ts', startLine: 10, endLine: 20, risk: 'other' },
+    ]);
+  });
+
+  it('does nothing for an empty plan with no hunks', () => {
+    const v = base();
+    expect(applyCoverageGate(v, [], [], isHigh)).toBe(v);
   });
 });

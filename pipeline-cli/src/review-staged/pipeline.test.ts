@@ -704,7 +704,11 @@ describe('synthesizer prompt and finalize', () => {
     expect(executed.probes.ok).toBeGreaterThan(0);
     f.seal = executed.seal;
     const r = await finalize(f, verdict());
-    expect(r).toMatchObject({ ok: false, reason: 'insufficient-evidence', fallbackSet: 'three' });
+    // The empty probes cover nothing, so the high-risk hunks fail closed.
+    expect(r).toMatchObject({
+      ok: true,
+      verdict: { approved: false, reason: 'incomplete-coverage' },
+    });
   });
 
   it('refuses to seal evidence when a probe rewrote the run state while it ran', async () => {
@@ -752,7 +756,7 @@ describe('synthesizer prompt and finalize', () => {
     expect(existsSync(join(runDirOf(f), RUN_FILES.evidence))).toBe(false);
   });
 
-  it('falls back when a high-risk hunk has no probe evidence', async () => {
+  it('rejects with incomplete-coverage when a high-risk hunk has no probe evidence', async () => {
     const { f } = await evidenceFixture();
     const mapPath = join(runDirOf(f), RUN_FILES.riskMap);
     const map = JSON.parse(readFileSync(mapPath, 'utf8')) as ReviewRiskMap;
@@ -761,7 +765,14 @@ describe('synthesizer prompt and finalize', () => {
     writeFileSync(mapPath, JSON.stringify({ ...map, hunks: [...map.hunks, extra] }));
     f.seal = await computeSeal(runDirOf(f), 'execute');
     const r = await finalize(f, verdict());
-    expect(r).toMatchObject({ ok: false, reason: 'insufficient-evidence' });
+    expect(r).toMatchObject({
+      ok: true,
+      verdict: {
+        approved: false,
+        reason: 'incomplete-coverage',
+        uncoveredHunks: [expect.objectContaining({ id: 'uncovered-hunk', risk: 'high' })],
+      },
+    });
   });
 
   it('refuses to run any sealed phase on changed or missing state', async () => {
