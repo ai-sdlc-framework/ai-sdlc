@@ -156,3 +156,43 @@ describe('validateAgentOutput()', () => {
     expect(rules).toContain('require-tests');
   });
 });
+
+describe('validateAgentOutput() max-lines diff base', () => {
+  it('diffs against the merge base so a two-commit branch is measured in full', async () => {
+    const calls: string[][] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockedExecFile.mockImplementation(((...args: any[]) => {
+      const gitArgs = args[1] as string[];
+      calls.push(gitArgs);
+      const cb = args[args.length - 1];
+      cb(
+        null,
+        gitArgs[0] === 'merge-base'
+          ? 'abc123\n'
+          : ' 4 files changed, 150 insertions(+), 80 deletions(-)\n',
+        '',
+      );
+      return { stdout: '', stderr: '' };
+    }) as unknown as typeof execFile);
+    const result = await validateAgentOutput(makeContext({ guardrails: { maxLinesPerPR: 200 } }));
+    expect(calls).toContainEqual(['diff', '--stat', 'abc123']);
+    expect(result.violations).toContainEqual(
+      expect.objectContaining({ rule: 'max-lines', message: expect.stringContaining('230') }),
+    );
+  });
+
+  it('falls back to HEAD~1 when no base ref resolves', async () => {
+    const calls: string[][] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockedExecFile.mockImplementation(((...args: any[]) => {
+      const gitArgs = args[1] as string[];
+      calls.push(gitArgs);
+      const cb = args[args.length - 1];
+      if (gitArgs[0] === 'merge-base') cb(new Error('no ref'), '', '');
+      else cb(null, ' 1 file changed, 1 insertion(+)\n', '');
+      return { stdout: '', stderr: '' };
+    }) as unknown as typeof execFile);
+    await validateAgentOutput(makeContext({ guardrails: { maxLinesPerPR: 200 } }));
+    expect(calls).toContainEqual(['diff', '--stat', 'HEAD~1']);
+  });
+});

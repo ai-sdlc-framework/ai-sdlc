@@ -106,7 +106,7 @@ function issueToInput(issue: GitHubIssue): PriorityInput {
   // ── Builder conviction from ai-eligible label ────────────────────
   const builderConviction = labelNames.includes('ai-eligible') ? 0.8 : 0.4;
 
-  // ── Age → competitive drift (issues older than 90 days drift) ────
+  // ── Age → competitive drift (drift ramps from day 30 and saturates at day 210, a 180-day window) ────
   const ageMs = Date.now() - new Date(issue.createdAt).getTime();
   const ageDays = ageMs / (1000 * 60 * 60 * 24);
   const competitiveDrift = Math.min(1, Math.max(0, (ageDays - 30) / 180));

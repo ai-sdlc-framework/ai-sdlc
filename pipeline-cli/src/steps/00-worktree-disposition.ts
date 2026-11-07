@@ -15,7 +15,8 @@ export type WorktreeDisposition =
   | 'remove-merged'
   | 'remove-closed'
   | 'remove-no-pr'
-  | 'remove-stale';
+  | 'remove-stale'
+  | 'remove-cap';
 
 export interface WorktreeSweepConfig {
   /** Run the sweep every N ticks (default 1, every tick). */

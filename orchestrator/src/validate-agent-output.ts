@@ -86,10 +86,26 @@ export async function validateAgentOutput(ctx: ValidationContext): Promise<Valid
   if (ctx.guardrails.maxLinesPerPR !== undefined) {
     // cleanGitEnv() prevents leaked GIT_DIR from binding this call to a
     // parent process's git repo (AISDLC-72).
+    // Diff against the merge base so a multi-commit branch is measured in full.
+    const gitOut = (args: string[]): Promise<string> =>
+      new Promise<string>((resolve, reject) => {
+        execFile('git', args, { cwd: ctx.workDir, env: cleanGitEnv() }, (err, out) =>
+          err ? reject(err) : resolve(out),
+        );
+      });
+    let base = 'HEAD~1';
+    for (const ref of ['origin/main', 'main']) {
+      try {
+        base = (await gitOut(['merge-base', 'HEAD', ref])).trim() || base;
+        break;
+      } catch {
+        // ref absent: try the next, else keep HEAD~1
+      }
+    }
     const stdout = await new Promise<string>((resolve, reject) => {
       execFile(
         'git',
-        ['diff', '--stat', 'HEAD~1'],
+        ['diff', '--stat', base],
         { cwd: ctx.workDir, env: cleanGitEnv() },
         (err, out) => {
           if (err) reject(err);

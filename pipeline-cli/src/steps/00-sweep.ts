@@ -428,6 +428,52 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
     }
   }
 
+  // Open-PR worktrees kept this pass, with branch-head age: the cap evicts oldest first.
+  const keptOpen: Array<{ f: (typeof found)[number]; headAge: number }> = [];
+
+  const sweepOne = async (
+    f: (typeof found)[number],
+    disposition: WorktreeDisposition,
+    mergedAt: string | null,
+  ): Promise<void> => {
+    const { entry, wt, branch } = f;
+    if (opts.dryRun) {
+      swept.push({
+        worktreePath: wt,
+        branch,
+        mergedAt: mergedAt ?? 'unknown',
+        taskId: entry,
+        disposition,
+      });
+      return;
+    }
+    const dirty = await dirtyPaths(wt, runner);
+    if (dirty.length > 0) {
+      log.info(
+        `[step-0-sweep] ${branch}: removing ${disposition} worktree with ${dirty.length} untracked or modified path(s) at ${wt}: ${dirty.slice(0, 20).join(', ')}${dirty.length > 20 ? ', ...' : ''}`,
+      );
+    }
+    const removal = await removeWorktree(wt, opts.workDir, runner);
+    if (!removal.ok) {
+      log.warn(`[step-0-sweep] ${branch}: removal FAILED at ${wt}: ${removal.reason}`);
+      failed.push({ worktreePath: wt, branch, reason: removal.reason });
+      return;
+    }
+    count--;
+    if (removal.fallback) {
+      log.warn(
+        `[step-0-sweep] ${branch}: git refused the removal; fell back to rm -rf + git worktree prune at ${wt}`,
+      );
+    }
+    swept.push({
+      worktreePath: wt,
+      branch,
+      mergedAt: mergedAt ?? 'unknown',
+      taskId: entry,
+      disposition,
+    });
+  };
+
   for (const f of found) {
     const { entry, wt, branch } = f;
     if (isProtected(f)) continue;
@@ -439,16 +485,18 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
         ? info.state
         : null;
     const mergedAt = info.mergedAt;
+    const headAge = prState === 'OPEN' ? await headAgeMs(wt, runner, nowMs) : null;
     const disposition: WorktreeDisposition = worktreeDisposition(
       {
         onBoardInflight: f.inflight,
         sentinelAgeMs: f.sentinelAgeMs,
         dirAgeMs: f.dirAgeMs,
         prState,
-        headAgeMs: prState === 'OPEN' ? await headAgeMs(wt, runner, nowMs) : null,
+        headAgeMs: headAge,
       },
       config,
     );
+    if (disposition === 'keep-open-pr') keptOpen.push({ f, headAge: headAge ?? 0 });
     if (!isRemoval(disposition)) continue;
     if (opts.dryRun) {
       swept.push({
@@ -507,6 +555,19 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
       ...(totalLifecycleMs !== undefined ? { totalLifecycleMs } : {}),
       ...(ciWaitMs !== undefined ? { ciWaitMs } : {}),
     });
+  }
+
+  // Cap (RFC-0062): above the ceiling, evict open-PR worktrees oldest branch head
+  // first until the count is back at the ceiling. Below it nothing changes.
+  if (!opts.dryRun && count > config.ceiling) {
+    keptOpen.sort((a, b) => b.headAge - a.headAge);
+    for (const { f, headAge } of keptOpen) {
+      if (count <= config.ceiling) break;
+      log.info(
+        `[step-0-sweep] ${f.branch}: worktree count ${count} is above the ceiling ${config.ceiling}; evicting oldest open-PR worktree (branch head ${Math.round(headAge / 3_600_000)}h old)`,
+      );
+      await sweepOne(f, 'remove-cap', resolved.get(f.branch)?.mergedAt ?? null);
+    }
   }
 
   if (!opts.dryRun) {

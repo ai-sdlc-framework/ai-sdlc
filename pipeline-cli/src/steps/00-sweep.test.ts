@@ -16,6 +16,7 @@ import {
   SWEEP_CACHE_FILE,
   SWEEP_STATUS_FILE,
 } from './00-sweep.js';
+import { WORKTREE_SWEEP_DEFAULTS } from './00-worktree-disposition.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, ok, fail as fakeRunnerFail } from '../__test-helpers/fake-runner.js';
 
@@ -133,6 +134,42 @@ describe('Step 0 — sweepMergedWorktrees', () => {
     );
     const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
     expect(result.swept[0]?.disposition).toBe('remove-stale');
+  });
+
+  it('at the cap evicts the oldest open-PR worktree by head age and logs it', async () => {
+    const names = ['wt-a', 'wt-b', 'wt-c'];
+    for (const n of names) mk(n);
+    const days: Record<string, number> = { 'wt-a': 2, 'wt-b': 9, 'wt-c': 5 };
+    const fake = wtRunner(
+      names.map((n, i) => pr(i + 1, 'OPEN', `ai-sdlc/${n}`)),
+      undefined,
+      (f) =>
+        f.on(/^git -C .+ log -1/, (args) => {
+          const d = days[(args[1] ?? '').split('/').pop() ?? ''] ?? 1;
+          return ok(`${Math.floor(Date.now() / 1000) - d * 86400}\n`);
+        }),
+    );
+    const infos: string[] = [];
+    const result = await sweepMergedWorktrees({
+      workDir: tmp,
+      runner: fake.toRunner(),
+      config: { ...WORKTREE_SWEEP_DEFAULTS, ceiling: 2 },
+      logger: { info: (m) => infos.push(m), warn: () => {} },
+    });
+    expect(result.swept.map((s) => [s.taskId, s.disposition])).toEqual([['wt-b', 'remove-cap']]);
+    expect(infos.some((m) => m.includes('evicting oldest open-PR worktree'))).toBe(true);
+  });
+
+  it('below the cap nothing is evicted', async () => {
+    mk('wt-a');
+    mk('wt-b');
+    const fake = wtRunner([pr(1, 'OPEN', 'ai-sdlc/wt-a'), pr(2, 'OPEN', 'ai-sdlc/wt-b')]);
+    const result = await sweepMergedWorktrees({
+      workDir: tmp,
+      runner: fake.toRunner(),
+      config: { ...WORKTREE_SWEEP_DEFAULTS, ceiling: 2 },
+    });
+    expect(result.swept).toEqual([]);
   });
 
   it('never removes inflight or fresh-sentinel worktrees, even when merged or closed', async () => {

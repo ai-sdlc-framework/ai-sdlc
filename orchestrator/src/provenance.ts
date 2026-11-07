@@ -27,7 +27,7 @@ export function createPipelineProvenance(opts: {
   cost?: CostReceipt;
 }): ProvenanceRecord {
   const promptHash = opts.promptText
-    ? createHash('sha256').update(opts.promptText).digest('hex').slice(0, 16)
+    ? createHash('sha256').update(opts.promptText).digest('hex')
     : 'no-prompt';
 
   return createProvenance({
@@ -50,6 +50,7 @@ export function attachProvenanceToPR(provenance: ProvenanceRecord): string {
     `- **Model**: ${provenance.model}`,
     `- **Tool**: ${provenance.tool}`,
     `- **Prompt Hash**: \`${provenance.promptHash}\``,
+    `- **Prompt Hash (short)**: \`${provenance.promptHash.slice(0, 16)}\``,
     `- **Timestamp**: ${provenance.timestamp}`,
     `- **Review Status**: ${provenance.reviewDecision}`,
   ];
