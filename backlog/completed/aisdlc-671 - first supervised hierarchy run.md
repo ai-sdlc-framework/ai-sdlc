@@ -2,7 +2,7 @@
 id: AISDLC-671
 title: >-
   RFC-0051 results note from production logs (closes the supervised-run requirement)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30'
 updated_date: '2026-11-07 00:00'

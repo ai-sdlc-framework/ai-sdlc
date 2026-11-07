@@ -35,6 +35,7 @@ A planner, a dispatch session and up to five executors, each in its own tmux ses
 |---------|-------------|
 | [`session-hierarchy.md`](session-hierarchy.md) | Operator runbook: the three tiers, starting and stopping, roster, board and sequence groups, escalation chain and timeboxes, context clearing, permission modes, governance values, troubleshooting |
 | [`cli-hierarchy.md`](cli-hierarchy.md) | `cli-hierarchy` reference: all subcommands (including `demo`, which regenerates the terminal demo clip) and the `up` options, roster file, operating cycle (brief, tick, clear), restart rule, troubleshooting |
+| [`hierarchy-results-2026-11.md`](hierarchy-results-2026-11.md) | Results note from production logs for the 7-day window ending 2026-11-07: done count, per-role usage, observed failure modes |
 
 **RFC:** [`spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md`](../../spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md)
 
