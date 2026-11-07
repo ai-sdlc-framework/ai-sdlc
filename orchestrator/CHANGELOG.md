@@ -5,6 +5,30 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.41.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.40.0...orchestrator-v0.41.0) (2026-11-07)
+
+
+### Features
+
+* hook-env-hygiene doctor check and parent-checkout escalations (AISDLC-1129) ([#2268](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2268)) ([5a94c66](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5a94c66ab16772dd3c9b0ff13a2139ae1e492689))
+* one-command first-run setup (AISDLC-1178) ([#2412](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2412)) ([161ed6d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/161ed6ddabd9e7ec3877220b67ec2ca8ad0cdabf))
+* **orchestrator:** add MCP advisor setup page and Codex config (AISDLC-1180) ([#2416](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2416)) ([167f225](https://github.com/ai-sdlc-framework/ai-sdlc/commit/167f2255b2dbe2895500508aa118814a55ce8df5))
+* **orchestrator:** SA three-layer engine at admission in phase 2a shadow (AISDLC-1211) ([#2473](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2473)) ([8c6fb27](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8c6fb27366e9c9dc7c9890632a33d2f6959b6f6f))
+* **pipeline-cli:** budget priority floor; delete RFC-0010 s14 quota modules (AISDLC-1209) ([#2465](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2465)) ([7795749](https://github.com/ai-sdlc-framework/ai-sdlc/commit/77957498a64fc20d7b40643208bd28d4edb5f91e))
+
+
+### Bug Fixes
+
+* small corrections to prompt digest, diff base, worktree cap, stale comments (AISDLC-1214) ([#2475](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2475)) ([bcc7090](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bcc70901b36564439f876d862231ac040a56f11a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/pipeline-cli bumped to 0.41.0
+    * @ai-sdlc/reference bumped to 0.41.0
+
 ## [0.40.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.39.0...orchestrator-v0.40.0) (2026-11-01)
 
 

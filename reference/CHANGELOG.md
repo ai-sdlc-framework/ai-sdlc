@@ -1,5 +1,19 @@
 # @ai-sdlc/reference
 
+## [0.41.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.40.0...reference-v0.41.0) (2026-11-07)
+
+
+### Features
+
+* **conformance:** one audit entry schema with JCS hashing and cross-SDK fixture (AISDLC-1213) ([#2471](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2471)) ([11fd3ca](https://github.com/ai-sdlc-framework/ai-sdlc/commit/11fd3ca4520dbafe850bd6822e7b2a8dcd42e1ad))
+* dispatch board rebuild, daily backup and restore (AISDLC-1130) ([#2263](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2263)) ([4f47398](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4f4739807f16ac284270e033e659ef1f053c6d9e))
+* launch profiles restrict tools per hierarchy role (AISDLC-1151) ([#2280](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2280)) ([381caf5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/381caf52e5fa1c5c30587dbbdedfad15cd1b27c7))
+
+
+### Bug Fixes
+
+* open task PRs ready when CodeQL does not run on pull requests (AISDLC-1149) ([#2273](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2273)) ([9dadf31](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9dadf314286653df5c9e43a10d0d7847906c8353))
+
 ## [0.40.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.39.0...reference-v0.40.0) (2026-11-01)
 
 

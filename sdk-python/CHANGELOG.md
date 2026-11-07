@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-python-v0.2.1...sdk-python-v0.3.0) (2026-11-07)
+
+
+### Features
+
+* **conformance:** one audit entry schema with JCS hashing and cross-SDK fixture (AISDLC-1213) ([#2471](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2471)) ([11fd3ca](https://github.com/ai-sdlc-framework/ai-sdlc/commit/11fd3ca4520dbafe850bd6822e7b2a8dcd42e1ad))
+
 ## [0.2.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-python-v0.2.0...sdk-python-v0.2.1) (2026-10-09)
 
 

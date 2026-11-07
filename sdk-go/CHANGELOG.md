@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.8.0...sdk-go-v0.9.0) (2026-11-07)
+
+
+### Features
+
+* **conformance:** one audit entry schema with JCS hashing and cross-SDK fixture (AISDLC-1213) ([#2471](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2471)) ([11fd3ca](https://github.com/ai-sdlc-framework/ai-sdlc/commit/11fd3ca4520dbafe850bd6822e7b2a8dcd42e1ad))
+
+
+### Bug Fixes
+
+* open task PRs ready when CodeQL does not run on pull requests (AISDLC-1149) ([#2273](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2273)) ([9dadf31](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9dadf314286653df5c9e43a10d0d7847906c8353))
+
 ## [0.8.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.7.0...sdk-go-v0.8.0) (2026-10-23)
 
 
