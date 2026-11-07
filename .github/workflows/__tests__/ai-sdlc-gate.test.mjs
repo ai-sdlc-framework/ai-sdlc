@@ -183,6 +183,8 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       'test-go',
       // AISDLC-1172: RFC-0061 verdict check replaces the v6 attestation-gate.
       'verdict-check',
+      // AISDLC-717: release content allowlist re-run on the release-please branch.
+      'release-content',
       'dependency-review-gate',
       'dor-readiness-gate',
       // AISDLC-764: changelog, scope-creep, OQ-marker and reviewer-set checks.
