@@ -41,6 +41,9 @@ import {
   KataSandboxDriver,
   GVisorSandboxDriver,
   MicroVmSandboxDriver,
+  checkDriverAvailability,
+  assertSandboxDriverAvailable,
+  type HostProbe,
   MockSandboxDriver,
   buildDockerRunArgs,
   DOCKER_SECCOMP_PROFILE,
@@ -116,7 +119,7 @@ describe('loadSandboxConfig', () => {
   it('reads complianceRegime from config', () => {
     const dir = makeTmpDir();
     writeGateYaml(dir, 'complianceRegime: hipaa\n');
-    const config = loadSandboxConfig(dir);
+    const config = loadSandboxConfig(dir, HOST_ALL);
     expect(config.complianceRegime).toBe('hipaa');
   });
 
@@ -432,7 +435,7 @@ describe('driver stubs return descriptive errors (not raw throws)', () => {
     });
     expect(result.outcome).toBe('error');
     if (result.outcome === 'error') {
-      expect(result.error).toContain('GVisorSandboxDriver');
+      expect(result.error).toContain('requires a real Docker runtime');
     }
   });
 
@@ -3589,4 +3592,100 @@ describe('SANDBOX_PR_DIFF_B64 env var injection (AISDLC-509 AC-1)', () => {
       expect(envDriver.capturedEnv?.['AI_SDLC_SIGNING_KEY']).toBeUndefined();
     }),
   );
+});
+
+// ── AISDLC-515.1: gVisor driver + config-time refusal ────────────────────────
+
+const HOST_ALL: HostProbe = { fileExists: () => true, commandSucceeds: () => true };
+const HOST_NONE: HostProbe = { fileExists: () => false, commandSucceeds: () => false };
+
+describe('gVisor run arguments (AISDLC-515.1 AC-2)', () => {
+  it('buildDockerRunArgs emits --runtime=runsc only when a runtime is given', () => {
+    const base = {
+      resourceLimits: DEFAULT_RESOURCE_LIMITS,
+      seccompProfileJson: '/tmp/s.json',
+      image: 'img',
+      command: ['true'],
+      cidFilePath: '/tmp/c.cid',
+    };
+    expect(buildDockerRunArgs(base)).not.toContain('--runtime=runsc');
+    expect(buildDockerRunArgs({ ...base, runtime: 'runsc' })).toContain('--runtime=runsc');
+  });
+
+  it('GVisorSandboxDriver spawns docker with --runtime=runsc and the hardening flags', async () => {
+    vi.stubEnv('AI_SDLC_SANDBOX_INTEGRATION_TESTS', '1');
+    const calls: string[][] = [];
+    class Spy extends GVisorSandboxDriver {
+      protected _spawnProcess(_cmd: string, args: string[]): ChildProcess {
+        calls.push(args);
+        const proc = new EventEmitter() as ChildProcess;
+        (proc as unknown as { stdout: EventEmitter }).stdout = new EventEmitter();
+        (proc as unknown as { stderr: EventEmitter }).stderr = new EventEmitter();
+        setImmediate(() => proc.emit('close', 0));
+        return proc;
+      }
+    }
+    const driver = new Spy();
+    try {
+      await driver.spawn({
+        policyFilePath: '/nonexistent',
+        prDiff: 'diff --git a/x b/x\n+x\n',
+        upstreamMainRef: 'https://github.com/example/repo.git',
+        resourceLimits: DEFAULT_RESOURCE_LIMITS,
+        prNumber: 1,
+      });
+      await driver.teardown();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    const run = calls[0];
+    expect(run).toContain('--runtime=runsc');
+    expect(run).toContain('--cap-drop=ALL');
+    expect(run).toContain('--network=none');
+    expect(run).toContain('--read-only');
+    expect(run).toContain('no-new-privileges');
+  });
+});
+
+describe('driver availability (AISDLC-515.1 AC-2, AC-3)', () => {
+  it('gvisor is unavailable without runsc, available with it', () => {
+    const r = checkDriverAvailability('gvisor', HOST_NONE);
+    expect(r.available).toBe(false);
+    expect(r.missing).toContain('runsc');
+    expect(checkDriverAvailability('gvisor', HOST_ALL).available).toBe(true);
+  });
+
+  it('microvm is unavailable without /dev/kvm', () => {
+    const r = checkDriverAvailability('microvm', HOST_NONE);
+    expect(r.available).toBe(false);
+    expect(r.missing).toContain('/dev/kvm');
+    expect(checkDriverAvailability('microvm', HOST_ALL).available).toBe(true);
+  });
+
+  it('docker has no host prerequisite check', () => {
+    expect(checkDriverAvailability('docker', HOST_NONE).available).toBe(true);
+  });
+
+  it('default probe reports a missing runsc/kvm consistently with the host', () => {
+    expect(typeof checkDriverAvailability('gvisor').available).toBe('boolean');
+    expect(typeof checkDriverAvailability('microvm').available).toBe('boolean');
+  });
+
+  it('loadSandboxConfig refuses an unavailable gvisor driver naming driver and prerequisite', () => {
+    const dir = makeTmpDir();
+    writeGateYaml(dir, 'sandboxDriver: gvisor\n');
+    expect(() => loadSandboxConfig(dir, HOST_NONE)).toThrow(/"gvisor".*runsc/);
+    expect(loadSandboxConfig(dir, HOST_ALL).sandboxDriver).toBe('gvisor');
+  });
+
+  it('loadSandboxConfig refuses hipaa without KVM, naming driver, regime override and /dev/kvm', () => {
+    const dir = makeTmpDir();
+    writeGateYaml(dir, 'sandboxDriver: docker\ncomplianceRegime: hipaa\n');
+    expect(() => loadSandboxConfig(dir, HOST_NONE)).toThrow(/"microvm".*\/dev\/kvm/);
+    expect(() => loadSandboxConfig(dir, HOST_NONE)).toThrow(/hipaa/);
+  });
+
+  it('assertSandboxDriverAvailable passes for docker on a bare host', () => {
+    expect(() => assertSandboxDriverAvailable(DEFAULT_SANDBOX_CONFIG, HOST_NONE)).not.toThrow();
+  });
 });

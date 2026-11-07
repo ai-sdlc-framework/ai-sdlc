@@ -1,7 +1,7 @@
 ---
 id: AISDLC-515.1
 title: 'gVisor sandbox driver and config-time refusal of an unavailable driver (RFC-0043 Phase 7a)'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-07'
 labels:
