@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1212
 title: 'One DAG engine; task-decomposer delegates to dependency-graph'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:

@@ -5,6 +5,7 @@
  * Design decision D1: Rule-based, not LLM-based. Complexity >= 6 triggers decomposition.
  */
 
+import { findCycles, topologicalLayers, topologicalOrder } from '@ai-sdlc/pipeline-cli/deps';
 import type { ModuleGraph, ModuleInfo } from './analysis/types.js';
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -102,7 +103,7 @@ export function decomposeTask(
     const affectedModules = findAffectedModules(ctx.moduleGraph, ctx.affectedFiles);
     if (affectedModules.length > 1) {
       // Order modules by dependency: upstream first
-      const ordered = topologicalSort(affectedModules, ctx.moduleGraph);
+      const ordered = orderModules(affectedModules, ctx.moduleGraph);
       for (const mod of ordered) {
         if (subtasks.length >= maxSubtasks) break;
         const deps = findModuleDependencyTasks(mod, ordered, subtasks, ctx.moduleGraph);
@@ -176,33 +177,10 @@ export function validateTaskGraph(graph: TaskGraph): string[] {
     }
   }
 
-  // Check for cycles
-  const visited = new Set<string>();
-  const visiting = new Set<string>();
-  const taskMap = new Map(graph.subtasks.map((s) => [s.id, s]));
-
-  function hasCycle(id: string): boolean {
-    if (visiting.has(id)) return true;
-    if (visited.has(id)) return false;
-    visiting.add(id);
-    const task = taskMap.get(id);
-    if (task) {
-      for (const dep of task.dependsOn) {
-        if (hasCycle(dep)) return true;
-      }
-    }
-    visiting.delete(id);
-    visited.add(id);
-    return false;
-  }
-
-  for (const task of graph.subtasks) {
-    visited.clear();
-    visiting.clear();
-    if (hasCycle(task.id)) {
-      errors.push(`Cycle detected involving task "${task.id}"`);
-      break;
-    }
+  const taskMap = new Map(graph.subtasks.map((t) => [t.id, t]));
+  const cycles = findCycles(taskMap.keys(), (id) => taskMap.get(id)?.dependsOn ?? []);
+  if (cycles.length > 0) {
+    errors.push(`Cycle detected: ${cycles[0].join(' -> ')}`);
   }
 
   return errors;
@@ -213,26 +191,10 @@ export function validateTaskGraph(graph: TaskGraph): string[] {
  * Returns layers: each layer contains tasks that can run in parallel.
  */
 export function getExecutionLayers(graph: TaskGraph): SubTask[][] {
-  const layers: SubTask[][] = [];
-  const completed = new Set<string>();
-  const remaining = new Map(graph.subtasks.map((s) => [s.id, s]));
-
-  while (remaining.size > 0) {
-    const layer: SubTask[] = [];
-    for (const [_id, task] of remaining) {
-      if (task.dependsOn.every((dep) => completed.has(dep))) {
-        layer.push(task);
-      }
-    }
-    if (layer.length === 0) break; // No progress = cycle
-    for (const task of layer) {
-      remaining.delete(task.id);
-      completed.add(task.id);
-    }
-    layers.push(layer);
-  }
-
-  return layers;
+  const taskMap = new Map(graph.subtasks.map((t) => [t.id, t]));
+  return topologicalLayers([...taskMap.keys()], (id) => taskMap.get(id)?.dependsOn ?? []).map(
+    (layer) => layer.map((id) => taskMap.get(id) as SubTask),
+  );
 }
 
 // ── Internal Helpers ──────────────────────────────────────────────────
@@ -245,38 +207,17 @@ function findAffectedModules(graph: ModuleGraph, files?: string[]): ModuleInfo[]
   );
 }
 
-function topologicalSort(modules: ModuleInfo[], graph: ModuleGraph): ModuleInfo[] {
-  const nameSet = new Set(modules.map((m) => m.name));
-  const adjacency = new Map<string, string[]>();
-
-  for (const mod of modules) {
-    adjacency.set(mod.name, []);
-  }
+function orderModules(modules: ModuleInfo[], graph: ModuleGraph): ModuleInfo[] {
+  const modMap = new Map(modules.map((m) => [m.name, m]));
+  const adjacency = new Map<string, string[]>(modules.map((m) => [m.name, []]));
   for (const edge of graph.edges) {
-    if (nameSet.has(edge.from) && nameSet.has(edge.to)) {
+    if (modMap.has(edge.from) && modMap.has(edge.to)) {
       adjacency.get(edge.from)?.push(edge.to);
     }
   }
-
-  const sorted: ModuleInfo[] = [];
-  const visited = new Set<string>();
-  const modMap = new Map(modules.map((m) => [m.name, m]));
-
-  function visit(name: string): void {
-    if (visited.has(name)) return;
-    visited.add(name);
-    for (const dep of adjacency.get(name) ?? []) {
-      visit(dep);
-    }
-    const mod = modMap.get(name);
-    if (mod) sorted.push(mod);
-  }
-
-  for (const mod of modules) {
-    visit(mod.name);
-  }
-
-  return sorted;
+  return topologicalOrder([...modMap.keys()], (name) => adjacency.get(name) ?? []).map(
+    (name) => modMap.get(name) as ModuleInfo,
+  );
 }
 
 function findModuleDependencyTasks(
