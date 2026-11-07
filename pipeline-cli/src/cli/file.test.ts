@@ -304,11 +304,56 @@ describe('cli-file', () => {
     it('writes none for dispatchable: false or blocked.reason', () => {
       fileTask(repo, writeFm('dispatchable: false\n'), { pr: true }, deps);
       expect(existsSync(briefPath())).toBe(false);
-      sh(repo, 'worktree', 'remove', '--force', join(repo, '.worktrees/file-aisdlc-900'));
-      sh(repo, 'branch', '-D', 'ai-sdlc/file-aisdlc-900');
       sh(remote, 'branch', '-D', 'ai-sdlc/file-aisdlc-900');
       fileTask(repo, writeFm('blocked:\n  reason: hold\n'), { pr: true }, deps);
       expect(existsSync(briefPath())).toBe(false);
+    });
+  });
+
+  describe('local filing branch cleanup (AISDLC-1221)', () => {
+    it('removes worktree and branch after push and gh pr create', () => {
+      const calls: string[] = [];
+      const rec: FileDeps = {
+        ...deps,
+        exec(cmd, args, cwd) {
+          calls.push(`${cmd} ${args.join(' ')}`);
+          return deps.exec(cmd, args, cwd);
+        },
+      };
+      const r = fileTask(repo, writeTask(), { pr: true }, rec);
+      expect(r.prUrl).toBe('https://github.com/o/r/pull/1');
+      const idx = (needle: string) => calls.findIndex((c) => c.startsWith(needle));
+      expect(idx('git worktree remove')).toBeGreaterThan(idx('gh pr create'));
+      expect(idx('git branch -D')).toBeGreaterThan(idx('git worktree remove'));
+      expect(idx('gh pr create')).toBeGreaterThan(idx('git push'));
+      expect(sh(repo, 'branch', '--list', 'ai-sdlc/file-aisdlc-900')).toBe('');
+      expect(existsSync(join(repo, '.worktrees/file-aisdlc-900'))).toBe(false);
+      expect(sh(remote, 'branch', '--list', 'ai-sdlc/file-aisdlc-900')).toContain(
+        'ai-sdlc/file-aisdlc-900',
+      );
+    });
+
+    it('keeps the branch with one warning when the remote sha differs', () => {
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const diverged: FileDeps = {
+        ...deps,
+        exec(cmd, args, cwd) {
+          if (cmd === 'git' && args[0] === 'ls-remote')
+            return { status: 0, stdout: 'deadbeef\trefs/heads/x\n', stderr: '' };
+          return deps.exec(cmd, args, cwd);
+        },
+      };
+      fileTask(repo, writeTask(), { pr: true }, diverged);
+      expect(sh(repo, 'branch', '--list', 'ai-sdlc/file-aisdlc-900')).toContain('file-aisdlc-900');
+      const warnings = err.mock.calls.filter((c) => String(c[0]).includes('differs'));
+      expect(warnings).toHaveLength(1);
+      err.mockRestore();
+    });
+
+    it('a second filing for the same id is not refused', () => {
+      fileTask(repo, writeTask(), { pr: true }, deps);
+      sh(remote, 'branch', '-D', 'ai-sdlc/file-aisdlc-900');
+      expect(() => fileTask(repo, writeTask(), { pr: true }, deps)).not.toThrow(/already exists/);
     });
   });
 
