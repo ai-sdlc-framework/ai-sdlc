@@ -1,0 +1,52 @@
+{
+  "schema": "ai-sdlc/review-verdict/v1",
+  "subject": {
+    "headSha": "9b11dbc38ab83e2f774e3faaedb27639b4649db6",
+    "treeSha": "0f4a6128878decc2295c01678e88d00ef4d185e4",
+    "baseSha": "fe67f56606e81e8613224c7e6e83e3efb914a72b",
+    "repository": "ai-sdlc-framework/ai-sdlc",
+    "pullRequest": 2512
+  },
+  "verdict": "approved",
+  "reviewers": [
+    {
+      "name": "code-reviewer",
+      "harness": "claude-code",
+      "model": "",
+      "independenceTier": "attested",
+      "verdict": "approved"
+    },
+    {
+      "name": "test-reviewer",
+      "harness": "claude-code",
+      "model": "",
+      "independenceTier": "attested",
+      "verdict": "approved"
+    },
+    {
+      "name": "security-reviewer",
+      "harness": "claude-code",
+      "model": "",
+      "independenceTier": "attested",
+      "verdict": "approved"
+    }
+  ],
+  "coverage": {
+    "policy": "review-policy@builtin",
+    "required": [
+      "code-reviewer",
+      "test-reviewer",
+      "security-reviewer"
+    ],
+    "satisfied": true
+  },
+  "evidence": {
+    "leaves": "leaves.jsonl",
+    "digest": "sha256:5bdfc06c6620d041246dd2376e822f4da1833d97f39170a0b3dab53cf2206d54"
+  },
+  "issuedBy": {
+    "principal": "pipeline-step-11",
+    "at": "2026-11-07T18:28:40Z"
+  },
+  "carriedForwardFrom": null
+}
