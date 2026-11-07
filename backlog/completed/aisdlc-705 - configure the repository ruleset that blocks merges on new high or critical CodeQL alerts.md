@@ -2,7 +2,7 @@
 id: AISDLC-705
 title: >-
   Configure the repository ruleset that blocks merges on new high or critical CodeQL alerts
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-03'
 labels:
