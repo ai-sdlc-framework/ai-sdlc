@@ -12,6 +12,7 @@ Operator-facing runbooks for running, tuning, and triaging an AI-SDLC pipeline i
 |---------|-------------|
 | [`system-of-record.md`](system-of-record.md) | Which store wins per artifact (task, issue, PR, decision, RFC, board, attestation, memory) and where this project diverges from playbook human-approval stages |
 | [`decision-authority.md`](decision-authority.md) | The autonomous decision protocol: classes (a), (b) and (c) |
+| [`codeql-ruleset.md`](codeql-ruleset.md) | The repository ruleset that blocks merges on new high or critical CodeQL alerts, and how to change it |
 
 ---
 
