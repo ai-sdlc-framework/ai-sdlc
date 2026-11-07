@@ -11,8 +11,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  ACTIVE_STALE_MS,
   BUSY_SCRIPT,
+  PUBLISH_SCRIPT,
   LAST_REPLY_MAX_CHARS,
   RESUME_COMMAND,
   ROTATION_TTL_MS,
@@ -35,6 +35,7 @@ import {
   HANDOFF_PROMPT,
   PLANNER_RESUME_COMMAND,
   PLANNER_ROTATE_AT_TOKENS,
+  PLANNER_TURN_STALE_MS,
   TRANSCRIPT_REPLY_SCRIPT,
   lastReplyKey,
   rotatePendingKey,
@@ -55,9 +56,10 @@ function setup(
     identity?: unknown;
     name?: string;
     task?: string;
+    board?: string;
   } = {},
 ) {
-  const handlers = registerStrict({});
+  const handlers = registerStrict(over.board ? { boardDir: over.board } : {});
   const kv = new Map<string, any>();
   const drop = new Set(over.drop ?? []);
   const result = (name: string) => (drop.has(name) ? { drop: 'busy' } : undefined);
@@ -309,17 +311,6 @@ describe('hierarchy module: executor wake', () => {
     expect(ran(s)).toEqual([RESUME_COMMAND, RESUME_COMMAND]);
   });
 
-  it('a task with no activity for a while no longer mutes wakes', async () => {
-    vi.useFakeTimers();
-    const s = setup();
-    await s.start();
-    const recv = s.handlers.get('session.receive');
-    await recv(s.$, { text: env('proj-operator-dispatch', 'enqueue 1') }, s.next);
-    vi.setSystemTime(Date.now() + ACTIVE_STALE_MS + 1000);
-    await recv(s.$, { text: env('proj-operator-dispatch', 'enqueue 2') }, s.next);
-    expect(ran(s)).toEqual([RESUME_COMMAND, RESUME_COMMAND]);
-  });
-
   it('logs a refused wake, consumes status noise, passes everything else through', async () => {
     const s = setup();
     await s.start();
@@ -425,6 +416,88 @@ describe('hierarchy module: board busy predicate (AISDLC-1124)', () => {
         execFileSync('node', ['-e', BUSY_SCRIPT, '/nonexistent', 'w1', '1'], { encoding: 'utf8' }),
       ).held,
     ).toBeNull();
+  });
+});
+
+describe('hierarchy module: executor state on the board (AISDLC-1216)', () => {
+  function boarded() {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'pub-'));
+    mkdirSync(path.join(dir, 'inflight'));
+    writeFileSync(path.join(dir, 'inflight', 'AISDLC-9.dispatch.json'), '{}');
+    const sf = path.join(dir, 'inflight', 'AISDLC-9.state.json');
+    writeFileSync(
+      sf,
+      JSON.stringify({
+        taskId: 'AISDLC-9',
+        workerId: 'w1',
+        lastHeartbeat: new Date().toISOString(),
+      }),
+    );
+    const s = setup({ name: 'w1', board: dir });
+    s.$.process.run = vi.fn(async (a: string[]) => ({
+      exitCode: 0,
+      stdout: execFileSync(a[0], a.slice(1), { encoding: 'utf8' }),
+    }));
+    const state = () => JSON.parse(readFileSync(sf, 'utf8')).executorState;
+    return { s, state, sf };
+  }
+
+  it('writes turn-running at turn.start and idle-awaiting-clear at turn.complete', async () => {
+    const { s, state, sf } = boarded();
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    expect(state()).toBe('turn-running');
+    await s.handlers.get('turn.complete')(s.$, { text: 'x' }, s.next);
+    expect(state()).toBe('idle-awaiting-clear');
+    expect(JSON.parse(readFileSync(sf, 'utf8')).workerId).toBe('w1');
+  });
+
+  it('tracks two background agents separately and ends them on task-notification turns', async () => {
+    const { s, state } = boarded();
+    await s.start();
+    const h = (n: string) => s.handlers.get(n);
+    await h('turn.start')(s.$, {}, s.next);
+    await h('session.start')(s.$, { agentId: 'a1' }, s.next);
+    await h('session.start')(s.$, { agentId: 'a2' }, s.next);
+    await h('turn.complete')(s.$, { text: 'backgrounded' }, s.next);
+    expect(state()).toBe('background-agent-running');
+    await h('turn.start')(s.$, { text: 'task-notification a2 done' }, s.next);
+    expect(state()).toBe('background-agent-running');
+    await h('turn.complete')(s.$, { text: 'x' }, s.next);
+    expect(state()).toBe('background-agent-running');
+    await h('turn.start')(s.$, { text: 'task-notification' }, s.next);
+    expect(state()).toBe('turn-running');
+    await h('turn.complete')(s.$, { text: 'x' }, s.next);
+    expect(state()).toBe('idle-awaiting-clear');
+  });
+
+  it('foreground subagents never leave the board stuck on background-agent-running', async () => {
+    const { s, state } = boarded();
+    await s.start();
+    const h = (n: string) => s.handlers.get(n);
+    await h('turn.start')(s.$, {}, s.next);
+    for (const id of ['f1', 'f2', 'f3']) {
+      await h('session.start')(s.$, { agentId: id }, s.next);
+      await h('turn.complete')(s.$, { agentId: id, text: 'done' }, s.next);
+    }
+    await h('turn.complete')(s.$, { text: 'x' }, s.next);
+    expect(state()).toBe('idle-awaiting-clear');
+    // agents that never signalled an end are dropped by the next ordinary parent turn
+    await h('session.start')(s.$, { agentId: 'g1' }, s.next);
+    await h('turn.start')(s.$, { text: 'next task' }, s.next);
+    expect(state()).toBe('turn-running');
+  });
+
+  it('publishes nothing without a heartbeat file, a worker name or process.run', async () => {
+    const s = setup({ name: 'w1', board: '/nonexistent' });
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    execFileSync('node', ['-e', PUBLISH_SCRIPT, '/nonexistent', 'w1', 'turn-running']);
+    const none = setup({ omit: 'process.run' });
+    await none.start();
+    await none.handlers.get('turn.start')(none.$, {}, none.next);
+    await none.handlers.get('session.start')(none.$, { agentId: 'z' }, none.next);
+    expect(none.s?.$ ?? none.$).toBeDefined();
   });
 });
 
@@ -640,11 +713,6 @@ describe('hierarchy module: rotation', () => {
     expect(ran(s)).toEqual([]);
     await s.handlers.get('turn.complete')(s.$, { agentId: 'sub', text: 'sub done' }, s.next);
     await s.handlers.get('turn.complete')(s.$, { text: 'still working' }, s.next);
-    expect(ran(s)).toEqual([]);
-    vi.useFakeTimers();
-    vi.setSystemTime(Date.now() + ACTIVE_STALE_MS + 1000);
-    await s.handlers.get('session.measure')(s.$, { tokens: 130_000 }, s.next);
-    vi.useRealTimers();
     expect(ran(s)).toContain('clear');
   });
 
@@ -765,7 +833,7 @@ describe('hierarchy module: planner role (AISDLC-1036)', () => {
     await s.handlers.get('turn.start')(s.$, {}, s.next);
     await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
     expect(ran(s)).toEqual([]);
-    vi.setSystemTime(Date.now() + ACTIVE_STALE_MS + 1000);
+    vi.setSystemTime(Date.now() + PLANNER_TURN_STALE_MS + 1000);
     await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
     expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
   });

@@ -393,6 +393,15 @@ describe('releaseInflight', () => {
     releaseInflight(boardDir, 'AISDLC-701');
     expect(readHeartbeat(boardDir, 'AISDLC-701')).toBeUndefined();
   });
+
+  it('a worker heartbeat keeps the executorState the hooks module published (AISDLC-1216)', () => {
+    const boardDir = mkBoard();
+    writeManifest(boardDir, mkManifest('AISDLC-702'));
+    claimNext(boardDir, 'in-session-agent');
+    writeHeartbeat(boardDir, mkHeartbeat('AISDLC-702', { executorState: 'turn-running' }));
+    writeHeartbeat(boardDir, mkHeartbeat('AISDLC-702'));
+    expect(readHeartbeat(boardDir, 'AISDLC-702')?.executorState).toBe('turn-running');
+  });
 });
 
 // ---------------------------------------------------------------------------

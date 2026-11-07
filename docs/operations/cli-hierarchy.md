@@ -286,6 +286,14 @@ binary) for callers that spawn `gh` directly. Lines older than 24 hours are drop
 GitHub reads (human-attention list, mark-ready, landing) and reports the skip when the lowest remaining bucket is below the floor
 (default 300, override with `AI_SDLC_GH_QUOTA_FLOOR`). The gate workflow prints the Actions quota at the start (`detect`) and end
 (`pr-ready`) of each run in the job summary.
+The `INFLIGHT` column appends the executor state in parentheses (AISDLC-1216, DEC-0392). The executor hooks
+module writes `executorState` into the claim's `inflight/<task>.state.json` (it holds no fs, so it runs a small
+`node -e` through `process.run`; only a claim whose heartbeat file exists is touched) on `turn.start`,
+`turn.complete` and a subagent `session.start`: `turn-running` (a main-loop turn is running),
+`idle-awaiting-clear` (no turn and no background agent) and `background-agent-running` (at least one subagent
+`session.start` not yet ended; it outranks the turn state because a backgrounded developer ends the main turn at
+once). The host delivers no subagent end event, so the next parent `turn.start` (the task-notification turn)
+ends one agent, the one the notification text names or else the oldest; agents are tracked per `agentId`.
 The `MODULE` column (AISDLC-1061) is the hierarchy hooks module's heartbeat for the session, read from
 `<board-dir>/handoff/module-<name>.json` (`{state, reason, version, at}`): `loaded`, `refused: <reason>`,
 `absent` (no file: the session has no hierarchy role, or the module never ran in it) or, for the dispatch

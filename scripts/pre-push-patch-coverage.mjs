@@ -18,11 +18,19 @@ import { isInstrumentableFile, listChangedFiles } from './check-pr-patch-coverag
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
+const MODS_COVERED_PREFIX = 'ai-sdlc-plugin/hooks/hierarchy/';
+const MODS_PACKAGE = 'ai-sdlc-plugin/mods';
+
 /** Map instrumentable changed files to the workspace package dirs that own a test:coverage script. */
 export function packagesToCover(files, readPkg = defaultReadPkg) {
   const out = new Set();
   for (const file of files) {
     if (!isInstrumentableFile(file)) continue;
+    // The hierarchy hooks module is covered by the mods package (its vitest config includes it).
+    if (file.startsWith(MODS_COVERED_PREFIX)) {
+      if (readPkg(MODS_PACKAGE)?.scripts?.['test:coverage']) out.add(MODS_PACKAGE);
+      continue;
+    }
     let dir = dirname(file);
     while (dir && dir !== '.') {
       const pkg = readPkg(dir);
