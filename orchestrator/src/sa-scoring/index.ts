@@ -52,6 +52,12 @@ export interface ScoreSoulAlignmentInput {
   observedMetrics?: Record<string, number>;
   /** Issue number for audit trail — used when persisting did_scoring_events. */
   issueNumber?: number;
+  /**
+   * Claim rank of the task at scoring time (RFC-0062 OQ-3 propensity
+   * logging). `null` = never claimed. Omitted = not recorded. Persisted as
+   * `rank` inside `phase_weights_json`.
+   */
+  claimRank?: number | null;
 }
 
 export interface ScoreSoulAlignmentDeps {
@@ -173,6 +179,7 @@ export async function scoreSoulAlignment(
       dimension: 'SA-1',
       phase: input.phase as StateSaPhase,
       weights: composite.weights,
+      claimRank: input.claimRank,
       layer1,
       layer2: domainRelevance,
       layer3Sa1: layer3
@@ -190,6 +197,7 @@ export async function scoreSoulAlignment(
       dimension: 'SA-2',
       phase: input.phase as StateSaPhase,
       weights: composite.weights,
+      claimRank: input.claimRank,
       layer1,
       layer2: principleCoverage,
       layer3Sa2: layer3
@@ -224,6 +232,7 @@ interface PersistEventInput {
   dimension: SaDimension;
   phase: StateSaPhase;
   weights: PhaseWeights;
+  claimRank?: number | null;
   layer1: DeterministicScoringResult;
   layer2: DomainRelevanceResult | PrincipleCoverageVector;
   layer3Sa1?: {
@@ -261,7 +270,9 @@ function persistScoringEvent(store: StateStore, input: PersistEventInput): void 
     layer2ResultJson: JSON.stringify(input.layer2),
     layer3ResultJson: layer3Payload ? JSON.stringify(layer3Payload) : undefined,
     compositeScore: input.compositeScore,
-    phaseWeightsJson: JSON.stringify(input.weights),
+    phaseWeightsJson: JSON.stringify(
+      input.claimRank === undefined ? input.weights : { ...input.weights, rank: input.claimRank },
+    ),
   });
 }
 

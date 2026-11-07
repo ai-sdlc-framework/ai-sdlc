@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import type { DesignIntentDocument, DesignSystemBinding } from '@ai-sdlc/reference';
 import { StateStore } from '../state/store.js';
 import { FakeDepparseClient } from './depparse-client.js';
 import { RecordedLLMClient } from './layer3-llm.js';
 import { resolveSoulAlignmentOverride, scoreSoulAlignment } from './index.js';
+import { createSoulAlignmentShadow } from './admission-shadow.js';
+import { computeAdmissionComposite } from '../admission-composite.js';
 
 const API_VERSION = 'ai-sdlc.io/v1alpha1' as const;
 
@@ -338,5 +340,87 @@ describe('resolveSoulAlignmentOverride', () => {
       },
     );
     expect(resolveSoulAlignmentOverride(result)).toBe(result.sa1);
+  });
+});
+
+describe('admission shadow wiring (AISDLC-1211)', () => {
+  const input = {
+    issueNumber: 77,
+    title: 'Add inventory sync',
+    body: 'Sync inventory via webhook.',
+    labels: ['enhancement'],
+    reactionCount: 0,
+    commentCount: 0,
+    createdAt: '2026-01-01T00:00:00Z',
+  };
+
+  it('writes (0,0)-weight rows for every SA dimension, rank null, score unchanged', async () => {
+    const db = new Database(':memory:');
+    const store = StateStore.open(db);
+    const errors: unknown[] = [];
+    const shadow = createSoulAlignmentShadow({
+      did: makeDid(),
+      deps: { depparse: new FakeDepparseClient(), llm: makeLLMClient(), stateStore: store },
+      issueText: () => `${input.title}\n${input.body}`,
+      onError: (e) => errors.push(e),
+    });
+    const baseline = computeAdmissionComposite(input);
+    const withShadow = computeAdmissionComposite(input, undefined, {
+      soulAlignmentShadow: shadow,
+    });
+    expect(withShadow.score.composite).toBe(baseline.score.composite);
+    expect(withShadow.score.dimensions.soulAlignment).toBe(baseline.score.dimensions.soulAlignment);
+
+    await vi.waitFor(() => {
+      expect(store.getDidScoringEvents({ issueNumber: 77 })).toHaveLength(2);
+    });
+    for (const dim of ['SA-1', 'SA-2'] as const) {
+      const rows = store.getDidScoringEvents({ issueNumber: 77, saDimension: dim });
+      expect(rows).toHaveLength(1);
+      expect(rows[0].phase).toBe('2a');
+      expect(typeof rows[0].compositeScore).toBe('number');
+      expect(JSON.parse(rows[0].phaseWeightsJson!)).toEqual({
+        wStructural: 0,
+        wLlm: 0,
+        rank: null,
+      });
+    }
+    expect(errors).toEqual([]);
+    store.close();
+  });
+
+  it('records a numeric claim rank when supplied and reports engine errors', async () => {
+    const db = new Database(':memory:');
+    const store = StateStore.open(db);
+    createSoulAlignmentShadow({
+      did: makeDid(),
+      deps: { depparse: new FakeDepparseClient(), stateStore: store },
+      issueText: () => 'x',
+      claimRank: () => 3,
+    })({ workItemId: '#78', issueNumber: 78, labelSoulAlignment: 0.5 });
+    await vi.waitFor(() => {
+      expect(store.getDidScoringEvents({ issueNumber: 78 })).toHaveLength(2);
+    });
+    const row = store.getDidScoringEvents({ issueNumber: 78, saDimension: 'SA-1' })[0];
+    expect(JSON.parse(row.phaseWeightsJson!).rank).toBe(3);
+
+    const errs: unknown[] = [];
+    createSoulAlignmentShadow({
+      did: {} as DesignIntentDocument,
+      deps: { depparse: new FakeDepparseClient() },
+      issueText: () => 'x',
+      onError: (e) => errs.push(e),
+    })({ workItemId: '#79', issueNumber: 79, labelSoulAlignment: 0.5 });
+    await vi.waitFor(() => expect(errs).toHaveLength(1));
+    store.close();
+  });
+
+  it('swallows a throwing shadow hook without altering admission', () => {
+    const r = computeAdmissionComposite(input, undefined, {
+      soulAlignmentShadow: () => {
+        throw new Error('boom');
+      },
+    });
+    expect(r.score.composite).toBe(computeAdmissionComposite(input).score.composite);
   });
 });
