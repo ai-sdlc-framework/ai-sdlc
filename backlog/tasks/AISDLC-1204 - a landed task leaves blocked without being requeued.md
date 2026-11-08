@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1204
 title: 'A landed task leaves blocked without being requeued'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-06'
 labels:

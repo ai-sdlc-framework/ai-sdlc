@@ -6,7 +6,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { listBoard, peekQueue } from './board.js';
-import { retireFailedVerdict, retireLandedSweep } from './retire-landed.js';
+import { retireBlockedManifest, retireFailedVerdict, retireLandedSweep } from './retire-landed.js';
 import { collectHandoffState } from '../hierarchy/handoff.js';
 import { briefStatus } from '../hierarchy/brief-status.js';
 import { renderBriefBlock } from '../hierarchy/brief-format.js';
@@ -251,5 +251,42 @@ describe('only the task code PR retires a failed verdict (AISDLC-1177)', () => {
         headBranch: 'ai-sdlc/aisdlc-2-x',
       }),
     ).toBe(true);
+  });
+});
+
+describe('landing retires a blocked manifest (AISDLC-1204)', () => {
+  function seedBlocked(): void {
+    mkdirSync(path.join(board, 'blocked'), { recursive: true });
+    writeFileSync(
+      path.join(board, 'blocked', 'AISDLC-1153.manifest.json'),
+      '{"taskId":"AISDLC-1153","block":{"reason":"awaiting gate re-run"}}',
+    );
+  }
+
+  it('reconcile moves it to done/ with the merge sha', () => {
+    seedBlocked();
+    reconcile([merged], { boardDir: board, execute: () => ({ ran: true }) });
+    expect(existsSync(path.join(board, 'blocked', 'AISDLC-1153.manifest.json'))).toBe(false);
+    expect(existsSync(path.join(board, 'done', 'AISDLC-1153.manifest.json'))).toBe(true);
+    const v = read('done', 'AISDLC-1153.verdict.json');
+    expect(v['outcome']).toBe('success');
+    expect(v['landedSha']).toBe('b48d5a2e');
+    expect(v['prNumber']).toBe(2282);
+  });
+
+  it('the sweep retires it, and a repeat or a docs PR does nothing', () => {
+    seedBlocked();
+    const rec = {
+      pr: 2282,
+      taskId: 'AISDLC-1153',
+      landed: '2026-11-06T00:00:00Z',
+      landedSha: 'abc',
+    };
+    expect(
+      retireBlockedManifest(board, { taskId: 'AISDLC-1153', landedAt: 'x', kind: 'docs' }),
+    ).toBe(false);
+    expect(retireLandedSweep(board, [rec]).moved).toEqual([{ taskId: 'AISDLC-1153', pr: 2282 }]);
+    expect(retireLandedSweep(board, [rec]).moved).toEqual([]);
+    expect(retireBlockedManifest(board, { taskId: 'bad id', landedAt: 'x' })).toBe(false);
   });
 });

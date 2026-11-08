@@ -86,6 +86,48 @@ export function retireFailedVerdict(boardDir: string, input: RetireLandedInput):
   return true;
 }
 
+/**
+ * Move the parked manifest of a landed task from `blocked/` to `done/` (AISDLC-1204), recording the
+ * landing in a success verdict so the task is never requeued. Idempotent; same PR and kind guards
+ * as {@link retireFailedVerdict}.
+ * @returns true when a blocked manifest was retired.
+ */
+export function retireBlockedManifest(boardDir: string, input: RetireLandedInput): boolean {
+  if (!TASK_ID_RE.test(input.taskId)) return false;
+  const blocked = path.join(boardDir, 'blocked', `${input.taskId}${MANIFEST_SUFFIX}`);
+  const doneVerdict = path.join(boardDir, 'done', `${input.taskId}${VERDICT_SUFFIX}`);
+  if (!existsSync(blocked) || existsSync(doneVerdict)) return false;
+  if (
+    (input.kind !== undefined && input.kind !== 'task') ||
+    DOCS_BRANCH_PREFIXES.some((p) => (input.headBranch ?? '').startsWith(p))
+  ) {
+    return false;
+  }
+  const record: Record<string, unknown> = {
+    schemaVersion: 'v1',
+    taskId: input.taskId,
+    outcome: 'success',
+    completedAt: input.landedAt,
+    landed: input.landedAt,
+    landedAt: input.landedAt,
+    ...(input.landedSha === undefined ? {} : { landedSha: input.landedSha }),
+    ...(input.prNumber === undefined ? {} : { prNumber: input.prNumber }),
+    notes: 'retired from blocked/ because its PR landed',
+  };
+  const tmp = `${doneVerdict}.tmp-${process.pid}`;
+  try {
+    writeFileSync(tmp, JSON.stringify(record, null, 2) + '\n', 'utf-8');
+    renameSync(tmp, doneVerdict);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
+  const doneManifest = path.join(boardDir, 'done', `${input.taskId}${MANIFEST_SUFFIX}`);
+  if (existsSync(doneManifest)) rmSync(blocked, { force: true });
+  else renameSync(blocked, doneManifest);
+  return true;
+}
+
 /** The fields of a landing record the sweep reads. */
 export interface LandedRecordLike {
   pr: number;
@@ -117,7 +159,16 @@ export function retireLandedSweep(
       ...(r.kind ? { kind: r.kind } : {}),
       ...(r.headBranch ? { headBranch: r.headBranch } : {}),
     });
-    if (did) moved.push({ taskId: r.taskId, pr: r.pr });
+    const sha = r.landedSha ?? r.headSha;
+    const didBlocked = retireBlockedManifest(boardDir, {
+      taskId: r.taskId,
+      landedAt: r.landed,
+      ...(sha ? { landedSha: sha } : {}),
+      prNumber: r.pr,
+      ...(r.kind ? { kind: r.kind } : {}),
+      ...(r.headBranch ? { headBranch: r.headBranch } : {}),
+    });
+    if (did || didBlocked) moved.push({ taskId: r.taskId, pr: r.pr });
   }
   return { moved };
 }
