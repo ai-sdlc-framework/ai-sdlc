@@ -10,8 +10,7 @@ labels:
   - onboarding
   - docs
   - smoke
-dependencies:
-  - AISDLC-1179
+dependencies: []
 references:
   - docs/getting-started/install-agent-brief.md
   - docs/getting-started/onboarding.md
@@ -22,6 +21,8 @@ dispatchableReason: 'Carries the AC-4 remainder of AISDLC-1179, re-dispatched by
 ---
 
 ## Description
+
+**Planner note 2026-11-08 (class a, dependency dropped).** The dispatch preflight refused this task because `dependencies` named the parent AISDLC-1179, which is still open: the parent's PR #2354 landed AC-1 to AC-3 and the parent closes only when this AC-4 remainder lands, so the dependency was circular. Dropping it loosens no control. The parent moves to completed when this task lands.
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
 **Source.** AISDLC-1179 landed AC-1 to AC-3 in #2354 (merge 74240e4b). The operator ruling of 2026-11-07 (decision rubric, Option A) narrowed the parent to AC-4 and re-dispatched it. The dispatch board keeps a landed id taken, so the AC-4 remainder runs under this sub-task.
