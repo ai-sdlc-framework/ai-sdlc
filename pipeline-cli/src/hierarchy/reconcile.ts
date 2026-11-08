@@ -29,7 +29,7 @@ import { classifyPr, type PrCheck, type PrFacts, type PrState } from './pr-state
 import { collectVerdicts, readInflightManifest, readQueuedManifest } from '../dispatch/board.js';
 import { DECISIONS_SYNC_BRANCH } from '../decisions/remote-persist.js';
 import { completeLandedIterateNeeded } from '../dispatch/complete.js';
-import { retireFailedVerdict } from '../dispatch/retire-landed.js';
+import { retireBlockedManifest, retireFailedVerdict } from '../dispatch/retire-landed.js';
 import { clearRuling, readRuling } from '../dispatch/ruling.js';
 import type { TaskRuling } from '../dispatch/types.js';
 import type { CommandRunner } from './types.js';
@@ -1206,14 +1206,17 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     if (d.state === 'merged' && f.taskId && landedAt !== undefined) {
       const sha = landedSha ?? f.headSha;
       try {
-        retireFailedVerdict(opts.boardDir, {
+        const retireInput = {
           taskId: f.taskId,
           landedAt,
           ...(sha === undefined ? {} : { landedSha: sha }),
           prNumber: f.prNumber,
           kind: d.kind,
           ...(f.headBranch === undefined ? {} : { headBranch: f.headBranch }),
-        });
+        };
+        retireFailedVerdict(opts.boardDir, retireInput);
+        // AISDLC-1204: a landed task parked in blocked/ is done, not requeueable.
+        retireBlockedManifest(opts.boardDir, retireInput);
       } catch {
         /* the sweep (cli-dispatch retire-landed) retries it */
       }
