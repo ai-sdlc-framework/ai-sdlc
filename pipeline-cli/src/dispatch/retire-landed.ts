@@ -17,6 +17,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { TASK_ID_RE } from './board.js';
 import { DOCS_BRANCH_PREFIXES, listLanding } from '../hierarchy/reconcile.js';
@@ -255,4 +256,19 @@ export function retireFailedLanded(boardDir: string, deps: RetireFailedLandedDep
     retired.push(taskId);
   }
   return retired;
+}
+
+/** Task ids under `backlog/completed/` on `origin/main`, each mapped to that commit (AISDLC-1243). */
+export function completedTaskIdsOnMain(workDir: string): ReadonlyMap<string, string> | undefined {
+  const git = (args: string[]) => spawnSync('git', args, { cwd: workDir, encoding: 'utf-8' });
+  const head = git(['rev-parse', 'origin/main']);
+  const ls = git(['ls-tree', '--name-only', 'origin/main', 'backlog/completed/']);
+  if (head.status !== 0 || ls.status !== 0) return undefined;
+  const sha = head.stdout.trim().slice(0, 12);
+  const ids = new Map<string, string>();
+  for (const line of ls.stdout.split('\n')) {
+    const m = /^backlog\/completed\/([A-Za-z][A-Za-z0-9-]*-[0-9]+(?:\.[0-9]+)*)\b/.exec(line);
+    if (m?.[1]) ids.set(m[1].toUpperCase(), sha);
+  }
+  return ids;
 }

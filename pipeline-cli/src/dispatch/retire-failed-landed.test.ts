@@ -6,7 +6,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { peekQueue } from './board.js';
-import { retireFailedLanded } from './retire-landed.js';
+import { execFileSync } from 'node:child_process';
+import { completedTaskIdsOnMain, retireFailedLanded } from './retire-landed.js';
 import { landingDir, landingPath } from '../hierarchy/reconcile.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -101,5 +102,25 @@ describe('retireFailedLanded', () => {
         now,
       }),
     ).toEqual([]);
+  });
+});
+
+describe('completedTaskIdsOnMain', () => {
+  it('lists completed task ids at origin/main, undefined without that ref', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'completed-main-'));
+    try {
+      const git = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf-8' });
+      git('init', '-q');
+      expect(completedTaskIdsOnMain(repo)).toBeUndefined();
+      mkdirSync(path.join(repo, 'backlog', 'completed'), { recursive: true });
+      writeFileSync(path.join(repo, 'backlog', 'completed', 'AISDLC-77 - a title.md'), 'x');
+      git('add', '.');
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x', '--no-verify');
+      git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+      const ids = completedTaskIdsOnMain(repo);
+      expect([...(ids?.keys() ?? [])]).toEqual(['AISDLC-77']);
+    } finally {
+      removeFixtureDir(repo);
+    }
   });
 });
