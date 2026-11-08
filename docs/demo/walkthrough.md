@@ -24,7 +24,7 @@ Seeded tasks: `DEMO-1` slugify, `DEMO-2` clamp, `DEMO-3` chunk. Reset between ta
 | --- | ----- | -------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
 | 1   | 0:00  | shell    | `node pipeline-cli/bin/cli-hierarchy.mjs up`                             | planner and dispatch sessions start, roster printed                      |
 | 2   | 0:45  | shell    | `node pipeline-cli/bin/cli-hierarchy.mjs status`                         | roster with live state                                                   |
-| 3   | 1:15  | TUI      | `AI_SDLC_TUI=experimental node pipeline-cli/bin/cli-tui.mjs`             | board with three To Do tasks                                             |
+| 3   | 1:15  | TUI      | `node pipeline-cli/bin/cli-tui.mjs`             | board with three To Do tasks                                             |
 | 4   | 2:00  | planner  | `/ai-sdlc planner`                                                       | planner reads the board; context meter visible in the status line        |
 | 5   | 3:00  | shell    | `node pipeline-cli/bin/cli-hierarchy.mjs brief`                          | dispatch brief: one wave, three independent tasks                        |
 | 6   | 4:00  | dispatch | `/ai-sdlc operator-dispatch`                                             | dispatch spawns one executor per task                                    |
