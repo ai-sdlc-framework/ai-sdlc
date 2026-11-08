@@ -2,7 +2,7 @@
 id: AISDLC-636.1
 title: >-
   RFC-0049 follow-up (security): permissiveAllowed for dor.stage-b-pass keys off the task file's origin, not the code path
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
