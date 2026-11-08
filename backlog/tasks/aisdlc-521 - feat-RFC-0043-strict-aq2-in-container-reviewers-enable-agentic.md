@@ -14,13 +14,14 @@ dependencies:
 references:
   - spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md
 priority: low
-dispatchable: false
+dispatchable: true
+dispatchableReason: 'Operator ruling 2026-11-08 (decision rubric, option split): unparked for the hermetic scope only, AC 1, 2, 3, 5 and 8. AC 4, 6 and 7 (live container, fork-harness run, agentic-reviewer path) moved to AISDLC-521.1, operator-gated. DEC-0276 answered go.'
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
+**Scope ruling 2026-11-08 (operator, decision rubric).** This task delivers the hermetic scope only: AC 1, 2, 3, 5 and 8. AC 4, 6 and 7 are delivered by AISDLC-521.1 (operator-gated live validation) and are marked here as moved, not as done. Do not attempt a live container or fork-harness run in this task.
 
 AISDLC-520 wired the inference.local proxy but runs the Stage-3 reviewers **host-side**
 (on the runner, which holds the provider key + open internet). That is acceptable for the
@@ -49,10 +50,10 @@ ship plain+host-side now (AISDLC-520), build strict in-container next (this task
 - [ ] #1 The reviewer container's network is a **proxy-only pinhole**: it can reach the inference.local proxy and NOTHING else (no direct internet, no LAN). NOTE this is NOT `--network=none` (which the Stage-2 differential-test container uses for running untrusted code) — it requires a locked-down network (custom internal bridge with only the proxy, or host-gateway + an egress firewall) — design + justify the chosen mechanism.
 - [ ] #2 The Stage-3 reviewers EXECUTE inside that container (a reviewer entrypoint), not in the host ucvg process; the provider credential is NEVER present in the container (assert `buildReviewerProxyEnv` excludes it).
 - [ ] #3 The proxy forwards in-container reviewer requests to the upstream provider (api.anthropic.com) with the credential injected, and streams the response back; verdicts are returned from the container to the host via a **mounted volume** (parsed host-side), not stdout scraping.
-- [ ] #4 Credential-withholding proven: a hermetic test asserts an in-container process cannot reach the provider key or any host beyond inference.local (reuse the AISDLC-513 credential-exfiltration vector against the live container under AI_SDLC_SANDBOX_INTEGRATION_TESTS=1).
+- [ ] #4 (MOVED to AISDLC-521.1) Credential-withholding proven: a hermetic test asserts an in-container process cannot reach the provider key or any host beyond inference.local (reuse the AISDLC-513 credential-exfiltration vector against the live container under AI_SDLC_SANDBOX_INTEGRATION_TESTS=1).
 - [ ] #5 Hermetic coverage (508 _spawnProcess / 510 proxy seams) for the network restriction + verdict-return contract; patch coverage ≥80% on changed non-test source.
-- [ ] #6 A benign untrusted PR still passes end-to-end (real in-container reviewers approve → v6 attestation status=valid) — validated on the fork harness ai-sdlc-enterprise/ai-sdlc-ucvg-test (operator/loop-gated live run).
-- [ ] #7 (Stretch / separate follow-up if large) document the path to AGENTIC reviewers (tools in-container) now that containment exists; do NOT implement agentic tool-use in this task unless trivial.
+- [ ] #6 (MOVED to AISDLC-521.1) A benign untrusted PR still passes end-to-end (real in-container reviewers approve → v6 attestation status=valid) — validated on the fork harness ai-sdlc-enterprise/ai-sdlc-ucvg-test (operator/loop-gated live run).
+- [ ] #7 (MOVED to AISDLC-521.1) (Stretch / separate follow-up if large) document the path to AGENTIC reviewers (tools in-container) now that containment exists; do NOT implement agentic tool-use in this task unless trivial.
 - [ ] #8 build/test/lint/format clean; no AISDLC-NNN tracker IDs in runtime/workflow-echoed strings; isolated mkdtemp; no shared /tmp/.ai-sdlc.
 <!-- AC:END -->
 
@@ -65,6 +66,5 @@ work: the reviewer stage needs a single egress to the proxy, unlike the Stage-2
 untrusted-code stage which gets zero network.
 <!-- SECTION:NOTES -->
 
-## Dispatch note (2026-10-30)
-
-`dispatchable: false` (DEC-0276, operator ruling 2026-10-30): the task stays parked pending a planner go; no executor claims it until the operator flips this back to `true`.
+## Dispatch note (2026-11-08)
+`dispatchable: true` for the hermetic scope (operator ruling 2026-11-08, DEC-0276 answered go). The 2026-10-30 park is lifted.
