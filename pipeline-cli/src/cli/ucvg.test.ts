@@ -195,6 +195,70 @@ describe('runSandboxAndReview — upstreamMainRef is baseSha (MAJOR fix #7)', ()
   });
 });
 
+describe('runSandboxAndReview — strict AQ2 in-container reviewers', () => {
+  it('routes Stage 3 through the container runner when enabled and the proxy is up', async () => {
+    vi.mocked(sandboxRunnerMod.runSandbox).mockResolvedValue({
+      outcome: 'error' as const,
+      error: 'mock',
+    });
+    vi.mocked(sandboxRunnerMod.loadSandboxConfig).mockReturnValue({
+      sandboxDriver: 'docker',
+      differentialTest: { resourceLimits: { wallClockSeconds: 600, cpuCores: 2, memoryMb: 4096 } },
+    });
+    const approved = { approved: true, findings: [], promptInjectionDetected: false };
+    const containerRunner = vi.fn().mockResolvedValue({
+      verdicts: { code: approved, test: approved, security: approved },
+      consensus: { approved: true, blockingFindings: 0 },
+    });
+    const origFactory = _ucvgSeams.inferenceProxyFactory;
+    const origRunner = _ucvgSeams.containerReviewerRunner;
+    _ucvgSeams.containerReviewerRunner = containerRunner;
+    _ucvgSeams.inferenceProxyFactory = (async () => ({
+      proxy: { stop: async () => undefined },
+      port: 7777,
+      sessionToken: 'sess',
+    })) as unknown as typeof origFactory;
+    vi.stubEnv('AI_SDLC_SANDBOX_INTEGRATION_TESTS', '1');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test-not-real');
+    vi.stubEnv('AI_SDLC_UCVG_REVIEWERS_IN_CONTAINER', '1');
+    const tmpDirPath = mkdtempSync(join(tmpdir(), 'ucvg-incontainer-test-'));
+    vi.mocked(cleanRoomSignerMod.unsignedReportPath).mockReturnValue(
+      join(tmpDirPath, '.ai-sdlc', 'ucvg', 'reports', '42.unsigned.json'),
+    );
+    try {
+      await runUcvgCli([
+        'sandbox-run',
+        '--pr-number',
+        '42',
+        '--head-sha',
+        'a'.repeat(40),
+        '--base-sha',
+        'b'.repeat(40),
+        '--pr-content-dir',
+        tmpDirPath,
+        '--work-dir',
+        tmpDirPath,
+        '--output-dir',
+        tmpDirPath,
+      ]);
+    } catch {
+      // report-write errors are irrelevant here
+    } finally {
+      removeFixtureDir(tmpDirPath);
+      _ucvgSeams.inferenceProxyFactory = origFactory;
+      _ucvgSeams.containerReviewerRunner = origRunner;
+      vi.unstubAllEnvs();
+    }
+    expect(containerRunner).toHaveBeenCalledOnce();
+    expect(containerRunner.mock.calls[0][0]).toMatchObject({
+      proxyPort: 7777,
+      sessionToken: 'sess',
+      prNumber: 42,
+    });
+    expect(JSON.stringify(containerRunner.mock.calls[0][0])).not.toContain('sk-ant');
+  });
+});
+
 // ── ast-gate stdin wiring — CRITICAL fix #1 (structural test) ─────────────────
 
 describe('ast-gate CLI — reads changed paths from stdin (CRITICAL fix #1)', () => {

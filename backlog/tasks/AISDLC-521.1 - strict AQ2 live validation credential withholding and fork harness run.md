@@ -1,6 +1,9 @@
 ---
 id: AISDLC-521.1
-title: 'Strict AQ2 live validation: credential-withholding proof against the live container, benign fork-PR end-to-end on the fork harness, and the agentic-reviewer path note (operator-gated)'
+title: >-
+  Strict AQ2 live validation: credential-withholding proof against the live
+  container, benign fork-PR end-to-end on the fork harness, and the
+  agentic-reviewer path note (operator-gated)
 status: To Do
 assignee: []
 created_date: '2026-11-08'
@@ -13,10 +16,27 @@ dependencies:
   - AISDLC-521
 references:
   - spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md
-  - backlog/tasks/aisdlc-521 - feat-RFC-0043-strict-aq2-in-container-reviewers-enable-agentic.md
 priority: medium
 dispatchable: false
-dispatchableReason: 'Operator-gated: AC 1 needs a live container under AI_SDLC_SANDBOX_INTEGRATION on a machine with Docker, and AC 2 needs a loop-gated live run on the fork harness ai-sdlc-enterprise/ai-sdlc-ucvg-test. Split out of AISDLC-521 by operator ruling 2026-11-08 (decision rubric) so the hermetic scope can land without an executor stalling on these.'
+dispatchableReason: >-
+  Operator-gated: AC 1 needs a live container under AI_SDLC_SANDBOX_INTEGRATION
+  on a machine with Docker, and AC 2 needs a loop-gated live run on the fork
+  harness ai-sdlc-enterprise/ai-sdlc-ucvg-test. Split out of AISDLC-521 by
+  operator ruling 2026-11-08 (decision rubric) so the hermetic scope can land
+  without an executor stalling on these.
+drift_status: flagged
+drift_checked: '2026-11-08'
+drift_log:
+  - date: '2026-11-08'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists: backlog/tasks/aisdlc-521 -
+      feat-RFC-0043-strict-aq2-in-container-reviewers-enable-agentic.md
+    resolution: flagged
+  - date: '2026-11-08'
+    type: dep-resolved
+    detail: Dependency AISDLC-521 has been completed
+    resolution: flagged
 ---
 
 ## Description
