@@ -19,6 +19,7 @@ import {
   fileTask,
   removeSourceCopy,
   buildPrCreateArgs,
+  closeTask,
   parseLogStrict,
   replayCommand,
   runFileCli,
@@ -679,6 +680,140 @@ describe('cli-file', () => {
       commitMain('backlog/tasks/aisdlc-900 - thing.md', '---\nid: AISDLC-900\n---\nold\n');
       const r = fileTask(repo, corrected(), { pr: false, update: true }, deps);
       expect(r.branch).toBe('ai-sdlc/update-aisdlc-900');
+    });
+  });
+
+  describe('AISDLC-1241 task --close', () => {
+    const TASK = 'backlog/tasks/aisdlc-900 - thing.md';
+    const seed = () =>
+      commitMain(TASK, '---\nid: AISDLC-900\nstatus: To Do\ndispatchable: false\n---\nbody\n');
+    const prList = (heads: string[]) => {
+      const inner = deps.exec;
+      deps = {
+        ...deps,
+        exec(cmd, args, cwd) {
+          if (cmd === 'gh' && args[1] === 'list') {
+            return {
+              status: 0,
+              stdout: JSON.stringify(heads.map((h, i) => ({ number: i + 7, headRefName: h }))),
+              stderr: '',
+            };
+          }
+          return inner(cmd, args, cwd);
+        },
+      };
+    };
+    const board = (sub: string) => {
+      mkdirSync(join(repo, '.ai-sdlc/dispatch', sub), { recursive: true });
+      writeFileSync(
+        join(repo, '.ai-sdlc/dispatch', sub, 'AISDLC-900.dispatch.json'),
+        '{"taskId":"AISDLC-900"}',
+      );
+    };
+
+    it('moves the file to completed with status Done and a Closed section', () => {
+      seed();
+      const r = closeTask(
+        repo,
+        'aisdlc-900',
+        { reason: 'superseded', supersededBy: 'AISDLC-901', pr: false },
+        deps,
+      );
+      expect(r.branch).toBe('ai-sdlc/file-aisdlc-900');
+      const names = sh(remote, 'diff', '--name-status', 'main', r.branch).split('\n');
+      expect(names.map((l) => l.split('\t')[0]).sort()).toEqual(['A', 'D']);
+      const moved = sh(remote, 'show', `${r.branch}:backlog/completed/aisdlc-900 - thing.md`);
+      expect(moved).toContain('status: Done');
+      expect(moved).toContain('## Closed');
+      expect(moved).toContain('- Reason: superseded');
+      expect(moved).toContain('- Superseded by: AISDLC-901');
+    });
+
+    it('with --pr opens and arms the filing PR', () => {
+      seed();
+      const r = closeTask(repo, 'AISDLC-900', { reason: 'withdrawn', pr: true }, deps);
+      expect(r.prUrl).toBe('https://github.com/o/r/pull/1');
+      expect(r.armed).toBe(true);
+      expect(armCalls).toHaveLength(1);
+    });
+
+    it('adds a status line when the task has none', () => {
+      commitMain(TASK, '---\nid: AISDLC-900\n---\nbody\n');
+      const r = closeTask(repo, 'AISDLC-900', { reason: 'x', pr: false }, deps);
+      expect(sh(remote, 'show', `${r.branch}:backlog/completed/aisdlc-900 - thing.md`)).toContain(
+        'status: Done',
+      );
+    });
+
+    it('refuses an empty reason', () => {
+      seed();
+      expect(() => closeTask(repo, 'AISDLC-900', { reason: '  ', pr: false }, deps)).toThrow(
+        /--reason must not be empty/,
+      );
+    });
+
+    it('refuses an open PR', () => {
+      seed();
+      prList(['ai-sdlc/aisdlc-900-thing']);
+      expect(() => closeTask(repo, 'AISDLC-900', { reason: 'x', pr: false }, deps)).toThrow(
+        /open PR \(#7\)/,
+      );
+    });
+
+    it('refuses a live inflight claim', () => {
+      seed();
+      board('inflight');
+      expect(() => closeTask(repo, 'AISDLC-900', { reason: 'x', pr: false }, deps)).toThrow(
+        /live inflight claim/,
+      );
+    });
+
+    it('refuses a queued manifest', () => {
+      seed();
+      board('queue');
+      expect(() => closeTask(repo, 'AISDLC-900', { reason: 'x', pr: false }, deps)).toThrow(
+        /queued manifest/,
+      );
+    });
+
+    it('refuses an unknown, completed or malformed id and a bad superseding id', () => {
+      expect(() => closeTask(repo, 'AISDLC-900', { reason: 'x', pr: false }, deps)).toThrow(
+        /not found on origin\/main/,
+      );
+      commitMain('backlog/completed/aisdlc-901 - done.md', '---\nid: AISDLC-901\n---\n');
+      expect(() => closeTask(repo, 'AISDLC-901', { reason: 'x', pr: false }, deps)).toThrow(
+        /already completed/,
+      );
+      expect(() => closeTask(repo, 'nope', { reason: 'x', pr: false }, deps)).toThrow(
+        /not a task id/,
+      );
+      expect(() =>
+        closeTask(repo, 'AISDLC-900', { reason: 'x', supersededBy: 'zz', pr: false }, deps),
+      ).toThrow(/--superseded-by/);
+    });
+
+    it('a failing drift check refuses and leaves no branch', () => {
+      seed();
+      drift = 'backlog-drift: bad ref';
+      expect(() => closeTask(repo, 'AISDLC-900', { reason: 'x', pr: false }, deps)).toThrow(
+        /backlog-drift/,
+      );
+    });
+
+    it('the CLI routes --close and refuses a missing path', async () => {
+      seed();
+      const pacing: PacingDeps = { ...(await import('./file-pacing.js')).defaultPacingDeps };
+      const cwd = process.cwd();
+      process.chdir(repo);
+      try {
+        expect(
+          await runFileCli(['task', '--close', 'AISDLC-900', '--reason', 'r'], deps, pacing),
+        ).toBe(0);
+        expect(await runFileCli(['task'], deps, pacing)).toBe(2);
+        expect(await runFileCli(['task', '--close', 'AISDLC-900'], deps, pacing)).toBe(1);
+      } finally {
+        process.chdir(cwd);
+      }
     });
   });
 

@@ -489,6 +489,14 @@ describe('helpers', () => {
     expect(detectKind({ headBranch: 'docs/x', taskId: 'A-1' })).toBe('docs');
     expect(detectKind({ headBranch: 'ai-sdlc/decisions-sync' })).toBe('decisions-sync');
     expect(detectKind({ headBranch: 'ai-sdlc/file-x' })).toBe('docs');
+    // AISDLC-1241: a `task --close` PR is a filing, never a task PR that records a landing.
+    expect(
+      detectKind({
+        headBranch: 'ai-sdlc/file-aisdlc-1179.1',
+        title: 'chore(docs): close backlog task AISDLC-1179.1 (AISDLC-1179.1)',
+        taskId: 'AISDLC-1179.1',
+      }),
+    ).toBe('docs');
     expect(
       detectKind({
         headBranch: 'ai-sdlc/update-aisdlc-1179.1',

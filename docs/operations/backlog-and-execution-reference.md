@@ -18,6 +18,7 @@ Live in `spec/rfcs/RFC-NNNN-*.md`. Process: [`spec/rfcs/README.md`](../../spec/r
 **Example**: RFC-0031 (calibration-driven DID revision) assumes RFC-0009's DID schema as a design contract — its shipped code (`orchestrator/src/sa-scoring/revision-proposal.ts`) only imports `crypto.randomUUID`, not any RFC-0009 module. Correct: `assumes: [RFC-0009]`, not `requires: [RFC-0009]`.
 
 **Gate composition:**
+
 - **DoR upstream-OQ gate** — tasks BLOCK dispatch on open OQs / pre-`Signed Off` lifecycle of RFCs they list under `requires:` (or `references:` for legacy backward-compat). Tasks that list an RFC under `assumes:` are documentation-only — the gate does NOT block on the target's OQ / lifecycle status.
 - **Lifecycle promotion** — when an RFC is promoted to `Implemented`, its `requires:` entries SHOULD also be `Implemented` (warning during AISDLC-311 soak window). `assumes:` entries only need to exist.
 - **Docs-drift linter** (`scripts/check-rfc-docs.mjs`) — `requires:` / `assumes:` entries must reference real RFC IDs. When the RFC declares `implementedBy:` (source-tree paths) and the target also does, the linter scans for actual imports; missing imports surface a deprecation warning suggesting `assumes:`.
@@ -33,8 +34,8 @@ Tasks live in `backlog/tasks/` (open) and `backlog/completed/` (closed); managed
 Tasks that are **never** meant to be picked up by the autonomous orchestrator's developer subagent (soak phases, operator-only monitoring steps, investigation/diagnosis tasks) should carry `dispatchable: false` in their frontmatter. This prevents the orchestrator from wasting subscription time dispatching a subagent for work that requires human judgment.
 
 ```yaml
-dispatchable: false                          # required to opt out of dispatch
-dispatchableReason: "Operator soak phase — no code work; operator monitors stability"  # optional advisory
+dispatchable: false # required to opt out of dispatch
+dispatchableReason: 'Operator soak phase — no code work; operator monitors stability' # optional advisory
 ```
 
 - **Default is `true`** — omitting the field means the task IS dispatchable (backward-compatible).
@@ -62,7 +63,7 @@ dispatchableReason: "Operator soak phase — no code work; operator monitors sta
 
 ```yaml
 blocked:
-  reason: "RFC-0024 OQs acknowledged; operator walkthrough scheduled for 2026-05-20"
+  reason: 'RFC-0024 OQs acknowledged; operator walkthrough scheduled for 2026-05-20'
 ```
 
 This prevents retroactive blocking of in-flight tasks and allows a graceful migration path. The override is logged to the calibration log.
@@ -83,13 +84,13 @@ The decision is computed by `pipeline-cli dor-pr-has-violations`, which consumes
 
 ### Canonical execution paths
 
-| Use case | Command | Billing |
-|---|---|---|
-| Internal dogfood (backlog tasks) | `/ai-sdlc execute <task-id>` (e.g. `AISDLC-393`) | Subscription (Claude Code Max) |
-| Internal dogfood (GitHub issues, subscription billing) | `/ai-sdlc execute <issue-number>` (e.g. `612`, `#612`, `gh:612`) | Subscription (Agent SDK credit pool post-2026-06-15; refuses to fall back to API key) — AISDLC-393 |
-| **Autonomous loop — hierarchy (RFC-0051; supersedes orchestrator-tick / dispatch-worker / execute-parallel, AISDLC-763)** | `cli-hierarchy up` (planner + dispatch + executors); see [`docs/operations/cli-hierarchy.md`](docs/operations/cli-hierarchy.md). The old `/ai-sdlc orchestrator-tick`, `dispatch-worker` and `execute-parallel*` commands are one-paragraph pointers to it. | Subscription interactive quota only — Sonnet for dev/code/test, Opus only for security. |
-| Manual cleanup | `/ai-sdlc cleanup [<task-id>]` | n/a |
-| Unattended watcher (API key; not an external-issue trigger) | `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` | API key |
+| Use case                                                                                                                  | Command                                                                                                                                                                                                                                                     | Billing                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Internal dogfood (backlog tasks)                                                                                          | `/ai-sdlc execute <task-id>` (e.g. `AISDLC-393`)                                                                                                                                                                                                            | Subscription (Claude Code Max)                                                                     |
+| Internal dogfood (GitHub issues, subscription billing)                                                                    | `/ai-sdlc execute <issue-number>` (e.g. `612`, `#612`, `gh:612`)                                                                                                                                                                                            | Subscription (Agent SDK credit pool post-2026-06-15; refuses to fall back to API key) — AISDLC-393 |
+| **Autonomous loop — hierarchy (RFC-0051; supersedes orchestrator-tick / dispatch-worker / execute-parallel, AISDLC-763)** | `cli-hierarchy up` (planner + dispatch + executors); see [`docs/operations/cli-hierarchy.md`](docs/operations/cli-hierarchy.md). The old `/ai-sdlc orchestrator-tick`, `dispatch-worker` and `execute-parallel*` commands are one-paragraph pointers to it. | Subscription interactive quota only — Sonnet for dev/code/test, Opus only for security.            |
+| Manual cleanup                                                                                                            | `/ai-sdlc cleanup [<task-id>]`                                                                                                                                                                                                                              | n/a                                                                                                |
+| Unattended watcher (API key; not an external-issue trigger)                                                               | `pnpm --filter @ai-sdlc/dogfood watch --issue <id>`                                                                                                                                                                                                         | API key                                                                                            |
 
 **External issues (AISDLC-979).** The only external-issue path is `/ai-sdlc execute gh:<n>` run by a local agent. No CI workflow triggers on an issue label (the former `ai-eligible` label is removed from admission scoring and the generated config).
 
@@ -98,6 +99,7 @@ The decision is computed by `pipeline-cli dor-pr-has-violations`, which consumes
 **AISDLC-393 — argument forms.** `/ai-sdlc execute` accepts (in this precedence order): `gh:<n>` (explicit GH-issue), `<prefix>-<number>` (backlog task ID like `AISDLC-393`, including hierarchical sub-IDs like `AISDLC-100.5`), `<number>` / `#<number>` (bare/hash-prefixed numeric → GH-issue). The reference parser lives in `dogfood/src/dispatch-execute-arg.ts` (`parseExecuteArg`) with hermetic test coverage. On the GH-issue path, NO backlog task file is created — the issue is the source of truth and the PR closes it via `Closes #N`. The watcher path (`pnpm --filter @ai-sdlc/dogfood watch --issue <id>`) accepts the same argument forms via the same parser, preserved unchanged for API-key/unattended/CI use. **Dispatch wiring:** the GH-issue path uses `fetchGhIssueAsTaskSpec()` (`dogfood/src/dispatch-from-issue.ts`) to synthesise an in-memory `TaskSpec`, then dispatches via `executePipeline({ taskSpec, sourceKind: 'gh-issue', issueNumber })` — the same composite the backlog-task path uses, just with two knobs flipped. Step 1 skips `findTaskFile`; Step 4 skips the frontmatter patch (sentinel still written) and materialises a transient synthetic task file at `<worktree>/backlog/tasks/<id> - <slug>.md` when `permittedExternalPaths` is non-empty so the PreToolUse hook resolves the allowlist (round-2 AC-2 fix; Step 13 removes the synthetic before push); Step 10 skips the tasks→completed move (attestation envelope still signed + committed); Step 11 formats the PR title with `(closes #N)` and prepends `Closes #N` to the body so the issue auto-closes on merge. **Billing safety (round 2 FINDING 2 fix):** the gh-issue branch pre-flights `claude` on PATH and refuses dispatch if the CLI is missing — refuses to fall back to `ANTHROPIC_API_KEY`-based SDK dispatch (paid API tokens) without explicit operator opt-in via the watcher path. **Latency (round 2 FINDING 3 fix):** the gh-issue branch fetches the issue once, caches the synthesised spec to a `$TMPDIR/aisdlc-393-spec-<n>-$$.json` tmpfile cleaned up on EXIT/INT/TERM, and feeds both the shell-scope TASK_ID extraction and the dispatch `node -e` block from that cache — no second `gh issue view` round-trip.
 
 **Spawner kinds for `--spawner <kind>`** (AISDLC-349, default changed AISDLC-352; legacy `claude-cli` removed AISDLC-377.6):
+
 - `mock` — fixtures only; for plumbing tests. Billing: none.
 - `api-key` — uses `ANTHROPIC_API_KEY` via the Claude Code SDK. Billing: API token (pay-as-you-go or Agent SDK credit pool post-2026-06-15).
 - `claude` — **(DEFAULT since AISDLC-352)** shells out to `claude -p` via `child_process.spawn`. **Use this for shell-driven dispatch** (no slash command body around). Billing: subscription (Agent SDK credit pool, $200/mo on Max-20x). AISDLC-349. **Warning**: if `ANTHROPIC_API_KEY` is also set in env and `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is configured, a spawner error can silently fall through to paid API tokens — the CLI warns at start.
@@ -106,6 +108,7 @@ The decision is computed by `pipeline-cli dor-pr-has-violations`, which consumes
 - ~~`claude-cli`~~ — **removed in RFC-0041 Phase 3.3 (AISDLC-377.6)** after the AISDLC-377.4 deprecation-warning window. Was the `ClaudeCliInlineSpawner` inline-manifest path (AISDLC-198). For subscription-billed parallel autonomous drain, use the session hierarchy (`cli-hierarchy up`, RFC-0051). Migration breadcrumb: [`docs/operations/claude-cli-spawner-removed.md`](docs/operations/claude-cli-spawner-removed.md).
 
 **New dispatch patterns (RFC-0041 Conductor/Worker Architecture)**:
+
 - `in-session-agent` — each Worker is a separate operator-opened CC session (now an executor under `cli-hierarchy`; the `/ai-sdlc dispatch-worker` command is retired, AISDLC-763); tasks are claimed from the Dispatch Board (`.ai-sdlc/dispatch/queue/`) via foreground `Agent` calls (no watchdog, subscription quota). **Recommended default for autonomous drain.** N sessions = N-wide parallelism at zero incremental cost.
 - `claude-p-shell` — Workers are `env -u CLAUDECODE claude -p` subprocesses spawned by `cli-dispatch-supervisor`. Operator-controlled 30 min watchdog. Draws Agent SDK credit pool post-2026-06-15. For headless/CI contexts where no operator CC session is available.
 
@@ -142,6 +145,10 @@ The PreToolUse hook reads `<worktree>/.active-task` (per-worktree sentinel, AISD
 
 After `cli-file task` / `cli-file decision` pushes the filing branch, it removes the untracked source copy from the parent when it is byte-identical to the committed copy (for decisions, the per-event files). A tracked or differing file is kept and a `[cli-file] kept ...` line says why. Step 0.5 (`00-5-sync-parent.ts`) skips an untracked `backlog/tasks/` file whose `ai-sdlc/file-<id>` branch already exists (local or `origin`) and names the branch, instead of aborting on `git worktree add -b`.
 
+### Closing a superseded or withdrawn task (AISDLC-1241)
+
+`cli-file task --close <id> --reason <text> [--superseded-by <id>] [--pr]` is the sanctioned exit for a task that will never have a PR. It reads the task from `origin/main`, sets `status: Done`, appends a `## Closed` section (reason, superseding id, date), moves the file to `backlog/completed/` and opens an armed filing PR on `ai-sdlc/file-<id>` (a move, so the review-task "no task files added" gate is not triggered; the reconciler classifies the branch as a filing, so no task "landed" record is written). Unlike `--update`, which edits in place and refuses a completed task, `--close` refuses an empty `--reason`, an id with an open PR, a live inflight claim or a queued manifest, and an id already in `backlog/completed/`. Without `--pr` it only pushes the branch.
+
 ### Step 0 sweep GitHub cost and cache (AISDLC-958)
 
 Step 0 (`pipeline-cli/src/steps/00-sweep.ts`) makes at most one GitHub call per run, however many worktrees exist: a single `gh pr list --state all --limit 200 --json number,state,headRefName,mergedAt`, matched to worktree branches locally. Branches whose PR is `MERGED` or `CLOSED` are recorded in `.ai-sdlc/sweep-landed-cache.json` (gitignored) together with the worktree HEAD sha, and are never queried again while the sha is unchanged; a run where every worktree is cached makes zero calls. Entries drop out when the worktree is removed or swept, and a branch whose HEAD moved (for example a new PR after new commits) is re-queried. Open and PR-less branches are never cached. Limitation: only the 200 most recent PRs are visible, so an older PR is treated as "no PR" until it is found. To clear the cache, delete `.ai-sdlc/sweep-landed-cache.json`; the next sweep rebuilds it with one call.
@@ -172,26 +179,30 @@ A push typed in the Pattern C parent (on `main`, same remote) overwrites the tas
 ### `finalSummary` template
 
 ```markdown
-
 **AISDLC-1026 - a resume of a delivered task does not touch the task file.** When Step 1 reports a resumed completed task (the file is already under `backlog/completed/` with `status: Done`), Step 4 skips the status flip and the rollback never rewrites it, so the worktree stays clean for Step 10.5. The rollback restores the status it actually read and, when that read failed, leaves the file alone and logs it. The Step 10.5 dirty-tree refusal lists the dirty paths.
 
 **AISDLC-1016 - Step 11 lease push of its own rebase.** Step 11 rebases onto `origin/main` before it pushes, so a branch already on the remote (an earlier push or a resume) is rewritten and the plain push is rejected non-fast-forward. When that happens Step 11 fetches the branch and checks that the remote head is an ancestor of the ref it held before its own rebase, which makes it the pre-rebase copy of the same patch and not foreign work. If so, and the trusted `spec.governance.allowForcePush` policy (read by `loadOperationalPolicy`, the reader the hook shares) allows it, it pushes once with `--force-with-lease=refs/heads/<branch>:<observed remote head>` and reports `pushed: true`. Modes honoured: `lease` = any non-protected branch; `leaseOnOwnBranch` = only from the task's own registered worktree; `never` = no push. A foreign commit on the remote, a protected branch, or an unverifiable remote head keeps the abort with `pushed: false`. Step 10 now stages the reviewer transcript leaves and review records (`ATTESTATION_ARTIFACT_PATHS`) in the attestation chore commit, and the playbook `rebase-push` and `drop-chores` actions treat a tree holding only those paths as clean (`rebase-push` rebases with `--autostash`).
 
 ## Summary
+
 <one-paragraph: what shipped>
 
 ## Changes
+
 - `path/to/file.ts` (new|modified): <what + why>
 
 ## Design decisions
+
 - **<Decision>**: <reason + tradeoff>
 
 ## Verification
+
 - `pnpm build` — clean
 - `pnpm test` — <counts>
 - `pnpm lint` — clean
 
 ## Follow-up
+
 <every item cites a task or issue id (e.g. AISDLC-123 or #123), or starts with "declined: <reason>"; or write "(none)">
 ```
 
@@ -200,8 +211,6 @@ A push typed in the Pattern C parent (on `main`, same remote) overwrites the tas
 - Inline fixes caught during review (use the PR).
 - Trivial chores (deps, config, typos).
 - Exploration/spikes (retroactively if it becomes real work).
-
-
 
 ## `fixesPr` takeover end to end (AISDLC-1054, AISDLC-1070)
 
