@@ -153,3 +153,7 @@ We document these deliberately. The aim is a defensible, improvable baseline for
 - **Protected path** — a file or directory (e.g. `.github/`, lockfiles) whose mutation by an untrusted contributor is hard-blocked.
 - **Prompt-injection finding** — a surfaced detection that the diff attempted to manipulate the reviewers; it blocks signing.
 - **Fail-closed** — when the gate cannot complete, it blocks and requests review rather than passing.
+
+---
+
+Want to discuss untrusted-contributor verification for your repositories? [Contact us](https://ai-sdlc.io/contact?source=whitepaper).

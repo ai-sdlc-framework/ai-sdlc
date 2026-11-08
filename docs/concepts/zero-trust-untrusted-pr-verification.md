@@ -116,3 +116,4 @@ review — not a claim of perfection.
 - [API reference](../api-reference/rfc-0043-ucvg.md)
 - [RFC-0043](../../spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md) · [RFC-0042](../../spec/rfcs/RFC-0042-proof-of-execution-attestation.md)
 - Whitepaper: [Zero-Trust Untrusted-Contributor PR Verification](https://ai-sdlc.io/whitepapers/untrusted-contributor-verification)
+- Want to talk it through for your repositories? [Get in touch](https://ai-sdlc.io/contact?source=documentation)
