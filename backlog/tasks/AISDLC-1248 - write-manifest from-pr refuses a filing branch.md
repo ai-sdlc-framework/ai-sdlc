@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1248
 title: 'cli-dispatch write-manifest --from-pr and classifyPr refuse a filing branch, so a stale reconciler can never rewrite a task manifest to ai-sdlc/update-* or ai-sdlc/file-*'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-08'
 labels:

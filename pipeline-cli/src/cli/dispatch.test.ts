@@ -520,6 +520,36 @@ describe('runDispatchCli', () => {
     expect(missing.exit).toBe(2);
   });
 
+  it('write-manifest refuses a filing branch via --branch and --from-pr (AISDLC-1248)', async () => {
+    dispatchWriteManifest(boardDir, mkManifest('AISDLC-2061'));
+    const file = path.join(boardDir, 'queue', 'AISDLC-2061.dispatch.json');
+    const before = readFileSync(file, 'utf-8');
+    const viaBranch = await captureStdout(() =>
+      runDispatchCli([
+        'write-manifest',
+        'AISDLC-2061',
+        '--branch',
+        'ai-sdlc/update-aisdlc-2061',
+        '--board-dir',
+        boardDir,
+      ]),
+    );
+    expect(viaBranch.exit).toBe(1);
+    const viaPr = await captureStdout(() =>
+      runDispatchCli(['write-manifest', 'AISDLC-2061', '--from-pr', '9', '--board-dir', boardDir], {
+        prHeadBranch: () => 'ai-sdlc/file-aisdlc-2061',
+      }),
+    );
+    expect(viaPr.exit).toBe(1);
+    const ok = await captureStdout(() =>
+      runDispatchCli(['write-manifest', 'AISDLC-2061', '--from-pr', '9', '--board-dir', boardDir], {
+        prHeadBranch: () => 'ai-sdlc/aisdlc-2061-slug',
+      }),
+    );
+    expect(ok.exit).toBe(0);
+    expect(readFileSync(file, 'utf-8')).not.toBe(before);
+  });
+
   it('help subcommand prints usage', async () => {
     const { exit, captured } = await captureStdout(() => runDispatchCli(['help']));
     expect(exit).toBe(0);

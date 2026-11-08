@@ -238,6 +238,7 @@ import { now as clockNow } from '../clock.js';
 import { closeSupersededPr } from '../hierarchy/superseded.js';
 import { unlandTask } from '../dispatch/unland.js';
 import { createSystemRunner } from '../hierarchy/system-runner.js';
+import { isFilingBranch } from '../hierarchy/filing-branches.js';
 import type { CommandRunner } from '../hierarchy/types.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
 import { checkDispatchCaller, loadOperational, type IdentityDeps } from '../hierarchy/index.js';
@@ -403,6 +404,8 @@ function out(value: unknown): void {
 
 /** Collaborators a test can replace so the CLI never reaches the network. */
 export interface DispatchCliDeps {
+  /** Replaces the `gh pr view` head-branch lookup of `write-manifest --from-pr`. */
+  prHeadBranch?: (pr: string) => string | undefined;
   /** File paths touched by open pull requests. Throws when they cannot be listed. */
   openPrFiles?: () => string[];
   /** Replaces the roster and process lookups that identify the calling session (`requeue`). */
@@ -1297,16 +1300,26 @@ export async function runDispatchCli(
         }
         let branch: string | undefined = branchFlag;
         if (fromPr !== undefined) {
-          const view = createSystemRunner()(
-            'gh',
-            ['pr', 'view', fromPr, '--json', 'headRefName', '--jq', '.headRefName'],
-            { cwd: deps.cwd ?? process.cwd() },
-          );
-          branch = view.status === 0 ? view.stdout.trim() : undefined;
+          if (deps.prHeadBranch) {
+            branch = deps.prHeadBranch(fromPr);
+          } else {
+            const view = createSystemRunner()(
+              'gh',
+              ['pr', 'view', fromPr, '--json', 'headRefName', '--jq', '.headRefName'],
+              { cwd: deps.cwd ?? process.cwd() },
+            );
+            branch = view.status === 0 ? view.stdout.trim() : undefined;
+          }
         }
         if (!branch || branch === 'true') {
           process.stderr.write('cli-dispatch write-manifest: could not resolve the branch\n');
           return 2;
+        }
+        if (isFilingBranch(branch)) {
+          process.stderr.write(
+            `cli-dispatch write-manifest: refused: ${branch} is a filing branch\n`,
+          );
+          return 1;
         }
         try {
           out({ ok: true, path: replaceQueuedBranch(boardDir, taskId, branch), branch });

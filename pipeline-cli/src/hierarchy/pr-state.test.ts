@@ -67,6 +67,17 @@ const rows: Array<[PrState, PrFacts]> = [
   ],
 ];
 
+describe('classifyPr filing guard (AISDLC-1248)', () => {
+  it('never returns manifest-branch-mismatch for a filing head', () => {
+    const r = classifyPr({
+      ...base,
+      manifestBranch: 'ai-sdlc/aisdlc-521-slug',
+      headBranch: 'ai-sdlc/update-aisdlc-521',
+    });
+    expect(r.state).not.toBe('manifest-branch-mismatch');
+  });
+});
+
 describe('classifyPr (AISDLC-823)', () => {
   it.each(rows)('classifies %s', (state, facts) => {
     const c = classifyPr(facts);
