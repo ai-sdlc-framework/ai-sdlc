@@ -94,7 +94,6 @@ describe('reviewer container arg builders', () => {
         outDir: '/o',
         appDir: '/a',
         seccompProfilePath: '/s.json',
-        seccompProfilePath: '/s.json',
         env: { ANTHROPIC_API_KEY: 'x' },
       }),
     ).toThrow();
