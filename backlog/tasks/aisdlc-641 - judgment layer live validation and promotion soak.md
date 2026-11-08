@@ -51,6 +51,23 @@ now dispatched (operator ruling 2026-11-07); this task starts once they land.
 
 Option A, go live. The judgment layer shipped in October but AISDLC-641 never ran for want of a live key; the operator provisioned the key on 2026-11-07. The three code blockers (redaction hardening 630.3/630.4, capability-liveness doctor 644) have value without Jev and were parked only by the 2026-10-06 batch. Counter-argument considered: merging them without validation risks dead code; rejected because redaction already runs in the reference package today. 633.2 and 636.1 ride along; 635.1 still waits on 641's shadow data.
 
+## Status 2026-11-08 (steps 1, 2 and the first of step 3 done; operator order "turn it on")
+
+- Step 1: the live contract test passed against the real API (no fixture drift);
+  `cli-judgment doctor --live` returned modelVersion `jev-1.13.0`, latency 109 ms.
+- Step 2: `.ai-sdlc/judgment-config.yaml` committed with provider `jev`, model `jev-1.13.0`,
+  every judgment in `shadow`, egress `work-item-text`, `code-diff`, `agent-output`.
+- Step 3, `dor.stage-b` on the 78-fixture DoR corpus (report under `.ai-sdlc/judgment-evals/`):
+  act-band precision peaks at 16.7% (fail threshold 0.06, 12 flags, 2 true) and falls to
+  8.0% at 0.2; the `pass` threshold does not move the bands. Far below the 90% tighten bar,
+  so it stays in `shadow`. No corpus exists yet for the five substrate judgments
+  (`.ai-sdlc/classifier-corpus/` is absent), `estimate.class` or `decision.recommendation`:
+  those are explicit no-data entries until the shadow log fills.
+- Step 4, measured against RFC-0049 section "Why Jev": latency p50 67 to 76 ms, p95 161 to
+  180 ms (RFC quotes about 100 ms); cost $0.002874 for 68,422 input tokens, which is the
+  quoted $0.042 per million exactly.
+- Open: steps 5 to 8 (shadow soak, promotion by PR, doctor `live` rows, results note).
+
 ## Scope
 1. Export `TYPESAFE_API_KEY` locally. Run the live contract test
    (`AI_SDLC_LIVE_CONTRACT=1`) and `node pipeline-cli/bin/cli-judgment.mjs doctor --live`.

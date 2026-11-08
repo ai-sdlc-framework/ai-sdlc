@@ -1,0 +1,16 @@
+# RFC-0049 judgment layer. AISDLC-641 step 2: every judgment in shadow; nothing
+# acts until a promotion record exists (docs/operations/judgment-promotion.md).
+# Kill switch: AI_SDLC_JUDGMENT=off. The key is read from TYPESAFE_API_KEY at call time.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: JudgmentConfig
+metadata:
+  name: ai-sdlc-judgment
+spec:
+  provider: jev
+  model: jev-1.13.0
+  egress:
+    allow: [work-item-text, code-diff, agent-output]
+  defaults:
+    mode: shadow
+    timeoutMs: 10000
+    cache: true
