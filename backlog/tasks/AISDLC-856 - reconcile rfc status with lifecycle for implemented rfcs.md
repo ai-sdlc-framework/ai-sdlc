@@ -3,7 +3,7 @@ id: AISDLC-856
 title: >-
   check-rfc-docs flags an RFC whose status is Draft while its lifecycle is
   Implemented, wired into ai-sdlc-gate
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-13'
 labels:
