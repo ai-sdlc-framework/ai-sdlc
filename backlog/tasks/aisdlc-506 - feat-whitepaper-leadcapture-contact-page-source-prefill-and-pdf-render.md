@@ -10,15 +10,14 @@ labels:
   - ai-sdlc-io
   - lead-capture
   - follow-up
-dependencies:
-  - AISDLC-496
+dependencies: []
 references:
   - spec/rfcs/RFC-0043-untrusted-contributor-pr-verification.md
 permittedExternalPaths:
   - '../ai-sdlc-io/'
 priority: medium
 dispatchable: true
-dispatchableReason: 'Unparked 2026-11-07 by operator ruling (planner critical-path review).'
+dispatchableReason: 'Unparked 2026-11-07 by operator ruling. Dependency on AISDLC-496 dropped 2026-11-08 (planner, class a, same shape as AISDLC-1179.1): 496 deliverables shipped (ai-sdlc-io PR #3, whitepaper, PDF) and 496 closes only when this task lands (AC #8), so the dependency was circular and held this task on the board indefinitely.'
 ---
 
 ## Description
