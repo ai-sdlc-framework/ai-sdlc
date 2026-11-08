@@ -297,6 +297,27 @@ describe('validateRfc', () => {
 // no documentation. `docsCoverage` upgrades it to a coverage check for RFCs
 // that opt in.
 
+describe('validateRfc — Draft status with Implemented lifecycle (AISDLC-856)', () => {
+  const NO_DOCS_DIR = '/this/dir/does/not/exist';
+  const FIXED_TODAY = new Date('2026-05-01T00:00:00Z');
+  const base = { status: 'Draft', lifecycle: 'Implemented', requiresDocs: [] };
+  it('fails an RFC outside the known set', () => {
+    const r = validateRfc(
+      { ...base, id: 'RFC-0999' },
+      { docsDir: NO_DOCS_DIR, today: FIXED_TODAY },
+    );
+    assert.equal(r.failures.length, 1);
+    assert.match(r.failures[0].reason, /contradicts lifecycle/);
+  });
+  it('passes a grandfathered RFC', () => {
+    const r = validateRfc(
+      { ...base, id: 'RFC-0009' },
+      { docsDir: NO_DOCS_DIR, today: FIXED_TODAY },
+    );
+    assert.deepEqual(r.failures, []);
+  });
+});
+
 describe('findCoverageGaps', () => {
   const withDocs = (files) => {
     const root = mkdtempSync(join(tmpdir(), 'rfc-check-coverage-'));
@@ -1391,7 +1412,7 @@ describe('checkAllRfcs — runtimeEvidence', () => {
       mkdirSync(rfcs);
       const write = (name, body) => writeFileSync(join(rfcs, name), body);
       const fm = (id, entries) =>
-        `---\nid: ${id}\ntitle: Test RFC\nstatus: Draft\nlifecycle: Implemented\nauthor: a\ncreated: 2026-01-01\nupdated: 2026-01-01\nrequiresDocs: []\nruntimeEvidence:\n${entries}\n---\n# ${id}\n`;
+        `---\nid: ${id}\ntitle: Test RFC\nstatus: Approved\nlifecycle: Implemented\nauthor: a\ncreated: 2026-01-01\nupdated: 2026-01-01\nrequiresDocs: []\nruntimeEvidence:\n${entries}\n---\n# ${id}\n`;
       write('RFC-9001-warn.md', fm('RFC-9001', evEntry('dor.stage-b', 'degraded', 'OWN-1')));
       let run = spawnSync(process.execPath, [SCRIPT, '--rfcs-dir', rfcs, '--docs-dir', dir], {
         encoding: 'utf-8',

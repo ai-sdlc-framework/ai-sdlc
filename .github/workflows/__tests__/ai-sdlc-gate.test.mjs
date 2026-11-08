@@ -835,6 +835,18 @@ describe('ai-sdlc-gate.yml — coexistence with legacy workflows (AISDLC-140 sub
   });
 });
 
+describe('rfc:check runs check-rfc-docs in the gate (AISDLC-856)', () => {
+  it('runs pnpm rfc:check, which invokes check-rfc-docs.mjs', () => {
+    const wf = loadYaml(WORKFLOW_PATH);
+    const runs = Object.values(wf.jobs).flatMap((j) => (j.steps ?? []).map((x) => x.run ?? ''));
+    assert.ok(runs.some((r) => /pnpm rfc:check/.test(r)));
+    const pkg = JSON.parse(
+      readFileSync(new URL('../../../package.json', import.meta.url), 'utf-8'),
+    );
+    assert.match(pkg.scripts['rfc:check'], /node scripts\/check-rfc-docs\.mjs/);
+  });
+});
+
 describe('governance-gate (AISDLC-764)', () => {
   const wf = loadYaml(WORKFLOW_PATH);
   const job = wf.jobs['governance-gate'];

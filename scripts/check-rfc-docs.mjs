@@ -75,6 +75,21 @@ export const SURFACE_TO_SUBDIR = {
 export const ENFORCED_STATUSES = new Set(['Approved', 'Implemented', 'Final']);
 
 /**
+ * RFCs already published as `status: Draft` with `lifecycle: Implemented`
+ * (AISDLC-856). Grandfathered; remove an id once its status is corrected.
+ */
+export const DRAFT_IMPLEMENTED_KNOWN = new Set([
+  'RFC-0009',
+  'RFC-0010',
+  'RFC-0016',
+  'RFC-0019',
+  'RFC-0022',
+  'RFC-0024',
+  'RFC-0035',
+  'RFC-0048',
+]);
+
+/**
  * The template file is always skipped — it has placeholder values
  * (`id: RFC-NNNN`, `created: YYYY-MM-DD`) that fail validation by design.
  */
@@ -296,6 +311,21 @@ export function validateRfc(frontmatter, { docsDir, today = new Date() }) {
       reason: `invalid or missing 'status' (got ${JSON.stringify(status)}; expected one of ${[...KNOWN_STATUSES].join(', ')})`,
     });
     return { failures, warnings };
+  }
+
+  // AISDLC-856: the public registry shows status beside lifecycle, so a Draft
+  // status on an Implemented lifecycle reads as a contradiction. The known set
+  // is grandfathered; it only shrinks as those RFCs get their status corrected.
+  if (
+    status === 'Draft' &&
+    frontmatter.lifecycle === 'Implemented' &&
+    !DRAFT_IMPLEMENTED_KNOWN.has(id)
+  ) {
+    failures.push({
+      rfc: id,
+      surface: null,
+      reason: `status 'Draft' contradicts lifecycle 'Implemented' — set status to match the sign-off position (the registry shows both)`,
+    });
   }
 
   if (!ENFORCED_STATUSES.has(status)) {
