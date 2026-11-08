@@ -2,7 +2,7 @@
 id: AISDLC-772
 title: >-
   demo script and seeded demo repo for the hierarchy walkthrough video
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-09'
 labels:
