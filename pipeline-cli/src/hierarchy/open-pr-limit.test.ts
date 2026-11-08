@@ -11,6 +11,7 @@ import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 import { runDispatchTick, type LoopDeps } from './dispatch-loop.js';
 import {
   acquireReconcileLock,
+  countedTaskPrs,
   formatOpenPrs,
   openPrState,
   openTaskPrs,
@@ -193,8 +194,72 @@ describe('limit resolution and counting', () => {
     expect(openTaskPrs(board)).toEqual([1, 7]);
     const s = openPrState(board, { AI_SDLC_OPEN_PR_LIMIT: '2' });
     expect(s.atLimit).toBe(true);
-    expect(formatOpenPrs(s)).toContain('OPEN PRS 2 of limit 2');
-    expect(formatOpenPrs({ ...s, atLimit: false, open: [1] })).toBe('OPEN PRS 1 of limit 2');
+    expect(formatOpenPrs(s)).toContain('OPEN PRS 2 counted of limit 2, 2 total of ceiling');
+    expect(formatOpenPrs({ ...s, atLimit: false, open: [1], counted: [1], excluded: [] })).toBe(
+      `OPEN PRS 1 counted of limit 2, 1 total of ceiling ${s.ceiling}`,
+    );
+  });
+});
+
+function inflight(taskId: string): void {
+  mkdirSync(path.join(board, 'inflight'), { recursive: true });
+  writeFileSync(
+    path.join(board, 'inflight', `${taskId}.dispatch.json`),
+    JSON.stringify({ taskId }),
+  );
+}
+
+describe('re-entering PRs and the ceiling (AISDLC-1234, DEC-0396)', () => {
+  it('excludes inflight and queued-repair tasks; plain queued and landed behave as before', () => {
+    landing(1, { taskId: 'AISDLC-1' });
+    inflight('AISDLC-1');
+    landing(2, { taskId: 'AISDLC-2' });
+    queue('AISDLC-2');
+    makeRepair('AISDLC-2');
+    landing(3, { taskId: 'AISDLC-3' });
+    queue('AISDLC-3');
+    landing(4, { taskId: 'AISDLC-4', landed: 'x' });
+    inflight('AISDLC-4');
+    landing(5);
+    expect(countedTaskPrs(board)).toEqual({ counted: [3, 5], excluded: [1, 2] });
+    const s = openPrState(board, {});
+    expect(s.excluded).toEqual([1, 2]);
+    expect(formatOpenPrs(s)).toContain('excluded (re-entering): #1, #2');
+  });
+
+  function reenter(n: number): void {
+    for (let i = 0; i < n; i++) {
+      landing(100 + i, { taskId: `AISDLC-${100 + i}` });
+      inflight(`AISDLC-${100 + i}`);
+    }
+  }
+
+  it('the ceiling holds at limit + max total open PRs even with counted below limit', async () => {
+    reenter(4);
+    landing(11);
+    landing(12);
+    queue('AISDLC-1');
+    const s = openPrState(board, { AI_SDLC_OPEN_PR_LIMIT: '3' });
+    expect(s.ceiling).toBe(6);
+    expect(s.counted.length).toBe(2);
+    expect(s.atLimit).toBe(true);
+    await runDispatchTick(deps({}, 3));
+    expect(spawns).toEqual([]);
+  });
+
+  it('4 re-entering + 1 delivered claims a new task (2026-11-07 regression)', async () => {
+    reenter(4);
+    landing(11);
+    queue('AISDLC-1');
+    await runDispatchTick(deps({}, 3));
+    expect(spawns).toEqual(['AISDLC-1']);
+  });
+
+  it('four re-entering PRs at limit 3 do not block a new queued task', async () => {
+    reenter(4);
+    queue('AISDLC-1');
+    await runDispatchTick(deps({}, 3));
+    expect(spawns).toEqual(['AISDLC-1']);
   });
 });
 

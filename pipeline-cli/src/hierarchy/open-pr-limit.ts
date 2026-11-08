@@ -13,6 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
+import { isReEntering } from '../dispatch/board.js';
 import { resolveExecutorsMax } from './executor-cap.js';
 import { listLanding } from './reconcile.js';
 import { configPath } from './thresholds.js';
@@ -43,18 +44,46 @@ export function resolveOpenPrLimit(
 
 /** PR numbers of open task PRs: landed and closed-unlanded records, and non-task kinds, do not count. */
 export function openTaskPrs(boardDir: string): number[] {
+  return openTaskRecords(boardDir).map((r) => r.pr);
+}
+
+function openTaskRecords(boardDir: string): { pr: number; taskId?: string }[] {
   try {
-    return listLanding(boardDir)
-      .filter((r) => r.kind === 'task' && !r.landed && !r.closedUnlanded)
-      .map((r) => r.pr);
+    return listLanding(boardDir).filter((r) => r.kind === 'task' && !r.landed && !r.closedUnlanded);
   } catch {
     return [];
   }
 }
 
+/**
+ * Open task PRs split for the cap (AISDLC-1234, DEC-0396): a PR whose task has an inflight claim
+ * or a queued repair manifest is re-entering the pipeline and is excluded from `counted`.
+ */
+export function countedTaskPrs(boardDir: string): { counted: number[]; excluded: number[] } {
+  const counted: number[] = [];
+  const excluded: number[] = [];
+  for (const r of openTaskRecords(boardDir)) {
+    let reEntering = false;
+    try {
+      reEntering = r.taskId !== undefined && isReEntering(boardDir, r.taskId);
+    } catch {
+      /* unreadable manifest: count the PR */
+    }
+    (reEntering ? excluded : counted).push(r.pr);
+  }
+  return { counted, excluded };
+}
+
 export interface OpenPrState {
   limit: number;
+  /** `limit + executors.max`: total open task PRs of any state may not reach it. */
+  ceiling: number;
+  /** All open task PRs. */
   open: number[];
+  /** Open task PRs that count toward `limit`. */
+  counted: number[];
+  /** Open task PRs excluded from the count because their task is re-entering. */
+  excluded: number[];
   atLimit: boolean;
 }
 
@@ -63,19 +92,32 @@ export function openPrState(
   env: Record<string, string | undefined> = {},
 ): OpenPrState {
   const limit = resolveOpenPrLimit(boardDir, env);
+  const ceiling = limit + resolveExecutorsMax(boardDir, env);
   const open = openTaskPrs(boardDir);
-  return { limit, open, atLimit: open.length >= limit };
+  const { counted, excluded } = countedTaskPrs(boardDir);
+  return {
+    limit,
+    ceiling,
+    open,
+    counted,
+    excluded,
+    atLimit: counted.length >= limit || open.length >= ceiling,
+  };
 }
 
 /** The `OPEN PRS` line of `status`. */
 export function formatOpenPrs(s: OpenPrState): string {
-  return `OPEN PRS ${s.open.length} of limit ${s.limit}${s.atLimit ? ' (new tasks held; repairs still claimed)' : ''}`;
+  const ex =
+    s.excluded.length > 0
+      ? `; excluded (re-entering): ${s.excluded.map((n) => `#${n}`).join(', ')}`
+      : '';
+  return `OPEN PRS ${s.counted.length} counted of limit ${s.limit}, ${s.open.length} total of ceiling ${s.ceiling}${ex}${s.atLimit ? ' (new tasks held; repairs still claimed)' : ''}`;
 }
 
 /** The reason line logged when new-task entries are held at the limit. */
 export function openPrHoldReason(s: OpenPrState, held: readonly string[]): string {
   const prs = s.open.map((n) => `#${n}`).join(', ');
-  return `not claiming new tasks (${held.join(', ')}): ${s.open.length} open PRs at limit ${s.limit} (${prs}); land or repair them first`;
+  return `not claiming new tasks (${held.join(', ')}): ${s.counted.length} counted of limit ${s.limit}, ${s.open.length} open of ceiling ${s.ceiling} (${prs}); land or repair them first`;
 }
 
 /** A lock older than this is taken over (its holder crashed). */

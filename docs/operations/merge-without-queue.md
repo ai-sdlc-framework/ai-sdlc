@@ -88,6 +88,10 @@ Total wall-clock time: ~5-10 min (CI time) vs ~15-25 min with the queue (CI + qu
 
 ---
 
+## Open task PR bounds (AISDLC-1234, DEC-0396)
+
+Dispatch holds new-task claims on two bounds, never repairs. The count (limit `openPrLimit`, default `executors.max`) excludes task PRs that are re-entering (inflight claim or queued repair manifest). The ceiling `openPrLimit + executors.max` caps total open task PRs of any state. See `docs/operations/cli-hierarchy.md`, "Land and repair before new tasks".
+
 ## Open PR handling (AISDLC-727 / DEC-0056)
 
 `auto-rebase-open-prs.yml` was deleted. It rebased every other open PR after every merge to `main`; each rebase restarted CI, cancelled runs in flight, disarmed auto-merge and invalidated the attestation envelope's head binding (a 50-PR sample showed ~37 workflow runs per PR, 343 cancelled runs and auto-merge toggled about 350 times). The up-to-date requirement on `main` is on (`strict=true`, as `scripts/sync-branch-protection.sh` applies), so GitHub disarms a BEHIND PR; the rebases are not restored because the arm is: `auto-enable-auto-merge.yml` re-arms on `synchronize` and the reconciler re-arms any green CLEAN ready task PR that is unarmed (AISDLC-1097).
