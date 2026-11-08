@@ -46,6 +46,7 @@ import {
 } from '../orchestrator/index.js';
 import { runDailyPriceRefresh } from '../orchestrator/price-refresh.js';
 import { runWeeklyRoutingProposal } from '../orchestrator/routing-proposal.js';
+import { runCapabilityLiveness } from '../orchestrator/capability-liveness.js';
 import { runRoutingReverts } from '../orchestrator/routing-revert.js';
 import {
   resolveResultPath,
@@ -164,6 +165,7 @@ function buildAdapters(
         emit,
         warn: (m) => void process.stderr.write(`${m}\n`),
       }),
+    capabilityLiveness: (ctx, emit) => runCapabilityLiveness({ ...ctx, emit }),
   };
   const rawSpawner = argv.spawner;
   if (rawSpawner === undefined || rawSpawner === null) {

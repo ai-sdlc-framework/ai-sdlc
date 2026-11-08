@@ -81,6 +81,8 @@ const KIND_KEY: Record<
     // Judgment layer config has its own loader (`loadJudgmentConfig` in
     // `@ai-sdlc/reference`, base-ref read) — not part of the directory walk.
     | 'JudgmentConfig'
+    // Capabilities declaration has its own base-ref loader (`loadRequiredCapabilities`).
+    | 'CapabilitiesConfig'
   >,
   keyof AiSdlcConfig
 > = {

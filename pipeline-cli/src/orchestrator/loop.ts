@@ -490,6 +490,17 @@ export interface OrchestratorAdapters {
     emit: (event: Omit<OrchestratorEvent, 'ts'>) => void,
   ) => Promise<unknown>;
   /**
+   * RFC-0049 section 9.3 - capability liveness. Called once per tick with the
+   * tick's event emitter; files one Decision per required capability that is
+   * degraded (at most daily, never a duplicate of an open one). Informational
+   * only: a throw or rejection is logged as a warning and nothing is blocked.
+   * Unset in tests.
+   */
+  capabilityLiveness?: (
+    ctx: { workDir: string; artifactsDir: string },
+    emit: (event: Omit<OrchestratorEvent, 'ts'>) => void,
+  ) => unknown;
+  /**
    * AISDLC-373 — single-PR operator-driven path. When set to true, the
    * §4.3 admission filter chain (DependencyReadiness, Blocked, DoR, etc.)
    * is skipped and every frontier candidate flows straight to dispatch.
@@ -620,6 +631,22 @@ export async function runOrchestratorTick(
     } catch (err) {
       logger.warn(
         `[orchestrator] routing revert failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  if (adapters.capabilityLiveness) {
+    try {
+      await adapters.capabilityLiveness(
+        {
+          workDir: config.workDir,
+          artifactsDir: resolveArtifactsDir(config.workDir, adapters.artifactsDir),
+        },
+        emit,
+      );
+    } catch (err) {
+      logger.warn(
+        `[orchestrator] capability liveness failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

@@ -582,3 +582,41 @@ describe('ROLLBACK_OUTCOMES contract', () => {
     expect(Array.from(RECOVERABLE_ABORT_OUTCOMES).sort()).toEqual(['aborted']);
   });
 });
+
+describe('runOrchestratorTick — capability liveness never blocks dispatch (RFC-0049)', () => {
+  const cfg = () => defaultOrchestratorConfig({ workDir: '/tmp', maxConcurrent: 2, maxTicks: 1 });
+
+  async function tickWith(capabilityLiveness: OrchestratorAdapters['capabilityLiveness']) {
+    const dispatched: string[] = [];
+    const result = await runOrchestratorTick(
+      cfg(),
+      {
+        logger: silentLogger(),
+        frontier: fakeFrontier(['AISDLC-A', 'AISDLC-B']),
+        dispatch: async (taskId) => {
+          dispatched.push(taskId);
+          return approvedResult(taskId, `https://github.com/x/y/pull/1#${taskId}`);
+        },
+        capabilityLiveness,
+        ...hermeticFilterAdapters(),
+      },
+      1,
+    );
+    return { dispatched, result };
+  }
+
+  it('dispatches when a required capability is degraded', async () => {
+    const { dispatched, result } = await tickWith((_ctx, emit) => {
+      emit({ type: 'CapabilityDegraded', capabilityId: 'dor.stage-b' });
+    });
+    expect(dispatched).toEqual(['AISDLC-A', 'AISDLC-B']);
+    expect(result.dispatched).toEqual(['AISDLC-A', 'AISDLC-B']);
+  });
+
+  it('dispatches when Decision filing throws', async () => {
+    const { dispatched } = await tickWith(() => {
+      throw new Error('decision log unwritable');
+    });
+    expect(dispatched).toEqual(['AISDLC-A', 'AISDLC-B']);
+  });
+});

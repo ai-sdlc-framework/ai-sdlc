@@ -1,0 +1,18 @@
+## Capabilities this repository expects to be live (RFC-0049 section 9.3).
+## Read from the default branch only. A listed capability that is degraded or never
+## observed fails the doctor capability-liveness check and files one Decision per day;
+## nothing is ever blocked.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: CapabilitiesConfig
+metadata:
+  name: capabilities
+spec:
+  required:
+    - classifier.capture-triage
+    - classifier.capture-severity
+    - classifier.pr-comment-is-capture
+    - classifier.dor-answer-is-new-concern
+    - decisions.stage-c-recommendation
+    - decisions.stage-b-signals
+    - dor.stage-b
+    - estimation.class-assignment

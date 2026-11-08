@@ -45,6 +45,7 @@ const SCHEMA_FILES: Record<ResourceKind, string> = {
   DorConfig: 'dor-config.v1.schema.json',
   CompliancePosture: 'compliance-posture.v1.schema.json',
   JudgmentConfig: 'judgment-config.v1.schema.json',
+  CapabilitiesConfig: 'capabilities-config.v1.schema.json',
 };
 
 /**

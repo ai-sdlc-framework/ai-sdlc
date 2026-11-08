@@ -400,6 +400,28 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
     });
   });
 
+  it('accepts CapabilityDegraded (RFC-0049)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'CapabilityDegraded',
+      capabilityId: 'dor.stage-b',
+      capabilityStatus: 'never-observed',
+    });
+    expectValid({
+      ts: baseTs,
+      type: 'CapabilityDegraded',
+      capabilityId: 'dor.stage-b',
+      capabilityStatus: 'degraded',
+      reason: 'no backend configured',
+    });
+    expectInvalid({
+      ts: baseTs,
+      type: 'CapabilityDegraded',
+      capabilityId: 'dor.stage-b',
+      capabilityStatus: 'live',
+    });
+  });
+
   it('accepts HierarchySessionStarted (RFC-0051)', () => {
     expectValid({
       ts: baseTs,

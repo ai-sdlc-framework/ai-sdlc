@@ -1716,6 +1716,27 @@ export const WORKFLOWS_TEMPLATES: FeatureTemplateSet = {
 };
 
 /**
+ * `.ai-sdlc/templates/capabilities.yaml` - starter for the required-capabilities
+ * declaration. Copy to `.ai-sdlc/capabilities.yaml` and commit it to the default branch
+ * (the file is read from the base branch only). An empty list changes nothing.
+ */
+export const CAPABILITIES_CONFIG_TEMPLATE = `## Required capabilities.
+##
+## Copy this file to .ai-sdlc/capabilities.yaml and commit it to the default branch.
+## It is read from the default branch only. List the capability ids you expect to be
+## live. A listed capability that is degraded or never observed makes the doctor
+## capability-liveness check fail and files one Decision per day; nothing is ever
+## blocked. An empty list changes nothing.
+
+apiVersion: ai-sdlc.io/v1alpha1
+kind: CapabilitiesConfig
+metadata:
+  name: capabilities
+spec:
+  required: []
+`;
+
+/**
  * Always-on baseline workflow templates (regardless of wizard answers).
  * Matches AC #4 in AISDLC-143: pipeline.yaml + agent-role.yaml +
  * quality-gate.yaml + autonomy-policy.yaml are scaffolded by `initProject`
@@ -1735,5 +1756,6 @@ export const BASELINE_WORKFLOW_TEMPLATES: FeatureTemplateSet = {
     '.ai-sdlc/templates/framework-bug-report.md': FRAMEWORK_BUG_REPORT_TEMPLATE_STUB,
     '.ai-sdlc/templates/usage-config.yaml': USAGE_CONFIG_TEMPLATE_STUB,
     '.ai-sdlc/templates/judgment-config.yaml': JUDGMENT_CONFIG_TEMPLATE,
+    '.ai-sdlc/templates/capabilities.yaml': CAPABILITIES_CONFIG_TEMPLATE,
   },
 };

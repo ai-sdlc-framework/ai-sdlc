@@ -1322,6 +1322,46 @@ export const backlogTaskV1Schema = {
   },
 } as const;
 
+export const capabilitiesConfigV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/capabilities-config.v1.schema.json',
+  title: 'AI-SDLC CapabilitiesConfig',
+  description:
+    'Per-repository declaration of the optional capabilities that are expected to be live. A required capability that is degraded or never observed makes the doctor capability-liveness check fail and files a Decision; nothing is ever blocked. Lives at .ai-sdlc/capabilities.yaml and is read from the trusted base branch only. The default is an empty list.',
+  type: 'object',
+  required: ['apiVersion', 'kind', 'spec'],
+  properties: {
+    apiVersion: {
+      $ref: 'common.schema.json#/$defs/apiVersion',
+    },
+    kind: {
+      type: 'string',
+      const: 'CapabilitiesConfig',
+    },
+    metadata: {
+      $ref: 'common.schema.json#/$defs/metadata',
+    },
+    spec: {
+      type: 'object',
+      properties: {
+        required: {
+          type: 'array',
+          description:
+            'Capability ids this repository expects to be live, for example dor.stage-b.',
+          items: {
+            type: 'string',
+            pattern: '^[a-z0-9][a-z0-9.-]*$',
+          },
+          uniqueItems: true,
+          default: [],
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+} as const;
+
 export const captureRecordV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/capture-record.v1.schema.json',
@@ -6439,6 +6479,18 @@ export const orchestratorEventsV1Schema = {
       description:
         'Where an escalated judgment sends the item - present on `JudgmentEscalated` (RFC-0049).',
     },
+    capabilityId: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Capability id, e.g. `dor.stage-b` - present on `CapabilityDegraded` (RFC-0049).',
+    },
+    capabilityStatus: {
+      type: 'string',
+      enum: ['degraded', 'never-observed'],
+      description:
+        'Status of the required capability when the event was emitted - present on `CapabilityDegraded` (RFC-0049).',
+    },
     provider: {
       type: 'string',
       minLength: 1,
@@ -6569,7 +6621,7 @@ export const orchestratorEventsV1Schema = {
     OrchestratorEventType: {
       type: 'string',
       description:
-        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). AISDLC-493 adds `PrOpened` (PR lifecycle anchor), `ReconcileCompleted` (per-pass reconcile overhead), and `DispatchToMergeCompleted` (DORA lead-time join). RFC-0050 adds `ModelPriceChanged` (model, tokenClass, oldPrice, newPrice) when an active model price changes, `UsageLimitObserved` (window, usedPercent, unitsInWindow, impliedAllotment) when a usage-window snapshot is recorded, and `AllotmentChangeSuspected` (window, previousAllotment, impliedAllotment, changeRatio) when consecutive snapshots of one window differ beyond the tolerance with a similar model mix, and `ModelRoutingOverrideApplied` (role, taskClass, model, tableModel, tasks, observedRate, evidenceRate) when a routing cell is moved back to its previous stronger model. RFC-0049 adds `JudgmentEscalated` (judgmentId, escalateTo, reason) when an enforced judgment escalates and `JudgmentProviderUnavailable` (reason, judgmentId, provider) when a configured judgment provider cannot be used, at most once per process per reason. RFC-0051 adds `HierarchySessionStarted` (sessionName, sessionRole, sessionModel, sessionPermissionMode), `ExecutorContextCleared` (executor, paneId, resumed, settleMs), `DecisionRouted` (decisionId, route, routedTo, fromTier, toTier), `DecisionEscalated` (decisionId, fromTier, toTier) and `OperatorPlaybookAction` (taskId, action, result, reason) for the session hierarchy's dispatch loop, and `DispatchTick` (tickId, startedAt, endedAt, steps, nextWakeSec) once per dispatch wake-up so the usage ledger can bucket the dispatch session's calls per tick. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). AISDLC-493 adds `PrOpened` (PR lifecycle anchor), `ReconcileCompleted` (per-pass reconcile overhead), and `DispatchToMergeCompleted` (DORA lead-time join). RFC-0050 adds `ModelPriceChanged` (model, tokenClass, oldPrice, newPrice) when an active model price changes, `UsageLimitObserved` (window, usedPercent, unitsInWindow, impliedAllotment) when a usage-window snapshot is recorded, and `AllotmentChangeSuspected` (window, previousAllotment, impliedAllotment, changeRatio) when consecutive snapshots of one window differ beyond the tolerance with a similar model mix, and `ModelRoutingOverrideApplied` (role, taskClass, model, tableModel, tasks, observedRate, evidenceRate) when a routing cell is moved back to its previous stronger model. RFC-0049 adds `JudgmentEscalated` (judgmentId, escalateTo, reason) when an enforced judgment escalates and `JudgmentProviderUnavailable` (reason, judgmentId, provider) when a configured judgment provider cannot be used, at most once per process per reason, and `CapabilityDegraded` (capabilityId, capabilityStatus, reason) when the tick files a Decision for a required capability that is degraded or never observed. RFC-0051 adds `HierarchySessionStarted` (sessionName, sessionRole, sessionModel, sessionPermissionMode), `ExecutorContextCleared` (executor, paneId, resumed, settleMs), `DecisionRouted` (decisionId, route, routedTo, fromTier, toTier), `DecisionEscalated` (decisionId, fromTier, toTier) and `OperatorPlaybookAction` (taskId, action, result, reason) for the session hierarchy's dispatch loop, and `DispatchTick` (tickId, startedAt, endedAt, steps, nextWakeSec) once per dispatch wake-up so the usage ledger can bucket the dispatch session's calls per tick. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
       enum: [
         'OrchestratorTick',
         'OrchestratorDispatched',
@@ -6604,6 +6656,7 @@ export const orchestratorEventsV1Schema = {
         'ReviewComparisonFlagged',
         'JudgmentEscalated',
         'JudgmentProviderUnavailable',
+        'CapabilityDegraded',
         'HierarchySessionStarted',
         'ExecutorContextCleared',
         'DecisionRouted',
@@ -10852,6 +10905,7 @@ export const SCHEMAS: Record<string, object> = {
   'audit-ignores.schema.json': auditIgnoresSchema,
   'autonomy-policy.schema.json': autonomyPolicySchema,
   'backlog-task.v1.schema.json': backlogTaskV1Schema,
+  'capabilities-config.v1.schema.json': capabilitiesConfigV1Schema,
   'capture-record.v1.schema.json': captureRecordV1Schema,
   'common.schema.json': commonSchema,
   'compliance-posture.v1.schema.json': compliancePostureV1Schema,
