@@ -7,10 +7,20 @@
  * original failed verdict is kept inside the done record.
  */
 
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { TASK_ID_RE } from './board.js';
-import { DOCS_BRANCH_PREFIXES } from '../hierarchy/reconcile.js';
+import { DOCS_BRANCH_PREFIXES, listLanding } from '../hierarchy/reconcile.js';
+import { UNLAND_LOG } from './unland.js';
 
 const VERDICT_SUFFIX = '.verdict.json';
 const MANIFEST_SUFFIX = '.manifest.json';
@@ -171,4 +181,78 @@ export function retireLandedSweep(
     if (did || didBlocked) moved.push({ taskId: r.taskId, pr: r.pr });
   }
   return { moved };
+}
+
+export interface RetireFailedLandedDeps {
+  /**
+   * Task ids whose file sits under `backlog/completed/` on `origin/main`, with the sha they landed
+   * at; undefined when it cannot be read. Called only when `failed/` holds a verdict.
+   */
+  completedOnMain: () => ReadonlyMap<string, string> | undefined;
+  now: () => Date;
+}
+
+/**
+ * Tick step (AISDLC-1243): move the `failed/` verdict (and manifest) of a task that landed anyway,
+ * through a later round, a re-filed task or a hand-finished PR, to `retired/`. A task has landed
+ * when its file is in `backlog/completed/` on `origin/main` or a merged task PR is on record. A
+ * verdict for a task still open is untouched; nothing is deleted. One audit line per move.
+ * @returns the task ids retired.
+ */
+export function retireFailedLanded(boardDir: string, deps: RetireFailedLandedDeps): string[] {
+  const failedDir = path.join(boardDir, 'failed');
+  let names: string[];
+  try {
+    names = readdirSync(failedDir).filter((n) => n.endsWith(VERDICT_SUFFIX));
+  } catch {
+    return [];
+  }
+  if (names.length === 0) return [];
+  const completed = deps.completedOnMain() ?? new Map<string, string>();
+  const merged = new Map<string, string>();
+  for (const r of listLanding(boardDir)) {
+    if (r.landed && r.taskId && (r.kind === undefined || r.kind === 'task')) {
+      merged.set(r.taskId, r.landedSha ?? r.headSha ?? r.landed);
+    }
+  }
+  const retired: string[] = [];
+  for (const n of names) {
+    const taskId = n.slice(0, -VERDICT_SUFFIX.length);
+    if (!TASK_ID_RE.test(taskId)) continue;
+    const sha = completed.get(taskId) ?? merged.get(taskId);
+    if (sha === undefined) continue;
+    const at = deps.now().toISOString();
+    const reason = `task landed ${sha}`;
+    const retiredDir = path.join(boardDir, 'retired');
+    mkdirSync(retiredDir, { recursive: true });
+    let original: Record<string, unknown>;
+    try {
+      original = JSON.parse(readFileSync(path.join(failedDir, n), 'utf-8')) as Record<
+        string,
+        unknown
+      >;
+    } catch {
+      continue;
+    }
+    const dst = path.join(retiredDir, n);
+    const tmp = `${dst}.tmp-${process.pid}`;
+    writeFileSync(
+      tmp,
+      JSON.stringify({ ...original, retiredAt: at, retiredReason: reason }, null, 2) + '\n',
+      'utf-8',
+    );
+    renameSync(tmp, dst);
+    rmSync(path.join(failedDir, n), { force: true });
+    const manifest = `${taskId}${MANIFEST_SUFFIX}`;
+    if (existsSync(path.join(failedDir, manifest))) {
+      renameSync(path.join(failedDir, manifest), path.join(retiredDir, manifest));
+    }
+    appendFileSync(
+      path.join(boardDir, UNLAND_LOG),
+      JSON.stringify({ event: 'retire-failed-landed', taskId, reason, at }) + '\n',
+      'utf-8',
+    );
+    retired.push(taskId);
+  }
+  return retired;
 }

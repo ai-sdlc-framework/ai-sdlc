@@ -502,6 +502,21 @@ function quietBaseSha(workDir: string): string {
   throw new Error('cannot resolve a base commit');
 }
 
+/** Task ids under `backlog/completed/` on `origin/main`, each mapped to that commit (AISDLC-1243). */
+function completedTaskIds(workDir: string): ReadonlyMap<string, string> | undefined {
+  const git = (args: string[]) => spawnSync('git', args, { cwd: workDir, encoding: 'utf-8' });
+  const head = git(['rev-parse', 'origin/main']);
+  const ls = git(['ls-tree', '--name-only', 'origin/main', 'backlog/completed/']);
+  if (head.status !== 0 || ls.status !== 0) return undefined;
+  const sha = head.stdout.trim().slice(0, 12);
+  const ids = new Map<string, string>();
+  for (const line of ls.stdout.split('\n')) {
+    const m = /^backlog\/completed\/([A-Za-z][A-Za-z0-9-]*-[0-9]+(?:\.[0-9]+)*)\b/.exec(line);
+    if (m?.[1]) ids.set(m[1].toUpperCase(), sha);
+  }
+  return ids;
+}
+
 function parseRoleFlag(raw: string | undefined): HierarchyRole | null {
   if (raw === 'dispatch') return 'operator-dispatch';
   return raw === 'planner' || raw === 'operator-dispatch' || raw === 'executor' ? raw : null;
@@ -674,6 +689,8 @@ export async function runHierarchyCli(
     usageIngest?: () => void;
     /** Replaces the daily board backup the tick runs (tests). */
     boardBackup?: () => void;
+    /** Replaces the landed-task read of `origin/main` (tests). */
+    completedOnMain?: () => ReadonlyMap<string, string> | undefined;
     /** Replaces the usage endpoint and credential reads (tests). */
     usage?: Partial<UsageDeps>;
     /** Replaces the demo's system dependencies (tests). */
@@ -1421,6 +1438,8 @@ export async function runHierarchyCli(
                     }).cap,
                 },
               }),
+          // AISDLC-1243: a failed verdict whose task landed anyway is retired.
+          completedOnMain: extras.completedOnMain ?? (() => completedTaskIds(repoRoot)),
           // AISDLC-1130: once a day the board is tarred under ~/.ai-sdlc/board-backups/.
           boardBackup:
             extras.boardBackup ??
