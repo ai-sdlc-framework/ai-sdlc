@@ -1,7 +1,7 @@
 ---
 id: AISDLC-506
 title: 'feat(ai-sdlc-io): wire whitepaper/website lead-capture to the contact page (source pre-fill) + render whitepaper PDF (AISDLC-496 deferred ACs)'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-06-03'
 labels:
