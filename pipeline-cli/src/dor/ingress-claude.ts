@@ -28,6 +28,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyAutoPass } from './auto-pass.js';
 import { evaluateIssueE2EDetailed, type EvaluateE2EOpts } from './composite.js';
+import { resolveTaskOrigin } from './task-origin.js';
 import { buildJudgmentContext } from '../judgment/context.js';
 import { appendCalibrationEntry } from './calibration-log.js';
 import {
@@ -48,7 +49,7 @@ import {
   type UpstreamOqCheckResult,
 } from './upstream-oq-gate.js';
 import { extractDeclaredDependencyRefs } from './gates/gate-7-deps.js';
-import type { IssueInput, RefinementVerdict } from './types.js';
+import type { IssueInput, RefinementVerdict, TaskOrigin } from './types.js';
 
 export interface RefineBacklogTaskOpts {
   /** Project root. Defaults to `process.cwd()`. */
@@ -69,6 +70,11 @@ export interface RefineBacklogTaskOpts {
    * default disk reader.
    */
   readRfcFile?: (filePath: string) => string | null;
+  /**
+   * Origin of the task file (AISDLC-636.1). Defaults to resolving it from the base ref:
+   * `'base-ref'` only when the file exists byte-identical there. The import path passes `'import'`.
+   */
+  taskOrigin?: TaskOrigin;
 }
 
 export interface RefineBacklogTaskResult {
@@ -235,6 +241,9 @@ export async function refineBacklogTask(
   const raw = readFileSync(taskFile, 'utf8');
   const { title, body, createdBy, frontmatter } = stripFrontmatter(raw);
 
+  const taskOrigin = opts.taskOrigin ?? resolveTaskOrigin(workDir, taskFile, raw);
+  const permissiveAllowed = taskOrigin === 'base-ref';
+
   const config = opts.config ?? loadDorConfig({ workDir });
 
   // AISDLC-296 — upstream-OQ gate. Run BEFORE the seven-gate rubric so the
@@ -250,6 +259,7 @@ export async function refineBacklogTask(
 
   const input: IssueInput = {
     source: 'backlog',
+    taskOrigin,
     id: taskId,
     title: title || taskId,
     body,
@@ -283,7 +293,7 @@ export async function refineBacklogTask(
         context: buildJudgmentContext({
           workDir,
           taskId,
-          sourceKind: 'backlog',
+          sourceKind: permissiveAllowed ? 'backlog' : 'backlog-untrusted',
           ...(opts.artifactsDir ? { artifactsDir: opts.artifactsDir } : {}),
         }),
       };
@@ -305,6 +315,8 @@ export async function refineBacklogTask(
       verdict,
       outcome: verdict.overallVerdict,
       stageBSource,
+      taskOrigin,
+      permissiveAllowed,
       ...(createdBy ? { author: createdBy } : {}),
     },
     opts.artifactsDir ? { artifactsDir: opts.artifactsDir } : {},

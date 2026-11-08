@@ -184,6 +184,42 @@ describe('relax path matrix', () => {
           }
 });
 
+describe('task origin gates the relax path (AISDLC-636.1)', () => {
+  for (const [taskOrigin, relaxes] of [
+    ['base-ref', true],
+    ['pr-tree', false],
+    ['import', false],
+  ] as const) {
+    it(`origin=${taskOrigin}: relax acts ${relaxes}`, async () => {
+      stageAKind = 'pass';
+      const input: IssueInput = { source: 'backlog', id: 'T-1', title: 't', body: 'b', taskOrigin };
+      const sp = spawner();
+      const p = provider('all-pass');
+      const r = await evaluateIssueE2EDetailed(input, {
+        stageB: { spawner: sp },
+        judgment: { context: { config: config('enforce'), getProvider: () => p } },
+      });
+      expect(sp.getCallCount('refinement-reviewer')).toBe(relaxes ? 0 : 1);
+      expect(r.stageBSource).toBe(relaxes ? 'judgment' : 'subagent');
+      const judgedPass = r.verdict.gates.filter(
+        (x) => x.stage === 'B' && x.finding?.includes('answered yes'),
+      );
+      if (!relaxes) expect(judgedPass).toEqual([]);
+    });
+
+    it(`origin=${taskOrigin}: a judged fail still applies`, async () => {
+      stageAKind = 'pass';
+      const input: IssueInput = { source: 'backlog', id: 'T-1', title: 't', body: 'b', taskOrigin };
+      const p = provider('one-fail');
+      const r = await evaluateIssueE2EDetailed(input, {
+        stageB: { spawner: spawner() },
+        judgment: { context: { config: config('enforce'), getProvider: () => p } },
+      });
+      expect(r.verdict.gates.find((x) => x.gateId === 4)!.verdict).toBe('fail');
+    });
+  }
+});
+
 describe('dor.stage-b-pass declaration', () => {
   it('conforms to the registration-time rules', () => {
     expect(validateJudgmentDefinitionSafety(dorStageBPassJudgment)).toBeUndefined();

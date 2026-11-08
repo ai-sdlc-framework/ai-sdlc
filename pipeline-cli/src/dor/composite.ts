@@ -207,7 +207,7 @@ async function evaluateIssueE2EInner(
   if (!opts.stageB) {
     if (judged) {
       const applied = applyJudgedGates(stageA.gates, judged, {
-        fillPass: input.source === 'backlog',
+        fillPass: isTrustedBacklog(input),
       });
       if (applied.changed.length > 0) {
         return {
@@ -240,6 +240,20 @@ async function evaluateIssueE2EInner(
   return { verdict: merged, stageBSource: 'subagent' };
 }
 
+/** Backlog work whose task file is trusted (AISDLC-636.1): base-ref origin, or no origin recorded. */
+export function isTrustedBacklog(input: IssueInput): boolean {
+  return (
+    input.source === 'backlog' &&
+    (input.taskOrigin === undefined || input.taskOrigin === 'base-ref')
+  );
+}
+
+/** `'backlog'` only for a trusted task file; any other origin gets a kind that is never permissive. */
+function judgmentSourceKindOf(input: IssueInput): string {
+  if (input.source === 'backlog' && !isTrustedBacklog(input)) return 'backlog-untrusted';
+  return judgmentSourceKind(input.source);
+}
+
 /**
  * True only when `dor.stage-b-pass` acted with `all-gates-pass` for trusted backlog work.
  * The checks here repeat the compose guards on purpose: the wiring must not rely on the
@@ -251,14 +265,14 @@ async function allGatesPass(
   tightened: DorJudgmentDecision['gates'] | undefined,
   context: EvaluateJudgmentContext,
 ): Promise<boolean> {
-  if (input.source !== 'backlog') return false;
+  if (!isTrustedBacklog(input)) return false;
   if (stageA.gates.some((g) => g.verdict === 'fail')) return false;
   if (tightened && Object.values(tightened).includes('fail')) return false;
   const judgmentInput = buildDorJudgmentInput(input, stageA);
   if (judgmentInput.gateIds.length === 0) return false;
   const outcome = await evaluateJudgment(dorStageBPassJudgment, judgmentInput, {
     ...context,
-    sourceKind: judgmentSourceKind(input.source),
+    sourceKind: judgmentSourceKindOf(input),
   });
   return outcome.kind === 'act' && outcome.decision.outcome === ALL_GATES_PASS;
 }
@@ -273,7 +287,7 @@ async function runJudgment(
   if (judgmentInput.gateIds.length === 0) return undefined;
   const outcome = await evaluateJudgment(dorStageBJudgment, judgmentInput, {
     ...context,
-    sourceKind: judgmentSourceKind(input.source),
+    sourceKind: judgmentSourceKindOf(input),
     incumbent: {
       gates: Object.fromEntries(stageA.gates.map((g) => [`${g.gateId}`, g.verdict])),
     },

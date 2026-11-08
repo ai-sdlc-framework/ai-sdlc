@@ -29,6 +29,9 @@ export type OverallVerdict = 'admit' | 'needs-clarification';
  * (GitHub issue, backlog task, Forge ticket, Slack thread, ...) into
  * this shared shape before invoking the evaluator.
  */
+/** Provenance of a task file; see {@link IssueInput.taskOrigin}. */
+export type TaskOrigin = 'base-ref' | 'pr-tree' | 'import';
+
 export interface IssueInput {
   /** Source of the issue (used by ingress shims for fan-out, NOT a rubric input). */
   source: 'github' | 'backlog' | 'forge' | 'slack';
@@ -62,6 +65,12 @@ export interface IssueInput {
    * does not require these to exist.
    */
   creates?: string[];
+  /**
+   * Where the task file came from (AISDLC-636.1). Only `'base-ref'` (present, byte-identical,
+   * on the trusted base ref) lets a permissive `dor.stage-b-pass` outcome act. `'pr-tree'` and
+   * `'import'` never do. Absent means a trusted in-repo fixture (corpus runners, unit tests).
+   */
+  taskOrigin?: TaskOrigin;
   /** Backlog frontmatter labels. */
   labels?: string[];
   /** Frontmatter `blocked.reason` override. */
