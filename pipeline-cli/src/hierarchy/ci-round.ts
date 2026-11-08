@@ -57,6 +57,51 @@ export interface CiNoteInput {
   pr: number;
   headSha: string;
   failingLine?: string;
+  /** ISO time of the previous automatic round; only a ruling comment newer than it counts. */
+  since?: string;
+  /** Lower-case logins whose comments may carry a ruling; absent or empty means rulings are ignored. */
+  trustedLogins?: ReadonlySet<string>;
+}
+
+const RULING_FIRST_LINE_RE = /^(Planner ruling\b|PLANNER REPAIR ORDER\b)/;
+
+interface PrComment {
+  body?: string;
+  createdAt?: string;
+  author?: { login?: string };
+}
+
+/**
+ * AISDLC-1238: the newest planner ruling or repair order on the PR (a comment whose first
+ * line starts `Planner ruling` or `PLANNER REPAIR ORDER`) newer than `since`. Never throws.
+ */
+export function findPlannerRuling(
+  run: CommandRunner,
+  cwd: string,
+  pr: number,
+  since?: string,
+  trustedLogins?: ReadonlySet<string>,
+): string | undefined {
+  if (!trustedLogins || trustedLogins.size === 0) return undefined;
+  try {
+    const r = run('gh', ['pr', 'view', String(pr), '--json', 'comments'], { cwd });
+    if (r.status !== 0) return undefined;
+    const comments = (JSON.parse(r.stdout) as { comments?: PrComment[] }).comments ?? [];
+    const sinceMs = since ? Date.parse(since) : Number.NaN;
+    const hits = comments
+      .filter((c) => {
+        if (!trustedLogins.has((c.author?.login ?? '').toLowerCase())) return false;
+        const first = (c.body ?? '').trim().split('\n')[0] ?? '';
+        if (!RULING_FIRST_LINE_RE.test(first)) return false;
+        if (Number.isNaN(sinceMs)) return true;
+        const at = Date.parse(c.createdAt ?? '');
+        return !Number.isNaN(at) && at > sinceMs;
+      })
+      .sort((a, b) => Date.parse(a.createdAt ?? '') - Date.parse(b.createdAt ?? ''));
+    return hits.at(-1)?.body?.trim();
+  } catch {
+    return undefined;
+  }
 }
 
 /** Build the note text. Never throws; a missing run or log is stated in the note. */
@@ -72,6 +117,13 @@ export function buildCiRoundNote(run: CommandRunner, cwd: string, input: CiNoteI
     if (l.status === 0 && l.stdout.trim() !== '') log = tailLog(l.stdout);
   }
   const stepName = steps.length > 0 ? steps.join('; ') : (input.failingLine ?? 'unknown step');
+  const ruling = findPlannerRuling(run, cwd, input.pr, input.since, input.trustedLogins);
+  if (ruling) {
+    const lead = `${ruling.slice(0, MAX_NOTE_CHARS - 400)}\nFailed step: ${stepName} (PR #${input.pr}, head ${headSha}).`;
+    const room = MAX_NOTE_CHARS - lead.length - 12;
+    const tail = log && room > 100 ? `\nLog tail:\n${tailLog(log, CI_LOG_TAIL_LINES, room)}` : '';
+    return `${lead}${tail}`.slice(0, MAX_NOTE_CHARS);
+  }
   const head = [
     `CI failed on PR #${input.pr} at head ${headSha}. Failed step: ${stepName}.`,
     'Fix the cause in this round, run the full verification, and push.',
