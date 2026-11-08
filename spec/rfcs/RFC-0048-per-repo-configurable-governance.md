@@ -1,11 +1,11 @@
 ---
 id: RFC-0048
 title: Per-Repo Configurable Governance Hard-Rules
-status: Draft
+status: Implemented
 lifecycle: Implemented
 author: 'Dominique Legault'
 created: 2026-09-07
-updated: 2026-09-07
+updated: 2026-11-08
 targetSpecVersion: v1alpha1
 requires: []
 assumes: [RFC-0043]
@@ -40,6 +40,10 @@ and relaxing governance from a PR tree) permanently fixed; **(OQ-4)** a determin
 raw `gh pr merge` so the helper is the only route; **(OQ-5)** ship the granular block
 **plus** a named `operator-trusted` preset now (`strict` = defaults). Trigger:
 local-trades adopter (plugin 0.19.0); tasks AISDLC-601/602/603.
+
+## Status note
+
+Status is Implemented to match lifecycle Implemented (AISDLC-856, AISDLC-1223). The design shipped through AISDLC-601 (governance source of truth and hook render), AISDLC-602 (execute hard-rules render), AISDLC-603 (merge-if-eligible CLI), AISDLC-607 (consumer-repo fix). All 5 OQs are resolved; zero open questions remain.
 
 ## Summary
 

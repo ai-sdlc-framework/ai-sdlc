@@ -1,11 +1,11 @@
 ---
 id: RFC-0024
 title: Emergent Issue Capture + Triage Pattern
-status: Draft
+status: Implemented
 lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-03
-updated: 2026-09-30
+updated: 2026-11-08
 targetSpecVersion: v1alpha1
 requires: [RFC-0011, RFC-0015]
 requiresDocs: []
@@ -44,6 +44,10 @@ runtimeEvidence:
 **Anchor:** [VISION.md §5](../../VISION.md) — emergent-work gap
 
 > The bold-status block above is preserved for human readability. The YAML frontmatter at the top of the file is the source of truth for tooling.
+
+## Status note
+
+Status is Implemented to match lifecycle Implemented (AISDLC-856, AISDLC-1223). The design shipped through AISDLC-269 (capture authoring and triage), AISDLC-275 (threshold-gated triage), AISDLC-276 (PR-comment classifier), AISDLC-277 (DoR classifier integration), AISDLC-278 (lifecycle defaults). All OQs are resolved (§15); zero open questions remain.
 
 ## 1. Summary
 

@@ -1,11 +1,11 @@
 ---
 id: RFC-0009
 title: Tessellated Design Intent Documents for Multi-Soul Platforms
-status: Draft
+status: Implemented
 lifecycle: Implemented
 author: Alexander Kline
 created: 2026-04-24
-updated: 2026-05-27
+updated: 2026-11-08
 targetSpecVersion: v1alpha1
 requiresDocs: []
 implementedBy:
@@ -35,6 +35,10 @@ implementedBy:
 **Closes:** PPA v1.0 §8 "Multi-Product Portfolio" open question; RFC-0005 "Multi-product portfolio-level resource allocation" non-goal; RFC-0008 §17 v1.1 Direction (extends with v1.1-6 + v1.1-7)
 
 ---
+
+## Status note
+
+Status is Implemented to match lifecycle Implemented (AISDLC-856, AISDLC-1223). The design shipped through AISDLC-313 (tessellation admission routing), AISDLC-315 (soul-scoping), AISDLC-316 (Eρ5 compliance clearance), AISDLC-317 (Eτ tessellation-drift detector), AISDLC-318 (HC_cost channel), AISDLC-319 (OQ-11 trigger checklist). All 13 OQs are resolved; zero open questions remain.
 
 ## Sign-Off
 

@@ -1,7 +1,7 @@
 ---
 id: RFC-0010
 title: Parallel Execution and Worktree Pooling
-status: Draft
+status: Implemented
 # Lifecycle: Implemented per AISDLC-118 — sub-tasks AISDLC-70.1 through 70.9
 # all reached Done. The legacy `status: Draft` is retained because the
 # remaining design-system + product-owner sign-off boxes were never filled in
@@ -11,7 +11,7 @@ status: Draft
 lifecycle: Implemented
 author: Dominique Legault
 created: 2026-04-26
-updated: 2026-04-26
+updated: 2026-11-08
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0002
@@ -37,6 +37,10 @@ requiresDocs:
 **Amends:** RFC-0002 §3 (Stage object), §5 (Branching), §9 (reconciliation semantics); RFC-0004 §4 (cost attribution per stage)
 
 ---
+
+## Status note
+
+Status is Implemented to match lifecycle Implemented (AISDLC-856, AISDLC-1223). The design shipped through the worktree pooling and budget phases recorded in the Revision History, most recently AISDLC-1209 (budget priority floor; the §14 quota modules deleted). All 16 OQs are resolved (§21); zero open questions remain.
 
 ## Sign-Off
 

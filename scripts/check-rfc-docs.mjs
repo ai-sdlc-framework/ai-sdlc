@@ -78,16 +78,7 @@ export const ENFORCED_STATUSES = new Set(['Approved', 'Implemented', 'Final']);
  * RFCs already published as `status: Draft` with `lifecycle: Implemented`
  * (AISDLC-856). Grandfathered; remove an id once its status is corrected.
  */
-export const DRAFT_IMPLEMENTED_KNOWN = new Set([
-  'RFC-0009',
-  'RFC-0010',
-  'RFC-0016',
-  'RFC-0019',
-  'RFC-0022',
-  'RFC-0024',
-  'RFC-0035',
-  'RFC-0048',
-]);
+export const DRAFT_IMPLEMENTED_KNOWN = new Set([]);
 
 /**
  * The template file is always skipped — it has placeholder values
