@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-11-08T07:06:26.347Z","decisionId":"DEC-0399","chosenOptionId":"restore-board","rationale":"Planner class (a), autonomous decision rubric 2026-11-08 07:1xZ: restores a true board state, loosens no control, reversible with write-verdict; the reconciler tightening is AISDLC-1235.","by":"planner"}
