@@ -1,5 +1,23 @@
 # @ai-sdlc/reference
 
+## [0.41.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.40.0...reference-v0.41.0) (2026-11-08)
+
+
+### Features
+
+* **conformance:** one audit entry schema with JCS hashing and cross-SDK fixture (AISDLC-1213) ([#2471](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2471)) ([11fd3ca](https://github.com/ai-sdlc-framework/ai-sdlc/commit/11fd3ca4520dbafe850bd6822e7b2a8dcd42e1ad))
+* dispatch board rebuild, daily backup and restore (AISDLC-1130) ([#2263](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2263)) ([4f47398](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4f4739807f16ac284270e033e659ef1f053c6d9e))
+* launch profiles restrict tools per hierarchy role (AISDLC-1151) ([#2280](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2280)) ([381caf5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/381caf52e5fa1c5c30587dbbdedfad15cd1b27c7))
+* **reference:** capability-liveness doctor check, required capabilities and Decisions (AISDLC-644) ([#2541](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2541)) ([a612e66](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a612e66ad2cb58204b4229b00edf2d6b825ba7cc))
+* **reference:** redact more secret forms in the redactor (AISDLC-630.3) ([#2533](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2533)) ([f0fdf5b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f0fdf5b735873752b88ca7b8aa8fea73152a48ba))
+
+
+### Bug Fixes
+
+* open task PRs ready when CodeQL does not run on pull requests (AISDLC-1149) ([#2273](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2273)) ([9dadf31](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9dadf314286653df5c9e43a10d0d7847906c8353))
+* **reference:** key-aware redaction of secret-named keys in judgment redactor (AISDLC-630.4) ([#2564](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2564)) ([700560f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/700560fcf024177e3e64690477109cc7becc87e9))
+* **reference:** tighten openai-compatible apiKeyEnv rule, caps and reasons (AISDLC-633.2) ([#2539](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2539)) ([11062bd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/11062bdd1138468c48ee4637edc11ca539041e7d))
+
 ## [0.40.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.39.0...reference-v0.40.0) (2026-11-01)
 
 
