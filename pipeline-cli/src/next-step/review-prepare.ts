@@ -142,10 +142,20 @@ export function selectForReview<T extends { reviewer: ReviewerType }>(
   prompts: readonly T[],
   names: readonly string[],
   changedPaths: readonly string[],
+  /** False on a delta resume: the delta's own reviewer set decides, not the whole-PR rule. */
+  forceCoverage = true,
 ): T[] {
   const selected = selectByClassifier(prompts, names);
-  if (requiredReviewerKind(changedPaths).kind !== 'three') return selected;
-  const required = new Set<ReviewerType>(['code-reviewer', 'test-reviewer', 'security-reviewer']);
+  const kind = requiredReviewerKind(changedPaths).kind;
+  if (kind === 'correctness-only') return selected;
+  if (kind !== 'three' && !forceCoverage) return selected;
+  // AISDLC-1247: the spawn list is a superset of what the Step 8 coverage gate requires, so the
+  // classifier narrows only optional reviewers. Every kind but correctness-only needs security.
+  const required = new Set<ReviewerType>(['security-reviewer']);
+  if (kind === 'three') {
+    required.add('code-reviewer');
+    required.add('test-reviewer');
+  }
   return prompts.filter((p) => required.has(p.reviewer) || selected.includes(p));
 }
 
@@ -317,7 +327,12 @@ export async function prepareReview(
       : ['testing', 'critic'];
   }
   const classifierLine = classifierLineFor(classifier);
-  const selected = selectForReview(built.prompts, classifier.reviewers, built.changedFiles);
+  const selected = selectForReview(
+    built.prompts,
+    classifier.reviewers,
+    built.changedFiles,
+    resumeDecision?.branch !== 'delta',
+  );
 
   // AISDLC-725: the shared round plan (built with the prompts) is the one incremental decision.
   const roundPlan = built.roundPlan;

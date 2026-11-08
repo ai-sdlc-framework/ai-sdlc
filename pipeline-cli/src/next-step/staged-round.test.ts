@@ -457,6 +457,25 @@ describe('advanceStagedRound, synthesize stage', () => {
     ]);
   });
 
+  it('extends a non-empty beside list with security instead of replacing it (AISDLC-1247)', async () => {
+    const code: SpawnedReviewer = {
+      ...security,
+      reviewer: 'code-reviewer',
+      agent: 'code-reviewer',
+    };
+    state.review = stagedReview({ stage: 'synthesize', beside: [code] });
+    const synth = leaf('synthesize', 'synth');
+    h.present.add(synth.transcriptPath);
+    h.present.add(synth.verdictPath);
+    h.runner.on(
+      (c, a) => a[1] === 'finalize',
+      ok(JSON.stringify({ ok: true, reviewerVerdict, leaves: [synth], dropped: 0 })),
+    );
+    const res = await advanceStagedRound(h.ctx, state, report(), artifacts);
+    if (res.kind !== 'spawn') throw new Error('expected spawn');
+    expect(res.review.spawned.map((s) => s.agent)).toEqual(['code-reviewer', 'security-reviewer']);
+  });
+
   it('marks the staged verdict not approved when a plan leaf cannot be emitted', async () => {
     synthState();
     const plan = leaf('plan', 'planner');

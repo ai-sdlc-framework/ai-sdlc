@@ -169,6 +169,31 @@ describe('selectForReview (AISDLC-850)', () => {
     },
   );
 
+  it('always spawns security when the coverage rule requires it (AISDLC-1247)', () => {
+    const merged = [p('correctness-reviewer'), p('security-reviewer')];
+    const out = selectForReview(merged, ['testing', 'critic'], ['src/a.ts']).map((x) => x.reviewer);
+    expect(out).toContain('security-reviewer');
+  });
+
+  it('spawned covers the required kind for every classifier answer (AISDLC-1247)', () => {
+    const all = [
+      p('code-reviewer'),
+      p('test-reviewer'),
+      p('correctness-reviewer'),
+      p('security-reviewer'),
+    ];
+    const names = ['testing', 'critic', 'security'];
+    const answers = Array.from({ length: 8 }, (_, m) => names.filter((_, i) => m & (1 << i)));
+    for (const paths of [['src/a.ts'], ['docs/a.md'], ['.github/workflows/x.yml'], []]) {
+      const kind = requiredReviewerKind(paths).kind;
+      for (const ans of answers) {
+        const got = selectForReview(all, ans, paths).map((x) => x.reviewer as string);
+        if (kind !== 'correctness-only') expect(got).toContain('security-reviewer');
+        if (kind === 'three') expect(checkReviewerKindCoverage(got, kind).ok).toBe(true);
+      }
+    }
+  });
+
   it('still narrows a docs-only diff', () => {
     expect(selectForReview(three, ['security'], ['docs/a.md']).map((x) => x.reviewer)).toEqual([
       'security-reviewer',
@@ -384,12 +409,11 @@ spec:
     expect(res.classifierLine).toContain('fellOpen: invocation-failed');
   });
 
-  it('spawns nothing when the classifier selects no reviewer', async () => {
+  it('still spawns the coverage-required security reviewer when the classifier selects none (AISDLC-1247)', async () => {
     script({ classifier: { reviewers: [], confidence: 1, fellOpen: false } });
     const res = await prepareReview(h.ctx, state, 1);
-    expect(res.kind).toBe('nothing-to-spawn');
-    if (res.kind === 'nothing-to-spawn') expect(res.verdicts).toEqual([]);
-    expect(h.runner.calls.some((c) => c.args.includes('generate-nonce'))).toBe(false);
+    if (res.kind !== 'spawn') throw new Error('expected spawn');
+    expect(res.review.spawned.map((s) => s.agent)).toEqual(['security-reviewer']);
   });
 
   const plan = (over: Partial<ReviewRoundPlan>): ReviewRoundPlan => ({

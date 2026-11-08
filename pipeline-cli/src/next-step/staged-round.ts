@@ -458,11 +458,20 @@ export async function advanceStagedRound(
       kind: 'spawn',
       review: {
         ...review,
-        spawned: staged.beside && staged.beside.length > 0 ? staged.beside : [staged.security],
+        spawned: withSecurity(staged.beside, staged.security),
         staged: { ...staged, stage: 'security', verdict },
       },
     };
   }
 
   return { kind: 'abort', reason: `staged review: unexpected stage ${staged.stage}` };
+}
+
+/** AISDLC-1247: the staged `beside` list is extended with security, never replaced by it. */
+function withSecurity<T extends { reviewer: string }>(
+  beside: readonly T[] | undefined,
+  security: T,
+): T[] {
+  if (!beside || beside.length === 0) return [security];
+  return beside.some((b) => b.reviewer === security.reviewer) ? [...beside] : [...beside, security];
 }
