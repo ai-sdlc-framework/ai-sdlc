@@ -32,7 +32,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { buildCleanRoomVerdict, writeVerdictArtifact } from '../attestation/verdict-untrusted.js';
 import { validateReport } from '../pipeline/report-validator.js';
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { runReviewerMatrixInContainer } from '../pipeline/reviewer-container.js';
 import { classifyTrust } from '../pipeline/trust-classifier.js';
 import { runAstGate, loadAstGateConfig, buildBlockedEvent } from '../pipeline/ast-gate.js';
 import type { ChangedFile } from '../pipeline/ast-gate.js';
@@ -348,13 +350,28 @@ async function runSandboxAndReview(args: {
     // InferenceProxyClient pointed at the live proxy (proxy env vars set above).
     // In CI (no proxy): returns the fail-closed FakeModelClient.
     process.stderr.write('[stage-3] running reviewer matrix...\n');
-    const modelClient = resolveModelClient(args.workDir);
-    const reviewerResult = await runReviewerMatrix({
-      prDiff,
-      prNumber: args.prNumber,
-      differentialTest,
-      modelClient,
-    });
+    const inContainerPort = parseInt(process.env['INFERENCE_PROXY_PORT'] ?? '0', 10);
+    const inContainerSession = process.env['INFERENCE_PROXY_SESSION'];
+    const reviewerResult =
+      process.env['AI_SDLC_UCVG_REVIEWERS_IN_CONTAINER'] === '1' &&
+      proxy !== null &&
+      inContainerPort > 0 &&
+      inContainerSession
+        ? // Strict AQ2: reviewers run inside the proxy-only container.
+          await _ucvgSeams.containerReviewerRunner({
+            prDiff,
+            prNumber: args.prNumber,
+            differentialTest,
+            proxyPort: inContainerPort,
+            sessionToken: inContainerSession,
+            appDir: dirname(dirname(fileURLToPath(import.meta.url))),
+          })
+        : await runReviewerMatrix({
+            prDiff,
+            prNumber: args.prNumber,
+            differentialTest,
+            modelClient: resolveModelClient(args.workDir),
+          });
 
     // Emit the unsigned report artifact with the real reviewer verdicts.
     const report = buildUnsignedReport(
@@ -723,10 +740,13 @@ export const _ucvgSeams: {
    * Defaults to null (uses the real git diff implementation).
    */
   computePrDiffFn: ((prContentDir: string, baseSha: string, headSha: string) => string) | null;
+  /** Runs the reviewers inside the proxy-only container (strict AQ2). Test seam. */
+  containerReviewerRunner: typeof runReviewerMatrixInContainer;
 } = {
   modelClientFactory: null,
   inferenceProxyFactory: createInferenceProxy,
   computePrDiffFn: null,
+  containerReviewerRunner: runReviewerMatrixInContainer,
 };
 
 /**
