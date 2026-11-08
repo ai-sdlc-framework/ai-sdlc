@@ -2,7 +2,7 @@
 id: AISDLC-633.2
 title: >-
   RFC-0049 follow-up: apiKeyEnv name rule beyond the fixed denylist, caps on timeoutMs and maxStateTokens, sanitised disabled reasons
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-02'
 labels:
