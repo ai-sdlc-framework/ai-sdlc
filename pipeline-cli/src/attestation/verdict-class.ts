@@ -81,6 +81,7 @@
 
 import {
   existsSync,
+  linkSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -88,6 +89,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { join, resolve } from 'node:path';
 
 /** The two trust classes a transcript leaf can be assigned. */
@@ -433,6 +435,62 @@ export function consumeSubagentMarker(filePath: string, claim?: MarkerClaim | nu
 }
 
 /**
+ * Claim a marker for one leaf, atomically (AISDLC-701).
+ *
+ * Selecting a marker and binding it were separate steps, so two `emit-leaf`
+ * runs for the same leaf could both select it and both be credited
+ * `independent`. The claim is a `<marker>.claim` file created by hard-linking a
+ * fully written temp file: exactly one creator wins, and a reader never sees a
+ * half-written claim. The winner binds the marker and then marks the claim
+ * `claimed`. A later run presenting the same (head, reviewer, task) finds a
+ * `claimed` claim and keeps its class (idempotent re-emit, AISDLC-734); a run
+ * that finds the claim still `claiming`, or held by another claim, loses and the
+ * caller falls back to `self-authored`. A crashed winner leaves a `claiming`
+ * file, which fails safe the same way.
+ *
+ * With no claim (head not a full SHA) the marker is simply deleted, as before.
+ * Returns `true` when the caller may credit `independent`.
+ */
+export function claimAndConsumeSubagentMarker(
+  filePath: string,
+  claim: MarkerClaim | null | undefined,
+): boolean {
+  if (!claim) {
+    consumeSubagentMarker(filePath, null);
+    return true;
+  }
+  const lock = `${filePath}.claim`;
+  const writeTmp = (state: 'claiming' | 'claimed'): string => {
+    const tmp = `${filePath}.${process.pid}.${randomBytes(4).toString('hex')}.claimtmp`;
+    writeFileSync(tmp, JSON.stringify({ state, claim }), 'utf8');
+    return tmp;
+  };
+  try {
+    const tmp = writeTmp('claiming');
+    try {
+      linkSync(tmp, lock);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') return false;
+      const held = JSON.parse(readFileSync(lock, 'utf8')) as { state?: string; claim?: unknown };
+      const heldClaim = readClaim(held.claim);
+      return held.state === 'claimed' && heldClaim !== null && claimsEqual(heldClaim, claim);
+    } finally {
+      try {
+        unlinkSync(tmp);
+      } catch {
+        // temp already gone
+      }
+    }
+    consumeSubagentMarker(filePath, claim);
+    const done = writeTmp('claimed');
+    renameSync(done, lock);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Determine the verdict class for a transcript leaf from markers under
  * `repoRoot` ONLY.
  *
@@ -485,8 +543,7 @@ export function determineVerdictClass(opts: {
     return 'self-authored';
   }
   if (!selection) return 'self-authored';
-  consumeSubagentMarker(selection.filePath, claim);
-  return 'independent';
+  return claimAndConsumeSubagentMarker(selection.filePath, claim) ? 'independent' : 'self-authored';
 }
 
 /**

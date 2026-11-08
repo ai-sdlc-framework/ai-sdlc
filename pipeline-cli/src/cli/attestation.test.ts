@@ -489,6 +489,46 @@ describe('emit-leaf — reviews ledger integration (AISDLC-616)', () => {
     expect(records[0].findings[0]).toMatchObject({ severity: 'critical', area: 'src/foo.ts' });
   });
 
+  it('prints a notice when --allow-role-matched-independent is set (AISDLC-701)', async () => {
+    makeTranscript('aisdlc-616', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-616',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-optin.json', { approved: true, findings: [] });
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      writes.push(String(chunk));
+      return true;
+    });
+    try {
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-616',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'f'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'claude-sonnet-4-6',
+        '--allow-role-matched-independent',
+      ]).parseAsync();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(writes.join('')).toContain('--allow-role-matched-independent set');
+  });
+
   it('routes the ledger to the task worktree when run from a Pattern C parent (AISDLC-793)', async () => {
     makeTranscript('aisdlc-616', 'code-reviewer');
     const transcriptPath = join(

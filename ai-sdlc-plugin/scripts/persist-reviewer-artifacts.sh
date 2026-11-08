@@ -30,13 +30,19 @@
 #     --task-id <id> \
 #     --reviewer <name> \
 #     --agent-id <harness-agent-id> \
-#     --verdict-file <path-to-verdict-json>
+#     --verdict-file <path-to-verdict-json> \
+#     [--nonce-marker <literal>]
+#
+# --nonce-marker (AISDLC-701): the literal `cli-attestation nonce-marker` prints.
+# When given, the resolved harness transcript must contain it; otherwise nothing
+# is persisted and the script exits 4. Without it the behaviour is unchanged.
 #
 # Exit codes:
 #   0  success — transcript copied + verdict written
 #   1  usage error (missing required flag)
 #   2  no harness transcript found for --agent-id under ~/.claude/projects
 #   3  --verdict-file does not exist / is not readable
+#   4  --nonce-marker given but the harness transcript does not contain it
 #
 # Idempotent: re-running with the same args overwrites cleanly.
 
@@ -49,6 +55,7 @@ TASK_ID=""
 REVIEWER=""
 AGENT_ID=""
 VERDICT_FILE=""
+NONCE_MARKER=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -70,6 +77,10 @@ while [ $# -gt 0 ]; do
       ;;
     --verdict-file)
       VERDICT_FILE="$2"
+      shift 2
+      ;;
+    --nonce-marker)
+      NONCE_MARKER="$2"
       shift 2
       ;;
     *)
@@ -157,6 +168,13 @@ done < <(find "$CLAUDE_PROJECTS_DIR" -type f -name "agent-${AGENT_ID}.jsonl" -pr
 if [ -z "${TRANSCRIPT_SRC:-}" ] || [ ! -f "${TRANSCRIPT_SRC:-/nonexistent}" ]; then
   echo "persist-reviewer-artifacts.sh: no harness transcript found for agent-id '${AGENT_ID}' under ${CLAUDE_PROJECTS_DIR} (searched for agent-${AGENT_ID}.jsonl)" >&2
   exit 2
+fi
+
+# AISDLC-701: refuse a transcript that lacks the diff-binding nonce marker
+# BEFORE anything is copied, so a wrong run is never persisted.
+if [ -n "$NONCE_MARKER" ] && ! grep -F -q -- "$NONCE_MARKER" "$TRANSCRIPT_SRC"; then
+  echo "persist-reviewer-artifacts.sh: harness transcript ${TRANSCRIPT_SRC} does not contain the nonce marker; refusing to persist" >&2
+  exit 4
 fi
 
 TRANSCRIPT_DEST_DIR="$WORKTREE/.ai-sdlc/transcripts/${TASK_ID_LOWER}"

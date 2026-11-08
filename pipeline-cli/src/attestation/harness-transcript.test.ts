@@ -3,7 +3,7 @@
  *
  * Coverage:
  *   - claudeProjectSlug / resolveMostRecentSessionDir path derivation.
- *   - findMatchingSubagentMarker: read-only marker scan (fresh/stale/malformed,
+ *   - selectSubagentMarker: read-only marker scan (fresh/stale/malformed,
  *     non-consuming).
  *   - resolveHarnessTranscriptPath: explicit session-id vs. fallback heuristic,
  *     missing project dir / session dir / transcript file.
@@ -45,7 +45,6 @@ const {
   claudeProjectSlug,
   claudeProjectsDir,
   computeHarnessTranscriptHash,
-  findMatchingSubagentMarker,
   locateSessionDirByAgentId,
   markerSearchRoots,
   nonceMarkerLiteral,
@@ -56,7 +55,8 @@ const {
   resolveMostRecentSessionDir,
   transcriptContainsNonce,
 } = await import('./harness-transcript.js');
-const { subagentSessionsDir, MARKER_MAX_AGE_MS } = await import('./verdict-class.js');
+const { subagentSessionsDir, MARKER_MAX_AGE_MS, selectSubagentMarker } =
+  await import('./verdict-class.js');
 
 let repoRoot: string;
 
@@ -126,9 +126,28 @@ function writeMarker(
   writeFileSync(join(dir, name), JSON.stringify(fields));
 }
 
-describe('findMatchingSubagentMarker', () => {
+const scan = (opts: {
+  transcriptMtimeMs: number;
+  reviewerName?: string;
+}): { agentId: string; agentType: string | null; firedAt: string } | null => {
+  const sel = selectSubagentMarker({
+    roots: [repoRoot],
+    transcriptMtimeMs: opts.transcriptMtimeMs,
+    reviewerName: opts.reviewerName,
+    allowUntyped: true,
+  });
+  return sel
+    ? {
+        agentId: sel.marker.agentId,
+        agentType: sel.marker.agentType,
+        firedAt: sel.marker.firedAt,
+      }
+    : null;
+};
+
+describe('selectSubagentMarker (marker lookup)', () => {
   it('returns null when no subagent-sessions directory exists', () => {
-    expect(findMatchingSubagentMarker({ repoRoot, transcriptMtimeMs: Date.now() })).toBeNull();
+    expect(scan({ transcriptMtimeMs: Date.now() })).toBeNull();
   });
 
   it('finds a fresh marker within the window and does NOT consume it', () => {
@@ -138,13 +157,11 @@ describe('findMatchingSubagentMarker', () => {
       firedAt: new Date(now).toISOString(),
     });
 
-    const match = findMatchingSubagentMarker({ repoRoot, transcriptMtimeMs: now });
-    expect(match).toEqual({
+    expect(scan({ transcriptMtimeMs: now })).toEqual({
       agentId: 'abc',
       agentType: null,
       firedAt: new Date(now).toISOString(),
     });
-    // Read-only: the marker file must still exist afterwards.
     expect(readdirSync(subagentSessionsDir(repoRoot))).toHaveLength(1);
   });
 
@@ -155,9 +172,7 @@ describe('findMatchingSubagentMarker', () => {
       agentType: 'code-reviewer',
       firedAt: new Date(now).toISOString(),
     });
-
-    const match = findMatchingSubagentMarker({ repoRoot, transcriptMtimeMs: now });
-    expect(match?.agentType).toBe('code-reviewer');
+    expect(scan({ transcriptMtimeMs: now })?.agentType).toBe('code-reviewer');
   });
 
   it('returns null for a stale marker outside MARKER_MAX_AGE_MS', () => {
@@ -166,16 +181,14 @@ describe('findMatchingSubagentMarker', () => {
       agentId: 'stale',
       firedAt: new Date(now - MARKER_MAX_AGE_MS - 60_000).toISOString(),
     });
-
-    expect(findMatchingSubagentMarker({ repoRoot, transcriptMtimeMs: now })).toBeNull();
+    expect(scan({ transcriptMtimeMs: now })).toBeNull();
   });
 
   it('returns null for malformed marker JSON (fail-safe)', () => {
     const dir = subagentSessionsDir(repoRoot);
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'broken.json'), '{ not valid json');
-
-    expect(findMatchingSubagentMarker({ repoRoot, transcriptMtimeMs: Date.now() })).toBeNull();
+    expect(scan({ transcriptMtimeMs: Date.now() })).toBeNull();
   });
 });
 
@@ -1276,7 +1289,24 @@ describe('computeHarnessTranscriptHash — marker location and reviewer binding'
     expect(readdirSync(subagentSessionsDir(resolvedMainRoot))).toEqual(['taskb.json']);
   });
 
-  it('bindLeafToReviewerRun: without a nonce match, only a marker under repoRoot itself still earns independent', () => {
+  it('bindLeafToReviewerRun: without a nonce match and no opt-in the leaf is self-authored (AISDLC-701)', () => {
+    const now = Date.now();
+    writeMarker(worktreeRoot, 'local.json', {
+      agentId: 'local',
+      agentType: 'code-reviewer',
+      firedAt: new Date(now).toISOString(),
+    });
+    const bound = bindLeafToReviewerRun({
+      repoRoot: worktreeRoot,
+      transcriptMtimeMs: now,
+      nonce: 'd2'.repeat(32),
+      reviewerName: 'code-reviewer',
+    });
+    expect(bound.verdictClass).toBe('self-authored');
+    expect(readdirSync(subagentSessionsDir(worktreeRoot))).toEqual(['local.json']);
+  });
+
+  it('bindLeafToReviewerRun: with the opt-in, only a marker under repoRoot itself earns independent', () => {
     const now = Date.now();
     const nonce = 'd3'.repeat(32);
     writeMarker(worktreeRoot, 'local.json', {
@@ -1289,6 +1319,7 @@ describe('computeHarnessTranscriptHash — marker location and reviewer binding'
       transcriptMtimeMs: now,
       nonce,
       reviewerName: 'code-reviewer',
+      allowRoleMatchedIndependent: true,
     });
     expect(bound.verdictClass).toBe('independent');
     expect(bound.harnessTranscriptHash).toBeNull();
@@ -1366,7 +1397,7 @@ describe('computeHarnessTranscriptHash — marker location and reviewer binding'
   });
 });
 
-describe('findMatchingSubagentMarker — deterministic choice', () => {
+describe('selectSubagentMarker — deterministic choice', () => {
   it('prefers the most recent marker of the reviewer role, independent of file name order', () => {
     const now = Date.now();
     writeMarker(repoRoot, 'a-older.json', {
@@ -1379,17 +1410,23 @@ describe('findMatchingSubagentMarker — deterministic choice', () => {
       agentType: 'code-reviewer',
       firedAt: new Date(now - 1_000).toISOString(),
     });
-    const match = findMatchingSubagentMarker({
-      repoRoot,
-      transcriptMtimeMs: now,
-      reviewerName: 'ai-sdlc:code-reviewer',
-    });
+    const match = scan({ transcriptMtimeMs: now, reviewerName: 'ai-sdlc:code-reviewer' });
     expect(match?.agentId).toBe('newer');
+  });
+
+  it('ignores a marker of another role', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'other.json', {
+      agentId: 'other',
+      agentType: 'security-reviewer',
+      firedAt: new Date(now).toISOString(),
+    });
+    expect(scan({ transcriptMtimeMs: now, reviewerName: 'code-reviewer' })).toBeNull();
   });
 
   it('without a reviewer name keeps accepting any marker in the window', () => {
     const now = Date.now();
     writeMarker(repoRoot, 'm.json', { agentId: 'm', firedAt: new Date(now).toISOString() });
-    expect(findMatchingSubagentMarker({ repoRoot, transcriptMtimeMs: now })?.agentId).toBe('m');
+    expect(scan({ transcriptMtimeMs: now })?.agentId).toBe('m');
   });
 });

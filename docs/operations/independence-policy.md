@@ -190,10 +190,16 @@ A marker is credited as `independent` in one of two ways:
    contains this leaf's diff-binding nonce, the literal the coordinator embeds in the
    reviewer prompt before the reviewer runs. That proves the run reviewed this diff. The
    leaf gets that transcript's hash as `harnessTranscriptHash`, and that marker is
-   consumed.
-2. **Local marker (under `--repo-root` only).** With no nonce-verified marker, a marker of
-   the reviewer's role under `--repo-root` itself still earns `independent`, with
-   `harnessTranscriptHash: null`, as before.
+   consumed. The nonce shows the run was given this nonce in its prompt; it does not
+   show the run did the review well.
+2. **Local marker (opt-in only).** With `--allow-role-matched-independent`, a marker of
+   the reviewer's role under `--repo-root` itself earns `independent` without a nonce,
+   with `harnessTranscriptHash: null`, and `emit-leaf` prints a notice. Without the flag
+   and without a verified nonce the leaf is `self-authored`. The pipeline's own callers
+   (`next-step` review finalize and staged round) pass the nonce and do not need the flag.
+
+Marker claims are atomic: two `emit-leaf` runs for the same leaf cannot both be credited
+`independent`; the loser gets `self-authored`.
 
 A marker under the main checkout or `--project-dir` is never credited without the nonce.
 Those directories are shared by every task run from the same checkout, and role and
@@ -212,7 +218,8 @@ The reviewers of one task can run in parallel and their leaves can be emitted ba
 back. Each leaf's `harnessTranscriptHash` is the hash of its own reviewer's harness
 transcript; the session directory is found by the agent id, not by which session was
 written to last. Several tasks can run from one checkout at the same time: a leaf binds
-only to a run whose transcript carries its own task's nonce.
+only to a run whose transcript carries its own task's nonce, and with no nonce it is
+`self-authored` unless the opt-in flag is given.
 
 ## Quick reference
 

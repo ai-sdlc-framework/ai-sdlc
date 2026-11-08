@@ -16,6 +16,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   AGENT_ID_PATTERN,
+  buildMarkerClaim,
+  claimAndConsumeSubagentMarker,
   MARKER_MAX_AGE_MS,
   consumeSubagentMarker,
   determineVerdictClass,
@@ -488,5 +490,42 @@ describe('listSubagentMarkerCandidates and consumeSubagentMarker', () => {
     consumeSubagentMarker(marker);
     expect(existsSync(marker)).toBe(false);
     expect(() => consumeSubagentMarker(marker)).not.toThrow();
+  });
+});
+
+describe('claimAndConsumeSubagentMarker (AISDLC-701)', () => {
+  const head = 'a'.repeat(40);
+
+  it('lets exactly one of two racing runs claim the marker; the loser is self-authored', () => {
+    const marker = writeMarker(repoRoot, 'code.json', new Date().toISOString());
+    const claim = buildMarkerClaim(head, 'code-reviewer', 'AISDLC-1');
+    const other = buildMarkerClaim('b'.repeat(40), 'code-reviewer', 'AISDLC-1');
+    expect(claimAndConsumeSubagentMarker(marker, claim)).toBe(true);
+    // A different head racing for the same marker loses.
+    expect(claimAndConsumeSubagentMarker(marker, other)).toBe(false);
+    // The same run re-emitting keeps its class (idempotent).
+    expect(claimAndConsumeSubagentMarker(marker, claim)).toBe(true);
+  });
+
+  it('a claim left in the claiming state (crashed winner) fails safe', () => {
+    const marker = writeMarker(repoRoot, 'code.json', new Date().toISOString());
+    const claim = buildMarkerClaim(head, 'code-reviewer', 'AISDLC-1');
+    writeFileSync(`${marker}.claim`, JSON.stringify({ state: 'claiming', claim }));
+    expect(claimAndConsumeSubagentMarker(marker, claim)).toBe(false);
+  });
+
+  it('with no claim the marker is deleted and the caller may credit independent', () => {
+    const marker = writeMarker(repoRoot, 'code.json', new Date().toISOString());
+    expect(claimAndConsumeSubagentMarker(marker, null)).toBe(true);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it('determineVerdictClass yields independent once for two emits of different heads', () => {
+    const now = Date.now();
+    writeMarker(repoRoot, 'code.json', new Date(now).toISOString());
+    const base = { repoRoot, transcriptMtimeMs: now, reviewerName: 'code-reviewer', taskId: 'T-1' };
+    const first = determineVerdictClass({ ...base, headSha: head });
+    const second = determineVerdictClass({ ...base, headSha: 'c'.repeat(40) });
+    expect([first, second].sort()).toEqual(['independent', 'self-authored']);
   });
 });
