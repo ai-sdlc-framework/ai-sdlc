@@ -28,6 +28,7 @@ import {
   computeDistFileSha512s,
   sha512Hex,
   signTarballEnvelope,
+  resolveTarballUrl,
   writeTarballEnvelope,
 } from './sign-mcp-tarball.mjs';
 import { spawnSync } from 'node:child_process';
@@ -565,5 +566,72 @@ describe('writeTarballEnvelope (AISDLC-875)', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('resolveTarballUrl polling (AISDLC-1245)', () => {
+  const base = { packageName: '@ai-sdlc/x', version: '1.0.0', registry: 'https://r.test' };
+  const mk = (statuses) => {
+    let i = 0;
+    return async () => {
+      const status = statuses[Math.min(i++, statuses.length - 1)];
+      return {
+        ok: status === 200,
+        status,
+        json: async () => ({ dist: { tarball: 'https://r.test/t.tgz' } }),
+      };
+    };
+  };
+
+  it('retries a 404 that turns into a 200', async () => {
+    const sleeps = [];
+    const url = await resolveTarballUrl({
+      ...base,
+      attempts: 5,
+      intervalMs: 7,
+      fetchImpl: mk([404, 404, 200]),
+      sleepImpl: async (ms) => sleeps.push(ms),
+    });
+    assert.equal(url, 'https://r.test/t.tgz');
+    assert.deepEqual(sleeps, [7, 7]);
+  });
+
+  it('gives up after the bound on persistent 404', async () => {
+    await assert.rejects(
+      resolveTarballUrl({
+        ...base,
+        attempts: 3,
+        fetchImpl: mk([404]),
+        sleepImpl: async () => {},
+      }),
+      /HTTP 404/,
+    );
+  });
+
+  it('does not retry non-404 errors', async () => {
+    let calls = 0;
+    await assert.rejects(
+      resolveTarballUrl({
+        ...base,
+        attempts: 5,
+        fetchImpl: async () => {
+          calls++;
+          return { ok: false, status: 500 };
+        },
+        sleepImpl: async () => {},
+      }),
+      /HTTP 500/,
+    );
+    assert.equal(calls, 1);
+  });
+
+  it('rejects metadata missing dist.tarball', async () => {
+    await assert.rejects(
+      resolveTarballUrl({
+        ...base,
+        fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({}) }),
+      }),
+      /missing dist.tarball/,
+    );
   });
 });

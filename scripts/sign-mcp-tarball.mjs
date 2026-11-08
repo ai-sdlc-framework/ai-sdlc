@@ -27,6 +27,9 @@
  *   --registry  <url>      npm registry base URL. Default: https://registry.npmjs.org
  *   --out       <path>     Output envelope path. Default:
  *                          .ai-sdlc/attestations/mcp-server-<version>.dsse.json
+ *   --poll-attempts <n>    Max registry metadata fetches while the version 404s
+ *                          (default 1 = no retry).
+ *   --poll-interval <sec>  Seconds between polls (default 0).
  *   --dry-run              Print the unsigned predicate to stdout and exit.
  *                          Useful for debugging without a signing key.
  *
@@ -237,20 +240,38 @@ export function signTarballEnvelope({ predicate, privateKeyPem, keyid }) {
  * Resolve the npm tarball URL for a given package + version.
  * Fetches the registry metadata and extracts the `dist.tarball` URL.
  */
-export async function resolveTarballUrl({ packageName, version, registry }) {
+export async function resolveTarballUrl({
+  packageName,
+  version,
+  registry,
+  attempts = 1,
+  intervalMs = 0,
+  fetchImpl = fetch,
+  sleepImpl = (ms) => new Promise((r) => setTimeout(r, ms)),
+}) {
   const metaUrl = `${registry}/${encodeURIComponent(packageName)}/${encodeURIComponent(version)}`;
-  const res = await fetch(metaUrl, {
-    headers: { Accept: 'application/json' },
-  });
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} fetching registry metadata: ${metaUrl}`);
+  // Registry propagation after publish is eventually consistent: a 404 is
+  // retried up to `attempts` times, `intervalMs` apart (AISDLC-1245).
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetchImpl(metaUrl, {
+      headers: { Accept: 'application/json' },
+    });
+    if (res.ok) {
+      const meta = await res.json();
+      const tarballUrl = meta?.dist?.tarball;
+      if (!tarballUrl || typeof tarballUrl !== 'string') {
+        throw new Error(`Registry metadata for ${packageName}@${version} missing dist.tarball`);
+      }
+      return tarballUrl;
+    }
+    if (res.status !== 404 || attempt >= attempts) {
+      throw new Error(`HTTP ${res.status} fetching registry metadata: ${metaUrl}`);
+    }
+    process.stderr.write(
+      `[sign-mcp-tarball] ${packageName}@${version} not visible yet (attempt ${attempt}/${attempts}); retrying in ${intervalMs}ms\n`,
+    );
+    await sleepImpl(intervalMs);
   }
-  const meta = await res.json();
-  const tarballUrl = meta?.dist?.tarball;
-  if (!tarballUrl || typeof tarballUrl !== 'string') {
-    throw new Error(`Registry metadata for ${packageName}@${version} missing dist.tarball`);
-  }
-  return tarballUrl;
 }
 
 /**
@@ -293,7 +314,13 @@ async function main() {
   // Resolve tarball URL from registry metadata.
   let tarballUrl;
   try {
-    tarballUrl = await resolveTarballUrl({ packageName, version, registry });
+    tarballUrl = await resolveTarballUrl({
+      packageName,
+      version,
+      registry,
+      attempts: Number(args['poll-attempts'] ?? 1) || 1,
+      intervalMs: (Number(args['poll-interval']) || 0) * 1000,
+    });
   } catch (err) {
     fail(`Failed to resolve tarball URL: ${err.message}`);
   }
