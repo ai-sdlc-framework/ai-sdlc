@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1234
 title: open-PR cap excludes re-entering task PRs and adds an absolute ceiling
-status: To Do
+status: In Progress
 priority: high
 labels: [dispatch, hierarchy, throughput, pipeline-cli]
 dependencies: []
