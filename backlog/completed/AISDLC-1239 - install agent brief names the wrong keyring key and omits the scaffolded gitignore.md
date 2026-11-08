@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1239
 title: 'Install agent brief: keyring block is `reviewers:` not `signingKeys:`, and the commit step must include the scaffolded .gitignore'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-08'
 labels:
@@ -39,7 +39,33 @@ dispatchableReason: 'Filed by the planner on operator order 2026-11-08 from the 
 
 ## Acceptance Criteria
 
-- [ ] AC-1: `grep -rn signingKeys docs/` returns nothing; every doc that showed the key block shows `reviewers:` with the schema's field names.
-- [ ] AC-2: the brief's commit step lists `.gitignore`; the PR body states the decision on `.mcp.json` in one sentence.
-- [ ] AC-3: a check (test or smoke-script assertion) fails when the brief names a key that is not in the `trusted-reviewers` schema.
-- [ ] AC-4: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] AC-1: `grep -rn signingKeys docs/` returns nothing; every doc that showed the key block shows `reviewers:` with the schema's field names.
+- [x] AC-2: the brief's commit step lists `.gitignore`; the PR body states the decision on `.mcp.json` in one sentence.
+- [x] AC-3: a check (test or smoke-script assertion) fails when the brief names a key that is not in the `trusted-reviewers` schema.
+- [x] AC-4: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Final Summary
+
+## Summary
+The install brief, onboarding and signing-key-setup docs now show the `reviewers:` keyring block with the schema's field names. The brief's commit step now lists `.gitignore` and `.mcp.json`. A new test fails if a brief names a key outside the trusted-reviewers schema.
+
+## Changes
+- docs/getting-started/install-agent-brief.md
+- docs/getting-started/onboarding.md
+- docs/ucvg-test-repo-setup/signing-key-setup.md
+- scripts/smoke-install-brief.mjs
+- scripts/smoke-install-brief.test.mjs
+
+## Design decisions
+`.mcp.json` is now in the brief's commit list, because the scaffold writes it and this repository commits it; the PR body states this. `findUnknownKeyringKeys` in `scripts/smoke-install-brief.mjs` flags any key named after the word `under` in backticks that isn't `reviewers`. `scripts/smoke-install-brief.test.mjs` runs it over the three docs, asserts `signingKeys` is gone, and asserts `.gitignore` is in the commit step. There is no `.mcp.json` in this worktree, so I couldn't check its contents against the brief.
+
+## Verification
+- `pnpm build` — passed (dashboard build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (240 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
