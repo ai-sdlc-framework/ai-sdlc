@@ -1032,7 +1032,7 @@ describe('idle-with-claim check (AISDLC-826, AISDLC-1218)', () => {
   }
 
   it('reaps an idle holder with no verdict, clears it and re-queues the task (DEC-0392)', async () => {
-    claim('AISDLC-71', 'executor-alpha', 'done', 2 * MIN, '06-review');
+    claim('AISDLC-71', 'executor-alpha', 'done', 6 * MIN, '06-review');
     const r = await runDispatchTick(stallDeps());
     expect(r.stalled).toHaveLength(1);
     expect(r.stalled![0]).toMatchObject({
@@ -1063,7 +1063,7 @@ describe('idle-with-claim check (AISDLC-826, AISDLC-1218)', () => {
   );
 
   it('reports a re-queue refusal and keeps the failure record', async () => {
-    claim('AISDLC-71', 'executor-alpha', 'done', 2 * MIN);
+    claim('AISDLC-71', 'executor-alpha', 'done', 6 * MIN);
     copyFileSync(
       path.join(board, 'inflight', 'AISDLC-71.dispatch.json'),
       path.join(board, 'queue', 'AISDLC-71.dispatch.json'),
@@ -1075,7 +1075,7 @@ describe('idle-with-claim check (AISDLC-826, AISDLC-1218)', () => {
   });
 
   it('records a reap once: the next tick neither reaps nor clears again', async () => {
-    claim('AISDLC-71', 'executor-alpha', 'done', 2 * MIN);
+    claim('AISDLC-71', 'executor-alpha', 'done', 6 * MIN);
     await runDispatchTick(stallDeps());
     const again = await runDispatchTick(stallDeps());
     expect(again.stalled).toBeUndefined();
@@ -1084,13 +1084,13 @@ describe('idle-with-claim check (AISDLC-826, AISDLC-1218)', () => {
   });
 
   it('does not clear when clear-executor-context is not granted', async () => {
-    claim('AISDLC-71', 'executor-alpha', 'done', 2 * MIN);
+    claim('AISDLC-71', 'executor-alpha', 'done', 6 * MIN);
     await runDispatchTick(stallDeps({ operational: new Set(['requeue']) }));
     expect(cleared).toEqual([]);
   });
 
   it('skips a claim that already has a verdict and never runs without a stall config', async () => {
-    claim('AISDLC-71', 'executor-alpha', 'done', 2 * MIN);
+    claim('AISDLC-71', 'executor-alpha', 'done', 6 * MIN);
     verdict('AISDLC-72');
     const none = await runDispatchTick(deps());
     expect(none.stalled).toBeUndefined();
@@ -1101,7 +1101,7 @@ describe('idle-with-claim check (AISDLC-826, AISDLC-1218)', () => {
   });
 
   it('survives a failing clear and PR lookup', async () => {
-    claim('AISDLC-71', 'executor-alpha', 'done', 2 * MIN);
+    claim('AISDLC-71', 'executor-alpha', 'done', 6 * MIN);
     clearImpl = async () => {
       throw new Error('tmux gone');
     };

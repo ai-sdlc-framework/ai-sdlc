@@ -111,3 +111,27 @@ describe('completeLandedIterateNeeded (AISDLC-1030)', () => {
     expect(completeLandedIterateNeeded(board, 'bad id', 5)).toBe(false);
   });
 });
+
+describe('completeTask after an existing verdict (AISDLC-1230)', () => {
+  const m: DispatchManifest = {
+    schemaVersion: 'v1',
+    taskId: 'AISDLC-702',
+    branch: 'ai-sdlc/aisdlc-702',
+    worktree: '.worktrees/aisdlc-702',
+    baseSha: 'abc1234',
+    workerKind: 'in-session-agent',
+    dispatchedAt: '2026-05-20T10:00:00.000Z',
+    dispatchedBy: 'test',
+    spec: { taskFile: 'backlog/tasks/aisdlc-702.md', verifyCommands: [] },
+  };
+  it('is a no-op for the same outcome and refuses a different one naming both', () => {
+    writeManifest(board, m);
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-a' });
+    const o = { taskId: 'AISDLC-702', outcome: 'success', workerId: 'executor-a' };
+    completeTask(board, o);
+    const files = written();
+    expect(completeTask(board, o).verdict.outcome).toBe('success');
+    expect(written()).toEqual(files);
+    expect(() => completeTask(board, { ...o, outcome: 'failed' })).toThrow(/'success'.*'failed'/);
+  });
+});

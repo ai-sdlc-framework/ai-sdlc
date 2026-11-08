@@ -1233,7 +1233,7 @@ input. A claim is stalled when it has no verdict in `done/` or `failed/`, no liv
 either its `phase` is `done` or `aborted`, or its `lastHeartbeat` is older than `stallMs` (default 20 minutes). It moves to `failed/` with
 `cause: idle-with-claim`, `lastStep` and `heartbeatAgeMs` (informational); the holder is cleared (which restarts its
 executor loop with `/ai-sdlc:executor`) and the task goes back to `queue/` through `requeueFailed`. An idle executor
-with a live `next-step` process (a backgrounded verification) is spared.
+with a live `next-step` process (a backgrounded verification) is spared. The executor writes the verdict (Step 3 `complete`), a `done` claim is spared for `terminalGraceMs` (default 5 minutes) after the phase flip, and `complete` over an existing verdict with the same outcome is a no-op while a different outcome is refused naming both (AISDLC-1230); the diagnostic names the flip time, the reap time and the expected worker.
 The tick result carries `stalled` (`taskId`, `worker`, `ageMs`, `step`, `requeue`) and a progress line
 per reap. This is operational: the planner is not asked. Clearing needs
 `clear-executor-context`.

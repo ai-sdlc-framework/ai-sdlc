@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1230
 title: idle-with-claim reap races the executor verdict at phase done
-status: To Do
+status: Done
 priority: high
 labels: [bug, pipeline-cli, dispatch]
 dependencies: []
@@ -25,12 +25,34 @@ Cause: `workflow/execute-host.ts` writes `phase: 'done'` to the inflight state w
 
 ## Acceptance Criteria
 
-- [ ] #1 Test: a claim whose inflight state flips to `phase: 'done'` carries a board verdict in the same write (or, on the fallback branch, is not reaped within `terminalGraceMs` of the flip and is reaped after it).
-- [ ] #2 Test: `cli-dispatch complete` after a host-written verdict with the same outcome exits 0 without a second file; with a different outcome it refuses and names both.
-- [ ] #3 Test: `reapStalledClaims` still reaps `phase: 'aborted'` with no verdict, and a non-terminal heartbeat older than the stall window, unchanged.
-- [ ] #4 The idle-with-claim diagnostic names the phase-flip time, the reap time and the expected worker.
-- [ ] #5 `commands/executor.md` Step 3 and `docs/operations/cli-hierarchy.md` state in one sentence who writes the verdict and what `complete` does afterwards.
+- [x] #1 Test: a claim whose inflight state flips to `phase: 'done'` carries a board verdict in the same write (or, on the fallback branch, is not reaped within `terminalGraceMs` of the flip and is reaped after it).
+- [x] #2 Test: `cli-dispatch complete` after a host-written verdict with the same outcome exits 0 without a second file; with a different outcome it refuses and names both.
+- [x] #3 Test: `reapStalledClaims` still reaps `phase: 'aborted'` with no verdict, and a non-terminal heartbeat older than the stall window, unchanged.
+- [x] #4 The idle-with-claim diagnostic names the phase-flip time, the reap time and the expected worker.
+- [x] #5 `commands/executor.md` Step 3 and `docs/operations/cli-hierarchy.md` state in one sentence who writes the verdict and what `complete` does afterwards.
 
 ## Notes
 
 Evidence: `.ai-sdlc/dispatch/failed/AISDLC-515.1.diagnostic.json` (completedAt 20:45:16.456Z, heartbeatAgeMs 222, lastStep done), `.ai-sdlc/dispatch/sessions/aisdlc-515.1.session.json` (lastHeartbeat 20:45:16.206Z, status done), verdict ref commit 4fc22076 by ai-sdlc-step-11 at 20:43:13Z. Related: AISDLC-1227 (the developer pushed the same head itself at 20:35Z, eight minutes before the verdict ref).
+
+## Final Summary
+
+## Summary
+I re-ran `pnpm --filter ./pipeline-cli test:coverage` in the worktree as a single foreground run, with no other vitest process live. It exited 0 and the coverage thresholds were met. The earlier failure came from a stray coverage run in the same coverage directory. I made no code change and no new commit. The branch is unchanged at HEAD 234ff9ef, and the working tree is clean. I did not rebase, push or open a PR in this round, and did not check whether earlier rounds already did. I left no background processes running.
+
+## Changes
+- (none)
+
+## Design decisions
+Only the pipeline-cli coverage run was re-checked. Overall coverage was Lines 94.15%, Statements 92.85%, Branches 85.95%, Functions 93.53%. I did not inspect the per-file figures for pipeline-cli/src/hierarchy/stall.ts or pipeline-cli/src/dispatch/complete.ts. prUrl is null only because this round pushed and opened nothing. The orchestrator should use the PR from the earlier round.
+
+## Verification
+- `pnpm build` — passed (dashboard build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (240 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
