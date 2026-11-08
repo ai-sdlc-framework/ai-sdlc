@@ -19,7 +19,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { resolveCatalogRoot } from '../decisions/catalog-root.js';
@@ -31,7 +31,15 @@ import type { Decision } from '../decisions/decision-record.js';
 import { projectDecision } from '../decisions/projection.js';
 import { resolveGateRunId } from './gate-run.js';
 import { classifyPr, type PrFacts, type PrState } from './pr-state.js';
-import { landingDir, normaliseCheck, readLanding, taskIdFrom } from './reconcile.js';
+import {
+  landingDir,
+  normaliseCheck,
+  readGuard,
+  readLanding,
+  recordGuard,
+  taskIdFrom,
+  type GuardEntry,
+} from './reconcile.js';
 import { findOpenPrNumber } from './stall.js';
 import type { CommandRunner } from './types.js';
 
@@ -84,16 +92,6 @@ export interface ReenterDeps {
   resolveDecision?: (id: string) => Decision | null;
 }
 
-interface GuardEntry {
-  action: string;
-  headSha: string;
-  at: string;
-  /** Hash of the order's note, for a developer-round entry. */
-  noteHash?: string;
-  /** The answered catalog record that released the guard. */
-  decision?: string;
-}
-
 const hashNote = (note: string): string =>
   createHash('sha256').update(note.trim()).digest('hex').slice(0, 12);
 
@@ -140,27 +138,6 @@ function localAheadHead(deps: ReenterDeps): (taskId: string, prHead: string) => 
 }
 
 const short = (sha: string): string => sha.slice(0, 7);
-
-function guardFile(boardDir: string, pr: number): string {
-  return path.join(landingDir(boardDir), String(pr), 'reentered.json');
-}
-
-function readGuard(boardDir: string, pr: number): GuardEntry[] {
-  try {
-    const v = JSON.parse(readFileSync(guardFile(boardDir, pr), 'utf-8')) as unknown;
-    return Array.isArray(v) ? (v as GuardEntry[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function recordGuard(boardDir: string, pr: number, entry: GuardEntry): void {
-  const file = guardFile(boardDir, pr);
-  mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, JSON.stringify([...readGuard(boardDir, pr), entry], null, 2) + '\n', 'utf-8');
-  renameSync(tmp, file);
-}
 
 function prFromVerdicts(boardDir: string, taskId: string): number | undefined {
   const id = taskId.toLowerCase();

@@ -21,6 +21,8 @@ export interface PrCheck {
   durationSec?: number;
   /** The job was skipped (the rollup reports it as success; this keeps the fact). */
   skipped?: boolean;
+  /** ISO time the job completed, when known (AISDLC-1232). */
+  completedAt?: string;
 }
 
 /** REST facts for one open (or just merged) task PR. */
@@ -34,6 +36,8 @@ export interface PrFacts {
   autoMergeArmed?: boolean;
   /** An approved review verdict exists for the head. */
   approvedVerdict?: boolean;
+  /** AISDLC-1232: the head's verdict ref was written after the `verdict-check` job completed red. */
+  staleVerdictCheck?: boolean;
   checks?: PrCheck[];
   headBranch?: string;
   manifestBranch?: string;
@@ -47,6 +51,7 @@ export const PR_STATES = [
   'behind-or-dirty',
   'needs-re-review',
   'rate-limited',
+  'stale-verdict-check',
   'real-failure',
   'cancelled-or-infra',
   'ready-to-flip',
@@ -63,6 +68,7 @@ export const PR_ACTIONS: Record<PrState, string> = {
   'behind-or-dirty': 'requeue-hand-review-path-resume',
   'needs-re-review': 'review-resume',
   'rate-limited': 'wait-and-rerun',
+  'stale-verdict-check': 'rerun-stale-verdict-check',
   'real-failure': 'full-fix-resume-with-failing-line',
   'cancelled-or-infra': 'rerun-workflow',
   'ready-to-flip': 'flip-ready-via-rest',
@@ -201,6 +207,7 @@ export function classifyPr(f: PrFacts): PrClassification {
   }
   if (staleBaseDrift(failedChecks, f.changedFiles)) return mk('behind-or-dirty');
   const ready = checks.find((c) => c.name === PR_READY && failed(c));
+  if (ready && f.staleVerdictCheck) return mk('stale-verdict-check', ready.summary);
   if (ready) return mk('real-failure', ready.summary);
   if (checks.some((c) => c.conclusion === 'cancelled' || c.conclusion === 'infra')) {
     return mk('cancelled-or-infra');

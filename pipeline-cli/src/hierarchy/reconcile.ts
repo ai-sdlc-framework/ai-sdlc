@@ -41,6 +41,7 @@ export const TASK_ACTIONS: Record<PrState, string> = {
   'behind-or-dirty': 'land-prep',
   'needs-re-review': 'review-resume',
   'rate-limited': 'wait-and-rerun',
+  'stale-verdict-check': 'rerun-stale-verdict-check',
   'real-failure': 'reenter',
   'cancelled-or-infra': 'retrigger-once',
   'ready-to-flip': 'flip-ready-takeover',
@@ -59,6 +60,7 @@ export const DOCS_ACTIONS: Record<PrState, string> = {
   'behind-or-dirty': 'rebase-in-place',
   'needs-re-review': 'none',
   'rate-limited': 'wait-and-rerun',
+  'stale-verdict-check': 'route-to-planner',
   'real-failure': 'route-to-planner',
   'cancelled-or-infra': 'retrigger-once',
   'ready-to-flip': 'none',
@@ -91,6 +93,8 @@ export interface ReconcilePr extends PrFacts {
    * attestation (every reviewer approved); only the push is missing, so the machine owns it.
    */
   reclaimable?: boolean;
+  /** AISDLC-1232: reruns already recorded for this head in `reentered.json`. */
+  staleRerunCount?: number;
   /** AISDLC-1158: the commit the PR merged as, when the merge was read from GitHub. */
   mergeSha?: string;
 }
@@ -247,6 +251,10 @@ export function decide(
   // (the reviewers have not signed the new head); it is not counted as a failure and nothing runs.
   if (c.state === 'real-failure' && f.manifestState === 'inflight' && !takeover) {
     return { ...base, action: 'none', note: LIVE_CLAIM_NOTE };
+  }
+  // AISDLC-1232: one rerun per head; a second stale classification means the rerun did not turn green.
+  if (c.state === 'stale-verdict-check' && (f.staleRerunCount ?? 0) >= 1) {
+    return { ...base, action: 'route-to-planner', note: 'stale-verdict-check@2' };
   }
   let action = TASK_ACTIONS[c.state];
   // A green, CLEAN, unarmed ready task PR is armed by the reconciler (AISDLC-1091).
@@ -409,6 +417,7 @@ export function actionCommands(ctx: ActionContext, cliBin: string): ActionComman
       ];
     }
     case 'retrigger-once':
+    case 'rerun-stale-verdict-check':
     case 'rerun-rate-limited':
     case 'rerun-dor':
       return ctx.headSha
@@ -463,8 +472,47 @@ export function commandExecutor(run: CommandRunner, cwd: string, cliBin: string)
         };
       }
     }
+    if (ctx.action === 'rerun-stale-verdict-check' && ctx.headSha) {
+      recordGuard(ctx.boardDir, ctx.pr, {
+        action: 'rerun',
+        headSha: ctx.headSha,
+        at: clockNow().toISOString(),
+      });
+    }
     return { ran: true };
   };
+}
+
+/** AISDLC-883: one entry per re-entry on a head, in `landing/<pr>/reentered.json`. */
+export interface GuardEntry {
+  action: string;
+  headSha: string;
+  at: string;
+  /** Hash of the order's note, for a developer-round entry. */
+  noteHash?: string;
+  /** The answered catalog record that released the guard. */
+  decision?: string;
+}
+
+function guardFile(boardDir: string, pr: number): string {
+  return path.join(landingDir(boardDir), String(pr), 'reentered.json');
+}
+
+export function readGuard(boardDir: string, pr: number): GuardEntry[] {
+  try {
+    const v = JSON.parse(readFileSync(guardFile(boardDir, pr), 'utf-8')) as unknown;
+    return Array.isArray(v) ? (v as GuardEntry[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function recordGuard(boardDir: string, pr: number, entry: GuardEntry): void {
+  const file = guardFile(boardDir, pr);
+  mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify([...readGuard(boardDir, pr), entry], null, 2) + '\n', 'utf-8');
+  renameSync(tmp, file);
 }
 
 export function landingDir(boardDir: string): string {
@@ -1265,7 +1313,38 @@ export function normaliseCheck(c: RollupItem): PrCheck {
     ...(raw === 'SKIPPED' ? { skipped: true } : {}),
     ...(summary ? { summary } : {}),
     ...(c.detailsUrl ? { detailsUrl: c.detailsUrl } : {}),
+    ...(Number.isFinite(t1) ? { completedAt: new Date(t1).toISOString() } : {}),
   };
+}
+
+const VERDICT_CHECK_NAME = 'Review verdict (code PRs)';
+
+/**
+ * AISDLC-1232: the `verdict-check` job is red but the head's verdict ref was committed after
+ * the job completed, so the job read the ref before it landed. Fail-closed on any lookup error.
+ */
+function verdictRefNewerThanCheck(
+  run: CommandRunner,
+  cwd: string,
+  headSha: string,
+  checks: readonly PrCheck[],
+): boolean {
+  const job = checks.find((c) => c.name === VERDICT_CHECK_NAME && c.conclusion === 'failure');
+  const done = Date.parse(job?.completedAt ?? '');
+  if (!job || !Number.isFinite(done)) return false;
+  const ref = run(
+    'gh',
+    ['api', `repos/{owner}/{repo}/git/ref/ai-sdlc/verdicts/${headSha}`, '--jq', '.object.sha'],
+    { cwd },
+  );
+  const sha = ref.status === 0 ? ref.stdout.trim() : '';
+  if (!sha) return false;
+  const when = run(
+    'gh',
+    ['api', `repos/{owner}/{repo}/git/commits/${sha}`, '--jq', '.committer.date'],
+    { cwd },
+  );
+  return when.status === 0 && Date.parse(when.stdout.trim()) > done;
 }
 
 /** AISDLC-953: first annotation message of a failed job, when the rollup gave no summary. */
@@ -1342,6 +1421,10 @@ export function gatherFacts(
     const files = p.files?.map((x) => x.path) ?? [];
     const checks = (rollup?.statusCheckRollup ?? []).map(normaliseCheck);
     fillSummaryFromAnnotations(run, cwd, checks);
+    const staleVerdictCheck =
+      kind === 'task' && p.headRefOid !== undefined
+        ? verdictRefNewerThanCheck(run, cwd, p.headRefOid, checks)
+        : false;
     const queuedManifest = kind === 'task' ? readQueuedManifest(boardDir, taskId) : undefined;
     const inflightManifest = kind === 'task' ? readInflightManifest(boardDir, taskId) : undefined;
     const onBoard = inflightManifest ?? queuedManifest;
@@ -1389,6 +1472,14 @@ export function gatherFacts(
       ...(p.title === undefined ? {} : { title: p.title }),
       ...(p.headRefName === undefined ? {} : { headBranch: p.headRefName }),
       ...(p.headRefOid === undefined ? {} : { headSha: p.headRefOid }),
+      ...(staleVerdictCheck
+        ? {
+            staleVerdictCheck,
+            staleRerunCount: readGuard(boardDir, p.number).filter(
+              (e) => e.action === 'rerun' && e.headSha === p.headRefOid,
+            ).length,
+          }
+        : {}),
       draft: isDraft,
       ...(p.mergeStateStatus === undefined ? {} : { mergeStateStatus: p.mergeStateStatus }),
       autoMergeArmed: p.autoMergeRequest != null,

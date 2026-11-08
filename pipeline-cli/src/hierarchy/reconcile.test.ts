@@ -260,6 +260,10 @@ describe('action table (AC2)', () => {
         },
       ],
     }),
+    'stale-verdict-check': taskPr({
+      staleVerdictCheck: true,
+      checks: [{ name: 'ai-sdlc/pr-ready', conclusion: 'failure', summary: 'x' }],
+    }),
     'real-failure': taskPr({
       checks: [{ name: 'ai-sdlc/pr-ready', conclusion: 'failure', summary: 'x' }],
     }),
@@ -1459,5 +1463,109 @@ describe('failing check on a live claim (AISDLC-1202)', () => {
     expect(report.skippedFailures).toHaveLength(0);
     expect(execute).toHaveBeenCalledTimes(1);
     expect(readLanding(board, 10)?.history.filter((h) => h.action === 'reenter')).toHaveLength(1);
+  });
+});
+
+describe('stale verdict-check (AISDLC-1232)', () => {
+  const sha = 'abc123';
+  const checks = (completedAt: string) => [
+    { name: 'Review verdict (code PRs)', conclusion: 'failure', completedAt },
+    { name: 'ai-sdlc/pr-ready', conclusion: 'failure', summary: 'verdict missing' },
+  ];
+  const listOf = (extra: Record<string, unknown> = {}) =>
+    JSON.stringify([
+      {
+        number: 5,
+        title: 'fix (AISDLC-1)',
+        headRefName: 'ai-sdlc/aisdlc-1-x',
+        headRefOid: sha,
+        isCrossRepository: false,
+        author: { login: 'me' },
+        isDraft: false,
+        ...extra,
+      },
+    ]);
+  const gather = (withRef: boolean) => {
+    const run: CommandRunner = (_f, args) => {
+      const a = args.join(' ');
+      const ok = (stdout: string) => ({ status: 0, stdout, stderr: '' });
+      if (a === 'api user --jq .login') return ok('me\n');
+      if (a.startsWith('pr list')) return ok(listOf());
+      if (a.startsWith('pr view 5')) {
+        return ok(
+          JSON.stringify({
+            statusCheckRollup: [
+              {
+                name: 'Review verdict (code PRs)',
+                status: 'COMPLETED',
+                conclusion: 'FAILURE',
+                completedAt: '2026-10-14T00:00:00Z',
+              },
+              {
+                name: 'ai-sdlc/pr-ready',
+                status: 'COMPLETED',
+                conclusion: 'FAILURE',
+                description: 'verdict missing',
+              },
+            ],
+          }),
+        );
+      }
+      if (a.includes('/git/ref/'))
+        return withRef ? ok('refsha\n') : { status: 1, stdout: '', stderr: 'x' };
+      if (a.includes('/git/commits/')) return ok('2026-10-14T00:05:00Z\n');
+      return { status: 1, stdout: '', stderr: 'x' };
+    };
+    return gatherFacts(run, '/', board)!.find((f) => f.prNumber === 5)!;
+  };
+
+  it('classifies a red verdict-check older than the verdict ref and reruns once, recording rerun', () => {
+    const f = gather(true);
+    expect(f.staleVerdictCheck).toBe(true);
+    expect(f.staleRerunCount).toBe(0);
+    expect(decide(f).state).toBe('stale-verdict-check');
+    const calls: string[][] = [];
+    const runner = ((_f: string, args: string[]) => {
+      calls.push(args);
+      return { status: 0, stdout: args[1] === 'list' ? '777\n' : '', stderr: '' };
+    }) as unknown as Parameters<typeof commandExecutor>[0];
+    const exec = commandExecutor(runner, '/cwd', '/bin');
+    const ctx: ActionContext = {
+      pr: 5,
+      taskId: 'AISDLC-1',
+      kind: 'task',
+      action: decide(f).action,
+      state: 'stale-verdict-check',
+      headSha: sha,
+      boardDir: board,
+    };
+    expect(ctx.action).toBe('rerun-stale-verdict-check');
+    expect(exec(ctx)).toEqual({ ran: true });
+    expect(calls[1]).toEqual(['run', 'rerun', '777', '--failed']);
+    const guard = JSON.parse(
+      readFileSync(path.join(board, 'landing', '5', 'reentered.json'), 'utf-8'),
+    ) as { action: string; headSha: string }[];
+    expect(guard).toMatchObject([{ action: 'rerun', headSha: sha }]);
+    expect(gather(true).staleRerunCount).toBe(1);
+  });
+
+  it('keeps real-failure when the head has no verdict ref', () => {
+    const f = gather(false);
+    expect(f.staleVerdictCheck).toBeUndefined();
+    const d = decide(f);
+    expect(d.state).toBe('real-failure');
+    expect(d.action).toBe('reenter');
+  });
+
+  it('routes the second stale classification on a head to the planner', () => {
+    const d = decide(
+      taskPr({
+        staleVerdictCheck: true,
+        staleRerunCount: 1,
+        checks: checks('2026-10-14T00:00:00Z') as ReconcilePr['checks'],
+      }),
+    );
+    expect(d.action).toBe('route-to-planner');
+    expect(d.note).toBe('stale-verdict-check@2');
   });
 });
