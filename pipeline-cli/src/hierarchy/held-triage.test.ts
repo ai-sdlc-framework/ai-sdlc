@@ -89,13 +89,15 @@ describe('triageHeld', () => {
     expect(triageHeld(board, root, now, notify)).toEqual([]);
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify.mock.calls[0]![0]).toContain('operator-gated');
-    const rec = JSON.parse(readFileSync(path.join(board, 'held', 'AISDLC-506.json'), 'utf-8'));
+    const rec = JSON.parse(
+      readFileSync(path.join(board, 'held', 'AISDLC-506--AISDLC-496.json'), 'utf-8'),
+    );
     expect(rec).toMatchObject({
       class: 'operator-gated',
       dependency: 'AISDLC-496',
       notified: true,
     });
-    expect(existsSync(path.join(board, 'held', 'AISDLC-7.json'))).toBe(false);
+    expect(existsSync(path.join(board, 'held', 'AISDLC-7--AISDLC-8.json'))).toBe(false);
   });
 
   it('announces again when the class changes, and retries after a failed send', () => {
@@ -109,8 +111,27 @@ describe('triageHeld', () => {
     task('AISDLC-496', 'dispatchable: false');
     expect(triageHeld(board, root, now, ok)).toEqual(['AISDLC-506']);
     expect(ok).toHaveBeenCalledTimes(2);
-    writeFileSync(path.join(board, 'held', 'AISDLC-506.json'), 'not json');
+    writeFileSync(path.join(board, 'held', 'AISDLC-506--AISDLC-496.json'), 'not json');
     expect(triageHeld(board, root, now, ok)).toEqual(['AISDLC-506']);
+  });
+});
+
+describe('triageHeld with two held dependencies', () => {
+  it('records and announces each dependency once', () => {
+    task('AISDLC-496', 'dispatchable: false');
+    queue('AISDLC-10', ['AISDLC-496', 'AISDLC-404']);
+    const notify = vi.fn();
+    triageHeld(board, root, now, notify);
+    triageHeld(board, root, now, notify);
+    expect(notify).toHaveBeenCalledTimes(2);
+    const a = JSON.parse(
+      readFileSync(path.join(board, 'held', 'AISDLC-10--AISDLC-496.json'), 'utf-8'),
+    );
+    const b = JSON.parse(
+      readFileSync(path.join(board, 'held', 'AISDLC-10--AISDLC-404.json'), 'utf-8'),
+    );
+    expect(a.class).toBe('operator-gated');
+    expect(b.class).toBe('absent');
   });
 });
 

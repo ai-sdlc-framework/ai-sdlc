@@ -1,7 +1,7 @@
 /**
  * Held-task triage (AISDLC-1244). A queued task held on a dependency that no executor will ever claim
  * (`dispatchable: false`, or not on the board) used to sit held indefinitely. The tick classifies each
- * hold; a non-`waiting` class is recorded once in `held/<id>.json` and typed once into the planner session.
+ * hold; a non-`waiting` class is recorded once in `held/<id>--<dependency>.json` and typed once into the planner session.
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -93,7 +93,7 @@ export function listHeld(boardDir: string, repoDir: string): HeldRow[] {
   return rows;
 }
 
-/** A held record, `held/<id>.json`. */
+/** A held record, `held/<id>--<dependency>.json`. */
 export interface HeldRecord {
   schemaVersion: 'v1';
   taskId: string;
@@ -120,7 +120,7 @@ export function triageHeld(
   const announced: string[] = [];
   for (const row of listHeld(boardDir, repoDir)) {
     if (row.class === 'waiting') continue;
-    const file = path.join(dir, `${row.taskId}.json`);
+    const file = path.join(dir, `${row.taskId}--${row.dependency}.json`);
     const prior = readIfExists(file);
     if (prior !== undefined) {
       try {
