@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1223
 title: 'Reconcile RFC status with lifecycle: retroactive Implemented batch with an open-question gate (AISDLC-856 part b)'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-07'
 labels:
