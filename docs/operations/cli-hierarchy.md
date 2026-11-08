@@ -1189,7 +1189,7 @@ cli-hierarchy tick [--worker <dispatch-name>] [--report-every-ms <n>] [--settle-
 
 Dispatch-session command, guarded like `clear`. Effects: moves manifests into `queue/`,
 requeues failed tasks within the retry limit, clears executors whose tasks reached a
-verdict, flips CodeQL-clean drafts ready when `mark-ready-after-codeql` is granted, and
+verdict, flips CodeQL-clean drafts ready when `mark-ready-after-codeql` is granted (only if the head has a `refs/ai-sdlc/verdicts/<sha>` ref on origin, AISDLC-1237), and
 lands eligible own-author PRs when `land-eligible-prs` is granted.
 The JSON also carries the caller's `identity` (`name`, `planner`), the `handoff` file text,
 `selfClear` (whether `TMUX_PANE` is set) and `nextWakeSec`/`wakeReason`: 30 when a brief or

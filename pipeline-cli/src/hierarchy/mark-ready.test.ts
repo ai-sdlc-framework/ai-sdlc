@@ -16,11 +16,23 @@ import type { CommandRunner } from './types.js';
 const BODY = 'Draft until CodeQL is clean.';
 
 /** A fake `gh`: `list` is the draft list, `views` maps a PR number to its detail. */
-function fakeGh(list: unknown[], views: Record<number, unknown>) {
+function fakeGh(list: unknown[], views: Record<number, unknown>, noRef: string[] = []) {
   const calls: string[][] = [];
+  const withOid = list.map((p) => {
+    const pr = p as { number: number };
+    return { headRefOid: `sha${pr.number}`, ...pr };
+  });
   const run: CommandRunner = (_file, args) => {
     calls.push([...args]);
-    if (args[1] === 'list') return { status: 0, stdout: JSON.stringify(list), stderr: '' };
+    if (args[0] === 'ls-remote') {
+      const sha = String(args[2]).split('/').pop() ?? '';
+      return {
+        status: 0,
+        stdout: noRef.includes(sha) ? '' : `${sha}\t${args[2]}\n`,
+        stderr: '',
+      };
+    }
+    if (args[1] === 'list') return { status: 0, stdout: JSON.stringify(withOid), stderr: '' };
     if (args[1] === 'view') {
       const v = views[Number(args[2])];
       return v === undefined
@@ -51,6 +63,32 @@ describe('analyzeState', () => {
 });
 
 describe('markReadyAfterCodeql', () => {
+  it('skips a draft with no verdict ref for its head, and flips it once the ref exists', () => {
+    const prs = [{ number: 21, body: BODY, headRefName: 'ai-sdlc/t', mergeStateStatus: 'CLEAN' }];
+    const views = { 21: { statusCheckRollup: [analyze('SUCCESS')], comments: [] } };
+    const without = fakeGh(prs, views, ['sha21']);
+    const r1 = markReadyAfterCodeql(without.run, '/repo');
+    expect(r1.readied).toEqual([]);
+    expect(r1.skipped).toEqual([{ pr: 21, reason: 'no verdict ref for head' }]);
+    expect(without.calls.some((c) => c[1] === 'ready')).toBe(false);
+    const withRef = fakeGh(prs, views);
+    expect(markReadyAfterCodeql(withRef.run, '/repo').readied).toEqual([21]);
+  });
+
+  it('skips a draft with no head sha', () => {
+    const run: CommandRunner = (_f, args) =>
+      args[1] === 'list'
+        ? {
+            status: 0,
+            stdout: JSON.stringify([{ number: 22, headRefName: 'ai-sdlc/t' }]),
+            stderr: '',
+          }
+        : { status: 0, stdout: '', stderr: '' };
+    expect(markReadyAfterCodeql(run, '/repo').skipped).toEqual([
+      { pr: 22, reason: 'no verdict ref for head' },
+    ]);
+  });
+
   it('flips a draft whose Analyze jobs all passed, and nothing else', () => {
     const gh = fakeGh(
       [
