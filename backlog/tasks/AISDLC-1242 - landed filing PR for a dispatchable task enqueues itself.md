@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1242
 title: 'A landed filing PR for a dispatchable task with a brief enqueues the task on the next tick and tells the planner, instead of waiting for a planner wake'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-08'
 labels:
