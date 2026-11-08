@@ -10,7 +10,14 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const seed = join(repo, 'scripts/demo/seed-demo-repo.sh');
 const reset = join(repo, 'scripts/demo/reset-demo-repo.sh');
 const doc = readFileSync(join(repo, 'docs/demo/walkthrough.md'), 'utf8');
-const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8' }).trim();
+const identity = {
+  ...process.env,
+  GIT_AUTHOR_NAME: 'Test',
+  GIT_AUTHOR_EMAIL: 'test@example.invalid',
+  GIT_COMMITTER_NAME: 'Test',
+  GIT_COMMITTER_EMAIL: 'test@example.invalid',
+};
+const git = (cwd, ...a) => execFileSync('git', a, { cwd, encoding: 'utf8', env: identity }).trim();
 const tmp = () => join(mkdtempSync(join(tmpdir(), 'demo-')), 'repo');
 
 test('seed is idempotent', () => {
