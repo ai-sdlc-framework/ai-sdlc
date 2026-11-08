@@ -20,7 +20,7 @@ import {
   routingArtifactsDir,
   routingRecordable,
 } from '../routing/artifacts-dir.js';
-import { taskClassOf } from '../routing/task-class.js';
+import { taskClassFromBaseRef } from '../routing/task-class.js';
 import type { DeveloperPromptResult, TaskSpec } from '../types.js';
 
 export interface BuildDeveloperPromptOptions {
@@ -128,7 +128,7 @@ export async function buildDeveloperPrompt(
   // and cannot change the prompt or the model returned here.
   const routed = resolveModel({
     role: 'developer',
-    taskClass: taskClassOf(opts.task.rawBody),
+    taskClass: taskClassFromBaseRef(opts.task),
     taskId: opts.taskId,
     sourceKind: opts.sourceKind,
     iteration,

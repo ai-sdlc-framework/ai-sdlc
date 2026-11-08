@@ -25,7 +25,7 @@ import {
 import { defaultArtifactsDir, resolveProjectRoot } from '../routing/artifacts-dir.js';
 import { resolveReviewerHarnessSetting } from '../routing/role-model.js';
 import { resolveModel } from '../routing/resolve-model.js';
-import { taskClassOf } from '../routing/task-class.js';
+import { taskClassFromBaseRef } from '../routing/task-class.js';
 import {
   buildReviewPrompts,
   type BuildReviewPromptsOptions,
@@ -419,7 +419,7 @@ export async function prepareReview(
   }
   const nonceMarker = markerRun.stdout.trim();
 
-  const taskClass = taskClassOf(state.task.rawBody);
+  const taskClass = taskClassFromBaseRef(state.task);
   const spawnedFor = (ps: typeof prompts): SpawnedReviewer[] => {
     const out: SpawnedReviewer[] = [];
     for (const p of ps) {

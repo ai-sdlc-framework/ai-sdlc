@@ -25,7 +25,7 @@
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { resolveModel } from '../routing/resolve-model.js';
-import { taskClassOf } from '../routing/task-class.js';
+import { taskClassFromBaseRef } from '../routing/task-class.js';
 import type { ReviewerVerdict } from '../types.js';
 import { writeRunFile } from './init.js';
 import { resolveAgentIdFromMarkers, type ReviewerReport } from './review-finalize.js';
@@ -117,7 +117,7 @@ function modelFor(
 ): { model?: string; leafModel: string } {
   const routed = resolveModel({
     role,
-    taskClass: taskClassOf(state.task.rawBody),
+    taskClass: taskClassFromBaseRef(state.task),
     taskId: state.taskId,
     sourceKind: 'backlog',
     iteration: round,
