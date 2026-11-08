@@ -2,7 +2,7 @@
 id: AISDLC-630.3
 title: >-
   RFC-0049 follow-up (security): redact colon, header and flag secret forms, APIKEY names, raw URL password characters and multi-token values
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-01'
 labels:
