@@ -1,7 +1,7 @@
 ---
 id: AISDLC-521
 title: 'feat(sandbox): RFC-0043 strict AQ2 — run Stage-3 reviewers INSIDE the sandbox via proxy-only egress (enables agentic reviewers)'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-06-05'
 labels:
