@@ -59,6 +59,8 @@ export interface CiNoteInput {
   failingLine?: string;
   /** ISO time of the previous automatic round; only a ruling comment newer than it counts. */
   since?: string;
+  /** Lower-case logins whose comments may carry a ruling; absent or empty means rulings are ignored. */
+  trustedLogins?: ReadonlySet<string>;
 }
 
 const RULING_FIRST_LINE_RE = /^(Planner ruling\b|PLANNER REPAIR ORDER\b)/;
@@ -66,6 +68,7 @@ const RULING_FIRST_LINE_RE = /^(Planner ruling\b|PLANNER REPAIR ORDER\b)/;
 interface PrComment {
   body?: string;
   createdAt?: string;
+  author?: { login?: string };
 }
 
 /**
@@ -77,7 +80,9 @@ export function findPlannerRuling(
   cwd: string,
   pr: number,
   since?: string,
+  trustedLogins?: ReadonlySet<string>,
 ): string | undefined {
+  if (!trustedLogins || trustedLogins.size === 0) return undefined;
   try {
     const r = run('gh', ['pr', 'view', String(pr), '--json', 'comments'], { cwd });
     if (r.status !== 0) return undefined;
@@ -85,6 +90,7 @@ export function findPlannerRuling(
     const sinceMs = since ? Date.parse(since) : Number.NaN;
     const hits = comments
       .filter((c) => {
+        if (!trustedLogins.has((c.author?.login ?? '').toLowerCase())) return false;
         const first = (c.body ?? '').trim().split('\n')[0] ?? '';
         if (!RULING_FIRST_LINE_RE.test(first)) return false;
         if (Number.isNaN(sinceMs)) return true;
@@ -111,7 +117,7 @@ export function buildCiRoundNote(run: CommandRunner, cwd: string, input: CiNoteI
     if (l.status === 0 && l.stdout.trim() !== '') log = tailLog(l.stdout);
   }
   const stepName = steps.length > 0 ? steps.join('; ') : (input.failingLine ?? 'unknown step');
-  const ruling = findPlannerRuling(run, cwd, input.pr, input.since);
+  const ruling = findPlannerRuling(run, cwd, input.pr, input.since, input.trustedLogins);
   if (ruling) {
     const lead = `${ruling.slice(0, MAX_NOTE_CHARS - 400)}\nFailed step: ${stepName} (PR #${input.pr}, head ${headSha}).`;
     const room = MAX_NOTE_CHARS - lead.length - 12;

@@ -308,6 +308,8 @@ function choreOnlySinceOf(
   );
   if (r.status !== 0) return undefined;
   const files = r.stdout.split('\n').filter((l) => l.trim() !== '');
+  // The compare API truncates at 300 files; a list that long is treated as a content change.
+  if (files.length === 0 || files.length >= 300) return undefined;
   return files.every((x) => CHORE_PATH_RE.test(x)) ? last.headSha : undefined;
 }
 
@@ -561,8 +563,10 @@ export function commandExecutor(run: CommandRunner, cwd: string, cliBin: string)
       ctx.headSha
     ) {
       try {
+        const trusted = allowedAuthors(run, cwd);
         const note = buildCiRoundNote(run, cwd, {
           pr: ctx.pr,
+          ...(trusted === undefined ? {} : { trustedLogins: trusted }),
           headSha: ctx.headSha,
           ...(ctx.failingLine === undefined ? {} : { failingLine: ctx.failingLine }),
           ...(ctx.lastRoundAt === undefined ? {} : { since: ctx.lastRoundAt }),
