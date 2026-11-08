@@ -1,0 +1,259 @@
+{
+  "judgmentId": "dor.stage-b",
+  "version": 1,
+  "riskClass": "tighten",
+  "provider": "jev",
+  "model": "jev-1.13.0",
+  "date": "2026-11-08",
+  "corpus": "dor-stage-b.jsonl",
+  "thresholds": {
+    "pass": 0.7
+  },
+  "n": 78,
+  "counts": {
+    "act": 0,
+    "escalate": 0,
+    "abstain": 78
+  },
+  "shares": {
+    "act": 0,
+    "escalate": 0,
+    "abstain": 1
+  },
+  "actAgreeing": 0,
+  "actBandPrecision": null,
+  "confusion": {
+    "rows": {
+      "abstain": {
+        "{\"4\":\"pass\",\"6\":\"pass\"}": 1,
+        "{\"1\":\"pass\",\"3\":\"pass\",\"4\":\"pass\",\"5\":\"pass\",\"6\":\"pass\",\"7\":\"pass\"}": 40,
+        "{\"1\":\"pass\",\"4\":\"pass\",\"5\":\"pass\",\"6\":\"pass\",\"7\":\"pass\"}": 11,
+        "{\"3\":\"pass\",\"4\":\"pass\",\"6\":\"pass\",\"7\":\"pass\"}": 4,
+        "{\"3\":\"pass\",\"4\":\"pass\",\"5\":\"pass\",\"6\":\"pass\",\"7\":\"pass\"}": 1,
+        "{\"4\":\"pass\",\"5\":\"pass\",\"6\":\"pass\",\"7\":\"pass\"}": 1,
+        "{\"1\":\"pass\",\"3\":\"pass\",\"4\":\"fail\",\"5\":\"pass\",\"6\":\"pass\",\"7\":\"pass\"}": 4,
+        "{\"1\":\"pass\",\"4\":\"fail\",\"5\":\"pass\",\"6\":\"pass\",\"7\":\"pass\"}": 1,
+        "{\"1\":\"pass\",\"3\":\"pass\",\"4\":\"pass\",\"6\":\"pass\",\"7\":\"pass\"}": 5,
+        "{\"1\":\"pass\",\"3\":\"pass\",\"4\":\"pass\",\"5\":\"pass\",\"6\":\"fail\",\"7\":\"pass\"}": 4,
+        "{\"1\":\"pass\",\"4\":\"pass\",\"5\":\"pass\",\"6\":\"fail\",\"7\":\"pass\"}": 1,
+        "{\"1\":\"pass\",\"3\":\"pass\",\"4\":\"pass\",\"5\":\"pass\",\"6\":\"pass\"}": 4,
+        "{\"1\":\"pass\",\"4\":\"pass\",\"5\":\"pass\",\"6\":\"pass\"}": 1
+      }
+    }
+  },
+  "latencyMs": {
+    "p50": 67,
+    "p95": 162
+  },
+  "calls": 78,
+  "cacheHits": 0,
+  "totalInputTokens": 68422,
+  "totalCostUsd": 0.002873723999999999,
+  "abstainReasons": {},
+  "sweep": {
+    "spec": {
+      "name": "fail",
+      "from": 0.02,
+      "to": 0.2,
+      "step": 0.02
+    },
+    "rows": [
+      {
+        "value": 0.02,
+        "thresholds": {
+          "pass": 0.7,
+          "fail": 0.02
+        },
+        "n": 78,
+        "counts": {
+          "act": 2,
+          "escalate": 76,
+          "abstain": 0
+        },
+        "shares": {
+          "act": 0.0256,
+          "escalate": 0.9744,
+          "abstain": 0
+        },
+        "actBandPrecision": 0
+      },
+      {
+        "value": 0.04,
+        "thresholds": {
+          "pass": 0.7,
+          "fail": 0.04
+        },
+        "n": 78,
+        "counts": {
+          "act": 7,
+          "escalate": 71,
+          "abstain": 0
+        },
+        "shares": {
+          "act": 0.0897,
+          "escalate": 0.9103,
+          "abstain": 0
+        },
+        "actBandPrecision": 0.1429
+      },
+      {
+        "value": 0.06,
+        "thresholds": {
+          "pass": 0.7,
+          "fail": 0.06
+        },
+        "n": 78,
+        "counts": {
+          "act": 12,
+          "escalate": 66,
+          "abstain": 0
+        },
+        "shares": {
+          "act": 0.1538,
+          "escalate": 0.8462,
+          "abstain": 0
+        },
+        "actBandPrecision": 0.1667
+      },
+      {
+        "value": 0.08,
+        "thresholds": {
+          "pass": 0.7,
+          "fail": 0.08
+        },
+        "n": 78,
+        "counts": {
+          "act": 16,
+          "escalate": 62,
+          "abstain": 0
+        },
+        "shares": {
+          "act": 0.2051,
+          "escalate": 0.7949,
+          "abstain": 0
+        },
+        "actBandPrecision": 0.125
+      },
+      {
+        "value": 0.1,
+        "thresholds": {
+          "pass": 0.7,
+          "fail": 0.1
+        },
+        "n": 78,
+        "counts": {
+          "act": 16,
+          "escalate": 62,
+          "abstain": 0
+        },
+        "shares": {
+          "act": 0.2051,
+          "escalate": 0.7949,
+          "abstain": 0
+        },
+        "actBandPrecision": 0.125
+      },
+      {
+        "value": 0.12,
+        "thresholds": {
+          "pass": 0.7,
+          "fail": 0.12
+        },
+        "n": 78,
+        "counts": {
+          "act": 18,
+          "escalate": 60,
+          "abstain": 0
+        },
+        "shares": {
+          "act": 0.2308,
+          "escalate": 0.7692,
+          "abstain": 0
+        },
+        "actBandPrecision": 0.1111
+      },
+      {
+        "value": 0.14,
+        "thresholds": {
+          "pass": 0.7,
+          "fail": 0.14
+        },
+        "n": 78,
+        "counts": {
+          "act": 20,
+          "escalate": 58,
+          "abstain": 0
+        },
+        "shares": {
+          "act": 0.2564,
+          "escalate": 0.7436,
+          "abstain": 0
+        },
+        "actBandPrecision": 0.1
+      },
+      {
+        "value": 0.16,
+        "thresholds": {
+          "pass": 0.7,
+          "fail": 0.16
+        },
+        "n": 78,
+        "counts": {
+          "act": 21,
+          "escalate": 57,
+          "abstain": 0
+        },
+        "shares": {
+          "act": 0.2692,
+          "escalate": 0.7308,
+          "abstain": 0
+        },
+        "actBandPrecision": 0.0952
+      },
+      {
+        "value": 0.18,
+        "thresholds": {
+          "pass": 0.7,
+          "fail": 0.18
+        },
+        "n": 78,
+        "counts": {
+          "act": 22,
+          "escalate": 56,
+          "abstain": 0
+        },
+        "shares": {
+          "act": 0.2821,
+          "escalate": 0.7179,
+          "abstain": 0
+        },
+        "actBandPrecision": 0.0909
+      },
+      {
+        "value": 0.2,
+        "thresholds": {
+          "pass": 0.7,
+          "fail": 0.2
+        },
+        "n": 78,
+        "counts": {
+          "act": 25,
+          "escalate": 53,
+          "abstain": 0
+        },
+        "shares": {
+          "act": 0.3205,
+          "escalate": 0.6795,
+          "abstain": 0
+        },
+        "actBandPrecision": 0.08
+      }
+    ]
+  },
+  "promotion": {
+    "key": "jev@jev-1.13.0",
+    "met": false,
+    "statement": "NOT MET: tighten bar for dor.stage-b: n=78 (needs >= 50); no items in the act band (needs act-band precision >= 90%). The operator-override path is also allowed, with the evidence recorded in the pull request."
+  },
+  "notes": []
+}
