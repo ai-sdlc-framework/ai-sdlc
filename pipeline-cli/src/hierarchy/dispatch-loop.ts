@@ -97,6 +97,7 @@ import {
 } from '../kpi/closed-unmerged.js';
 import { withReconcileLock } from './open-pr-limit.js';
 import { summariseLanding, takeSuppressedNote } from './reconcile.js';
+import { triageHeld } from './held-triage.js';
 import { takeRestartRequests } from './restart-lock.js';
 import { clearRotateRequest } from './rotate-request.js';
 import { readRosterChecked } from './roster.js';
@@ -334,6 +335,8 @@ export interface TickResult {
   promotions?: PromotedDecision[];
   /** Present while the board is held (AISDLC-899): claims and relaunches are skipped, reporting is not. */
   held?: Hold;
+  /** Held tasks announced to the planner this tick (AISDLC-1244). */
+  heldAnnounced?: string[];
   /** Present when the tick skipped its GitHub reads for low quota (AISDLC-963). */
   quotaSkip?: { remaining: number; floor: number };
   /** Present when the parent upkeep ran this tick (AISDLC-981). */
@@ -526,6 +529,8 @@ export interface LoopDeps {
   recordTick?: (marker: DispatchTickMarker) => void;
   /** Checks the turns-per-tick budget and files a Decision on an overrun; its failure never fails the tick. */
   reviewTurnBudget?: () => TurnBudgetReview | Promise<TurnBudgetReview>;
+  /** Classifies held tasks and tells the planner once about a hold that cannot clear (AISDLC-1244). */
+  heldTriage?: { repoDir: string; notify: (text: string) => void };
 }
 
 function ingestBriefs(
@@ -1328,6 +1333,19 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   } catch {
     /* a marker is observability; losing one must not stop the loop */
   }
+  let heldAnnounced: string[] = [];
+  try {
+    if (deps.heldTriage) {
+      heldAnnounced = triageHeld(
+        deps.boardDir,
+        deps.heldTriage.repoDir,
+        deps.now(),
+        deps.heldTriage.notify,
+      );
+    }
+  } catch {
+    /* triage is advisory; it must not stop the dispatch loop */
+  }
   let turnBudget: TurnBudgetReview | undefined;
   try {
     turnBudget = await deps.reviewTurnBudget?.();
@@ -1338,6 +1356,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     blockers,
     ...(closedUnmerged ? { closedUnmerged: closedUnmerged.total } : {}),
     ...(held ? { held } : {}),
+    ...(heldAnnounced.length > 0 ? { heldAnnounced } : {}),
     ...(holdLifted ? { holdLifted } : {}),
     ...ingest,
     ...watch,

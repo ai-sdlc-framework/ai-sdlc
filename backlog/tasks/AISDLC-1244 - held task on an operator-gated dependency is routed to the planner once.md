@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1244
 title: 'A queued task held on a dependency that is dispatchable: false is routed to the planner once with the reason, instead of sitting held indefinitely'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-08'
 labels:

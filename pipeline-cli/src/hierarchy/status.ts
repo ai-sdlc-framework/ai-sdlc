@@ -4,6 +4,7 @@
  */
 
 import { listBoard, peekQueue } from '../dispatch/board.js';
+import { listHeld } from './held-triage.js';
 import { listUnbriefed } from './auto-brief.js';
 import type { QueueCounts } from '../dispatch/types.js';
 import { listInflight } from './inflight.js';
@@ -128,6 +129,8 @@ export interface StatusResult {
   unbriefed?: string[];
   /** Tasks parked in `blocked/` with the reason (AISDLC-1043); absent when none. */
   blocked?: { taskId: string; reason: string }[];
+  /** Queued tasks held on a dependency, with the hold class (AISDLC-1244); absent when none. */
+  held?: { taskId: string; dependency: string; class: string }[];
   /** Open PRs no lane owns (AISDLC-1091); `unowned PRs: N` in the text view. */
   unowned?: number;
   /** AISDLC-1092: open PRs with no state change for the aging window, oldest first. */
@@ -335,6 +338,16 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* an unreadable board must not break status */
   }
+  let held: { taskId: string; dependency: string; class: string }[] = [];
+  try {
+    held = listHeld(deps.boardDir, deps.cwd).map((r) => ({
+      taskId: r.taskId,
+      dependency: r.dependency,
+      class: r.class,
+    }));
+  } catch {
+    /* an unreadable board must not break status */
+  }
   let ghCallsPerHour: Record<string, number> = {};
   try {
     const log = ghCallsPath(deps.boardDir);
@@ -414,6 +427,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     openPrs: openPrState(deps.boardDir, deps.env),
     ...(unbriefed.length > 0 ? { unbriefed } : {}),
     ...(blocked.length > 0 ? { blocked } : {}),
+    ...(held.length > 0 ? { held } : {}),
   };
 }
 
@@ -477,6 +491,9 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     (r) =>
       `held for planner: PR #${r.pr} waiting ${formatAge(new Date(0).toISOString(), r.waitMs)} (${r.reason})`,
   );
+  const heldLines = (result.held ?? []).map(
+    (h) => `held: ${h.taskId} (waits on ${h.dependency}) [${h.class}]`,
+  );
   const blockedLines = (result.blocked ?? []).map((b) => `blocked: ${b.taskId}: ${b.reason}`);
   if (result.rows.length === 0)
     return [
@@ -490,6 +507,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ...budgetLine,
       ...unbriefed,
       ...blockedLines,
+      ...heldLines,
       ...stallLines,
       ...stuckLines,
       unownedLine,
@@ -576,6 +594,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     ...budgetLine,
     ...unbriefed,
     ...blockedLines,
+    ...heldLines,
     ...stallLines,
     unownedLine,
     ...agedLines,
