@@ -28,6 +28,18 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_BRIEF = resolve(HERE, '..', 'docs/getting-started/install-agent-brief.md');
 export const DEFAULT_PERMISSION_MODE = 'bypassPermissions';
 
+/** Top-level keys of the trusted-reviewers schema (AISDLC-1239). */
+export const TRUSTED_REVIEWERS_KEYS = ['reviewers'];
+
+/** Return keys a brief names "under `key:`" that are not in the schema. */
+export function findUnknownKeyringKeys(text) {
+  const bad = [];
+  for (const m of text.matchAll(/under `([A-Za-z]+):`/g)) {
+    if (!TRUSTED_REVIEWERS_KEYS.includes(m[1])) bad.push(m[1]);
+  }
+  return bad;
+}
+
 export function parseArgs(argv) {
   const opts = {
     brief: DEFAULT_BRIEF,

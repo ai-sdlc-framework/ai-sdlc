@@ -5,7 +5,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -14,6 +14,7 @@ import {
   mapExitCode,
   childEnv,
   main,
+  findUnknownKeyringKeys,
   DEFAULT_BRIEF,
   DEFAULT_PERMISSION_MODE,
 } from './smoke-install-brief.mjs';
@@ -112,5 +113,26 @@ describe('main (no claude invoked)', () => {
     assert.equal(main(['--brief', brief], env), 0);
     stub('ai-sdlc', 3);
     assert.equal(main(['--brief', brief], env), 1);
+  });
+});
+
+describe('keyring block key names (AISDLC-1239)', () => {
+  it('flags a key outside the trusted-reviewers schema', () => {
+    assert.deepEqual(findUnknownKeyringKeys('paste it under `signingKeys:`'), ['signingKeys']);
+    assert.deepEqual(findUnknownKeyringKeys('paste it under `reviewers:`'), []);
+  });
+  it('the shipped docs use only schema keys and no stale signingKeys', () => {
+    for (const f of [
+      'docs/getting-started/install-agent-brief.md',
+      'docs/getting-started/onboarding.md',
+      'docs/ucvg-test-repo-setup/signing-key-setup.md',
+    ]) {
+      const text = readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+      assert.deepEqual(findUnknownKeyringKeys(text), [], f);
+      assert.ok(!text.includes('signingKeys'), f);
+    }
+  });
+  it('the brief commit step lists .gitignore', () => {
+    assert.match(readFileSync(DEFAULT_BRIEF, 'utf8'), /git add [^`]*\.gitignore/);
   });
 });

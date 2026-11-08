@@ -65,9 +65,12 @@ The public key is needed by the verifier (`verify-attestation.yml`). Add it to y
 repository's `.ai-sdlc/trusted-reviewers.yaml`:
 
 ```yaml
-signingKeys:
-  - name: 'primary-signing-key'
-    publicKeyPem: |
+reviewers:
+  - identity: 'you@example.com'
+    machine: 'your-machine'
+    addedAt: '2026-01-01'
+    addedBy: 'you'
+    pubkey: |
       -----BEGIN PUBLIC KEY-----
       <paste the content of aisdlc-signing-key.pub.pem here>
       -----END PUBLIC KEY-----

@@ -28,7 +28,7 @@ Prerequisites to check first: `node --version` (20 or newer), `pnpm --version` (
 2. Install the SDK in this repository. Run `pnpm add @ai-sdlc/reference`. Verify with `pnpm ls @ai-sdlc/reference`, which must list the package.
 3. Install the Claude Code plugin. Run `/plugin marketplace add ai-sdlc-framework/ai-sdlc` then `/plugin install ai-sdlc@ai-sdlc`. Verify that `/plugin` lists `ai-sdlc` as enabled and that `/ai-sdlc` commands are available (restart the session if they are not).
 4. Scaffold the repository. Run `ai-sdlc init --yes`. Verify with `ai-sdlc health`, which must report all checks passing, and confirm `.ai-sdlc/pipeline.yaml` exists.
-5. Initialise the signing key. Run `/ai-sdlc init-signing-key`, paste the printed public key block into `.ai-sdlc/trusted-reviewers.yaml` under `signingKeys:`. Verify that `~/.ai-sdlc/signing-key.pem` exists and the public key is in `trusted-reviewers.yaml`. Never commit the private key.
+5. Initialise the signing key. Run `/ai-sdlc init-signing-key`, paste the printed public key block into `.ai-sdlc/trusted-reviewers.yaml` under `reviewers:` (fields `identity`, `machine`, `addedAt`, `addedBy`, `pubkey`). Verify that `~/.ai-sdlc/signing-key.pem` exists and the public key is in `trusted-reviewers.yaml`. Never commit the private key.
 6. Run the doctor. Run `/ai-sdlc doctor`. It must finish with no errors and no unresolved warnings.
 
 Recovery for known failures:
@@ -246,10 +246,13 @@ Expected output:
 ```
 [ai-sdlc:init-signing-key] Generated key pair at ~/.ai-sdlc/signing-key.pem
 
-Add this block to .ai-sdlc/trusted-reviewers.yaml under `signingKeys:`:
+Add this block to .ai-sdlc/trusted-reviewers.yaml under `reviewers:` (fields `identity`, `machine`, `addedAt`, `addedBy`, `pubkey`):
 
-  - name: 'primary-signing-key'
-    publicKeyPem: |
+  - identity: 'you@example.com'
+    machine: 'your-machine'
+    addedAt: '2026-01-01'
+    addedBy: 'you'
+    pubkey: |
       -----BEGIN PUBLIC KEY-----
       MCowBQYDK2VwAyEA...
       -----END PUBLIC KEY-----
