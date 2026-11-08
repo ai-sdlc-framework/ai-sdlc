@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-11-08T17:53:38.577Z","decisionId":"DEC-0401","chosenOptionId":"keep-and-automate","rationale":"Operator ruling 2026-11-08 via decision rubric: keep-and-automate. The wake stays; every gap it catches by hand is filed as an automation task; the job is deleted only once consecutive wakes find nothing to do.","by":"operator"}
