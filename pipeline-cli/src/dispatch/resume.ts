@@ -253,8 +253,16 @@ export function resumeDone(
   // takes that manifest over, so it is the one inflight entry that is allowed.
   const inflightManifest = path.join(boardDir, 'inflight', `${taskId}.dispatch.json`);
   const holdsIterateClaim = doneVerdict?.outcome === 'iterate-needed';
+  const queueManifest = path.join(boardDir, 'queue', `${taskId}.dispatch.json`);
+  // AISDLC-1228: a plain (resume-less) queue copy beside an iterate-needed verdict is a stale
+  // duplicate of the claim; resuming replaces it. One that carries a resume block is a live round.
+  const plainQueueCopy =
+    holdsIterateClaim &&
+    existsSync(queueManifest) &&
+    readJson<DispatchManifest>(queueManifest)?.resume === undefined;
   for (const sub of ['queue', 'inflight', 'blocked'] as const) {
     if (sub === 'inflight' && holdsIterateClaim) continue;
+    if (sub === 'queue' && plainQueueCopy) continue;
     if (existsSync(path.join(boardDir, sub, `${taskId}.dispatch.json`))) {
       throw new Error(`${taskId} is already in ${sub}/`);
     }
@@ -347,14 +355,26 @@ export function resumeDone(
   const parked =
     holdsIterateClaim && existsSync(inflightManifest) ? `${inflightManifest}.resuming` : '';
   if (parked) renameSync(inflightManifest, parked);
+  const parkedQueue = plainQueueCopy ? `${queueManifest}.resuming` : '';
+  if (parkedQueue) renameSync(queueManifest, parkedQueue);
   let queuePath: string;
   try {
     queuePath = writeManifest(boardDir, next);
   } catch (err) {
     if (parked) renameSync(parked, inflightManifest);
+    if (parkedQueue) renameSync(parkedQueue, queueManifest);
     throw err;
   }
   if (parked) rmSync(parked, { force: true });
+  if (parkedQueue) {
+    if (opts.archiveDir) {
+      mkdirSync(opts.archiveDir, { recursive: true });
+      const stamp = (opts.now ?? now)().toISOString().replace(/[:.]/g, '-');
+      renameSync(parkedQueue, path.join(opts.archiveDir, `${taskId}.dispatch.json.queue.${stamp}`));
+    } else {
+      rmSync(parkedQueue, { force: true });
+    }
+  }
   // The task is no longer finished: dependents wait for the next success.
   for (const f of [
     verdictFile,

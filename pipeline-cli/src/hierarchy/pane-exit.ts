@@ -9,7 +9,7 @@
  * as an exit. A second call for the same session finds nothing inflight and does nothing.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import {
@@ -62,6 +62,17 @@ function hasVerdict(boardDir: string, taskId: string): boolean {
   );
 }
 
+function iterateNeeded(boardDir: string, taskId: string): boolean {
+  try {
+    const v = JSON.parse(
+      readFileSync(path.join(boardDir, 'done', `${taskId}.verdict.json`), 'utf-8'),
+    ) as DispatchVerdict;
+    return v.outcome === 'iterate-needed';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Record the exit of a spawned executor's pane.
  * @throws when `session` is not a spawned executor name.
@@ -89,6 +100,12 @@ export function hierarchyPaneExited(session: string, deps: HierarchyDeps): PaneE
   }
   const { taskId } = held;
   const manifest = readInflightManifest(deps.boardDir, taskId);
+  if (manifest && iterateNeeded(deps.boardDir, taskId)) {
+    const reason =
+      'the claim stays: done/ holds an iterate-needed verdict, so the task goes back through `cli-dispatch reenter`, not the queue';
+    deps.log(`executor '${session}' exited; ${taskId}: ${reason}`);
+    return { status: 'noop', taskId, reason };
+  }
   if (!manifest || hasVerdict(deps.boardDir, taskId)) {
     return { status: 'noop', taskId, reason: 'the claim already has a verdict' };
   }

@@ -126,6 +126,23 @@ describe('hierarchyPaneExited', () => {
   });
 });
 
+describe('iterate-needed verdict (AISDLC-1228)', () => {
+  it('leaves the inflight claim and records why', () => {
+    const logs: string[] = [];
+    deps.log = (m: string) => logs.push(m);
+    fsx.writeFileSync(
+      path.join(deps.boardDir, 'done', 'AISDLC-9.verdict.json'),
+      JSON.stringify({ outcome: 'iterate-needed' }),
+    );
+    const r = hierarchyPaneExited(NAME, deps);
+    expect(r).toMatchObject({ status: 'noop', taskId: 'AISDLC-9' });
+    expect(r.reason).toMatch(/iterate-needed/);
+    expect(logs.join('\n')).toMatch(/reenter/);
+    expect(existsSync(manifestPathIn(deps.boardDir, 'inflight', 'AISDLC-9'))).toBe(true);
+    expect(existsSync(manifestPathIn(deps.boardDir, 'queue', 'AISDLC-9'))).toBe(false);
+  });
+});
+
 describe('hook install and down', () => {
   it('installs and removes a window-scoped hook', () => {
     installPaneExitHook(deps.run, NAME, '/x/cli-hierarchy.mjs');

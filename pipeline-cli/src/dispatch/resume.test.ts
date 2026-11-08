@@ -3,7 +3,15 @@
  * hands the feedback to the executor, and the bounded idle back-off (AISDLC-738).
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -42,6 +50,14 @@ function mkManifest(taskId: string, extra: Partial<DispatchManifest> = {}): Disp
     spec: { taskFile: `backlog/tasks/${taskId.toLowerCase()}.md`, verifyCommands: ['pnpm build'] },
     ...extra,
   };
+}
+
+/** Drop a manifest into queue/ beside an inflight claim (writeManifest refuses that). */
+function plantQueue(m: DispatchManifest): void {
+  writeFileSync(
+    path.join(board, 'queue', `${m.taskId}.dispatch.json`),
+    JSON.stringify(m, null, 2) + '\n',
+  );
 }
 
 let root: string;
@@ -361,6 +377,29 @@ describe('resumeDone', () => {
       completeTask(board, { taskId, outcome: 'iterate-needed', workerId: 'exec-a', notes });
     }
 
+    it('replaces a plain queue manifest beside an iterate-needed verdict (AISDLC-1228)', () => {
+      iterate('AISDLC-843');
+      plantQueue(mkManifest('AISDLC-843'));
+      const archiveDir = path.join(board, 'landing', '7', 'history');
+      const r = resumeDone(board, 'AISDLC-843', {}, { ...opts, archiveDir });
+      expect(r.queuePath).toBe(path.join(board, 'queue', 'AISDLC-843.dispatch.json'));
+      const queued = JSON.parse(readFileSync(r.queuePath, 'utf-8')) as DispatchManifest;
+      expect(queued.resume?.priorOutcome).toBe('iterate-needed');
+      const archived = readdirSync(archiveDir);
+      expect(archived.some((f) => f.startsWith('AISDLC-843.dispatch.json.queue.'))).toBe(true);
+      expect(archived.some((f) => f.startsWith('AISDLC-843.verdict.json'))).toBe(true);
+    });
+
+    it('still refuses a queue manifest that carries a resume block (AISDLC-1228)', () => {
+      iterate('AISDLC-843');
+      plantQueue(
+        mkManifest('AISDLC-843', {
+          resume: { note: 'x', resumedAt: 'a', resumedBy: 'dispatch' } as never,
+        }),
+      );
+      expect(() => resumeDone(board, 'AISDLC-843', {}, opts)).toThrow(/already in queue\//);
+    });
+
     it('takes over the held claim and resumes carrying the verdict notes', () => {
       iterate('AISDLC-843');
       const r = resumeDone(board, 'AISDLC-843', {}, opts);
@@ -600,6 +639,40 @@ describe('cli-dispatch reenter and claim', () => {
     const exit = await runDispatchCli(argv, deps);
     return { exit, stdout, stderr };
   }
+
+  it('reenter works and dequeue refuses on that state (AISDLC-1228)', async () => {
+    writeManifest(board, mkManifest('AISDLC-843', { priority: 2 }));
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+    completeTask(board, {
+      taskId: 'AISDLC-843',
+      outcome: 'iterate-needed',
+      workerId: 'exec-a',
+      notes: 'n',
+    });
+    plantQueue(mkManifest('AISDLC-843'));
+    const deq = await cli(
+      [
+        'dequeue',
+        '--board-dir',
+        board,
+        '--task-id',
+        'AISDLC-843',
+        '--reason',
+        'x',
+        '--work-dir',
+        root,
+      ],
+      allowed,
+    );
+    expect(deq.exit).toBe(1);
+    expect(deq.stderr).toMatch(/reenter/);
+    const r = await cli(
+      ['reenter', '7', '--board-dir', board, '--work-dir', root],
+      withGh('AISDLC-843'),
+    );
+    expect(r.exit).toBe(0);
+    expect(r.stdout).toMatch(/queue/);
+  });
 
   it('derives the failing check and head SHA from the pull request', async () => {
     finish('AISDLC-821');
