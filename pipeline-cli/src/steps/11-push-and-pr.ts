@@ -665,7 +665,7 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   // AISDLC-218: open as DRAFT. The slash command body / library caller is
   // responsible for spawning reviewers + signing attestation, then calling
   // `gh pr ready` (Step 13) to flip the draft to ready and trigger CI exactly
-  // once. See `docs/operations/aisdlc-218-draft-pr-flow.md` and
+  // once. See the draft-PR section of `docs/operations/cli-hierarchy.md` and
   // `ai-sdlc-plugin/commands/execute.md` Step 11 / Step 13.
   const prDecision = decidePrDraft(
     opts.workDir,

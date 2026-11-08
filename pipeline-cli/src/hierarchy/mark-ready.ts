@@ -3,7 +3,7 @@
  * operational action), run on every dispatch tick instead of by the session's prose.
  *
  * A draft qualifies when its head branch is `ai-sdlc/*`. It is flipped with
- * `gh pr ready` only when every `Analyze` check on its head passed. A PR
+ * `gh pr ready` only when its head has a verdict ref on origin (AISDLC-1237) and every `Analyze` check on its head passed. A PR
  * marked as superseded, or whose branch conflicts with main, is never flipped: marking
  * a dead PR ready would arm auto-merge on it. This module never runs a merge command.
  */
@@ -105,6 +105,7 @@ interface ListedPr {
   body?: string;
   mergeStateStatus?: string;
   headRefName?: string;
+  headRefOid?: string;
 }
 
 interface Check {
@@ -138,6 +139,13 @@ export function analyzeState(checks: Check[]): 'clean' | 'failed' | 'pending' {
   return verdicts.every((v) => v === 'SUCCESS') ? 'clean' : 'pending';
 }
 
+/** True when `refs/ai-sdlc/verdicts/<headSha>` exists on origin (AISDLC-1237). */
+function hasVerdictRef(run: CommandRunner, cwd: string, headSha: string | undefined): boolean {
+  if (!headSha) return false;
+  const r = run('git', ['ls-remote', 'origin', `refs/ai-sdlc/verdicts/${headSha}`], { cwd });
+  return r.status === 0 && r.stdout.trim().length > 0;
+}
+
 /** Run one mark-ready pass with the injected command runner (`gh`). */
 export function markReadyAfterCodeql(
   run: CommandRunner,
@@ -157,7 +165,7 @@ export function markReadyAfterCodeql(
       '--limit',
       '50',
       '--json',
-      'number,body,mergeStateStatus,headRefName',
+      'number,body,mergeStateStatus,headRefName,headRefOid',
     ],
     { cwd },
   );
@@ -180,6 +188,11 @@ export function markReadyAfterCodeql(
     }
     if (pr.mergeStateStatus === 'DIRTY') {
       report.skipped.push({ pr: pr.number, reason: 'the branch conflicts with main' });
+      continue;
+    }
+    // AISDLC-1237: never flip before the head's verdict ref exists on origin; the gate would fail no-record.
+    if (!hasVerdictRef(run, cwd, pr.headRefOid)) {
+      report.skipped.push({ pr: pr.number, reason: 'no verdict ref for head' });
       continue;
     }
     const view = run(
