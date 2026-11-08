@@ -170,6 +170,8 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     const expectedJobs = [
       'detect',
       'lint',
+      // AISDLC-631.5: workspace `tsc --noEmit`.
+      'typecheck',
       'build-test',
       // AISDLC-1021: macOS run of the pipeline-cli suite on pipeline-cli/** changes.
       'pipeline-cli-macos',
@@ -246,6 +248,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     for (const required of [
       'detect',
       'lint',
+      'typecheck',
       'build-test',
       'integration',
       'backlog-drift',
@@ -948,6 +951,20 @@ describe('AISDLC-1172: verdict-check job feeds pr-ready and posts ai-sdlc/attest
   it('gate workflow keeps a single pull_request trigger', () => {
     const on = wf.on ?? wf[true];
     assert.deepEqual(Object.keys(on), ['pull_request']);
+  });
+});
+
+describe('ai-sdlc-gate.yml — typecheck job (AISDLC-631.5)', () => {
+  it('runs pnpm typecheck, skips on docs-only/records-only, and is in the rollup', () => {
+    const job = workflow.jobs.typecheck;
+    assert.ok(job, 'typecheck job exists');
+    assert.ok(job.steps.some((s) => s.run === 'node scripts/typecheck-workspace.mjs'));
+    assert.match(String(job.if), /docs_only/);
+    assert.match(String(job.if), /records_only/);
+    const rollup = workflow.jobs['pr-ready'];
+    assert.ok(rollup.needs.includes('typecheck'));
+    const allowed = rollup.steps.find((s) => s.uses?.startsWith('re-actors/alls-green'));
+    assert.match(String(allowed.with['allowed-skips']), /typecheck/);
   });
 });
 

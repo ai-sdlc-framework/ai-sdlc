@@ -268,6 +268,26 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
 
+  # AISDLC-631.5: workspace typecheck. Merge skew between two green PRs once
+  # broke `tsc --noEmit` on main while every per-PR check stayed green. Build
+  # first so cross-package declarations resolve, then the workspace runner
+  # (bare `pnpm typecheck` fails on ai-sdlc-plugin/mods, which has no tsc).
+  typecheck:
+    name: Typecheck
+    needs: detect
+    if: needs.detect.outputs.docs_only != 'true' && needs.detect.outputs.records_only != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: node scripts/typecheck-workspace.mjs
+
   # ── Build & Test matrix (code/mixed only) ───────────────────────────────
   # Skipped when `detect.outputs.docs_only == 'true'`. Per the AISDLC-140
   # design, `re-actors/alls-green` treats `skipped` as success — so
@@ -1365,6 +1385,7 @@ jobs:
       [
         detect,
         lint,
+        typecheck,
         build-test,
         pipeline-cli-macos,
         integration,
@@ -1422,6 +1443,7 @@ jobs:
           jobs: ${{ toJSON(needs) }}
           allowed-skips: >-
             lint,
+            typecheck,
             build-test,
             pipeline-cli-macos,
             integration,

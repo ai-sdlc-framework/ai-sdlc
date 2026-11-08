@@ -2,7 +2,7 @@
 id: AISDLC-631.5
 title: >-
   CI follow-up: run pnpm typecheck as a job feeding the ai-sdlc/pr-ready rollup
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-01'
 labels:

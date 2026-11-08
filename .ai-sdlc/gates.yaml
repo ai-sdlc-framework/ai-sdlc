@@ -29,6 +29,12 @@ gates:
     owner: engineering
     property: eslint, prettier and clock-discipline on every PR
     baseline: true
+  - id: gate-job:typecheck
+    surface: pr-ready-job
+    origin: AISDLC-631.5
+    owner: engineering
+    property: tsc --noEmit passes in every workspace package after pnpm build, catching merge skew between individually green PRs
+    decision: DEC-0056
   - id: gate-job:build-test
     surface: pr-ready-job
     origin: AISDLC-727
