@@ -616,18 +616,44 @@ describe('openai-compatible provider: config hardening (AISDLC-633.1)', () => {
       '1KEY',
       'A-B',
       '__proto__',
+      'GH_TOKEN',
+      'ACTIONS_RUNTIME_TOKEN',
+      'DB_PASSWORD',
+      'APP_SECRET',
     ];
     for (const apiKeyEnv of denied) {
       const a = await build({ ...base, apiKeyEnv }).isAvailable();
       expect(a.available, apiKeyEnv).toBe(false);
       expect(a.reason).toContain('apiKeyEnv');
     }
-    for (const apiKeyEnv of ['OPENAI_API_KEY', 'LOCAL_LLM_KEY']) {
+    for (const apiKeyEnv of ['OPENAI_API_KEY', 'LOCAL_LLM_KEY', 'MY_PROVIDER_KEY']) {
       const p = createOpenAICompatibleProvider(
         { ...base, apiKeyEnv },
         { env: { [apiKeyEnv]: KEY } },
       );
       expect((await p.isAvailable()).available).toBe(true);
+    }
+  });
+
+  it('clamps timeoutMs and maxStateTokens with one warning each', () => {
+    const warn = vi.fn();
+    const p = build(
+      { baseUrl: BASE, model: 'm', timeoutMs: 600_000, maxStateTokens: 100_000 },
+      warn,
+    );
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('clamped to 120000'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('clamped to 32000'));
+    expect(p.capabilities.maxStateTokens).toBe(32_000);
+  });
+
+  it('does not echo unknown keys that are long or hold control characters', async () => {
+    for (const key of ['bad\u001b[31mkey\nx', 'k'.repeat(65)]) {
+      const a = await build({ baseUrl: BASE, [key]: 1 }).isAvailable();
+      expect(a.available).toBe(false);
+      expect(a.reason).not.toContain(key);
+      expect(a.reason).not.toContain('\u001b');
+      expect(a.reason).toContain('<redacted>');
     }
   });
 

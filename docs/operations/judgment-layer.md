@@ -105,13 +105,13 @@ Values are checked before defaults are applied.
 
 | Option | Meaning | Default |
 |---|---|---|
-| `baseUrl` | Endpoint base, for example `http://localhost:11434/v1`. Required. Must be `https`, except that `http` is accepted for a loopback host (`localhost`, `::1`, `127.0.0.0/8`) when `apiKeyEnv` is not set. | none |
+| `baseUrl` | Endpoint base, for example `http://localhost:11434/v1`. Required. Must be `https`, except that `http` is accepted for a loopback host (`localhost`, `::1`, `127.0.0.0/8`) when `apiKeyEnv` is not set. It must be a parseable URL with no credentials, userinfo or backslash. | none |
 | `model` | Model id sent to the endpoint. Taken from `spec.model` when omitted. | none |
-| `apiKeyEnv` | Name of the environment variable that holds the key. Optional for a keyless local endpoint. Setting it requires an `https` `baseUrl`, so an `http` loopback endpoint with a key is rejected. Names of secrets that are not provider keys (for example `GITHUB_TOKEN`, `NPM_TOKEN`, `ANTHROPIC_API_KEY`, `AWS_SECRET_ACCESS_KEY`) and any name ending in `_PRIVATE_KEY` are rejected, as is any name that is not a valid environment variable identifier. | none |
-| `timeoutMs` | Per-attempt timeout. | 10000 |
+| `apiKeyEnv` | Name of the environment variable that holds the key. Optional for a keyless local endpoint. The name must end in `_KEY` (for example `OPENAI_API_KEY`, `MY_PROVIDER_KEY`), so `GH_TOKEN`, `ACTIONS_RUNTIME_TOKEN`, `DB_PASSWORD` and `APP_SECRET` are rejected. Setting it requires an `https` `baseUrl`, so an `http` loopback endpoint with a key is rejected. Names of secrets that are not provider keys (for example `GITHUB_TOKEN`, `NPM_TOKEN`, `ANTHROPIC_API_KEY`, `AWS_SECRET_ACCESS_KEY`) and any name ending in `_PRIVATE_KEY` are rejected, as is any name that is not a valid environment variable identifier. | none |
+| `timeoutMs` | Per-attempt timeout. Above 120000 it is clamped to 120000 with a warning. | 10000 |
 | `maxRetries` | Retries after the first attempt on 429 and 5xx. Above 5 it is clamped to 5 and a warning is logged. | 2 |
 | `maxResponseBytes` | Largest response body read. A larger response is aborted with a `bad-response` error. Above 8 MiB it is clamped to 8 MiB with a warning. | 1 MiB |
-| `maxStateTokens` | State size limit the runtime enforces before calling. | 8000 |
+| `maxStateTokens` | State size limit the runtime enforces before calling. Above 32000 it is clamped to 32000 with a warning. | 8000 |
 | `inputCostPer1MTokens`, `outputCostPer1MTokens` | Prices used for cost attribution. | 0 |
 
 Minimal config for a local Ollama endpoint:

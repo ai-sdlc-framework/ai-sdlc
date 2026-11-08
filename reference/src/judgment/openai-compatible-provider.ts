@@ -52,6 +52,18 @@ const API_KEY_ENV_DENYLIST = new Set([
   'AWS_SECRET_ACCESS_KEY',
 ]);
 const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** A provider key variable must be named like a key: it has to end in `_KEY`. */
+const ENV_KEY_SUFFIX_RE = /_KEY$/;
+export const TIMEOUT_MS_CAP = 120_000;
+export const MAX_STATE_TOKENS_CAP = 32_000;
+const MAX_REPORTED_KEY_LENGTH = 64;
+
+/** Echo an untrusted name in a reason only when it is short and free of control characters. */
+function safeName(name: string): string {
+  // eslint-disable-next-line no-control-regex
+  const hasControl = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(name);
+  return hasControl || name.length > MAX_REPORTED_KEY_LENGTH ? '<redacted>' : `'${name}'`;
+}
 
 /** Configuration surface: exactly the allowlisted keys, nothing injectable. */
 export interface OpenAICompatibleProviderOptions {
@@ -155,7 +167,7 @@ export function validateOpenAICompatibleOptions(raw: unknown): OpenAICompatibleO
   const allowed = new Set<string>(OPENAI_COMPATIBLE_ALLOWED_OPTION_KEYS);
   for (const k of Reflect.ownKeys(raw)) {
     const name = typeof k === 'symbol' ? k.toString() : k;
-    if (!allowed.has(name)) errors.push(`unknown providerOptions key '${name}'`);
+    if (!allowed.has(name)) errors.push(`unknown providerOptions key ${safeName(name)}`);
   }
 
   const baseUrl = own(raw, 'baseUrl');
@@ -170,7 +182,9 @@ export function validateOpenAICompatibleOptions(raw: unknown): OpenAICompatibleO
     } else {
       const norm = apiKeyEnv.toUpperCase();
       if (norm === '__PROTO__' || API_KEY_ENV_DENYLIST.has(norm) || norm.endsWith('_PRIVATE_KEY')) {
-        errors.push(`apiKeyEnv '${apiKeyEnv}' is a denylisted secret name`);
+        errors.push(`apiKeyEnv ${safeName(apiKeyEnv)} is a denylisted secret name`);
+      } else if (!ENV_KEY_SUFFIX_RE.test(norm)) {
+        errors.push(`apiKeyEnv ${safeName(apiKeyEnv)} must end in _KEY`);
       }
     }
   }
@@ -199,6 +213,16 @@ export function validateOpenAICompatibleOptions(raw: unknown): OpenAICompatibleO
       `maxResponseBytes ${options.maxResponseBytes} exceeds the cap; clamped to ${MAX_RESPONSE_BYTES_CAP}`,
     );
     options.maxResponseBytes = MAX_RESPONSE_BYTES_CAP;
+  }
+  if (isFiniteNumber(options.timeoutMs) && options.timeoutMs > TIMEOUT_MS_CAP) {
+    warnings.push(`timeoutMs ${options.timeoutMs} exceeds the cap; clamped to ${TIMEOUT_MS_CAP}`);
+    options.timeoutMs = TIMEOUT_MS_CAP;
+  }
+  if (isFiniteNumber(options.maxStateTokens) && options.maxStateTokens > MAX_STATE_TOKENS_CAP) {
+    warnings.push(
+      `maxStateTokens ${options.maxStateTokens} exceeds the cap; clamped to ${MAX_STATE_TOKENS_CAP}`,
+    );
+    options.maxStateTokens = MAX_STATE_TOKENS_CAP;
   }
   return { ok: true, options, warnings };
 }
