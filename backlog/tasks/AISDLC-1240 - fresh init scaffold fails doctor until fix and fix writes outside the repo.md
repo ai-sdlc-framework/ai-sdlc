@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1240
 title: 'ai-sdlc init --yes leaves a fresh repo failing doctor (missing review-policy.md) until doctor --fix, and --fix writes into the plugin cache'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-08'
 labels:
