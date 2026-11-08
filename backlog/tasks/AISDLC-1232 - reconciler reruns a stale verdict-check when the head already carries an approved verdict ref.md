@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1232
 title: reconciler reruns a stale verdict-check when the head already carries an approved verdict ref
-status: To Do
+status: In Progress
 priority: high
 labels: [bug, pipeline-cli, dispatch, throughput]
 dependencies: []
