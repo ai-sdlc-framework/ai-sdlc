@@ -14,7 +14,7 @@ Prerequisites to check first: `node --version` (20 or newer), `pnpm --version` (
 2. Install the SDK in this repository. Run `pnpm add @ai-sdlc/reference`. Verify with `pnpm ls @ai-sdlc/reference`, which must list the package.
 3. Install the Claude Code plugin. Run `/plugin marketplace add ai-sdlc-framework/ai-sdlc` then `/plugin install ai-sdlc@ai-sdlc`. Verify that `/plugin` lists `ai-sdlc` as enabled and that `/ai-sdlc` commands are available (restart the session if they are not).
 4. Scaffold the repository. Run `ai-sdlc init --yes`. Verify with `ai-sdlc health`, which must report all checks passing, and confirm `.ai-sdlc/pipeline.yaml` exists.
-5. Initialise the signing key. Run `/ai-sdlc init-signing-key`, paste the printed public key block into `.ai-sdlc/trusted-reviewers.yaml` under `signingKeys:`. Verify that `~/.ai-sdlc/signing-key.pem` exists and the public key is in `trusted-reviewers.yaml`. Never commit the private key.
+5. Initialise the signing key. Run `/ai-sdlc init-signing-key`, paste the printed public key block into `.ai-sdlc/trusted-reviewers.yaml` under `reviewers:` (fields `identity`, `machine`, `addedAt`, `addedBy`, `pubkey`). Verify that `~/.ai-sdlc/signing-key.pem` exists and the public key is in `trusted-reviewers.yaml`. Never commit the private key.
 6. Run the doctor. Run `/ai-sdlc doctor`. It must finish with no errors and no unresolved warnings.
 
 Recovery for known failures:
@@ -24,4 +24,4 @@ Recovery for known failures:
 - Keyring never initialised (doctor or signing reports no signing key, or `~/.ai-sdlc/signing-key.pem` is missing): run step 5. In a scripted environment generate it manually: `openssl genpkey -algorithm ed25519 -out ~/.ai-sdlc/signing-key.pem`, `chmod 600 ~/.ai-sdlc/signing-key.pem`, `openssl pkey -in ~/.ai-sdlc/signing-key.pem -pubout -out ~/.ai-sdlc/signing-key.pub.pem`, and register the public key in `.ai-sdlc/trusted-reviewers.yaml`.
 - Doctor warnings: read each warning, fix the cause it names (usually one of the three failures above, a missing `gh` login, or an uncommitted scaffold), and re-run `/ai-sdlc doctor` until it is clean. Do not suppress or ignore a warning without telling me why.
 
-When doctor passes, commit the scaffold (`git add .ai-sdlc .github CLAUDE.md package.json pnpm-lock.yaml`, never the private key) and report what you installed and the doctor output.
+When doctor passes, commit the scaffold (`git add .ai-sdlc .github .gitignore .mcp.json CLAUDE.md package.json pnpm-lock.yaml`, never the private key) and report what you installed and the doctor output.
