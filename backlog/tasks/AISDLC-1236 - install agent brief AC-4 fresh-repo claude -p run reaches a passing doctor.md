@@ -2,7 +2,7 @@
 id: AISDLC-1236
 title: >-
   Install agent brief AC-4: a scripted fresh-repo `claude -p` run of the published brief reaches a passing `ai-sdlc doctor`
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-08'
 labels:
@@ -14,7 +14,7 @@ dependencies: []
 references:
   - docs/getting-started/install-agent-brief.md
   - docs/getting-started/onboarding.md
-  - backlog/tasks/AISDLC-1179 - publish install instructions as an agent brief before the raw commands.md
+  - backlog/completed/AISDLC-1179 - publish install instructions as an agent brief before the raw commands.md
   - backlog/tasks/AISDLC-1179.1 - install agent brief AC-4 fresh-repo claude -p run reaches a passing doctor.md
 priority: medium
 dispatchable: true

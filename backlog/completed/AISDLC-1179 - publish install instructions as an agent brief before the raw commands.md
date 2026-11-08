@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1179
 title: 'Publish the install as an agent brief a user pastes into Claude Code, with the raw commands second'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-04'
 labels:
@@ -45,4 +45,4 @@ AC-1 to AC-3 landed in #2354. What remains: an executor creates a fresh temporar
 - [x] AC-1 (done in #2354): `docs/getting-started/onboarding.md` opens with a copyable agent brief that names each install step, its verification, and the recovery for each of the four failure modes above.
 - [x] AC-2 (done in #2354): The raw command list follows the brief, unchanged in meaning.
 - [x] AC-3 (done in #2354): The brief is also kept as a standalone file that the ai-sdlc-io site can link to or embed, at a stable path stated in the PR body.
-- [ ] AC-4: Running the brief in a fresh non-interactive Claude Code session (`claude -p`) on a fresh temporary repo reaches a passing `ai-sdlc doctor`. The PR body records the exact invocation and the doctor output, and the script that performs the run is committed under `scripts/`.
+- [x] AC-4 (done in AISDLC-1236): Running the brief in a fresh non-interactive Claude Code session (`claude -p`) on a fresh temporary repo reaches a passing `ai-sdlc doctor`. The PR body records the exact invocation and the doctor output, and the script that performs the run is committed under `scripts/`.

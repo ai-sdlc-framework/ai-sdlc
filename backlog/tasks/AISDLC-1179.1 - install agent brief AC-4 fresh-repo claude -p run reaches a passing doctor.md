@@ -14,7 +14,7 @@ dependencies: []
 references:
   - docs/getting-started/install-agent-brief.md
   - docs/getting-started/onboarding.md
-  - backlog/tasks/AISDLC-1179 - publish install instructions as an agent brief before the raw commands.md
+  - backlog/completed/AISDLC-1179 - publish install instructions as an agent brief before the raw commands.md
 priority: medium
 dispatchable: false
 dispatchableReason: 'Superseded by AISDLC-1236 (DEC-0399, leave-done): the dispatch board marked this id landed from filing PR #2546 and a board id is never reusable. Closes when AISDLC-1236 lands.'
