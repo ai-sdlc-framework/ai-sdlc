@@ -558,6 +558,8 @@ running dispatch session for `--notify`).
 cli-hierarchy brief --rfc RFC-0051 --notify
 ```
 
+**Auto-enqueue of a landed filing (AISDLC-1242).** When a `cli-file` filing PR (`ai-sdlc/file-<id>`) merges, the next reconcile tick enqueues the task from its one-task brief `tasks-<id>.md` (wave and priority from the brief) and types one line into the planner session: `auto-enqueued <id> from tasks-<id>.md (filing #<pr> landed)`. A `dispatchable: false` or blocked task, an `--update` filing and a task already on the board are left alone with no line; `brief --notify` remains for multi-task briefs.
+
 **Local filing branch (AISDLC-1221).** After a successful push and `gh pr create`, `cli-file --pr`
 removes the `.worktrees/file-<id>` worktree and the local `ai-sdlc/file-<id>` branch it created, so
 a later filing for the same id (`cli-decisions add` then `answer`) is not refused. The remote

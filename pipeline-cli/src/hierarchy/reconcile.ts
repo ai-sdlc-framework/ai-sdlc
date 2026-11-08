@@ -918,6 +918,8 @@ export interface ReconcileOpts {
   stuckAfterMinutes?: number;
   /** AISDLC-1190: delivers a routed PR or a red main to the planner session; throws when it cannot. */
   notifyPlanner?: (text: string) => void;
+  /** AISDLC-1242: enqueues a landed filing's task from its brief; returns the planner line, or undefined when it left the task alone. */
+  enqueueFiled?: (pr: number, headBranch: string | undefined) => string | undefined;
 }
 
 /** Reconcile a set of PR facts: update the records and run the actions. Idempotent. */
@@ -1257,6 +1259,18 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     }
     writeLanding(opts.boardDir, record);
     report.records.push(record);
+    // AISDLC-1242: a filing that just landed enqueues its task from the brief and tells the planner once.
+    if (d.state === 'merged' && existing?.landed === undefined && opts.enqueueFiled) {
+      const line = opts.enqueueFiled(f.prNumber, f.headBranch);
+      if (line !== undefined) {
+        report.acted.push({ pr: f.prNumber, action: 'auto-enqueue', ran: true, note: line });
+        try {
+          opts.notifyPlanner?.(line);
+        } catch {
+          /* the task is on the board; the planner sees it in status */
+        }
+      }
+    }
     // Landing retires the task's failed verdict (AISDLC-1158).
     if (d.state === 'merged' && f.taskId && landedAt !== undefined) {
       const sha = landedSha ?? f.headSha;

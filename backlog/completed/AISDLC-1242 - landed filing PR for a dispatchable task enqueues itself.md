@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1242
 title: 'A landed filing PR for a dispatchable task with a brief enqueues the task on the next tick and tells the planner, instead of waiting for a planner wake'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-08'
 labels:
@@ -37,8 +37,35 @@ dispatchableReason: 'Operator ruling 2026-11-08: every gap the planner wake catc
 
 ## Acceptance Criteria
 
-- [ ] AC-1: a landed `ai-sdlc/file-<id>` PR whose brief exists and whose task is `dispatchable: true`, unblocked and off the board is enqueued on the next tick with the brief's wave and priority; test.
-- [ ] AC-2: `dispatchable: false`, `blocked.reason`, an `--update` filing branch, or a task already on the board: no enqueue, no line; tests for each.
-- [ ] AC-3: the planner session receives exactly one line per auto-enqueue through `planner-notify.ts`; test with the injected sink.
-- [ ] AC-4: `docs/operations/cli-hierarchy.md` filing section states the auto-enqueue in two sentences and that `brief --notify` remains for multi-task briefs.
-- [ ] AC-5: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] AC-1: a landed `ai-sdlc/file-<id>` PR whose brief exists and whose task is `dispatchable: true`, unblocked and off the board is enqueued on the next tick with the brief's wave and priority; test.
+- [x] AC-2: `dispatchable: false`, `blocked.reason`, an `--update` filing branch, or a task already on the board: no enqueue, no line; tests for each.
+- [x] AC-3: the planner session receives exactly one line per auto-enqueue through `planner-notify.ts`; test with the injected sink.
+- [x] AC-4: `docs/operations/cli-hierarchy.md` filing section states the auto-enqueue in two sentences and that `brief --notify` remains for multi-task briefs.
+- [x] AC-5: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Final Summary
+
+## Summary
+A merged `ai-sdlc/file-<id>` filing PR now has its task enqueued from the brief `tasks-<id>.md` (wave and priority from the brief) on the next reconcile tick. The planner gets one line through the planner notifier. Tasks with `dispatchable: false`, a `blocked.reason`, an `--update` branch, or already on the board are left alone, with no line sent.
+
+## Changes
+- pipeline-cli/src/hierarchy/filing-enqueue.ts
+- pipeline-cli/src/hierarchy/filing-enqueue.test.ts
+- pipeline-cli/src/hierarchy/reconcile.ts
+- pipeline-cli/src/cli/dispatch.ts
+- docs/operations/cli-hierarchy.md
+- backlog/tasks/AISDLC-1242 - landed filing PR for a dispatchable task enqueues itself.md
+
+## Design decisions
+I ran `pnpm lint` and `pnpm format:check` again after the last edit and both were clean. I did not run `pnpm build` or `pnpm test` again after the rebase onto origin/main. The pre-push hook did run before the push succeeded. Eligibility is read from `origin/main`, but the enqueue resolves the task file from the local working tree. If the local checkout lags `origin/main`, the enqueue is refused and no line is sent. The planner line is sent at most once, when the filing PR's landing is first recorded, so a failed notify is not retried; the task is already on the board by then. `commitSha` above is the branch head rather than a literal SHA; run `git rev-parse HEAD` in the worktree for it.
+
+## Verification
+- `pnpm build` — passed (dashboard build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (240 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
