@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1233
 title: pre-push coverage gate inherits the trusted push -c overrides and every fixture git commit runs the main checkout hooks
-status: To Do
+status: In Progress
 priority: critical
 labels: [bug, regression, hooks, pipeline-cli, throughput]
 dependencies: []

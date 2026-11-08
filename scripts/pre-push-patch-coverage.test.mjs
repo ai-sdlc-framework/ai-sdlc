@@ -335,6 +335,37 @@ describe('gitSafeEnv', () => {
     assert.deepEqual(out, { PATH: '/bin' });
     assert.equal(input.GIT_DIR, '/x/.git');
   });
+  it('drops GIT_CONFIG_* trusted push overrides (AISDLC-1233)', () => {
+    assert.deepEqual(
+      gitSafeEnv({
+        GIT_CONFIG_PARAMETERS: "'core.hooksPath=/x'",
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'a',
+        GIT_CONFIG_VALUE_0: 'b',
+        PATH: '/usr/bin',
+      }),
+      { PATH: '/usr/bin' },
+    );
+  });
+  it('spawn path passes no GIT_CONFIG_* key to children (AISDLC-1233)', async () => {
+    const saved = process.env.GIT_CONFIG_PARAMETERS;
+    process.env.GIT_CONFIG_PARAMETERS = "'core.hooksPath=/x'";
+    const envs = [];
+    try {
+      await main({
+        boardDir: null,
+        reuseFacts: () => null,
+        run: (_c, _a, opts) => (envs.push(opts.env), { status: 0 }),
+        changed: () => ['pipeline-cli/src/a.ts'],
+        log: () => {},
+      });
+    } finally {
+      if (saved === undefined) delete process.env.GIT_CONFIG_PARAMETERS;
+      else process.env.GIT_CONFIG_PARAMETERS = saved;
+    }
+    assert.ok(envs.length > 0);
+    for (const env of envs) assert.ok(!Object.keys(env).some((k) => k.startsWith('GIT_CONFIG_')));
+  });
   it('covers GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_COMMON_DIR and GIT_PREFIX', () => {
     for (const k of [
       'GIT_DIR',
