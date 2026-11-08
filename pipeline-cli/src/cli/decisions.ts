@@ -657,7 +657,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
       type: 'boolean',
       default: false,
       describe:
-        'AISDLC-1161: file the event through cli-file (own worktree from origin/main, branch ai-sdlc/file-<dec>) instead of writing the local store; works from the Pattern-C parent.',
+        'AISDLC-1161: file the event through cli-file (own worktree from origin/main, branch ai-sdlc/file-<dec>-<type>-<hhmm>) instead of writing the local store; works from the Pattern-C parent.',
     })
     .option('pr', {
       type: 'boolean',

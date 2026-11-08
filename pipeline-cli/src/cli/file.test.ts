@@ -429,7 +429,7 @@ describe('cli-file', () => {
       { taskId: 'AISDLC-801', answer: 'a', rationale: 'why', pr: true },
       withOptions(),
     );
-    expect(r.branch).toBe('ai-sdlc/file-dec-0002');
+    expect(r.branch).toMatch(/^ai-sdlc\/file-dec-0002-answer-\d{4}$/);
     const log = sh(remote, 'show', `${r.branch}:${EVENT_LOG_REL}`);
     expect(log).toContain('"operator-answered"');
     expect(log).toContain('"rationale":"why"');
@@ -454,6 +454,59 @@ describe('cli-file', () => {
       const r = file([answered('DEC-0001', 'a')]);
       expect(sh(remote, 'show', `${r.branch}:${EVENT_LOG_REL}`)).toContain('"operator-answered"');
       expect(sh(repo, 'status', '--porcelain', '--', '.ai-sdlc')).toBe('');
+    });
+
+    it('AISDLC-1249 AC-1: add then answer use different branches', () => {
+      const openedEv = {
+        eventVersion: 'v1',
+        type: 'decision-opened',
+        ts: 't',
+        decisionId: 'DEC-0007',
+        options: [{ id: 'a' }],
+        by: 'planner',
+      };
+      const add = fileDecision(
+        repo,
+        'DEC-0007',
+        { taskId: 'X-1', pr: true, events: [openedEv] },
+        deps,
+      );
+      // the add PR merged; GitHub left its branch on origin
+      commitMain(
+        EVENT_LOG_REL,
+        `${ev('DEC-0001', 'decision-opened')}\n${JSON.stringify(openedEv)}\n`,
+      );
+      const ans = fileDecision(
+        repo,
+        'DEC-0007',
+        { taskId: 'X-1', pr: true, events: [answered('DEC-0007', 'a')] },
+        deps,
+      );
+      expect(add.branch).toMatch(/^ai-sdlc\/file-dec-0007-add-\d{4}$/);
+      expect(ans.branch).toMatch(/^ai-sdlc\/file-dec-0007-answer-\d{4}$/);
+      expect(ans.branch).not.toBe(add.branch);
+    });
+
+    it('AISDLC-1249 AC-2: a rejected push reports the push stderr and never runs gh pr create', () => {
+      commitMain(EVENT_LOG_REL, opened({ options: [{ id: 'a' }] }));
+      const rejecting: FileDeps = {
+        ...deps,
+        exec(cmd, args, cwd) {
+          if (cmd === 'git' && args[0] === 'push') {
+            return { status: 1, stdout: '', stderr: '! [rejected] (non-fast-forward)' };
+          }
+          return deps.exec(cmd, args, cwd);
+        },
+      };
+      expect(() =>
+        fileDecision(
+          repo,
+          'DEC-0001',
+          { taskId: 'X-1', pr: true, events: [answered('DEC-0001', 'a')] },
+          rejecting,
+        ),
+      ).toThrow(/failed: ! \[rejected\] \(non-fast-forward\)/);
+      expect(ghCalls).toHaveLength(0);
     });
 
     it('refuses an event for a different decision', () => {
@@ -611,8 +664,8 @@ describe('cli-file', () => {
     sh(repo, 'push', 'origin', 'HEAD:refs/heads/main');
     ghCalls = [];
     const r = fileRebase(repo, 'DEC-0002', { pr: true }, d);
-    expect(first.branch).toBe('ai-sdlc/file-dec-0002');
-    expect(r.branch).toBe('ai-sdlc/file-dec-0002');
+    expect(first.branch).toMatch(/^ai-sdlc\/file-dec-0002-add-\d{4}$/);
+    expect(r.branch).toBe(first.branch);
     expect(r.prUrl).toBe('https://github.com/o/r/pull/1');
     expect(r.armed).toBe(true);
     const log = parseLogStrict(sh(remote, 'show', `${r.branch}:${EVENT_LOG_REL}`), 'x').events.map(
@@ -626,7 +679,7 @@ describe('cli-file', () => {
     // the remote has no replacement branch
     expect(sh(remote, 'branch', '--list', 'ai-sdlc/file-dec-0002*')).not.toContain('-r2');
     // a second rebase works too (temporary local branch was cleaned up)
-    expect(fileRebase(repo, 'DEC-0002', { pr: false }, d).branch).toBe('ai-sdlc/file-dec-0002');
+    expect(fileRebase(repo, 'DEC-0002', { pr: false }, d).branch).toBe(first.branch);
   });
 
   it('rebase carries non-log files and refuses a branch with no changes', () => {
@@ -931,7 +984,9 @@ describe('cli-file', () => {
       const replay = words(line);
       expect(replay[0]).toBe('cli-file');
       expect(await runFileCli(replay.slice(1), deps, pacing)).toBe(0);
-      const branch = 'ai-sdlc/file-dec-0005';
+      const branch = sh(remote, 'branch', '--list', 'ai-sdlc/file-dec-0005-*')
+        .replace('*', '')
+        .trim();
       const log = sh(remote, 'show', `${branch}:${EVENT_LOG_REL}`);
       const answered = log.split('\n').filter((l) => l.includes('"operator-answered"'));
       expect(answered).toHaveLength(1);
