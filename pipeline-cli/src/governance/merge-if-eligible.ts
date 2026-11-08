@@ -44,6 +44,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { auditGovernanceDir } from './audit-dir.js';
+import { FILE_BRANCH_PREFIX, UPDATE_BRANCH_PREFIX } from '../hierarchy/filing-branches.js';
 import { DOCS_ONLY_PATTERN } from '../../attestation-core/docs-only-paths.mjs';
 import { now } from '../clock.js';
 import type { Runner } from '../runtime/exec.js';
@@ -359,7 +360,11 @@ export function decisionsSyncPathRefusal(files: ChangedFile[]): string | null {
  * AISDLC-878 / AISDLC-1006 (DEC-0265): head-branch prefixes the docs lane accepts:
  * `cli-file` filing PRs and RFC / docs branches.
  */
-export const DOCS_LANE_HEAD_PREFIXES: readonly string[] = ['ai-sdlc/file-', 'docs/'];
+export const DOCS_LANE_HEAD_PREFIXES: readonly string[] = [
+  FILE_BRANCH_PREFIX,
+  UPDATE_BRANCH_PREFIX,
+  'docs/',
+];
 
 /**
  * AISDLC-878: refusal reason for a docs-lane PR whose diff touches a path outside

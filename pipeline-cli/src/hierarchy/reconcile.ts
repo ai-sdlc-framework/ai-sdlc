@@ -32,6 +32,7 @@ import { completeLandedIterateNeeded } from '../dispatch/complete.js';
 import { retireBlockedManifest, retireFailedVerdict } from '../dispatch/retire-landed.js';
 import { clearRuling, readRuling } from '../dispatch/ruling.js';
 import type { TaskRuling } from '../dispatch/types.js';
+import { FILE_BRANCH_PREFIX, UPDATE_BRANCH_PREFIX } from './filing-branches.js';
 import type { CommandRunner } from './types.js';
 
 /** Task set: one action per classifier state (RFC-0054 ownership table). */
@@ -147,7 +148,7 @@ export interface LandingRecord {
 
 /** Dependabot head branches (AISDLC-1091). */
 export const DEPS_BRANCH_PREFIX = 'dependabot/';
-export const DOCS_BRANCH_PREFIXES = ['ai-sdlc/file-', 'docs/'] as const;
+export const DOCS_BRANCH_PREFIXES = [FILE_BRANCH_PREFIX, UPDATE_BRANCH_PREFIX, 'docs/'] as const;
 const TASK_ID_IN_TEXT = /\b[A-Z][A-Z0-9]*-\d+(?:\.\d+)*\b/;
 const RELEASE_RE = /^chore: release\b|^release-please--/i;
 
