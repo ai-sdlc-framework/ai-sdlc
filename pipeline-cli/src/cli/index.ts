@@ -71,7 +71,7 @@ import { beginTask } from '../steps/04-flip-status.js';
 import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
 import { buildReviewPrompts } from '../steps/07-build-review-prompts.js';
 import { resolveModel } from '../routing/resolve-model.js';
-import { taskClassOf } from '../routing/task-class.js';
+import { taskClassFromBaseRef } from '../routing/task-class.js';
 import { cleanupTask } from '../steps/13-cleanup.js';
 import { computeBranchName } from '../steps/02-compute-branch.js';
 import { finalizeTask } from '../steps/10-finalize.js';
@@ -635,7 +635,7 @@ export function buildCli(): Argv {
                 taskId: argv['task-id'] as string,
                 workDir: argv['work-dir'] as string,
               });
-              taskClass = taskClassOf(v.task?.rawBody);
+              taskClass = taskClassFromBaseRef(v.task);
             } catch {
               taskClass = undefined;
             }

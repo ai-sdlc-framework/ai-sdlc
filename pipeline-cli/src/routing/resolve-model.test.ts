@@ -9,7 +9,7 @@ import { assignmentLogPath } from './assignment-log.js';
 import { loadRoutingTable, parseRoutingTable } from './load-table.js';
 import { cellModel, findOverride, overridesPath } from './overrides.js';
 import { exploreCandidate, resolveModel } from './resolve-model.js';
-import { taskClassOf } from './task-class.js';
+import { readTaskFromBaseRef, taskClassFromBaseRef, taskClassOf } from './task-class.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const TABLE = `
@@ -574,5 +574,63 @@ describe('taskClassOf', () => {
     expect(taskClassOf('---\nid: X\n---\n')).toBe('uncategorized');
     expect(taskClassOf('no frontmatter')).toBe('uncategorized');
     expect(taskClassOf(undefined)).toBe('uncategorized');
+  });
+});
+
+describe('taskClassFromBaseRef (AISDLC-654.1)', () => {
+  const worktreeCopy = '---\nid: X\nclass: chore\n---\n';
+  const baseCopy = '---\nid: X\nclass: bug\n---\n';
+  it('uses the base-ref class, not the worktree edit', () => {
+    const cls = taskClassFromBaseRef(
+      { filePath: '/w/t.md' },
+      { readBaseTask: () => baseCopy, log: () => {} },
+    );
+    expect(cls).toBe('bug');
+    expect(taskClassOf(worktreeCopy)).toBe('chore');
+  });
+  it('resolves to uncategorized and logs when absent from the base ref', () => {
+    const logs: string[] = [];
+    const cls = taskClassFromBaseRef(
+      { filePath: '/w/t.md' },
+      { readBaseTask: () => null, log: (m) => logs.push(m) },
+    );
+    expect(cls).toBe('uncategorized');
+    expect(logs[0]).toContain('absent from origin/main');
+  });
+  it('treats a throwing reader and a missing path as uncategorized', () => {
+    const logs: string[] = [];
+    const log = (m: string) => logs.push(m);
+    expect(
+      taskClassFromBaseRef(
+        { filePath: '/w/t.md' },
+        {
+          readBaseTask: () => {
+            throw new Error('x');
+          },
+          log,
+        },
+      ),
+    ).toBe('uncategorized');
+    expect(taskClassFromBaseRef(undefined, { log })).toBe('uncategorized');
+    expect(logs).toHaveLength(2);
+  });
+  it('reads the committed file from a real git ref', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tc-'));
+    try {
+      const git = (...a: string[]) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' });
+      git('init', '-q', '-b', 'main');
+      git('config', 'user.email', 'a@b.c');
+      git('config', 'user.name', 'n');
+      git('config', 'commit.gpgsign', 'false');
+      const f = join(dir, 't.md');
+      writeFileSync(f, baseCopy);
+      git('add', 't.md');
+      git('commit', '-q', '-m', 'x');
+      writeFileSync(f, worktreeCopy);
+      expect(taskClassFromBaseRef({ filePath: f }, { baseRef: 'main' })).toBe('bug');
+      expect(readTaskFromBaseRef(join(dir, 'nope.md'), 'main')).toBeNull();
+    } finally {
+      removeFixtureDir(dir);
+    }
   });
 });

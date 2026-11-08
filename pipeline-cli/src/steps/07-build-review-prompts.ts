@@ -41,7 +41,7 @@ import {
   routingArtifactsDir,
   routingRecordable,
 } from '../routing/artifacts-dir.js';
-import { taskClassOf } from '../routing/task-class.js';
+import { taskClassFromBaseRef } from '../routing/task-class.js';
 import { generateNonce } from '../attestation/staged-review.js';
 import { verdictRefName } from '../attestation/verdict-record.js';
 import { nonceMarkerLiteral } from '../attestation/harness-transcript.js';
@@ -348,7 +348,7 @@ export async function buildReviewPrompts(
   const nonce = generateNonce(headSha);
   const nonceMarker = nonceMarkerLiteral(nonce);
 
-  const taskClass = taskClassOf(opts.task.rawBody);
+  const taskClass = taskClassFromBaseRef(opts.task);
   const prompts: ReviewPrompt[] = reviewers.map((reviewer) => {
     const routed = resolveModel({
       role: reviewer,
