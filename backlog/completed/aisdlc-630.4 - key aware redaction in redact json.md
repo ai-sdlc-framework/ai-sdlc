@@ -2,7 +2,7 @@
 id: AISDLC-630.4
 title: >-
   RFC-0049 follow-up (security): key-aware redaction of values under secret-named keys in the judgment state redactor
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:

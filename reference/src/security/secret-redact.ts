@@ -1,4 +1,25 @@
 /**
+ * Key-name fragments that mark a value as secret. The structural JSON redactor
+ * (judgment/redact-json.ts) redacts any value under a key matching one of these
+ * regardless of the value's shape. Single source of truth for key names.
+ * Bare `secret` is left to the AWS adjacency logic. `pass`/`pwd` only match as a whole word-ish key (see SECRET_KEY_NAME).
+ */
+export const SECRET_KEY_FRAGMENTS: readonly string[] = [
+  'token',
+  'password',
+  'passwd',
+  'api[_-]?key',
+  'private[_-]?key',
+  'credential',
+];
+
+/** Case-insensitive test for a secret-named key (e.g. `apiKey`, `secret_token`). */
+export const SECRET_KEY_NAME: RegExp = new RegExp(
+  `${SECRET_KEY_FRAGMENTS.join('|')}|^(?:pass|pwd)$`,
+  'i',
+);
+
+/**
  * Secret redaction for the DoR calibration log (AISDLC-122).
  *
  * The calibration log persists short-form copies of issue titles, body
