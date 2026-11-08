@@ -1321,6 +1321,15 @@ export async function runHierarchyCli(
             }
           },
           now: deps.now,
+          heldTriage: {
+            repoDir: repoRoot,
+            notify: createPlannerNotifier(
+              deps.boardDir,
+              deps.run,
+              extras.sendBrief,
+              extras.sendSocket,
+            ),
+          },
           loopCanary: { workDir: repoRoot, baseSha: () => quietBaseSha(repoRoot) },
           enqueue:
             extras.enqueue ??
