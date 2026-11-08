@@ -97,6 +97,11 @@ export interface ReconcilePr extends PrFacts {
   reclaimable?: boolean;
   /** AISDLC-1232: reruns already recorded for this head in `reentered.json`. */
   staleRerunCount?: number;
+  /**
+   * AISDLC-1238: the head the previous automatic CI round started from, set when the diff from it
+   * to this head touches only `backlog/**` and `.ai-sdlc/reviews/**` (the pipeline's own chore commits).
+   */
+  choreOnlySince?: string;
   /** AISDLC-1158: the commit the PR merged as, when the merge was read from GitHub. */
   mergeSha?: string;
 }
@@ -273,6 +278,39 @@ export function decide(
   return guardSameHead({ ...base, action }, f, record, maxSameHeadActions);
 }
 
+/** AISDLC-1238: timestamp of the last ordered CI round, as a spreadable context fragment. */
+function lastRoundAtOf(record: LandingRecord | undefined): { lastRoundAt?: string } {
+  const last = [...(record?.history ?? [])]
+    .reverse()
+    .find((h) => h.action === 'reenter' && h.state === 'real-failure');
+  return last ? { lastRoundAt: last.ts } : {};
+}
+
+/** AISDLC-1238: paths the pipeline's own chore commits touch. */
+const CHORE_PATH_RE = /^(backlog\/|\.ai-sdlc\/reviews\/)/;
+
+/** The previous round's head when the diff to `head` is chore-only; undefined otherwise or when unknown. */
+function choreOnlySinceOf(
+  run: CommandRunner,
+  cwd: string,
+  record: LandingRecord | undefined,
+  head: string | undefined,
+): string | undefined {
+  if (!record || !head) return undefined;
+  const last = [...record.history]
+    .reverse()
+    .find((h) => h.action === 'reenter' && h.state === 'real-failure');
+  if (!last?.headSha || last.headSha === head) return undefined;
+  const r = run(
+    'gh',
+    ['api', `repos/{owner}/{repo}/compare/${last.headSha}...${head}`, '--jq', '.files[].filename'],
+    { cwd },
+  );
+  if (r.status !== 0) return undefined;
+  const files = r.stdout.split('\n').filter((l) => l.trim() !== '');
+  return files.every((x) => CHORE_PATH_RE.test(x)) ? last.headSha : undefined;
+}
+
 /** AISDLC-1231: default rounds of automatic CI repair on one PR before the planner is told. */
 export const DEFAULT_MAX_CI_ROUNDS = 3;
 
@@ -304,6 +342,14 @@ function guardCiRounds(
   if (!record || !f.headSha) return undefined;
   // The round for this head is already ordered; the pass is the idempotent no-op.
   if (record.action === 'reenter' && record.headSha === f.headSha) return undefined;
+  // AISDLC-1238: a head that differs from the last round's only by chore commits is no progress.
+  if (f.choreOnlySince) {
+    return {
+      ...d,
+      action: 'route-to-planner',
+      note: `no content change since ${f.choreOnlySince.slice(0, 7)}`,
+    };
+  }
   const n = ciRoundsOf(record);
   const lastRound = [...record.history]
     .reverse()
@@ -377,6 +423,8 @@ export interface ActionContext {
   headSha?: string;
   failingLine?: string;
   boardDir: string;
+  /** AISDLC-1238: when the previous automatic CI round was ordered. */
+  lastRoundAt?: string;
 }
 
 export type ActionExecutor = (ctx: ActionContext) => ActionResult;
@@ -517,6 +565,7 @@ export function commandExecutor(run: CommandRunner, cwd: string, cliBin: string)
           pr: ctx.pr,
           headSha: ctx.headSha,
           ...(ctx.failingLine === undefined ? {} : { failingLine: ctx.failingLine }),
+          ...(ctx.lastRoundAt === undefined ? {} : { since: ctx.lastRoundAt }),
         });
         noteFile = writeCiRoundNote(ctx.boardDir, ctx.pr, ctx.headSha, note);
       } catch {
@@ -1195,6 +1244,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         ...(f.headSha === undefined ? {} : { headSha: f.headSha }),
         ...(d.failingLine === undefined ? {} : { failingLine: d.failingLine }),
         boardDir: opts.boardDir,
+        ...lastRoundAtOf(existing),
       });
     }
     if (result.failed) {
@@ -1535,7 +1585,13 @@ export function gatherFacts(
         unownedReason = 'draft task PR with no live manifest on the board and no done verdict';
       }
     }
+    const redCheck = checks.some((k) => k.conclusion === 'failure');
+    const choreOnlySince =
+      kind === 'task' && redCheck && !isDraft
+        ? choreOnlySinceOf(run, cwd, readLanding(boardDir, p.number), p.headRefOid)
+        : undefined;
     facts.push({
+      ...(choreOnlySince === undefined ? {} : { choreOnlySince }),
       ...(reclaimable ? { reclaimable } : {}),
       ...(unownedReason === undefined ? {} : { unownedReason }),
       ...(executorDead ? { executorDead, approvedVerdict } : {}),

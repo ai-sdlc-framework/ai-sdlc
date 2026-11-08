@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
+import { MAX_NOTE_CHARS } from '../dispatch/resume.js';
 import {
   buildCiRoundNote,
   CI_LOG_TAIL_BYTES,
@@ -16,6 +17,8 @@ import {
   ciRoundsOf,
   commandExecutor,
   decide,
+  gatherFacts,
+  landingPath,
   type LandingRecord,
   type ReconcilePr,
 } from './reconcile.js';
@@ -262,5 +265,122 @@ describe('CI round bound (AISDLC-1231)', () => {
     };
     expect(rows(2).join('\n')).toContain('ci-round 2/3');
     expect(rows(0).join('\n')).not.toContain('ci-round');
+  });
+});
+
+describe('planner ruling note (AISDLC-1238)', () => {
+  const comments = (list: { body: string; createdAt: string }[]) =>
+    JSON.stringify({ comments: list });
+  const withComments = (json: string): CommandRunner => {
+    const base = runner({ runId: '55', jobs: JOBS, log: 'boom\nassert failed' });
+    return (f, args, o) => (args[0] === 'pr' && args[1] === 'view' ? ok(json) : base(f, args, o));
+  };
+  const input = { pr: 9, headSha: 'abc1234def' };
+
+  it('leads with the newest ruling, then the failing step, then the log tail', () => {
+    const run = withComments(
+      comments([
+        { body: 'Planner ruling old', createdAt: '2026-11-08T08:00:00Z' },
+        { body: 'unrelated chatter', createdAt: '2026-11-08T11:00:00Z' },
+        {
+          body: 'PLANNER REPAIR ORDER: drop the RFC flip',
+          createdAt: '2026-11-08T10:04:00Z',
+        },
+      ]),
+    );
+    const note = buildCiRoundNote(run, board, input);
+    expect(note.split('\n')[0]).toBe('PLANNER REPAIR ORDER: drop the RFC flip');
+    expect(note).toContain('Failed step: test / Run unit tests');
+    expect(note).toContain('assert failed');
+    expect(note.length).toBeLessThanOrEqual(MAX_NOTE_CHARS);
+  });
+
+  it('ignores a ruling not newer than the last round', () => {
+    const run = withComments(
+      comments([{ body: 'Planner ruling x', createdAt: '2026-11-08T08:00:00Z' }]),
+    );
+    const plain = buildCiRoundNote(
+      runner({ runId: '55', jobs: JOBS, log: 'boom\nassert failed' }),
+      board,
+      input,
+    );
+    expect(buildCiRoundNote(run, board, { ...input, since: '2026-11-08T09:00:00Z' })).toBe(plain);
+  });
+
+  it('is byte-identical to the plain note when no ruling exists or comments cannot be read', () => {
+    const base = runner({ runId: '55', jobs: JOBS, log: 'boom\nassert failed' });
+    const plain = buildCiRoundNote(base, board, input);
+    expect(
+      buildCiRoundNote(withComments(comments([{ body: 'lgtm', createdAt: 'x' }])), board, input),
+    ).toBe(plain);
+    expect(buildCiRoundNote(withComments('not json'), board, input)).toBe(plain);
+  });
+
+  it('caps an oversized ruling', () => {
+    const run = withComments(
+      comments([{ body: `Planner ruling ${'z'.repeat(9000)}`, createdAt: '2026-11-08T10:00:00Z' }]),
+    );
+    expect(buildCiRoundNote(run, board, input).length).toBeLessThanOrEqual(MAX_NOTE_CHARS);
+  });
+});
+
+describe('no-content round (AISDLC-1238)', () => {
+  it('a chore-only head routes to the planner and is not a new round', () => {
+    const d = decide({ ...red, choreOnlySince: 'H0abcdef1234' }, record(hist(1)));
+    expect(d).toMatchObject({
+      action: 'route-to-planner',
+      note: 'no content change since H0abcde',
+    });
+    expect(
+      ciRoundsOf(
+        record([
+          ...hist(1),
+          { ts: 't', state: 'real-failure', action: 'route-to-planner', headSha: 'HNEW' },
+        ]),
+      ),
+    ).toBe(1);
+  });
+
+  it('a content head still reenters', () => {
+    expect(decide(red, record(hist(1))).action).toBe('reenter');
+  });
+
+  it('gatherFacts marks a chore-only diff from the last round head', () => {
+    mkdirSync(path.dirname(landingPath(board, 9)), { recursive: true });
+    writeFileSync(landingPath(board, 9), JSON.stringify(record(hist(1))));
+    const mk =
+      (files: string): CommandRunner =>
+      (_f, args) => {
+        if (args[0] === 'pr' && args[1] === 'list')
+          return ok(
+            JSON.stringify([
+              {
+                number: 9,
+                title: 'AISDLC-1',
+                headRefName: 'ai-sdlc/aisdlc-1',
+                headRefOid: 'HNEW',
+                isDraft: false,
+                isCrossRepository: false,
+                author: { login: 'bot' },
+              },
+            ]),
+          );
+        if (args[0] === 'pr' && args[1] === 'view')
+          return ok(
+            JSON.stringify({
+              statusCheckRollup: [
+                { name: 'ai-sdlc/pr-ready', conclusion: 'FAILURE', status: 'COMPLETED' },
+              ],
+            }),
+          );
+        if (args[0] === 'api' && args[1] === 'user') return ok('bot');
+        if (args[0] === 'api' && args[1]?.includes('compare')) return ok(files);
+        return bad;
+      };
+    const facts = (files: string) => gatherFacts(mk(files), board, board)?.[0];
+    const chore = facts('backlog/tasks/a.md\n.ai-sdlc/reviews/x.json\n');
+    const content = facts('backlog/tasks/a.md\nsrc/x.ts\n');
+    expect(chore?.choreOnlySince).toBe('H0');
+    expect(content?.choreOnlySince).toBeUndefined();
   });
 });

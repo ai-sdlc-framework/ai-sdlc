@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1238
 title: 'Automatic CI round yields to a planner ruling on the PR, and a developer round that changes nothing routes to the planner instead of burning a round'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-08'
 labels:
