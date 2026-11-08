@@ -220,6 +220,7 @@ import {
   gatherMainHealth,
   type ReconcilePr,
 } from '../hierarchy/reconcile.js';
+import { autoEnqueueFiled, readTaskOnMain } from '../hierarchy/filing-enqueue.js';
 import { createPlannerNotifier } from '../hierarchy/planner-notify.js';
 import { acquireReconcileLock, releaseReconcileLock } from '../hierarchy/open-pr-limit.js';
 import { gatherPrFacts } from '../hierarchy/pr-facts.js';
@@ -559,6 +560,17 @@ export async function runDispatchCli(
           closeSuperseded,
           stuckAfterMinutes: resolveStuckAfterMinutes(boardDir),
           notifyPlanner,
+          enqueueFiled: (pr, headBranch) =>
+            autoEnqueueFiled(boardDir, pr, headBranch, {
+              readTaskOnMain: (id) => readTaskOnMain(createSystemRunner(), cwd, id),
+              enqueue: (entries) =>
+                enqueueTasks(boardDir, entries, {
+                  baseSha: resolveBaseSha(cwd),
+                  dispatchedBy: 'reconcile-auto-enqueue',
+                  resolveTaskFile: (id) => findTaskFileRelative(id, cwd),
+                  workDir: cwd,
+                }),
+            }),
         });
         for (const st of report.stalls) {
           try {
