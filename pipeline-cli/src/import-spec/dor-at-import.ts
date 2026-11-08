@@ -543,6 +543,7 @@ export async function runDorAtImport(
       : await refineBacklogTask(rendered.id, {
           workDir: opts.workDir,
           taskFilePathOverride: rendered.tmpFilePath,
+          taskOrigin: 'import',
         });
   } finally {
     rendered.cleanup();

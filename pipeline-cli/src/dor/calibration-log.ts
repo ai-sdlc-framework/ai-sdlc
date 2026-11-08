@@ -68,6 +68,10 @@ export interface CalibrationEntryInput {
    * without re-walking the graph.
    */
   highestDownstreamPriority?: number;
+  /** Task file provenance (AISDLC-636.1). */
+  taskOrigin?: 'base-ref' | 'pr-tree' | 'import';
+  /** Whether a permissive `dor.stage-b-pass` outcome was allowed for this evaluation. */
+  permissiveAllowed?: boolean;
   /** Where the Stage B verdicts came from: the judgment, the subagent, both, or neither. */
   stageBSource?: 'none' | 'judgment' | 'subagent' | 'judgment+subagent';
 }
@@ -131,6 +135,10 @@ export interface CalibrationEntry {
    * "(unknown)" bucket in `cli-dor-corpus --blast-radius`.
    */
   highestDownstreamPriority?: number;
+  /** Task file provenance (AISDLC-636.1). */
+  taskOrigin?: 'base-ref' | 'pr-tree' | 'import';
+  /** Whether a permissive `dor.stage-b-pass` outcome was allowed for this evaluation. */
+  permissiveAllowed?: boolean;
   /** Where the Stage B verdicts came from (judgment, subagent, both, or none). */
   stageBSource?: 'none' | 'judgment' | 'subagent' | 'judgment+subagent';
 }
@@ -193,6 +201,8 @@ export function buildEntry(
     blastRadius,
     highestDownstreamPriority,
     stageBSource,
+    taskOrigin,
+    permissiveAllowed,
   } = input;
   const now = opts.now ?? (() => new Date());
 
@@ -249,6 +259,8 @@ export function buildEntry(
     ...(blastRadiusClean !== undefined ? { blastRadius: blastRadiusClean } : {}),
     ...(highestDownstreamPriority !== undefined ? { highestDownstreamPriority } : {}),
     ...(stageBSource !== undefined ? { stageBSource } : {}),
+    ...(taskOrigin !== undefined ? { taskOrigin } : {}),
+    ...(permissiveAllowed !== undefined ? { permissiveAllowed } : {}),
   };
 }
 
