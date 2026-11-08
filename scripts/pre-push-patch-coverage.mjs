@@ -70,6 +70,10 @@ export const GIT_REPO_ENV_VARS = [
 export function gitSafeEnv(env = process.env) {
   const out = { ...env };
   for (const k of GIT_REPO_ENV_VARS) delete out[k];
+  // `git -c` overrides (e.g. a trusted push's core.hooksPath) travel via these (AISDLC-1233).
+  for (const k of Object.keys(out)) {
+    if (k === 'GIT_CONFIG_PARAMETERS' || k.startsWith('GIT_CONFIG_')) delete out[k];
+  }
   return out;
 }
 
