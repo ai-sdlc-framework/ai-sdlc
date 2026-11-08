@@ -22,6 +22,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { ROSTER_FILENAME } from './roster.js';
+import type { HierarchyRole } from './types.js';
 
 /** Same allowlist as the hook and the skills. */
 export const SAFE_SESSION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -190,4 +191,46 @@ export function createSystemIdentity(
     startPid: process.ppid,
     ...lookup,
   };
+}
+
+/**
+ * The role the calling process holds in the roster under `boardDir`, or null (callers
+ * treat null as the operator). Never throws. Same resolution as {@link resolveCaller}.
+ */
+export function resolveCallerRole(
+  boardDir: string,
+  lookup: Partial<Pick<IdentityDeps, 'parentPid' | 'comm' | 'startPid'>> = {},
+): HierarchyRole | null {
+  try {
+    const caller = resolveCaller(createSystemIdentity(boardDir, lookup));
+    return caller ? (caller.role as HierarchyRole) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Claim ownership: `worker` must be the name the claim of `taskId` recorded, which is
+ * returned. A mistake guard, not authentication: the recorded name is readable from
+ * the inflight manifest. `recorded` is undefined when the task is not inflight.
+ * @throws when the task is not inflight, the claim recorded no worker, or the names differ.
+ */
+export function assertClaimOwner(
+  taskId: string,
+  inflight: { workerId?: string } | null | undefined,
+  worker: string,
+): string {
+  if (!inflight) {
+    throw new Error(`${taskId} is not inflight; there is nothing to complete`);
+  }
+  const recorded = inflight.workerId;
+  if (!recorded) {
+    throw new Error(`${taskId} has no recorded worker, so its claim holder cannot be verified`);
+  }
+  if (worker !== recorded) {
+    throw new Error(
+      `${taskId} is claimed by '${recorded}', not '${worker}'; the worker name must match the one recorded at claim time`,
+    );
+  }
+  return recorded;
 }

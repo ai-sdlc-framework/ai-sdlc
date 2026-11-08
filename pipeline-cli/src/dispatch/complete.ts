@@ -19,6 +19,7 @@ import {
   TASK_ID_RE,
   writeVerdict,
 } from './board.js';
+import { assertClaimOwner } from '../hierarchy/caller-identity.js';
 import { snapshotFailedManifest } from './requeue.js';
 import { snapshotDoneManifest } from './resume.js';
 import { markSessionOutcome } from './sessions.js';
@@ -93,20 +94,7 @@ export function splitCommaList(raw: string | undefined): string[] {
  *   holder cannot be verified), or `worker` differs from the recorded name.
  */
 export function assertClaimHolder(boardDir: string, taskId: string, worker: string): string {
-  const inflight = readInflightManifest(boardDir, taskId);
-  if (!inflight) {
-    throw new Error(`${taskId} is not inflight; there is nothing to complete`);
-  }
-  const recorded = inflight.workerId;
-  if (!recorded) {
-    throw new Error(`${taskId} has no recorded worker, so its claim holder cannot be verified`);
-  }
-  if (worker !== recorded) {
-    throw new Error(
-      `${taskId} is claimed by '${recorded}', not '${worker}'; the worker name must match the one recorded at claim time`,
-    );
-  }
-  return recorded;
+  return assertClaimOwner(taskId, readInflightManifest(boardDir, taskId), worker);
 }
 
 /**
@@ -173,22 +161,8 @@ export function completeTask(boardDir: string, opts: CompleteOptions): CompleteR
     }
     throw new Error(`${opts.taskId} is not inflight; there is nothing to complete`);
   }
-  // The supplied worker name must equal the name the claim recorded on the
-  // manifest, and a manifest with no recorded name is refused. This guards
-  // against completing the wrong task by mistake; it is not authentication,
-  // because the recorded name is readable from the inflight manifest. The
-  // recorded name is never overwritten.
-  const workerId = inflight.workerId;
-  if (!workerId) {
-    throw new Error(
-      `${opts.taskId} has no recorded worker, so its claim holder cannot be verified`,
-    );
-  }
-  if (opts.workerId !== workerId) {
-    throw new Error(
-      `${opts.taskId} is claimed by '${workerId}', not '${opts.workerId}'; the worker name must match the one recorded at claim time`,
-    );
-  }
+  // Claim ownership is the shared check (caller-identity.ts); the recorded name is never overwritten.
+  const workerId = assertClaimOwner(opts.taskId, inflight, opts.workerId);
   const now = opts.now ?? (() => new Date());
   const verdict: DispatchVerdict = {
     schemaVersion: 'v1',

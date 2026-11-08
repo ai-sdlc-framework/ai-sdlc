@@ -1,8 +1,7 @@
 ---
 id: AISDLC-718
-title: >-
-  One role-resolution implementation: consolidate onto caller-identity
-status: To Do
+title: 'One role-resolution implementation: consolidate onto caller-identity'
+status: Done
 assignee: []
 created_date: '2026-10-04'
 labels:
@@ -11,14 +10,21 @@ labels:
 dependencies:
   - AISDLC-717
 references:
-  - pipeline-cli/src/hierarchy/session-role.ts
   - pipeline-cli/src/hierarchy/caller-identity.ts
   - pipeline-cli/src/hierarchy/caller-identity.test.ts
   - ai-sdlc-plugin/hooks/lib/hierarchy-role.js
   - pipeline-cli/src/cli/complete-task.ts
 priority: low
 dispatchable: true
-dispatchableReason: 'Unparked 2026-11-07 by operator ruling (planner critical-path review).'
+dispatchableReason: Unparked 2026-11-07 by operator ruling (planner critical-path review).
+drift_log:
+  - date: '2026-11-08'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/src/hierarchy/session-role.ts
+    resolution: flagged
+drift_checked: '2026-11-08'
 ---
 
 ## Description

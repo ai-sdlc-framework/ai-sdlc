@@ -6,10 +6,11 @@
  * hierarchy roster needs to be told what it is again; this builds that short
  * block. Any other session, and any other source, gets nothing.
  *
- * LOCKSTEP: `resolveSessionRole` here and `resolveCallerRole` in
- * `pipeline-cli/src/hierarchy/session-role.ts` implement the same resolution and
- * MUST change together. `pipeline-cli/src/hierarchy/session-role.test.ts` loads
- * both and asserts they agree.
+ * LOCKSTEP: `resolveSessionRole` here is the standalone JavaScript copy of
+ * `resolveCaller` in `pipeline-cli/src/hierarchy/caller-identity.ts`, the single
+ * TypeScript implementation (a hook cannot import compiled TypeScript). They MUST
+ * change together; `caller-identity.parity.test.ts` runs both over the same
+ * fixtures and fails when they differ.
  *
  * The roster is read with plain JSON parsing and a minimal shape check: the hook
  * is a standalone script and must never throw into session start.
