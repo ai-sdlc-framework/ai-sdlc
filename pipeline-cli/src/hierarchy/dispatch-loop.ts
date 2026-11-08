@@ -23,6 +23,7 @@
  * a clear, but can never send a second one.
  */
 
+import { retireFailedLanded } from '../dispatch/retire-landed.js';
 import { DEFAULT_QUOTA_FLOOR, lowestRemaining, type Quota } from './gh-calls.js';
 import {
   existsSync,
@@ -484,6 +485,8 @@ export interface LoopDeps {
   usageIngest?: () => void;
   /** Daily board backup (AISDLC-1130); best effort, must not block the tick. */
   boardBackup?: () => void;
+  /** Landed task ids for retiring failed verdicts (AISDLC-1243); absent means no retire step. */
+  completedOnMain?: () => ReadonlyMap<string, string> | undefined;
   /** Ephemeral executors (RFC-0059): down on verdict, sweep, spawn per claim; absent means standing executors only. */
   ephemeral?: EphemeralDeps;
   /** PRs for the closed-unmerged KPI (AISDLC-831); undefined when GitHub cannot be read. */
@@ -1106,6 +1109,13 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     deps.boardBackup?.();
   } catch {
     /* a failed backup must never stop the dispatch loop */
+  }
+  if (deps.completedOnMain) {
+    try {
+      retireFailedLanded(deps.boardDir, { completedOnMain: deps.completedOnMain, now: deps.now });
+    } catch {
+      /* retiring stale failed verdicts must never stop the dispatch loop */
+    }
   }
   const githubFresh = githubReadFresh(deps, state);
   const readGithub = !quotaSkip && !githubFresh;

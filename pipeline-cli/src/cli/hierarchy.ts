@@ -86,6 +86,7 @@ import {
 } from '../dispatch/board.js';
 import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
+import { completedTaskIdsOnMain } from '../dispatch/retire-landed.js';
 import { requeueFailed } from '../dispatch/requeue.js';
 import { backupBoard, backupDirFor, boardRecoveryHint } from '../dispatch/board-recovery.js';
 import { backupMemory, backupRepoMemory, memoryBackupHint } from '../memory-dream/backup.js';
@@ -674,6 +675,8 @@ export async function runHierarchyCli(
     usageIngest?: () => void;
     /** Replaces the daily board backup the tick runs (tests). */
     boardBackup?: () => void;
+    /** Replaces the landed-task read of `origin/main` (tests). */
+    completedOnMain?: () => ReadonlyMap<string, string> | undefined;
     /** Replaces the usage endpoint and credential reads (tests). */
     usage?: Partial<UsageDeps>;
     /** Replaces the demo's system dependencies (tests). */
@@ -1421,6 +1424,8 @@ export async function runHierarchyCli(
                     }).cap,
                 },
               }),
+          // AISDLC-1243: a failed verdict whose task landed anyway is retired.
+          completedOnMain: extras.completedOnMain ?? (() => completedTaskIdsOnMain(repoRoot)),
           // AISDLC-1130: once a day the board is tarred under ~/.ai-sdlc/board-backups/.
           boardBackup:
             extras.boardBackup ??
