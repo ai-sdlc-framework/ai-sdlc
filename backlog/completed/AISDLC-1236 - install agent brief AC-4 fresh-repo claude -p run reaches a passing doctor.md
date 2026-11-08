@@ -15,7 +15,7 @@ references:
   - docs/getting-started/install-agent-brief.md
   - docs/getting-started/onboarding.md
   - backlog/completed/AISDLC-1179 - publish install instructions as an agent brief before the raw commands.md
-  - backlog/tasks/AISDLC-1179.1 - install agent brief AC-4 fresh-repo claude -p run reaches a passing doctor.md
+  - backlog/completed/AISDLC-1179.1 - install agent brief AC-4 fresh-repo claude -p run reaches a passing doctor.md
 priority: medium
 dispatchable: true
 dispatchableReason: 'Carries the AC-4 remainder of AISDLC-1179 under a third id: AISDLC-1179.1 was marked landed on the dispatch board by filing PR #2546 (DEC-0399, leave-done) and a board id is never reusable. Operator ruling 2026-11-07 (decision rubric, Option A) still applies.'
@@ -71,7 +71,7 @@ Added scripts/smoke-install-brief.mjs and its unit test, and moved parent AISDLC
 - scripts/smoke-install-brief.mjs
 - scripts/smoke-install-brief.test.mjs
 - backlog/completed/AISDLC-1179 - publish install instructions as an agent brief before the raw commands.md
-- backlog/tasks/AISDLC-1179.1 - install agent brief AC-4 fresh-repo claude -p run reaches a passing doctor.md
+- backlog/completed/AISDLC-1179.1 - install agent brief AC-4 fresh-repo claude -p run reaches a passing doctor.md
 - backlog/tasks/AISDLC-1236 - install agent brief AC-4 fresh-repo claude -p run reaches a passing doctor.md
 
 ## Design decisions
