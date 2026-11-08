@@ -2,7 +2,7 @@
 id: AISDLC-701
 title: >-
   Attestation leaf binding hardening: nonce required for independent everywhere, atomic marker claim, nonce check before persisting, tested marker lookup
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-03'
 labels:
