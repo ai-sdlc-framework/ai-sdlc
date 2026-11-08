@@ -1,0 +1,41 @@
+---
+id: AISDLC-1249
+title: 'cli-decisions add --file and answer --file push to distinct branches, so an answer never collides with the merged add branch left on origin'
+status: To Do
+assignee: []
+created_date: '2026-11-08'
+labels:
+  - decisions
+  - filing
+  - bug
+dependencies: []
+references:
+  - pipeline-cli/src/cli/decisions.ts
+  - pipeline-cli/src/cli/file.ts
+  - docs/operations/decision-authority.md
+priority: medium
+dispatchable: true
+dispatchableReason: 'Planner wake 2026-11-08 18:0xZ (DEC-0401 keep-and-automate): cli-decisions answer DEC-0401 --file --pr pushed its event commit to ai-sdlc/file-dec-0401, the branch the add step had used for #2583 and that origin still held after the merge; the push was rejected as non-fast-forward and gh pr create failed with an empty message, so the planner opened #2586 by hand from the pushed commit. The same name is reused by every later event of a decision.'
+---
+
+## Description
+
+**Gap.** `cli-decisions ... --file` files through `cli-file` on branch `ai-sdlc/file-<dec>` (help text, AISDLC-1161) for every event type of a decision: `add` and `answer` push to the same name. GitHub does not delete the branch when the add PR merges, so the answer's push is rejected as non-fast-forward against a branch whose tip is already on main, and the error is reported as `gh pr create failed:` with no message. Nine such `ai-sdlc/file-*` leftovers sit on origin today (`file-790`, `file-dec-0111`, `file-dec-0224`, `file-dec-0401` among them).
+
+**Shape.** The branch carries the event type and a short time stamp: `ai-sdlc/file-<dec>-<type>-<hhmm>`; the `--update` and `--close` filings of `cli-file task` already use their own prefixes. The error path reports the git push stderr, not the later `gh pr create` step. No remote branch deletion is added (branch cleanup stays with the repository setting and `/ai-sdlc cleanup`).
+
+## Fix
+
+**Five-step review (requirements first).**
+1. Question: should the CLI instead delete the merged branch? No; agents never delete branches, and a unique name removes the collision without a destructive step.
+2. Delete: the shared single branch name per decision.
+3. Simplify: one branch-name helper in `cli/file.ts` used by both callers.
+4. Accelerate: none.
+5. Automate: a test that two consecutive `--file` events of one decision produce different branch names, and a test that a rejected push surfaces its stderr.
+
+## Acceptance Criteria
+
+- [ ] AC-1: `cli-decisions add --file` and a following `answer --file` on the same decision push to different branches; test.
+- [ ] AC-2: a rejected `git push` reports the push stderr as the error and does not run `gh pr create`; test.
+- [ ] AC-3: `docs/operations/decision-authority.md` filing paragraph names the branch pattern.
+- [ ] AC-4: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
