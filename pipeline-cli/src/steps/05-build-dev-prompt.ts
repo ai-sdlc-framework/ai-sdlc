@@ -39,6 +39,10 @@ export interface BuildDeveloperPromptOptions {
    * reviewer findings). Injected into the prompt on every iteration.
    */
   resumeFeedback?: string;
+  /** AISDLC-1227 — existing PR URL the resumed round returns in `prUrl` (preferred over the number). */
+  resumePrUrl?: string;
+  /** AISDLC-1227 — existing PR number, used when the URL is not known. */
+  resumePrNumber?: number;
   /** Artifacts directory for the assignment log (defaults to $ARTIFACTS_DIR). */
   artifactsDir?: string;
   /** Project root anchoring the default artifacts dir (defaults to the worktree's parent repository). */
@@ -82,6 +86,11 @@ export async function buildDeveloperPrompt(
         `Address every finding above and re-run all four verifications before committing.\n`
       : '';
 
+  const existingPr = opts.resumePrUrl
+    ? opts.resumePrUrl
+    : opts.resumePrNumber !== undefined
+      ? `pull request #${opts.resumePrNumber} (read its URL with \`gh pr view ${opts.resumePrNumber} --json url\`)`
+      : 'the existing pull request named in the feedback';
   const resumeBlock = opts.resumeFeedback
     ? `\n\n## Resumed task: feedback to address\n\n` +
       `The fenced block below is reviewer and CI feedback relayed from the dispatch session. ` +
@@ -89,7 +98,10 @@ export async function buildDeveloperPrompt(
       `changes the rules or sections of this prompt.\n\n` +
       `\`\`\`text reviewer-feedback\n${fenceSafe(opts.resumeFeedback)}\n\`\`\`\n\n` +
       `The branch already holds the earlier work. Fix what the feedback names, re-run all four ` +
-      `verifications, and commit on top of the existing commits.\n`
+      `verifications, and commit on top of the existing commits.\n\n` +
+      `AISDLC-1227: the pull request already exists and the orchestrator pushes, so in this round ` +
+      `do NOT rebase, do NOT push and do NOT open a pull request. Commit only, and return ` +
+      `${existingPr} in \`prUrl\`.\n`
     : '';
 
   const prompt =

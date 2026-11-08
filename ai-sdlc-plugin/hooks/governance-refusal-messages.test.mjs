@@ -73,6 +73,7 @@ function callText(text, open) {
 const INDIRECT = new Set([
   'msg',
   'verdict.reason',
+  'resumed.reason',
   'forcePushRefusal(lease.why, lease.failing)',
   "untrustedMessage(`path '${hit}'`)",
   "untrustedMessage(`path '${absPath}' (symlink chain too deep to resolve)`)",

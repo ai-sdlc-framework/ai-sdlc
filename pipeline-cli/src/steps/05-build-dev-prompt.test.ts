@@ -164,3 +164,32 @@ describe('Step 5 — artifacts dir anchoring (AISDLC-654.2)', () => {
     expect(existsSync(join(pinned, '.ai-sdlc'))).toBe(false);
   });
 });
+
+describe('Step 5 — resumed round is commit-only (AISDLC-1227)', () => {
+  const base = {
+    taskId: 'AISDLC-1',
+    task,
+    branch: 'ai-sdlc/aisdlc-1-demo',
+    worktreePath: '/tmp/wt',
+  };
+  it('states no rebase, no push, no PR and names the PR URL to return', async () => {
+    const r = await buildDeveloperPrompt({
+      ...base,
+      resumeFeedback: 'fix it',
+      resumePrUrl: 'https://github.com/o/r/pull/7',
+    });
+    expect(r.prompt).toContain('do NOT rebase, do NOT push and do NOT open a pull request');
+    expect(r.prompt).toContain('https://github.com/o/r/pull/7');
+  });
+  it('falls back to the PR number, then to a generic reference', async () => {
+    const n = await buildDeveloperPrompt({ ...base, resumeFeedback: 'x', resumePrNumber: 7 });
+    expect(n.prompt).toContain('pull request #7');
+    const g = await buildDeveloperPrompt({ ...base, resumeFeedback: 'x' });
+    expect(g.prompt).toContain('the existing pull request named in the feedback');
+  });
+  it('leaves the prompt unchanged without resumeFeedback', async () => {
+    const r = await buildDeveloperPrompt(base);
+    expect(r.prompt).not.toContain('AISDLC-1227');
+    expect(r.prompt).not.toContain('do NOT push');
+  });
+});
