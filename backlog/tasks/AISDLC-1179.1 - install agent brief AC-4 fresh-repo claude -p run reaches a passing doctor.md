@@ -16,8 +16,8 @@ references:
   - docs/getting-started/onboarding.md
   - backlog/tasks/AISDLC-1179 - publish install instructions as an agent brief before the raw commands.md
 priority: medium
-dispatchable: true
-dispatchableReason: 'Carries the AC-4 remainder of AISDLC-1179, re-dispatched by operator ruling 2026-11-07 (decision rubric, Option A). The parent id is taken on the dispatch board (#2354 landed), so the remainder runs under its own id.'
+dispatchable: false
+dispatchableReason: 'Superseded by AISDLC-1236 (DEC-0399, leave-done): the dispatch board marked this id landed from filing PR #2546 and a board id is never reusable. Closes when AISDLC-1236 lands.'
 ---
 
 ## Description
