@@ -77,6 +77,8 @@
  *     retry limit. A failed task whose verdict names an open PR is PR follow-up: it is requeued past the cap with
  *     `followUp: true` and no retry used. There is no `--note`: a task with a PR re-enters with `reenter`.
  *
+ *   - `reenter <task-id> --note <text>` on a task with no PR (AISDLC-1203) writes the note into
+ *     the task's resume note and requeues a fresh round; without `--note` it refuses.
  *   - `reenter <pr|task-id> [--note <text> | --note-file <path>]` (AISDLC-882) — re-enter a
  *     pull request keyed on its state. A state a machine can fix (BEHIND, a cancelled or infra
  *     check) runs that action and writes no manifest. A state that needs an executor (a real
@@ -1729,12 +1731,12 @@ export async function runDispatchCli(
         // AISDLC-1053: say which path the next resume takes, so dispatch sees whether the note
         // reaches a developer.
         const resumePath =
-          result.kind === 'manifest'
+          result.kind === 'manifest' || result.kind === 'task-note'
             ? developerRound
               ? 'developer-round'
               : await predictResumePath(workDir, result.taskId)
             : undefined;
-        if (developerRound && result.kind !== 'manifest') {
+        if (developerRound && result.kind === 'machine') {
           process.stderr.write(
             'cli-dispatch reenter: --developer-round ignored; the PR was routed to the machine, not a manifest\n',
           );
@@ -1889,7 +1891,7 @@ Subcommands:
   close-superseded <pr>   (DEC-0266: close a CLI-opened PR whose every file is already on main via a landed PR; exit 3 otherwise)
   reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
   requeue --task-id <id> [--retry-limit <n>]   (PR-less failures; meant for the dispatch session; limit at most 2)
-  reenter <pr|task-id> [--note <text>] [--developer-round] [--decision <id>]   (re-enter a PR keyed on its state; replaces resume)
+  reenter <pr|task-id> [--note <text>] [--developer-round] [--decision <id>]   (re-enter a PR keyed on its state; replaces resume; a task with no PR needs --note, which requeues a fresh round)
   complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>] [--pr-url <url>]
            [--follow-ups <ids>] [--decisions <ids>] [--notes <s>] [--cause <s>]
   next-subid <task-id> [--work-dir <path>]
