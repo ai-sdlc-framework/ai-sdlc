@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1247
 title: 'The review spawn list always includes security-reviewer when the coverage rule requires it, so the merged set never fails its own coverage gate'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-08'
 labels:
