@@ -2,7 +2,7 @@
 id: AISDLC-654.1
 title: >-
   RFC-0050 follow-up: resolveModel reads the task class from the base-ref task file, not the worktree copy
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-01'
 labels:
