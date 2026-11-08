@@ -3,7 +3,7 @@ id: AISDLC-856
 title: >-
   check-rfc-docs flags an RFC whose status is Draft while its lifecycle is
   Implemented, wired into ai-sdlc-gate
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-13'
 labels:
@@ -52,9 +52,9 @@ Out of scope: any RFC body or frontmatter change; the registry generator (site t
 
 ## Acceptance Criteria
 
-- [ ] `scripts/check-rfc-docs.mjs` fails on a fixture RFC with `status: Draft` and `lifecycle: Implemented` that is not in the known set, and passes the current `spec/rfcs/`.
-- [ ] `.github/workflows/ai-sdlc-gate.yml` runs the check as part of the existing `check-rfc-docs.mjs` step; the workflow test under `.github/workflows/__tests__/` asserts it.
-- [ ] `pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] `scripts/check-rfc-docs.mjs` fails on a fixture RFC with `status: Draft` and `lifecycle: Implemented` that is not in the known set, and passes the current `spec/rfcs/`.
+- [x] `.github/workflows/ai-sdlc-gate.yml` runs the check as part of the existing `check-rfc-docs.mjs` step; the workflow test under `.github/workflows/__tests__/` asserts it.
+- [x] `pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## Deferred (needs approver decision)
 
@@ -64,3 +64,28 @@ Part (b) is not in this task's scope and is not an acceptance criterion. Promoti
 2. RFC-0036: decide whether to move lifecycle to `Implemented` given `import-spec` and `rfc-init` ship, or document which phases remain.
 
 When the approver decides, file a follow-up task for the flips and shrink the known set in the check.
+
+## Final Summary
+
+## Summary
+check-rfc-docs.mjs now fails an RFC with status Draft and lifecycle Implemented unless it is one of the eight existing RFCs, which are grandfathered in a known set. The gate already runs the check through `pnpm rfc:check`, and a new workflow test asserts that.
+
+## Changes
+- scripts/check-rfc-docs.mjs
+- scripts/check-rfc-docs.test.mjs
+- .github/workflows/__tests__/ai-sdlc-gate.test.mjs
+- backlog/tasks/AISDLC-856 - reconcile rfc status with lifecycle for implemented rfcs.md
+
+## Design decisions
+I did not edit `ai-sdlc-gate.yml`, because its step already runs `pnpm rfc:check`, which invokes `check-rfc-docs.mjs`. The new test in `ai-sdlc-gate.test.mjs` asserts that wiring. An existing runtimeEvidence test fixture used Draft with Implemented, so I changed it to Approved. RFC-0036 (Ready for Review) is not covered, since the acceptance criteria name only Draft. The commit scope had to be `ci`, because commitlint rejected `rfc`. The `1c5e3749` commit only records the claim edit to the backlog task file.
+
+## Verification
+- `pnpm build` — passed (dashboard build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (240 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
