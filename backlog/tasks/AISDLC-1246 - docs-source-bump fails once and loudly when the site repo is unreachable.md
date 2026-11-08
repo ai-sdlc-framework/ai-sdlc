@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1246
 title: 'docs-source-bump.yml: unreachable site repository is reported once as an operator action, not as a red run on every push to main'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-08'
 labels:

@@ -52,24 +52,44 @@ jobs:
           fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check the site repository is visible to the token
+        id: site
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
+        run: |
+          # AISDLC-1246: an unreachable site repository is an operator action
+          # (grant the token access, or move to a pull model), not a red run on
+          # every push. Warn once and let every later step skip.
+          if gh repo view "$SITE_REPO" --json name >/dev/null 2>&1; then
+            echo "reachable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "reachable=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Docs source bump skipped::Site repository $SITE_REPO is not visible to AI_SDLC_PAT. Operator action: grant the token access to it, or switch to pulling from the site repository. No bump PR was opened."
+          fi
+
+      - if: steps.site.outputs.reachable == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - if: steps.site.outputs.reachable == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - if: steps.site.outputs.reachable == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
 
       - name: Build pipeline-cli
+        if: steps.site.outputs.reachable == 'true'
         run: |
           pnpm install --frozen-lockfile
           pnpm --filter @ai-sdlc/pipeline-cli... build
 
       - name: Open or update the bump PR in the site repository
         id: pr
+        if: steps.site.outputs.reachable == 'true'
         env:
           GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
           SHA: ${{ steps.sha.outputs.sha }}

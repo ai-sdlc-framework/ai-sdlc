@@ -53,6 +53,18 @@ describe('docs-source-bump workflow (AISDLC-859)', () => {
   });
   it('references the PAT only in the single bump job', () => {
     assert.deepEqual(Object.keys(wf.jobs), ['bump']);
-    assert.equal((raw.match(/secrets\.AI_SDLC_PAT/g) ?? []).length, 2);
+    assert.equal((raw.match(/secrets\.AI_SDLC_PAT/g) ?? []).length, 3);
+  });
+  it('AISDLC-1246: an unreachable site repo warns once and skips every later step', () => {
+    const steps = wf.jobs.bump.steps;
+    const idx = steps.findIndex((st) => st.id === 'site');
+    assert.ok(idx >= 0);
+    assert.match(steps[idx].run, /::warning/);
+    assert.ok(!/exit 1/.test(steps[idx].run));
+    for (const st of steps.slice(idx + 1)) {
+      // The arm step is gated on the bump step's output, which is empty when skipped.
+      if (st.if === "steps.pr.outputs.number != ''") continue;
+      assert.match(st.if, /steps\.site\.outputs\.reachable == 'true'/);
+    }
   });
 });
