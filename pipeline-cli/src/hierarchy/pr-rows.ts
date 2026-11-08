@@ -9,7 +9,13 @@
 import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { listLanding, recordLastActionAt, type LandingRecord } from './reconcile.js';
+import {
+  ciRoundsOf,
+  DEFAULT_MAX_CI_ROUNDS,
+  listLanding,
+  recordLastActionAt,
+  type LandingRecord,
+} from './reconcile.js';
 
 /** One open PR's decision, as logged, snapshotted and printed. */
 export interface PrRow {
@@ -102,14 +108,20 @@ function age(at: string | undefined, nowMs: number): string {
 }
 
 /** The status table over the open landing records. Empty when there are none. */
-export function formatPrTable(boardDir: string, nowMs: number): string[] {
+export function formatPrTable(
+  boardDir: string,
+  nowMs: number,
+  maxCiRounds = DEFAULT_MAX_CI_ROUNDS,
+): string[] {
   const open = listLanding(boardDir).filter((r) => !r.landed && !r.closedUnlanded);
   if (open.length === 0) return [];
   return [
     'open PRs:',
     ...open.map((r) => {
       const row = rowFromRecord(r);
-      return `  #${row.pr} lane ${row.lane}, action ${row.action}, reason ${row.reason}, owner ${row.owner}, age ${age(row.lastActionAt, nowMs)}`;
+      const rounds = r.kind === 'task' ? ciRoundsOf(r) : 0;
+      const ci = rounds > 0 ? ` ci-round ${Math.min(rounds, maxCiRounds)}/${maxCiRounds}` : '';
+      return `  #${row.pr} lane ${row.lane}, action ${row.action}, reason ${row.reason}, owner ${row.owner}${ci}, age ${age(row.lastActionAt, nowMs)}`;
     }),
   ];
 }

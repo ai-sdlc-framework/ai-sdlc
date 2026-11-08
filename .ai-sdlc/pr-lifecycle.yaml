@@ -27,3 +27,4 @@ spec:
     handshakeCeilingMs: 30000
   loopGuard:
     maxSameHeadActions: 1
+    maxCiRounds: 3

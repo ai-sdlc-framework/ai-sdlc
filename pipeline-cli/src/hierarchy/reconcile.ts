@@ -23,6 +23,7 @@ import {
 import path from 'node:path';
 
 import { now as clockNow } from '../clock.js';
+import { buildCiRoundNote, writeCiRoundNote } from './ci-round.js';
 import { gateRunListArgs, parseGateRunId } from './gate-run.js';
 import { classifyPr, type PrCheck, type PrFacts, type PrState } from './pr-state.js';
 import { collectVerdicts, readInflightManifest, readQueuedManifest } from '../dispatch/board.js';
@@ -193,6 +194,7 @@ export function decide(
   record?: LandingRecord,
   ruled?: RulingFacts,
   maxSameHeadActions = 1,
+  maxCiRounds = DEFAULT_MAX_CI_ROUNDS,
 ): Decision {
   const kind = detectKind({
     ...(f.title === undefined ? {} : { title: f.title }),
@@ -263,7 +265,51 @@ export function decide(
     if (ruled.untilMerged) return { ...base, action: 'ready-to-requeue' };
     if (HELD_ACTIONS.has(action)) return { ...base, action: 'held', ruling: ruled.ruling.text };
   }
+  if (action === 'reenter' && c.state === 'real-failure') {
+    const bounded = guardCiRounds({ ...base, action }, f, record, maxCiRounds);
+    if (bounded) return bounded;
+  }
   return guardSameHead({ ...base, action }, f, record, maxSameHeadActions);
+}
+
+/** AISDLC-1231: default rounds of automatic CI repair on one PR before the planner is told. */
+export const DEFAULT_MAX_CI_ROUNDS = 3;
+
+/** States that end a run of CI failures: the PR was green on some head. */
+const GREEN_STATES = new Set<PrState>(['armed-clean', 'ready-to-flip', 'merged']);
+
+/** CI rounds already ordered on this PR since it was last green (history entries of `reenter`). */
+export function ciRoundsOf(record: LandingRecord | undefined): number {
+  let n = 0;
+  for (let i = (record?.history.length ?? 0) - 1; i >= 0; i--) {
+    const h = record!.history[i]!;
+    if (GREEN_STATES.has(h.state)) break;
+    if (h.action === 'reenter' && h.state === 'real-failure') n++;
+  }
+  return n;
+}
+
+/**
+ * AISDLC-1231: a task PR with a red check gets a developer round automatically, bounded by
+ * `maxCiRounds`. A fourth round, or a round on the head the previous round started from
+ * (the executor pushed nothing), goes to the planner as `ci-rounds@<n>`.
+ */
+function guardCiRounds(
+  d: Decision,
+  f: ReconcilePr,
+  record: LandingRecord | undefined,
+  maxCiRounds: number,
+): Decision | undefined {
+  if (!record || !f.headSha) return undefined;
+  // The round for this head is already ordered; the pass is the idempotent no-op.
+  if (record.action === 'reenter' && record.headSha === f.headSha) return undefined;
+  const n = ciRoundsOf(record);
+  const lastRound = [...record.history]
+    .reverse()
+    .find((h) => h.action === 'reenter' && h.state === 'real-failure');
+  const sameHead = lastRound !== undefined && lastRound.headSha === f.headSha;
+  if (n < maxCiRounds && !sameHead) return undefined;
+  return { ...d, action: 'route-to-planner', note: `ci-rounds@${n + 1}` };
 }
 
 /** Actions that are not machine work on the PR, so the same-head guard never counts them. */
@@ -362,7 +408,12 @@ export function developerRoundNote(failingLine?: string): string | undefined {
   return undefined;
 }
 
-export function actionCommands(ctx: ActionContext, cliBin: string): ActionCommand[] | null {
+export function actionCommands(
+  ctx: ActionContext,
+  cliBin: string,
+  /** AISDLC-1231: the written CI-round note; replaces the failing-line note. */
+  noteFile?: string,
+): ActionCommand[] | null {
   const dispatch = (...a: string[]) => ({
     file: 'node',
     args: [path.join(cliBin, 'cli-dispatch.mjs'), ...a, '--board-dir', ctx.boardDir],
@@ -373,6 +424,9 @@ export function actionCommands(ctx: ActionContext, cliBin: string): ActionComman
     case 'reenter': {
       // A red that only new code can fix needs the developer in the round (AISDLC-1093): an
       // unchanged patch id would otherwise resume as re-sign only.
+      if (noteFile !== undefined) {
+        return [dispatch('reenter', String(ctx.pr), '--developer-round', '--note-file', noteFile)];
+      }
       const note = developerRoundNote(ctx.failingLine);
       if (note === undefined) return [reenter()];
       return [dispatch('reenter', String(ctx.pr), '--developer-round', '--note', note)];
@@ -449,7 +503,26 @@ function firstLine(text: string): string {
 /** Default executor: runs the argv the action names through the injected runner. */
 export function commandExecutor(run: CommandRunner, cwd: string, cliBin: string): ActionExecutor {
   return (ctx) => {
-    const cmds = actionCommands(ctx, cliBin);
+    // AISDLC-1231: a red check on a task PR is a developer round carrying the failing log.
+    let noteFile: string | undefined;
+    if (
+      ctx.action === 'reenter' &&
+      ctx.state === 'real-failure' &&
+      ctx.kind === 'task' &&
+      ctx.headSha
+    ) {
+      try {
+        const note = buildCiRoundNote(run, cwd, {
+          pr: ctx.pr,
+          headSha: ctx.headSha,
+          ...(ctx.failingLine === undefined ? {} : { failingLine: ctx.failingLine }),
+        });
+        noteFile = writeCiRoundNote(ctx.boardDir, ctx.pr, ctx.headSha, note);
+      } catch {
+        noteFile = undefined; // falls back to the plain reenter
+      }
+    }
+    const cmds = actionCommands(ctx, cliBin, noteFile);
     if (!cmds) {
       return ctx.action === 'arm'
         ? { ran: false, note: 'route to planner: no task id and not the decisions-sync branch' }
@@ -780,6 +853,8 @@ export interface ReconcileOpts {
   mainHealth?: MainHealth;
   /** `loopGuard.maxSameHeadActions` from `.ai-sdlc/pr-lifecycle.yaml`; default 1. */
   maxSameHeadActions?: number;
+  /** `loopGuard.maxCiRounds` from `.ai-sdlc/pr-lifecycle.yaml`; default 3 (AISDLC-1231). */
+  maxCiRounds?: number;
   /**
    * AISDLC-1011 (DEC-0266): asked for a PR that would otherwise go to the planner.
    * Returns the superseding PR number when it closed the PR, else undefined.
@@ -813,7 +888,7 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
   for (const f of facts) {
     const existing = readLanding(opts.boardDir, f.prNumber);
     const ruled = rulingFacts(opts.boardDir, f, facts);
-    let d = decide(f, existing, ruled, opts.maxSameHeadActions);
+    let d = decide(f, existing, ruled, opts.maxSameHeadActions, opts.maxCiRounds);
     if (d.note === LIVE_CLAIM_NOTE) {
       report.skippedFailures.push({ pr: f.prNumber, taskId: f.taskId, reason: d.note });
       console.error(`[reconcile] PR #${f.prNumber} ${f.taskId}: ${d.note}`);

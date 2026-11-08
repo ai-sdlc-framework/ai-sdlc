@@ -393,7 +393,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     rows,
     ...(routedToPlanner.length > 0 ? { routedToPlanner } : {}),
     ...(agedPrs.length > 0 ? { agedPrs } : {}),
-    prTable: formatPrTable(deps.boardDir, nowMs),
+    prTable: formatPrTable(deps.boardDir, nowMs, loadPrLifecycleConfig(deps.cwd).maxCiRounds),
     unowned: landings.filter((l) => l.owner === 'unowned').length,
     ...(drainStall ? { drainStall } : {}),
     ...(stuck.length > 0

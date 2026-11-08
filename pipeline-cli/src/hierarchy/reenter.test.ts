@@ -210,6 +210,15 @@ describe('reenter, a real failure on the head', () => {
     expect(r.kind === 'manifest' && r.resume.developerRound).toBe(true);
   });
 
+  it('a CI-round note rides the manifest with developerRound (AISDLC-1231)', () => {
+    failTask();
+    const note =
+      'CI failed on PR #7 at head aaaaaaa. Failed step: test / Run unit tests.\nLog tail:\nboom';
+    const r = reenter({ target: '7', developerRound: true, note }, deps(gh()));
+    expect(r.kind === 'manifest' && r.resume.developerRound).toBe(true);
+    expect(r.kind === 'manifest' && r.resume.note).toContain('Run unit tests');
+  });
+
   it('without the flag the manifest carries no developerRound', () => {
     failTask();
     const r = reenter({ target: '7' }, deps(gh()));

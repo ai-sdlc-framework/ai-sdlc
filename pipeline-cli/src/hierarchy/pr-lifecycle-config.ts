@@ -15,6 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { load as yamlLoad } from 'js-yaml';
 
 import { DEFAULT_SETTLE_MS } from './clear.js';
+import { DEFAULT_MAX_CI_ROUNDS } from './reconcile.js';
 import {
   WORKTREE_SWEEP_DEFAULTS,
   type WorktreeSweepConfig,
@@ -24,6 +25,8 @@ import { BUSY_INTERVAL_MS, IDLE_INTERVAL_MS } from './scheduler.js';
 export interface PrLifecycleConfig {
   /** How many times one `(action, headSha)` may run; the next one parks to the planner. */
   maxSameHeadActions: number;
+  /** AISDLC-1231: automatic CI rounds on one PR; the next one routes to the planner. */
+  maxCiRounds: number;
   webhook: {
     port: number;
     debounceMs: number;
@@ -49,6 +52,7 @@ const DEFAULT_WEBHOOK_DOWN_AFTER_MINUTES = 120;
 
 export const PR_LIFECYCLE_DEFAULTS: PrLifecycleConfig = {
   maxSameHeadActions: 1,
+  maxCiRounds: DEFAULT_MAX_CI_ROUNDS,
   webhook: {
     port: DEFAULT_WEBHOOK_PORT,
     debounceMs: DEFAULT_WEBHOOK_DEBOUNCE_MS,
@@ -64,7 +68,7 @@ export const PR_LIFECYCLE_DEFAULTS: PrLifecycleConfig = {
 export const PR_LIFECYCLE_KEY_READERS: Readonly<Record<string, (c: PrLifecycleConfig) => unknown>> =
   {
     noTaskBranchPrefixes: () => undefined, // read by CI through scripts/read-pr-lifecycle.mjs
-    loopGuard: (c) => c.maxSameHeadActions,
+    loopGuard: (c) => [c.maxSameHeadActions, c.maxCiRounds],
     webhook: (c) => c.webhook,
     reconcile: (c) => c.reconcile,
     clear: (c) => c.clear,
@@ -102,6 +106,7 @@ export function loadPrLifecycleConfig(
   const d = PR_LIFECYCLE_DEFAULTS;
   const defaults = (): PrLifecycleConfig => ({
     maxSameHeadActions: d.maxSameHeadActions,
+    maxCiRounds: d.maxCiRounds,
     webhook: { ...d.webhook },
     reconcile: { ...d.reconcile },
     clear: { ...d.clear },
@@ -122,6 +127,7 @@ export function loadPrLifecycleConfig(
         d.maxSameHeadActions,
         true,
       ),
+      maxCiRounds: pick(obj(spec?.loopGuard)?.maxCiRounds, d.maxCiRounds, true),
       webhook: {
         port: pick(webhook?.port, d.webhook.port, true),
         debounceMs: pick(webhook?.debounceMs, d.webhook.debounceMs),
