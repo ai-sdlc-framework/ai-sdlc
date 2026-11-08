@@ -338,6 +338,13 @@ export type OrchestratorEventType =
    */
   | 'JudgmentProviderUnavailable'
   /**
+   * RFC-0049 - emitted by the tick for each required capability (declared in
+   * `.ai-sdlc/capabilities.yaml`) that is degraded or never observed. Per-event
+   * fields: `capabilityId`, `capabilityStatus` (`degraded` or `never-observed`),
+   * optional `reason`. Informational only: nothing is blocked.
+   */
+  | 'CapabilityDegraded'
+  /**
    * RFC-0051 - emitted when a hierarchy session (planner, dispatch or
    * executor) is started by `cli-hierarchy up`. Per-event fields:
    * `sessionName` (the roster name), `sessionRole`, `sessionModel`,

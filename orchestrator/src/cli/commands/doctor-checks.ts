@@ -55,6 +55,8 @@ import {
   isModelAlias,
   judgmentEnforceDowngradeReason,
   loadJudgmentConfig,
+  loadRequiredCapabilities,
+  readCapabilityState,
   resolveJudgmentProvider,
   SCHEMAS,
 } from '@ai-sdlc/reference';
@@ -2165,6 +2167,79 @@ export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
   return results;
 }
 
+// ── Capability liveness (RFC-0049 section 9.3) ───────────────────────────
+
+function capabilityTable(rows: ReturnType<typeof readCapabilityState>): string {
+  return rows
+    .map(
+      (r) =>
+        `  ${cleanText(r.id)}  ${r.status}  live=${r.counts.live} shadow=${r.counts.shadow} degraded=${r.counts.degraded}`,
+    )
+    .join('\n');
+}
+
+/**
+ * Print every registered capability with its status and counts, and judge the ones this
+ * repository declares required in `.ai-sdlc/capabilities.yaml` (read from the base ref,
+ * never the working tree). Degraded or never-observed required capability: fail. Shadow:
+ * warn. No declaration: pass. Informational only; nothing else is ever blocked.
+ */
+export function checkCapabilityLiveness(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'capability-liveness';
+  const required = loadRequiredCapabilities({
+    workDir: ctx.projectDir,
+    readBaseConfig: (dir) => {
+      for (const ref of ['origin/main', 'main']) {
+        const r = ctx.adapters.runCommand('git', [
+          '-C',
+          dir,
+          'show',
+          `${ref}:.ai-sdlc/capabilities.yaml`,
+        ]);
+        if (r.exitCode === 0 && r.stdout) return r.stdout;
+      }
+      return null;
+    },
+  });
+  const artifactsDir =
+    ctx.adapters.env.ARTIFACTS_DIR ?? join(ctx.projectDir, '.ai-sdlc', 'artifacts');
+  const rows = readCapabilityState(artifactsDir);
+  const table = capabilityTable(rows);
+  const status = (cap: string) => rows.find((r) => r.id === cap)?.status ?? 'never-observed';
+  const bad = required.filter((c) => ['degraded', 'never-observed'].includes(status(c)));
+  const shadow = required.filter((c) => status(c) === 'shadow');
+  const evidence = { required: required.length, degraded: bad.length, shadow: shadow.length };
+  if (bad.length > 0) {
+    return {
+      id,
+      severity: 'fail',
+      title: `required capabilities not live: ${bad.map(cleanText).join(', ')}\n${table}`,
+      remediation:
+        'Configure the capability or remove it from spec.required in .ai-sdlc/capabilities.yaml; see docs/operations/capability-liveness.md.',
+      anonymizableEvidence: evidence,
+    };
+  }
+  if (shadow.length > 0) {
+    return {
+      id,
+      severity: 'warn',
+      title: `required capabilities running in shadow: ${shadow.map(cleanText).join(', ')}\n${table}`,
+      remediation:
+        'Promote the judgment out of shadow; see docs/operations/capability-liveness.md.',
+      anonymizableEvidence: evidence,
+    };
+  }
+  return {
+    id,
+    severity: 'pass',
+    title:
+      required.length === 0
+        ? `no required capabilities declared\n${table}`
+        : `all ${required.length} required capabilities are live\n${table}`,
+    anonymizableEvidence: evidence,
+  };
+}
+
 // ── Ignored pipeline-owned paths (AISDLC-967) ────────────────────────────
 
 const PIPELINE_OWNED_PROBES = [
@@ -3026,6 +3101,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Judgment layer: disabled state, provider key, model pinning, and enforce judgments the runtime would run as shadow (RFC-0049).',
     run: checkJudgmentLayer,
+  },
+  {
+    id: 'capability-liveness',
+    description:
+      'Table of registered capabilities; fails when a capability required in .ai-sdlc/capabilities.yaml is degraded or never observed (RFC-0049).',
+    run: checkCapabilityLiveness,
   },
 ];
 

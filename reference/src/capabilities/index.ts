@@ -19,3 +19,9 @@ export {
   reportCapabilityOutcome,
   type ReportCapabilityOptions,
 } from './state.js';
+export {
+  CAPABILITIES_CONFIG_PATH,
+  loadRequiredCapabilities,
+  readCapabilitiesConfigFromBaseRef,
+  type LoadCapabilitiesConfigOpts,
+} from './config.js';

@@ -19,7 +19,8 @@ export type ResourceKind =
   | 'DesignIntentDocument'
   | 'DorConfig'
   | 'CompliancePosture'
-  | 'JudgmentConfig';
+  | 'JudgmentConfig'
+  | 'CapabilitiesConfig';
 
 export interface Metadata {
   name: string;

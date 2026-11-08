@@ -77,6 +77,7 @@ Checks currently implemented (see `DOCTOR_CHECKS` in `doctor-checks.ts`):
 | `stale-repo-build` | Warns when the repo's own `pipeline-cli` build is missing or older than its sources (`resolve-pipeline-cli.sh --strict` exits 1), so dispatch would run old code; names `pnpm --filter @ai-sdlc/pipeline-cli build`. Quiet in repos without the script (AISDLC-988) | `bash` |
 | `force-push-policy` | The effective `spec.governance.allowForcePush` value and where it came from: the `leaseOnOwnBranch` default (key unset or no `agent-role.yaml`), an explicit value (`never`, `leaseOnOwnBranch` or `lease`) in `.ai-sdlc/agent-role.yaml`, or a malformed value that fails closed to `never` (warn). See [governance](../api-reference/governance.md) (AISDLC-710) | — |
 | `judgment-layer` | The judgment layer config (`.ai-sdlc/judgment-config.yaml`); see below | `loadJudgmentConfig` (RFC-0049) |
+| `capability-liveness` | Table of registered capabilities; `fail` when a capability required in `.ai-sdlc/capabilities.yaml` (base ref only) is degraded or never observed, `warn` when one is in shadow. See [capability-liveness.md](capability-liveness.md) | `git` (RFC-0049) |
 
 #### `judgment-layer`
 
