@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1248
 title: 'cli-dispatch write-manifest --from-pr and classifyPr refuse a filing branch, so a stale reconciler can never rewrite a task manifest to ai-sdlc/update-* or ai-sdlc/file-*'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-08'
 labels:
@@ -37,8 +37,37 @@ dispatchableReason: 'Planner wake 2026-11-08 18:0xZ (DEC-0401 keep-and-automate)
 
 ## Acceptance Criteria
 
-- [ ] AC-1: `classifyPr` with a manifest branch `ai-sdlc/aisdlc-521-...` and a PR head `ai-sdlc/update-aisdlc-521` returns the docs classification, not `manifest-branch-mismatch`; test.
-- [ ] AC-2: `cli-dispatch write-manifest <task> --from-pr <n>` refuses when the PR head matches a filing prefix, exit code non-zero, manifest unchanged; test with a stubbed PR view.
-- [ ] AC-3: `write-manifest <task> --branch <head>` refuses the same prefixes; test.
-- [ ] AC-4: `docs/operations/cli-hierarchy.md` `manifest-branch-mismatch` row names the guard in one sentence.
-- [ ] AC-5: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] AC-1: `classifyPr` with a manifest branch `ai-sdlc/aisdlc-521-...` and a PR head `ai-sdlc/update-aisdlc-521` returns the docs classification, not `manifest-branch-mismatch`; test.
+- [x] AC-2: `cli-dispatch write-manifest <task> --from-pr <n>` refuses when the PR head matches a filing prefix, exit code non-zero, manifest unchanged; test with a stubbed PR view.
+- [x] AC-3: `write-manifest <task> --branch <head>` refuses the same prefixes; test.
+- [x] AC-4: `docs/operations/cli-hierarchy.md` `manifest-branch-mismatch` row names the guard in one sentence.
+- [x] AC-5: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Final Summary
+
+## Summary
+classifyPr no longer returns manifest-branch-mismatch for a filing head, and write-manifest refuses a filing branch through both --from-pr and --branch. Both use one shared isFilingBranch predicate in filing-branches.ts. A draft PR is open.
+
+## Changes
+- pipeline-cli/src/hierarchy/filing-branches.ts
+- pipeline-cli/src/hierarchy/reconcile.ts
+- pipeline-cli/src/hierarchy/pr-state.ts
+- pipeline-cli/src/hierarchy/pr-state.test.ts
+- pipeline-cli/src/cli/dispatch.ts
+- pipeline-cli/src/cli/dispatch.test.ts
+- docs/operations/cli-hierarchy.md
+- backlog/tasks/AISDLC-1248 - write-manifest from-pr refuses a filing branch.md
+
+## Design decisions
+DOCS_BRANCH_PREFIXES moved into filing-branches.ts and is re-exported from reconcile.ts, so existing importers are unchanged. I added an optional prHeadBranch dep to runDispatchCli so tests can stub the PR view. For AC-1, a filing head now skips the mismatch check and falls through to the normal classification, because pr-state.ts has no separate docs state. The refusal message is `refused: <branch> is a filing branch`, with exit code 1. The backlog task file's status change to In Progress is included in the commit.
+
+## Verification
+- `pnpm build` — passed (dashboard build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (240 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+

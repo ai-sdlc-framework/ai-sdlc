@@ -6,6 +6,7 @@
  */
 
 import { writeEvent } from '../orchestrator/events.js';
+import { isFilingBranch } from './filing-branches.js';
 
 /** Outcome of one check run or status, normalised by the caller from REST. */
 export type CheckConclusion = 'success' | 'failure' | 'cancelled' | 'infra' | 'pending';
@@ -183,7 +184,13 @@ export function classifyPr(f: PrFacts): PrClassification {
   });
 
   if (f.merged) return mk('merged');
-  if (f.manifestBranch && f.headBranch && f.manifestBranch !== f.headBranch) {
+  // AISDLC-1248: a filing head is never a task branch, so its mismatch with a manifest is moot.
+  if (
+    f.manifestBranch &&
+    f.headBranch &&
+    f.manifestBranch !== f.headBranch &&
+    !isFilingBranch(f.headBranch)
+  ) {
     return mk('manifest-branch-mismatch');
   }
   if (f.mergeStateStatus === 'BEHIND' || f.mergeStateStatus === 'DIRTY') {
