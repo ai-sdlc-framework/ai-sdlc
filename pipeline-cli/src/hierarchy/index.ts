@@ -194,6 +194,8 @@ export {
 } from './executor-start.js';
 export {
   createSystemIdentity,
+  assertClaimOwner,
+  resolveCallerRole,
   isClaudeCommand,
   requireDispatchCaller,
   resolveCaller,
@@ -222,7 +224,6 @@ export {
 } from './playbook.js';
 export { checkRepoMatch, rosterProject, type RepoCheck } from './peer-guard.js';
 export { findStartedSession, readSessionRegistry, reconcileStartingEntries } from './registry.js';
-export { resolveCallerRole, type SessionRoleDeps } from './session-role.js';
 export {
   mainCheckoutRoot,
   realpathLoose,

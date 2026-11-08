@@ -2,7 +2,7 @@
 id: AISDLC-718
 title: >-
   One role-resolution implementation: consolidate onto caller-identity
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-10-04'
 labels:
