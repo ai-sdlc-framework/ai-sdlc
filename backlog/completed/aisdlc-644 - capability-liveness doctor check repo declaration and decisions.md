@@ -2,7 +2,7 @@
 id: AISDLC-644
 title: >-
   RFC-0049 OQ-7: capability-liveness doctor check, required-capabilities declaration, Decision filing, runbook
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-30'
 labels:
