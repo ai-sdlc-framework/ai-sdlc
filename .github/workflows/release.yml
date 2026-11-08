@@ -209,15 +209,20 @@ jobs:
             exit 0
           fi
 
-          # Wait briefly to allow the npm registry to propagate the tarball
-          # before we attempt to fetch it (eventual-consistency window).
-          sleep 15
+          # Bounded poll for registry propagation (eventual consistency):
+          # up to POLL_ATTEMPTS fetches, POLL_INTERVAL_SECONDS apart
+          # (12 x 10s = ~2 min). The script retries on 404 only.
+          POLL_ATTEMPTS=12
+          POLL_INTERVAL_SECONDS=10
 
+          # `|| SIGN_EXIT=$?` keeps the soft-fail guard live under bash -e.
+          SIGN_EXIT=0
           node scripts/sign-mcp-tarball.mjs \
             --version "$MCP_VERSION" \
             --key "$KEY_FILE" \
-            --out "$ENVELOPE_PATH"
-          SIGN_EXIT=$?
+            --out "$ENVELOPE_PATH" \
+            --poll-attempts "$POLL_ATTEMPTS" \
+            --poll-interval "$POLL_INTERVAL_SECONDS" || SIGN_EXIT=$?
           rm -f "$KEY_FILE"
 
           if [ $SIGN_EXIT -ne 0 ]; then

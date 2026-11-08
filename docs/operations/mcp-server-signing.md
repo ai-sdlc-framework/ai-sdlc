@@ -22,7 +22,7 @@ anchor, not GitHub OIDC, not npm provenance, not a new key).
 `.github/workflows/release.yml` runs the sign step automatically after `pnpm -r publish`:
 
 1. Resolves the published version from `ai-sdlc-plugin/mcp-server/package.json`.
-2. Waits 15 seconds for npm registry propagation.
+2. Polls the registry for the published version (bounded: 12 attempts, 10 seconds apart, about 2 minutes; only a 404 is retried) instead of a fixed sleep.
 3. Runs `scripts/sign-mcp-tarball.mjs` which:
    - Fetches the tarball from `https://registry.npmjs.org`.
    - Computes SHA-512 of the tarball bytes.
@@ -32,7 +32,14 @@ anchor, not GitHub OIDC, not npm provenance, not a new key).
 4. Commits the envelope back to `main`.
 
 If `AISDLC_SIGNING_KEY` is not set, the step emits a `::warning::` and continues
-(soft-fail). The npm publish still succeeds; you can re-run the sign step manually.
+(soft-fail). The same applies when the sign script fails, including when the
+version is still not visible after the poll bound: the step emits `::warning::`,
+sets `skipped=true`, the job stays green, and the commit step is skipped. The npm
+publish still succeeds; you can re-run the sign step manually.
+
+The 0.41.0 envelope was never produced by CI (run 42502073745 hit the registry 404
+window). It must be produced through the manual sign step with the operator key
+(`node scripts/sign-mcp-tarball.mjs --version 0.41.0`) and committed.
 
 ## Initial setup — repository secret
 

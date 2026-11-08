@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1245
 title: 'release.yml: the MCP tarball sign step polls the registry instead of sleeping 15s, and its exit guard actually runs under bash -e'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-08'
 labels:
