@@ -31,7 +31,7 @@ import {
   type BuildReviewPromptsOptions,
 } from '../steps/07-build-review-prompts.js';
 import type { ReviewerType, ReviewerVerdict } from '../types.js';
-import { requiredReviewerKind } from '../../attestation-core/review-scope-core.mjs';
+import { computeRequiredReviewers } from '../attestation/review-coverage.js';
 import { writeRunFile } from './init.js';
 import { startStagedRound } from './staged-round.js';
 import type { NextStepContext, NextStepState, ReviewRoundState, SpawnedReviewer } from './types.js';
@@ -134,29 +134,19 @@ export function selectByClassifier<T extends { reviewer: ReviewerType }>(
 }
 
 /**
- * `selectByClassifier` plus the verifier's floor (AISDLC-850): when the diff requires the
- * three-reviewer set (`requiredReviewerKind`, the same function the CI verifier uses), the
- * code, test and security reviewers are always kept whatever the narrowing classifier said.
+ * `selectByClassifier` plus the coverage floor (AISDLC-850, AISDLC-1251): every reviewer in
+ * `required` (the `computeRequiredReviewers` set the Step 8 gate enforces) is always kept, so the
+ * spawn list is a superset of the gate's requirement and the classifier narrows only reviewers
+ * outside it. A required name is matched on the prompt's reviewer type.
  */
 export function selectForReview<T extends { reviewer: ReviewerType }>(
   prompts: readonly T[],
   names: readonly string[],
-  changedPaths: readonly string[],
-  /** False on a delta resume: the delta's own reviewer set decides, not the whole-PR rule. */
-  forceCoverage = true,
+  required: readonly string[],
 ): T[] {
   const selected = selectByClassifier(prompts, names);
-  const kind = requiredReviewerKind(changedPaths).kind;
-  if (kind === 'correctness-only') return selected;
-  if (kind !== 'three' && !forceCoverage) return selected;
-  // AISDLC-1247: the spawn list is a superset of what the Step 8 coverage gate requires, so the
-  // classifier narrows only optional reviewers. Every kind but correctness-only needs security.
-  const required = new Set<ReviewerType>(['security-reviewer']);
-  if (kind === 'three') {
-    required.add('code-reviewer');
-    required.add('test-reviewer');
-  }
-  return prompts.filter((p) => required.has(p.reviewer) || selected.includes(p));
+  const must = new Set<string>(required);
+  return prompts.filter((p) => must.has(p.reviewer) || selected.includes(p));
 }
 
 async function runClassifier(
@@ -330,8 +320,14 @@ export async function prepareReview(
   const selected = selectForReview(
     built.prompts,
     classifier.reviewers,
-    built.changedFiles,
-    resumeDecision?.branch !== 'delta',
+    // AISDLC-1251: the one coverage rule the Step 8 gate reads (computed once from the paths).
+    // A delta resume keeps its delta-derived set.
+    resumeDecision?.branch === 'delta'
+      ? resumeDecision.reviewers
+      : computeRequiredReviewers({
+          changedPaths: built.changedFiles,
+          requireThree: built.reviewerSet?.reason === 'config:require-three',
+        }).required,
   );
 
   // AISDLC-725: the shared round plan (built with the prompts) is the one incremental decision.

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { computeRequiredReviewers } from '../attestation/review-coverage.js';
 import { fail, ok } from '../__test-helpers/fake-runner.js';
 import { makeHarness, makeState, type Harness } from '../__test-helpers/next-step-fixtures.js';
 import {
@@ -152,14 +153,22 @@ describe('pure helpers', () => {
   });
 });
 
-describe('selectForReview (AISDLC-850)', () => {
+describe('selectForReview (AISDLC-850, AISDLC-1251)', () => {
   const p = (r: string): { reviewer: never } => ({ reviewer: r as never });
   const three = [p('code-reviewer'), p('test-reviewer'), p('security-reviewer')];
+  const all = [
+    p('code-reviewer'),
+    p('test-reviewer'),
+    p('correctness-reviewer'),
+    p('security-reviewer'),
+  ];
+  const req = (paths: string[]): string[] =>
+    computeRequiredReviewers({ changedPaths: paths }).required;
 
   it.each(TRUST_CHAIN_PATH_PREFIXES.map((x) => `${x}file.ts`))(
     'keeps the verifier-required set for trust-chain path %s',
     (path) => {
-      const names = selectForReview(three, ['security'], [path]).map((x) =>
+      const names = selectForReview(three, ['security'], req([path])).map((x) =>
         resolveReviewerAgent(x.reviewer, {}),
       );
       const kind = requiredReviewerKind([path]).kind;
@@ -169,35 +178,38 @@ describe('selectForReview (AISDLC-850)', () => {
     },
   );
 
-  it('always spawns security when the coverage rule requires it (AISDLC-1247)', () => {
+  it('spawns correctness and security for the AISDLC-506 docs paths (AISDLC-1251)', () => {
+    const paths = [
+      'backlog/completed/aisdlc-506 - x.md',
+      'docs/concepts/zero-trust-untrusted-pr-verification.md',
+      'docs/whitepapers/untrusted-contributor-verification.md',
+    ];
     const merged = [p('correctness-reviewer'), p('security-reviewer')];
-    const out = selectForReview(merged, ['testing', 'critic'], ['src/a.ts']).map((x) => x.reviewer);
-    expect(out).toContain('security-reviewer');
+    const out = selectForReview(merged, ['critic'], req(paths)).map((x) => x.reviewer as string);
+    expect(out).toEqual(['correctness-reviewer', 'security-reviewer']);
   });
 
-  it('spawned covers the required kind for every classifier answer (AISDLC-1247)', () => {
-    const all = [
-      p('code-reviewer'),
-      p('test-reviewer'),
-      p('correctness-reviewer'),
-      p('security-reviewer'),
+  it('spawned is a superset of the coverage rule for every class and answer (AISDLC-1251)', () => {
+    const classes: string[][] = [
+      ['docs/a.md'],
+      ['src/a.test.ts'],
+      ['src/a.ts', 'docs/a.md'],
+      ['.github/workflows/x.yml'],
     ];
-    const names = ['testing', 'critic', 'security'];
-    const answers = Array.from({ length: 8 }, (_, m) => names.filter((_, i) => m & (1 << i)));
-    for (const paths of [['src/a.ts'], ['docs/a.md'], ['.github/workflows/x.yml'], []]) {
-      const kind = requiredReviewerKind(paths).kind;
+    const answers: string[][] = [
+      [],
+      ['critic'],
+      ['testing'],
+      ['security'],
+      ['testing', 'critic', 'security'],
+    ];
+    for (const paths of classes) {
+      const required = req(paths);
       for (const ans of answers) {
-        const got = selectForReview(all, ans, paths).map((x) => x.reviewer as string);
-        if (kind !== 'correctness-only') expect(got).toContain('security-reviewer');
-        if (kind === 'three') expect(checkReviewerKindCoverage(got, kind).ok).toBe(true);
+        const got = selectForReview(all, ans, required).map((x) => x.reviewer as string);
+        for (const r of required) expect(got).toContain(r);
       }
     }
-  });
-
-  it('still narrows a docs-only diff', () => {
-    expect(selectForReview(three, ['security'], ['docs/a.md']).map((x) => x.reviewer)).toEqual([
-      'security-reviewer',
-    ]);
   });
 });
 
@@ -390,11 +402,15 @@ spec:
     expect(res.review.spawned.map((s) => s.agent)).toContain('security-reviewer');
   });
 
-  it('honours the classifier subset', async () => {
+  it('spawns the full coverage-rule set whatever the classifier narrows to (AISDLC-1251)', async () => {
+    delete process.env.AI_SDLC_REVIEWER_SET;
     script({ classifier: { reviewers: ['security'], confidence: 0.95, fellOpen: false } });
     const res = await prepareReview(h.ctx, state, 1);
     if (res.kind !== 'spawn') throw new Error('expected spawn');
-    expect(res.review.spawned.map((s) => s.agent)).toEqual(['security-reviewer']);
+    expect(res.review.spawned.map((s) => s.agent).sort()).toEqual([
+      'correctness-reviewer',
+      'security-reviewer',
+    ]);
     expect(res.classifierLine).toContain('[security]');
   });
 
@@ -413,7 +429,12 @@ spec:
     script({ classifier: { reviewers: [], confidence: 1, fellOpen: false } });
     const res = await prepareReview(h.ctx, state, 1);
     if (res.kind !== 'spawn') throw new Error('expected spawn');
-    expect(res.review.spawned.map((s) => s.agent)).toEqual(['security-reviewer']);
+    // The pinned three set makes the coverage rule require code, test and security.
+    expect(res.review.spawned.map((s) => s.agent).sort()).toEqual([
+      'code-reviewer-codex',
+      'security-reviewer',
+      'test-reviewer-codex',
+    ]);
   });
 
   const plan = (over: Partial<ReviewRoundPlan>): ReviewRoundPlan => ({

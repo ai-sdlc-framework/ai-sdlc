@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1251
 title: 'The review spawn list is computed from the Step 8 coverage rule, so a docs-only diff spawns security-reviewer when the gate requires it'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-08'
 labels:
