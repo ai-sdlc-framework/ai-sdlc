@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync, readdirSync, existsSync, readFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  statSync,
+  writeFileSync,
+  readdirSync,
+  existsSync,
+  readFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -12,6 +20,7 @@ import {
   readReviewerVerdicts,
   runReviewerEntrypoint,
   runReviewerMatrixInContainer,
+  stageReviewerApp,
   defaultDockerExec,
   REVIEWER_VERDICTS_FILE,
   REVIEWER_INPUT_FILE,
@@ -63,6 +72,7 @@ describe('reviewer container arg builders', () => {
       inDir: '/i',
       outDir: '/o',
       appDir: '/a',
+      seccompProfilePath: '/s.json',
       env,
     });
     expect(args).toContain('--network=n');
@@ -83,6 +93,8 @@ describe('reviewer container arg builders', () => {
         inDir: '/i',
         outDir: '/o',
         appDir: '/a',
+        seccompProfilePath: '/s.json',
+        seccompProfilePath: '/s.json',
         env: { ANTHROPIC_API_KEY: 'x' },
       }),
     ).toThrow();
@@ -161,13 +173,19 @@ describe('runReviewerEntrypoint', () => {
 });
 
 describe('runReviewerMatrixInContainer', () => {
+  const fakeApp = tmp();
+  mkdirSync(join(fakeApp, 'pipeline'));
+  writeFileSync(join(fakeApp, 'pipeline', 'x.js'), '');
+  const fakeModelIds = join(fakeApp, 'ids.js');
+  writeFileSync(fakeModelIds, 'export const CLAUDE_SONNET_MODEL_ID = "m";');
   const base = {
     prDiff: 'd',
     prNumber: 3,
     differentialTest: dt,
     proxyPort: 9090,
     sessionToken: 's',
-    appDir: '/app',
+    appDir: fakeApp,
+    modelIdsFile: fakeModelIds,
     runId: RUN,
   };
 
@@ -199,6 +217,37 @@ describe('runReviewerMatrixInContainer', () => {
     ]);
     expect(readdirSync(parent)).toEqual([]);
     removeFixtureDir(parent);
+  });
+
+  it('stages a self-contained app, a 0777 out dir and a seccomp file path', async () => {
+    let seen: { mode: number; seccomp: string; shim: boolean; app: boolean } | undefined;
+    const exec: DockerExec = async (args) => {
+      if (args[0] === 'run' && !args.includes('-d')) {
+        const out = args.find((a) => a.endsWith(':/sandbox/out:rw'))!.split(':')[0]!;
+        const app = args.find((a) => a.endsWith(':/sandbox/app:ro'))!.split(':')[0]!;
+        const sec = args[args.indexOf('--security-opt') + 1]!.replace('seccomp=', '');
+        seen = {
+          mode: statSync(out).mode & 0o777,
+          seccomp: readFileSync(sec, 'utf8'),
+          shim: existsSync(join(app, 'node_modules', '@ai-sdlc', 'reference', 'index.js')),
+          app: existsSync(join(app, 'pipeline', 'x.js')),
+        };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    await runReviewerMatrixInContainer({ ...base, exec });
+    expect(seen?.mode).toBe(0o777);
+    expect(() => JSON.parse(seen!.seccomp)).not.toThrow();
+    expect(seen?.shim).toBe(true);
+    expect(seen?.app).toBe(true);
+  });
+
+  it('stageReviewerApp resolves the default model-id module', () => {
+    const scratch = tmp();
+    const app = stageReviewerApp(fakeApp, scratch);
+    expect(
+      readFileSync(join(app, 'node_modules', '@ai-sdlc', 'reference', 'index.js'), 'utf8'),
+    ).toContain('CLAUDE_SONNET_MODEL_ID');
   });
 
   it('fails closed and tears down when network creation fails', async () => {

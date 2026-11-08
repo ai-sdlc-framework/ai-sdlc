@@ -42,9 +42,19 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  rmSync,
+  chmodSync,
+  cpSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
 import { buildReviewerProxyEnv } from './inference-proxy.js';
@@ -69,6 +79,8 @@ export const REVIEWER_INPUT_FILE = 'input.json';
 export const REVIEWER_VERDICTS_FILE = 'verdicts.json';
 /** Relay image (small, ships a TCP forwarder). */
 export const DEFAULT_RELAY_IMAGE = 'alpine/socat:latest';
+/** Env var that overrides (pins) the relay image, e.g. to a digest. */
+export const RELAY_IMAGE_ENV = 'AI_SDLC_REVIEWER_RELAY_IMAGE';
 /** Reviewer image (needs node). */
 export const DEFAULT_REVIEWER_IMAGE = 'node:22-slim';
 
@@ -184,6 +196,8 @@ export interface ReviewerContainerArgsInput {
   inDir: string;
   outDir: string;
   appDir: string;
+  /** Path to a seccomp profile FILE (docker does not accept inline JSON). */
+  seccompProfilePath: string;
   env: Record<string, string>;
   image?: string;
   memoryMb?: number;
@@ -219,7 +233,7 @@ export function buildReviewerContainerArgs(opts: ReviewerContainerArgsInput): st
     '--user',
     '65534:65534',
     '--security-opt',
-    `seccomp=${JSON.stringify(DOCKER_SECCOMP_PROFILE)}`,
+    `seccomp=${opts.seccompProfilePath}`,
     '--security-opt',
     'no-new-privileges',
     '-v',
@@ -318,8 +332,35 @@ export interface RunReviewerInContainerInput {
   runId?: string;
   relayImage?: string;
   reviewerImage?: string;
+  /** Override for the model-id module shimmed in as `@ai-sdlc/reference`. */
+  modelIdsFile?: string;
   /** Parent for the isolated scratch dir. Defaults to the OS tmpdir. */
   scratchParent?: string;
+}
+
+/**
+ * Stage a self-contained app dir: a copy of the compiled pipeline-cli dist plus
+ * a minimal `@ai-sdlc/reference` shim (only the dependency-free model-id
+ * module), so the node:22-slim container needs no node_modules.
+ */
+export function stageReviewerApp(distDir: string, scratch: string, modelIdsFile?: string): string {
+  const appDir = join(scratch, 'app');
+  cpSync(distDir, appDir, { recursive: true });
+  const modelIds =
+    modelIdsFile ??
+    join(
+      dirname(fileURLToPath(import.meta.resolve('@ai-sdlc/reference'))),
+      'models',
+      'claude-model-ids.js',
+    );
+  const shimDir = join(appDir, 'node_modules', '@ai-sdlc', 'reference');
+  mkdirSync(shimDir, { recursive: true });
+  writeFileSync(
+    join(shimDir, 'package.json'),
+    JSON.stringify({ name: '@ai-sdlc/reference', type: 'module', main: 'index.js' }),
+  );
+  writeFileSync(join(shimDir, 'index.js'), readFileSync(modelIds));
+  return appDir;
 }
 
 /**
@@ -337,6 +378,10 @@ export async function runReviewerMatrixInContainer(
   mkdirSync(inDir);
   // The container runs as nobody; the out dir must be writable by it.
   mkdirSync(outDir, { mode: 0o777 });
+  // mkdirSync's mode is masked by the umask; chmod explicitly.
+  chmodSync(outDir, 0o777);
+  const seccompProfilePath = join(scratch, 'seccomp.json');
+  writeFileSync(seccompProfilePath, JSON.stringify(DOCKER_SECCOMP_PROFILE), { mode: 0o600 });
   const doc: ReviewerContainerInput = {
     prDiff: input.prDiff,
     prNumber: input.prNumber,
@@ -344,19 +389,20 @@ export async function runReviewerMatrixInContainer(
   };
   writeFileSync(join(inDir, REVIEWER_INPUT_FILE), JSON.stringify(doc));
 
-  const env = buildReviewerProxyEnv({ port: input.proxyPort, sessionToken: input.sessionToken });
-  const runArgs = buildReviewerContainerArgs({
-    name: names.reviewer,
-    network: names.network,
-    inDir,
-    outDir,
-    appDir: input.appDir,
-    env,
-    image: input.reviewerImage,
-  });
-
   const created: { network: boolean; relay: boolean } = { network: false, relay: false };
   try {
+    const appDir = stageReviewerApp(input.appDir, scratch, input.modelIdsFile);
+    const env = buildReviewerProxyEnv({ port: input.proxyPort, sessionToken: input.sessionToken });
+    const runArgs = buildReviewerContainerArgs({
+      name: names.reviewer,
+      network: names.network,
+      inDir,
+      outDir,
+      appDir,
+      seccompProfilePath,
+      env,
+      image: input.reviewerImage,
+    });
     const net = await exec(buildInternalNetworkCreateArgs(names.network));
     if (net.code !== 0) throw new Error('reviewer network creation failed');
     created.network = true;
@@ -365,7 +411,7 @@ export async function runReviewerMatrixInContainer(
       buildRelayRunArgs({
         relayName: names.relay,
         proxyPort: input.proxyPort,
-        image: input.relayImage,
+        image: input.relayImage ?? process.env[RELAY_IMAGE_ENV] ?? DEFAULT_RELAY_IMAGE,
       }),
     );
     if (relay.code !== 0) throw new Error('reviewer relay start failed');
