@@ -2,7 +2,7 @@
 id: AISDLC-1179.1
 title: >-
   Install agent brief AC-4: a scripted fresh-repo `claude -p` run of the published brief reaches a passing `ai-sdlc doctor`
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-08'
 labels:
@@ -60,3 +60,9 @@ The PR body records the exact invocation and the captured doctor output from one
 - Keep the temporary repo under `mktemp -d`; remove it on exit unless `--keep` is passed.
 - Hook-spawned process rule (AISDLC-1129) does not apply: the script is not a git hook, but state in the PR body that it is run from a shell, not from a hook, and that it unsets `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and `GIT_PREFIX` before `git init`.
 <!-- SECTION:NOTES:END -->
+
+## Closed
+
+- Reason: superseded: AC-4 remainder runs as AISDLC-1236 (DEC-0400 refile-1236)
+- Superseded by: AISDLC-1236
+- Date: 2026-11-08
