@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1243
 title: 'The dispatch tick retires a failed/ verdict whose task is in backlog/completed, so the board no longer lists landed tasks as failed'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-08'
 labels:
