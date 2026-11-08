@@ -33,6 +33,18 @@ let savedExit: typeof process.exit;
 let errs: string[];
 
 const ids = (dir: string) => (existsSync(dir) ? readdirSync(dir) : []);
+const remoteBranch = (prefix: string): string => {
+  const found = git(
+    parent,
+    'for-each-ref',
+    '--format=%(refname:short)',
+    `refs/remotes/origin/${prefix}*`,
+  )
+    .split('\n')
+    .filter(Boolean);
+  expect(found).toHaveLength(1);
+  return found[0].replace(/^origin\//, '');
+};
 const remoteFiles = (branch: string) =>
   git(parent, 'ls-tree', '--name-only', `origin/${branch}:${EVENTS}`).split('\n').filter(Boolean);
 
@@ -122,7 +134,9 @@ describe('decisions CLI --file from the Pattern-C parent (AISDLC-1161)', () => {
       await run(...ADD, '--file');
       expect(ids(join(parent, EVENTS))).toEqual([]);
       git(parent, 'fetch', 'origin');
-      expect(remoteFiles('ai-sdlc/file-dec-0001').join('\n')).toContain('decision-opened');
+      expect(remoteFiles(remoteBranch('ai-sdlc/file-dec-0001-add-')).join('\n')).toContain(
+        'decision-opened',
+      );
     },
     T,
   );
@@ -157,7 +171,9 @@ describe('decisions CLI --file from the Pattern-C parent (AISDLC-1161)', () => {
       await run('answer', 'DEC-0001', 'opt-b', '--file');
       expect(ids(join(parent, EVENTS))).toEqual([]);
       git(parent, 'fetch', 'origin');
-      expect(remoteFiles('ai-sdlc/file-dec-0001').join('\n')).toContain('operator-answered');
+      expect(remoteFiles(remoteBranch('ai-sdlc/file-dec-0001-answer-')).join('\n')).toContain(
+        'operator-answered',
+      );
     },
     T,
   );
@@ -187,7 +203,9 @@ describe('decisions CLI --file from the Pattern-C parent (AISDLC-1161)', () => {
       await run('supersede', 'DEC-0001', '--by', 'DEC-0002', '--reason', 'overruled', '--file');
       expect(ids(join(parent, EVENTS)).length).toBe(before);
       git(parent, 'fetch', 'origin');
-      expect(remoteFiles('ai-sdlc/file-dec-0001').join('\n')).toContain('superseded');
+      expect(remoteFiles(remoteBranch('ai-sdlc/file-dec-0001-superseded-')).join('\n')).toContain(
+        'superseded',
+      );
     },
     T,
   );
