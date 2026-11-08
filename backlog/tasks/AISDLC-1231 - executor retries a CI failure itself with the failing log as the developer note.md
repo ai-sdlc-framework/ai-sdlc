@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1231
 title: executor retries a CI failure itself with the failing log as the developer note
-status: To Do
+status: In Progress
 priority: high
 labels: [enhancement, pipeline-cli, dispatch, throughput]
 dependencies: []

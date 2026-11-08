@@ -530,7 +530,7 @@ export async function runDispatchCli(
         process.stderr.write('cli-dispatch reconcile: --pr must be a number\n');
         return 2;
       }
-      const { maxSameHeadActions, reconcile: timers } = loadPrLifecycleConfig(cwd);
+      const { maxSameHeadActions, maxCiRounds, reconcile: timers } = loadPrLifecycleConfig(cwd);
       // AISDLC-1095: one log row per open PR, and the same fields on the snapshot.
       const logRows = (facts: readonly ReconcilePr[]): void => {
         try {
@@ -551,6 +551,7 @@ export async function runDispatchCli(
           execute,
           mainHealth: gatherMainHealth(createSystemRunner(), cwd),
           maxSameHeadActions,
+          maxCiRounds,
           closeSuperseded,
           stuckAfterMinutes: resolveStuckAfterMinutes(boardDir),
           notifyPlanner,
