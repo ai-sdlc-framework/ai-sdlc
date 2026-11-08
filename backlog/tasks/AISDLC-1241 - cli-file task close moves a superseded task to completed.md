@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1241
 title: 'cli-file task --close: a sanctioned path that moves a superseded or withdrawn task to backlog/completed through a filing PR'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-08'
 labels:
