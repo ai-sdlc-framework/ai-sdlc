@@ -14,13 +14,14 @@ dependencies:
 references:
   - spec/rfcs/RFC-0050-usage-ledger-and-model-routing.md
 priority: low
-dispatchable: false
+dispatchable: true
+dispatchableReason: 'Operator go 2026-11-08 (planner backlog review): the only parked task with a landed dependency (AISDLC-654) and no operator precondition; small security fix.'
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Parked (planner, 2026-10-06): do not start without a planner go.
+Planner go given 2026-11-08 on operator order (was parked 2026-10-06).
 
 Follow-up filed from executor and reviewer reports on the parent task, approved by the
 operator on 2026-10-01. The parent's conventions apply (strict TypeScript, ESM,
