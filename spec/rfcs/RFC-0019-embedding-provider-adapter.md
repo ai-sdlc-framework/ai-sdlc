@@ -1,11 +1,11 @@
 ---
 id: RFC-0019
 title: Embedding Provider Adapter Framework
-status: Draft
+status: Implemented
 lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-03
-updated: 2026-05-27
+updated: 2026-11-08
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0010
@@ -34,6 +34,10 @@ implementedBy:
 **Target Spec Version:** v1alpha1
 
 ---
+
+## Status note
+
+Status is Implemented to match lifecycle Implemented (AISDLC-856, AISDLC-1223). The design shipped through AISDLC-339 (cli-embedding-bump, stale-vector, deprecation lifecycle), AISDLC-340 (pipeline schema and embedding load), AISDLC-341 (soak and promotion runbook). All 7 OQs are resolved; zero open questions remain.
 
 ## Sign-Off
 

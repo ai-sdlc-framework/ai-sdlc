@@ -1,11 +1,11 @@
 ---
 id: RFC-0035
 title: Decision Catalog and Operator Decision Routing
-status: Draft
+status: Implemented
 lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-08
-updated: 2026-09-30
+updated: 2026-11-08
 targetSpecVersion: v1alpha1
 requires: [RFC-0011, RFC-0023, RFC-0024, RFC-0025, RFC-0029]
 # Strategic / framework RFC. User-facing surfaces (operator runbook, API reference)
@@ -49,6 +49,10 @@ runtimeEvidence:
 **Target Spec Version:** v1alpha1
 
 ---
+
+## Status note
+
+Status is Implemented to match lifecycle Implemented (AISDLC-856, AISDLC-1223). The design shipped through AISDLC-285 (Decision resource and cli-decisions), AISDLC-286 to AISDLC-294 (Stage A/B/C, decision support, calibration, capacity, research and graphs). All 14 OQs are resolved; zero open questions remain.
 
 ## Sign-Off
 

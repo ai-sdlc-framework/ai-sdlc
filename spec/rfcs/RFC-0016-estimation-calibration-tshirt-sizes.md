@@ -1,11 +1,11 @@
 ---
 id: RFC-0016
 title: Estimation Calibration with T-Shirt Sizes
-status: Draft
+status: Implemented
 lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-01
-updated: 2026-09-30
+updated: 2026-11-08
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0011
@@ -44,6 +44,10 @@ runtimeEvidence:
 **Target Spec Version:** v1alpha1
 
 ---
+
+## Status note
+
+Status is Implemented to match lifecycle Implemented (AISDLC-856, AISDLC-1223). The design shipped through AISDLC-281 (measurement and calibration writer), AISDLC-282 (Stage B tie-breaker), AISDLC-283 (per-class bias), AISDLC-284 (soak, drift detection, class proposals), AISDLC-328 (concurrency hardening). The RFC carries no open questions.
 
 ## Sign-Off
 

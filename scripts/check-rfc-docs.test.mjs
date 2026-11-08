@@ -309,13 +309,6 @@ describe('validateRfc — Draft status with Implemented lifecycle (AISDLC-856)',
     assert.equal(r.failures.length, 1);
     assert.match(r.failures[0].reason, /contradicts lifecycle/);
   });
-  it('passes a grandfathered RFC', () => {
-    const r = validateRfc(
-      { ...base, id: 'RFC-0009' },
-      { docsDir: NO_DOCS_DIR, today: FIXED_TODAY },
-    );
-    assert.deepEqual(r.failures, []);
-  });
 });
 
 describe('findCoverageGaps', () => {

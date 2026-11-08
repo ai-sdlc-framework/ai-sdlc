@@ -1,11 +1,11 @@
 ---
 id: RFC-0022
 title: Compliance Posture + Audit Surface
-status: Draft
+status: Implemented
 lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-03
-updated: 2026-05-27
+updated: 2026-11-08
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0008
@@ -32,6 +32,10 @@ implementedBy:
 **Target Spec Version:** v1alpha1
 
 ---
+
+## Status note
+
+Status is Implemented to match lifecycle Implemented (AISDLC-856, AISDLC-1223). The design shipped through AISDLC-322 (CompliancePosture schema and loader), AISDLC-323 (Regime to DerivedGates composer), AISDLC-324 (init wizard step), AISDLC-325 (cli-compliance-audit export), AISDLC-416 (audit bundle fixes). All 7 OQs are resolved; zero open questions remain.
 
 ## Sign-Off
 
