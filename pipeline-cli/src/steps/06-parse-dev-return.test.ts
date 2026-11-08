@@ -334,3 +334,27 @@ describe('Step 6 — parseDeveloperReturnWithRetry (AISDLC-176)', () => {
     expect(captured).toBe(60_000);
   });
 });
+
+describe('Step 6 — resumed-round return (AISDLC-1227)', () => {
+  const ret = (prUrl: string | null) => ({
+    summary: 'fix round',
+    filesChanged: ['a.ts'],
+    commitSha: 'abc1234',
+    prUrl,
+    acceptanceCriteriaMet: [1],
+  });
+  it('accepts the existing prUrl as a complete return', async () => {
+    const r = await parseDeveloperReturn({
+      developerReturn: ret('https://github.com/o/r/pull/7'),
+    });
+    expect(r.ok).toBe(true);
+    expect((r.developer as { prUrl?: string | null } | undefined)?.prUrl).toBe(
+      'https://github.com/o/r/pull/7',
+    );
+  });
+  it('accepts prUrl null with a populated commitSha', async () => {
+    const r = await parseDeveloperReturn({ developerReturn: ret(null) });
+    expect(r.ok).toBe(true);
+    expect(r.developer?.commitSha).toBe('abc1234');
+  });
+});

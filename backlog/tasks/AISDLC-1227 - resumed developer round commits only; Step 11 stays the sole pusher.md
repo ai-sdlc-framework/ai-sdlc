@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1227
 title: resumed developer round commits only; Step 11 stays the sole pusher
-status: To Do
+status: In Progress
 priority: high
 labels: [bug, pipeline-cli, plugin, rfc-0061]
 dependencies: []

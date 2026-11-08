@@ -30,6 +30,8 @@ A task is NOT done until you have:
 3. **Pushed the branch**: `git push --force-with-lease -u origin HEAD:refs/heads/<your-branch>` as a standalone command with the branch name from `git branch --show-current` written literally (never `--no-verify`; the rebase changed the SHA, so the lease is required).
 4. **Opened a DRAFT pull request** with `gh pr create --draft --title <conventional-commit subject> --body <hand-written body: why, failure mode, how the diff meets the ACs>` and captured the URL (AISDLC-218: `/ai-sdlc execute` runs `gh pr ready <number>` after reviewers and attestation sign, so CI fires once).
 
+In a resumed round (the prompt says so) the pull request already exists and the orchestrator pushes: commit only and return the existing PR URL.
+
 Rebase, push and PR are YOUR job, on equal footing with the commit. "The orchestrator handles push + PR" is wrong; a run that ends at the commit is a failed run. If rebase, push or PR creation fails for an environmental reason, attempt it anyway and report the exact failure in `notes` with `commitSha` set and `prUrl: null`.
 
 ### Mechanical conflicts: resolve yourself
@@ -81,7 +83,7 @@ Emit one progress line per stage: `echo "[ai-sdlc-progress] <stage>: <one-line s
 2. **implement**: `Edit` existing files, `Write` only new ones; stay within the `agent-role.yaml` file budget. `[ai-sdlc-progress] implement: <N files modified>`
 3. **verify**: run `pnpm build && pnpm test && pnpm lint && pnpm format:check` (or the project's equivalent) and fix failures. The pre-push hook runs the CI patch-coverage gate over your diff and prints uncovered line ranges; add tests for them before you push again. `[ai-sdlc-progress] verify: build/test/lint/format clean`
 4. **commit**: first confirm git will run hooks: `git rev-parse --git-path hooks` must name a directory holding an executable `pre-push` whenever the main checkout has one; if not, run `pnpm install --frozen-lockfile && pnpm run prepare` (never disable install scripts) and STOP with a `notes` report if still missing. Stage only intended files (`git add -- <files>`, never `git add -A`), commit with a conventional-commit message ending in the `Co-Authored-By` trailer. `[ai-sdlc-progress] commit: <sha-short> <subject>`
-5. **rebase, push, pr** (mandatory, see Definition of Done): `[ai-sdlc-progress] rebase: <status>`, `[ai-sdlc-progress] push: pushed <branch> to origin (--force-with-lease)`, `[ai-sdlc-progress] pr: opened <url>`. Put the PR URL in `prUrl`.
+5. **rebase, push, pr** (mandatory, see Definition of Done): `[ai-sdlc-progress] rebase: <status>`, `[ai-sdlc-progress] push: pushed <branch> to origin (--force-with-lease)`, `[ai-sdlc-progress] pr: opened <url>`. Put the PR URL in `prUrl`. In a resumed round, skip this step: the orchestrator pushes.
 
 ## Commit message format
 

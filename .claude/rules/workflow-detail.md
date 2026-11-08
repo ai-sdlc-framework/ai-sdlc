@@ -29,6 +29,8 @@ Moved from `CLAUDE.md` (AISDLC-1152); the short forms stay there.
 - **Model defaults:** every agent and command pins `model:` (never `inherit`; `pnpm test:plugin-model-pins-gate`). Route code/test review to `-codex` variants on dispatch paths; never wrap mechanical work (sign, reconcile, rebase) in subagents.
 - **Prompt rules live in one source (AISDLC-651.2):** "never do X" rules are defined once in `ai-sdlc-plugin/hooks/lib/prompt-rules.js` and rendered as one line per agent/command; do not restate them in prose ([`docs/operations/prompt-rules.md`](docs/operations/prompt-rules.md)).
 
+- **Resumed developer round is commit-only (AISDLC-1227):** the PR already exists, so the developer neither rebases nor pushes and returns the existing PR URL; Step 11 stays the sole pusher of a ready PR (RFC-0061 OQ-2), and the PreToolUse guard denies a push while `resume.developerRound` is set.
+
 ## Backlog
 
 - Filenames must be ASCII.

@@ -352,6 +352,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       iteration: 1,
       sourceKind: opts.sourceKind,
       ...(resume ? { resumeFeedback: resume.feedback } : {}),
+      ...(resume?.prNumber !== undefined ? { resumePrNumber: resume.prNumber } : {}),
     });
 
     // Step 5b — spawn developer (LLM)

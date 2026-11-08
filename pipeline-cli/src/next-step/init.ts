@@ -172,7 +172,12 @@ export async function initTask(
       iteration: 1,
       sourceKind: 'backlog',
       ...(developerRound && manifestResume
-        ? { resumeFeedback: formatResumeFeedback(manifestResume) }
+        ? {
+            resumeFeedback: formatResumeFeedback(manifestResume),
+            ...(manifestResume.prNumber !== undefined
+              ? { resumePrNumber: manifestResume.prNumber }
+              : {}),
+          }
         : {}),
     });
     promptFile = writeRunFile(ctx, 'developer-prompt-1.md', built.prompt);

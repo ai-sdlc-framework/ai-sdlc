@@ -64,6 +64,7 @@ const {
 } = require('./lib/governance-resolver');
 const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guard');
 const { evaluateVerdictFence } = require('./lib/verdict-ref-fence');
+const { evaluateResumedRoundPush } = require('./lib/resumed-round-fence');
 const {
   runGit: gitOut,
   probeRef,
@@ -495,6 +496,13 @@ function enforceBash(command) {
   if (fence.decision === 'deny') {
     deny(`${fence.reason} Next step: run the pipeline through ai-sdlc-pipeline next-step.`);
   }
+
+  // AISDLC-1227: a resumed developer round commits only; Step 11 is the sole pusher.
+  const resumed = evaluateResumedRoundPush(trimmed, {
+    projectDir,
+    taskId: readActiveTaskId(projectDir, toolCwd || process.cwd()),
+  });
+  if (resumed.decision === 'deny') deny(resumed.reason);
 
   // AISDLC-720: untrusted runs may not write governance config / workflows via shell.
   enforceUntrustedShellWrites(trimmed);
