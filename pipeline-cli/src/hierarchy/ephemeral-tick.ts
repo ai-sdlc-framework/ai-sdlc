@@ -8,7 +8,7 @@
  */
 
 import { collectVerdicts, peekQueueOrder } from '../dispatch/board.js';
-import { openPrHoldReason } from './open-pr-limit.js';
+import { openPrHoldReason, type OpenPrState } from './open-pr-limit.js';
 import { readRosterChecked } from './roster.js';
 import type { RosterEntry } from './types.js';
 import { isSpawnedExecutorNameOf } from './validate.js';
@@ -27,7 +27,7 @@ export interface EphemeralDeps {
   /** Maximum number of live dynamic executors, given how many are live now (the load headroom counts them). */
   cap: (live?: number) => number;
   /** Open task PRs and their limit (AISDLC-1189); absent means no limit. */
-  openPrs?: () => { limit: number; open: number[]; atLimit: boolean };
+  openPrs?: () => OpenPrState;
   /** Sweep delay; default {@link EPHEMERAL_SWEEP_MS}. */
   sweepMs?: number;
 }

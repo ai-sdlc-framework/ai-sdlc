@@ -1129,6 +1129,16 @@ export interface QueueOrderEntry {
   repair?: true;
 }
 
+/**
+ * Whether a task is re-entering the pipeline (AISDLC-1234, DEC-0396): it holds an inflight
+ * claim, or a queued manifest marked as a repair (resume block). A plain queued manifest is not.
+ */
+export function isReEntering(boardDir: string, taskId: string): boolean {
+  if (existsSync(manifestPathIn(boardDir, 'inflight', taskId))) return true;
+  const queued = readManifest(manifestPathIn(boardDir, 'queue', taskId));
+  return queued?.resume !== undefined && queued.resume !== null;
+}
+
 /** Eligible queue entries in claim order: wave, priority ascending (absent last), then enqueue time. */
 export function peekQueueOrder(
   boardDir: string,

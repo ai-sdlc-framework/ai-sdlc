@@ -1755,8 +1755,14 @@ New tasks wait while open task PRs are at the limit; repair entries are still cl
 resolves `AI_SDLC_OPEN_PR_LIMIT`, then `<board>/config.json` `{ "executors": { "openPrLimit": N } }`,
 then `executors.max`; an invalid value falls through to the next source. Landing records with
 `landed` or `closedUnlanded`, and non-task kinds (docs, decisions-sync, deps), do not count. When
-entries are held the tick logs a reason line naming the open PRs, and `status` prints
-`OPEN PRS <n> of limit <m>`.
+entries are held the tick logs a reason line naming the open PRs.
+
+Two bounds apply to new-task claims (AISDLC-1234, DEC-0396). The **count** excludes a task PR whose
+task has an inflight claim or a queued repair manifest (it is re-entering the pipeline, not waiting
+on review); a plain queued manifest still counts. The **ceiling** is `openPrLimit + executors.max`:
+total open task PRs of any state may not reach it, even when the count is below the limit.
+Repairs are exempt from both. `status` prints
+`OPEN PRS <counted> counted of limit <m>, <total> total of ceiling <c>; excluded (re-entering): #<pr>, ...`.
 
 ## Claim order and reprioritize (AISDLC-904)
 

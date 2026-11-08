@@ -275,7 +275,7 @@ describe('runHierarchyCli', () => {
       'last tick: never',
       'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
       'EXECUTOR CAP 3 (executors.max 3, board ceiling none, pacer allowance unlimited, load headroom 4; limited by executors.max)',
-      'OPEN PRS 0 of limit 3',
+      'OPEN PRS 0 counted of limit 3, 0 total of ceiling 6',
       'unowned PRs: 0',
     ]);
     logs.length = 0;
