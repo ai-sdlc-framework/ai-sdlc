@@ -256,6 +256,17 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
     expect(gi).toContain('.ai-sdlc/artifacts/');
   });
 
+  it('scaffolds every no-input manifest entry so doctor config-manifest passes first run (AISDLC-1240)', async () => {
+    initBareRepo(tmpDir);
+    await runInit(['--skip-mcp', '--yes']);
+
+    const cfg = join(tmpDir, '.ai-sdlc');
+    expect(existsSync(join(cfg, 'review-policy.md'))).toBe(true);
+    expect(existsSync(join(cfg, 'workflow.yaml'))).toBe(true);
+    const { missingConfigEntries } = await import('@ai-sdlc/pipeline-cli/config-manifest');
+    expect(missingConfigEntries(tmpDir)).toEqual([]);
+  });
+
   it('adds .ai-sdlc/artifacts/ under the existing runtime block of a repository initialised earlier, once (AISDLC-657.3)', async () => {
     initBareRepo(tmpDir);
     const oldBlock =

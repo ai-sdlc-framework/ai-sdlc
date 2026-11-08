@@ -53,6 +53,7 @@ import {
   type FeatureSelection,
   type WizardFlags,
 } from './init-features.js';
+import { scaffoldConfig } from '@ai-sdlc/pipeline-cli/config-manifest';
 import { REVIEW_POLICY_INIT_LINE } from './doctor-checks.js';
 import {
   CALIBRATION_YAML_STUB,
@@ -483,6 +484,22 @@ function initProject(
   ensureGitignore(projectDir, false, prefix);
 }
 
+/**
+ * Scaffold every manifest entry that needs no operator input (review-policy.md,
+ * workflow.yaml, ...) so a fresh init passes doctor's config-manifest check on
+ * the first run (AISDLC-1240). `initProject` keeps its own file list, which
+ * diverged from the manifest; existing files are never overwritten.
+ */
+async function scaffoldManifestEntries(
+  projectDir: string,
+  dryRun: boolean,
+  prefix: string = '',
+): Promise<void> {
+  if (dryRun) return;
+  const result = await scaffoldConfig({ projectDir, skipOperatorInput: true });
+  for (const path of result.created) console.log(`${prefix}  created ${path}`);
+}
+
 /** Initialize the workspace root with workspace.yaml. */
 function initWorkspaceRoot(
   workspacePath: string,
@@ -794,6 +811,9 @@ export const initCommand = new Command('init')
           pipelineYaml: childPipeline,
           tier,
         });
+        if (configDirName === '.ai-sdlc') {
+          await scaffoldManifestEntries(repo.absPath, dryRun, '  ');
+        }
       }
 
       // MCP setup at workspace root (serves all repos)
@@ -831,6 +851,7 @@ export const initCommand = new Command('init')
     } else {
       // Single-repo mode (original behavior)
       initProject(projectDir, configDirName, dryRun, '', { pipelineYaml, tier });
+      if (configDirName === '.ai-sdlc') await scaffoldManifestEntries(projectDir, dryRun);
 
       if (!opts.skipMcp) {
         const { detected, skipped } = detectAgentsDetailed(projectDir, {
