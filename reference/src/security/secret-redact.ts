@@ -54,7 +54,7 @@ export interface SecretPattern {
   /** Pattern to match. MUST be `g`lobal so `String.replace` redacts ALL hits. */
   regex: RegExp;
   /** Static replacement; defaults to `[REDACTED:<name>]`. */
-  replacement?: string;
+  replacement?: string | ((match: string) => string);
 }
 
 /**
@@ -262,6 +262,74 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
       /([A-Za-z][A-Za-z0-9+.-]{0,31}:\/\/(?:[^\s/?#@:[\]]|\[REDACTED:[A-Z_-]{1,32}\]){0,512}:)[^\s/?#]{1,512}@/g,
     replacement: '$1[REDACTED:URL_PASSWORD]@',
   },
+  // AISDLC-630.3: secret forms the `.env` rule cannot see. All run AFTER the URL rules and BEFORE
+  // ENV_ASSIGNMENT, skip values that are already a `[REDACTED:` marker (idempotence), and redact
+  // only the value (key names and surrounding text stay).
+  //
+  // URL password with a raw `/`, `#` or `?` (`scheme://user:pa/ss#x@host`). Ends at the first `@`
+  // after a special character that is followed by a host. A numeric port (`host:8080/a@b`) is not a
+  // password, so a leading 1-5 digit run before `/ ? # @` is excluded.
+  {
+    name: 'URL_PASSWORD',
+    regex:
+      /([A-Za-z][A-Za-z0-9+.-]{0,31}:\/\/(?:[^\s/?#@:[\]]|\[REDACTED:[A-Z_-]{1,32}\]){1,256}:)(?!\d{1,5}(?:[/?#@]|\s|$))(?!\[REDACTED:)[^\s@/?#]{0,128}[/?#][^\s@]{0,128}@(?=[A-Za-z0-9.-]{1,253}(?::\d{1,5})?(?:[/?#\s"'),]|$))/g,
+    replacement: '$1[REDACTED:URL_PASSWORD]@',
+  },
+  // URL userinfo whose user part contains an `@` (`scheme://us@er:pw@host`).
+  {
+    name: 'URL_PASSWORD',
+    regex:
+      /([A-Za-z][A-Za-z0-9+.-]{0,31}:\/\/[^\s/?#:@[\]]{1,256}@[^\s/?#:@[\]]{1,256}:)(?!\[REDACTED:)[^\s/?#@]{1,512}@/g,
+    replacement: '$1[REDACTED:URL_PASSWORD]@',
+  },
+  // `Authorization: Bearer|Basic|Token <value>` (also Proxy-Authorization). A header without a
+  // credential scheme (`Authorization: none`) is untouched.
+  {
+    name: 'AUTH_HEADER',
+    regex:
+      /(\bAuthorization["']?[ \t]{0,20}:[ \t]{0,20}(?:Bearer|Basic|Token)[ \t]{1,20})(?!\[REDACTED:)[^\s"',;]{1,2048}/gi,
+    replacement: '$1[REDACTED:AUTH_HEADER]',
+  },
+  // Cookie / Set-Cookie pairs whose NAME looks like a session or auth token (`sessionid`, `auth`,
+  // `access_token`, `sid`, `jwt`); other cookies and attributes (`Path=/`) are untouched.
+  {
+    name: 'COOKIE',
+    regex: /\bCookie:[^\n]{1,4096}/gi,
+    replacement: (header: string) =>
+      header.replace(
+        /(?<![\w-])([\w-]{0,64}(?:sess|auth|token|sid|jwt)[\w-]{0,64})=(?!\[REDACTED:)[^\s;]+/gi,
+        '$1=[REDACTED:COOKIE]',
+      ),
+  },
+  // Colon forms (YAML `POSTGRES_PASSWORD: x`, JSON `"password":"x"`, header `X-Api-Key: x`) for the
+  // same key names as ENV_ASSIGNMENT except bare SECRET (existing tests pin `secret: x` unchanged) (plus `APIKEY` / `api-key` / `apiKey`).
+  {
+    name: 'COLON_SECRET',
+    regex:
+      /((?:TOKEN|PASSWORD|PASSWD|API[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL|(?<![A-Za-z])(?:PASS|PWD)(?![A-Za-z0-9]))(?:[A-Za-z0-9_.-]|\[REDACTED:[A-Z_-]{1,32}\]){0,64}["']?[ \t]{0,20}:(?!=)[ \t]{0,20})(?:(["'])(?!\[REDACTED:[A-Z_-]{1,32}\]\2)(?:(?!\2)[^\\\n]|\\.)+\2|(?!["'`]|\[REDACTED:)[^\s,;}\])]+)/gi,
+    replacement: '$1$2[REDACTED:COLON_SECRET]$2',
+  },
+  // Flag form `--password x` (the `=` form is ENV_ASSIGNMENT's). The value must not start with `-`.
+  {
+    name: 'FLAG_SECRET',
+    regex:
+      /(--[A-Za-z0-9_-]{0,64}(?:password|passwd|secret|token|api-?key|credential|private-key)[A-Za-z0-9_-]{0,64}[ \t]{1,20})(?:(["'])(?!\[REDACTED:[A-Z_-]{1,32}\]\2)(?:(?!\2)[^\\\n]|\\.)+\2|(?!["'-]|\[REDACTED:)[^\s]+)/gi,
+    replacement: '$1$2[REDACTED:FLAG_SECRET]$2',
+  },
+  // MySQL-family client password flag: `mysql -u root -p x` and the attached `-px`.
+  {
+    name: 'DB_PASSWORD_FLAG',
+    regex:
+      /(\b(?:mysql|mysqldump|mysqladmin|mariadb)\b[^\n|;&]{0,200}?[ \t]-p[ \t]{0,20})(?:(["'])(?!\[REDACTED:[A-Z_-]{1,32}\]\2)(?:(?!\2)[^\\\n]|\\.)+\2|(?![\s"'-]|\[REDACTED:)[^\s]+)/gi,
+    replacement: '$1$2[REDACTED:DB_PASSWORD]$2',
+  },
+  // `curl -u user:pw` and `--user user:pw` (a user with no `:password` is left alone).
+  {
+    name: 'USER_FLAG',
+    regex:
+      /((?:\bcurl\b[^\n|;&]{0,200}?[ \t]-u|[ \t]--user)(?:[ \t]{1,20}|=)(["']?))(?!\[REDACTED:)[^\s:"']{0,128}:[^\s"']{1,512}/gi,
+    replacement: '$1[REDACTED:USER_CREDENTIALS]',
+  },
   // `.env`-style assignments: `NAME=value` where NAME CONTAINS (case-
   // insensitive substring, so `GITHUB_TOKEN`, `authToken`, `db_password`)
   // SECRET, TOKEN, PASSWORD, PASSWD, API_KEY, PRIVATE_KEY or CREDENTIAL, or has
@@ -282,11 +350,8 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   // RESIDUAL GAPS (known; they MUST be closed before any provider-enabling work
   // relies on this redactor as its only defense; AISDLC-641 depends on both
   // follow-ups below). Each gap says who owns it:
-  //  - colon / header / flag forms: `POSTGRES_PASSWORD: x`, `"password":"x"`,
-  //    `Authorization: Bearer ...` / `Basic ...`, `X-Api-Key: x`, `--password x`,
-  //    `curl -u user:pw`, `.netrc`; and names `APIKEY=`, `api-key=`, `apiKey=`
-  //    (only `API_KEY` is a keyword) and camelCase `dbPass=`. Owner: AISDLC-630.3
-  //    (this file, reference/src/security/secret-redact.ts);
+  //  - `.netrc` and camelCase `dbPass=` (colon, header, flag and APIKEY forms are
+  //    covered by the AISDLC-630.3 rules above). Accepted and documented;
   //  - structured-state values under secret-named keys in the JSON walk
   //    (reference/src/judgment/redact-json.ts): `{"password":"x"}` is not
   //    redacted. Only an exactly-40-char base64 string (never 40 hex) under a
@@ -310,8 +375,9 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   //  - URL passwords: a raw `/`, `#` or `?` inside the password ends the match
   //    (widening would over-match URLs that merely contain `@` in a path or
   //    query), and an `@` in the URL user part. Accepted and documented;
-  //  - unquoted multi-token values (`TOKEN=Bearer abc def` redacts only
-  //    `Bearer`). Owner: AISDLC-630.3;
+  //  - unquoted multi-token values are redacted only when the first token is an
+  //    auth scheme (`TOKEN=Bearer abc def`); other multi-word values keep their tail
+  //    (`secret.key=abc rest`, pinned by existing tests). Accepted and documented;
   //  - a bare Twilio auth token (32 hex, no label, outside a URL) has no
   //    documented prefix and is not caught below the 48-char catch-all.
   //    Accepted and documented;
@@ -334,7 +400,7 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   {
     name: 'ENV_ASSIGNMENT',
     regex:
-      /((?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIAL|(?<![A-Za-z])(?:PASS|PWD)(?![A-Za-z0-9]))(?:[A-Za-z0-9_.-]|\[REDACTED:[A-Z_-]{1,32}\]){0,64}[ \t]{0,20}=(?!=)[ \t]{0,20})(?:(["'])(?!\[REDACTED:[A-Z_-]{1,32}\]\2)(?:(?!\2)[^\\\n]|\\.)+\2|(?!["']|\[REDACTED:[A-Z_-]{1,32}\](?!\S))[^\s]+|["'](?!["'])(?!\[REDACTED:[A-Z_-]{1,32}\](?:["']|[ \t]*(?:\r?\n|$)))[^\n]*)/gi,
+      /((?:SECRET|TOKEN|PASSWORD|PASSWD|API[_-]?KEY|PRIVATE_KEY|CREDENTIAL|(?<![A-Za-z])(?:PASS|PWD)(?![A-Za-z0-9]))(?:[A-Za-z0-9_.-]|\[REDACTED:[A-Z_-]{1,32}\]){0,64}[ \t]{0,20}=(?!=)[ \t]{0,20})(?:(["'])(?!\[REDACTED:[A-Z_-]{1,32}\]\2)(?:(?!\2)[^\\\n]|\\.)+\2|(?!["']|\[REDACTED:[A-Z_-]{1,32}\](?!\S))(?:(?:Bearer|Basic|Token|Digest)(?:[ \t]{1,20}(?![\w.-]{0,64}[ \t]{0,20}=|#)[^\s]+){1,16}|[^\s]+)|["'](?!["'])(?!\[REDACTED:[A-Z_-]{1,32}\](?:["']|[ \t]*(?:\r?\n|$)))[^\n]*)/gi,
     replacement: '$1$2[REDACTED:ENV_SECRET]$2',
   },
   // The `(?<![A-Za-z0-9_-])` run-start anchor does not change what matches (a
@@ -395,7 +461,10 @@ export function redactSecrets(input: string | undefined | null): string {
       : input;
   for (const pattern of SECRET_PATTERNS) {
     const replacement = pattern.replacement ?? `[REDACTED:${pattern.name}]`;
-    out = out.replace(pattern.regex, replacement);
+    out =
+      typeof replacement === 'string'
+        ? out.replace(pattern.regex, replacement)
+        : out.replace(pattern.regex, replacement);
   }
   return out;
 }
