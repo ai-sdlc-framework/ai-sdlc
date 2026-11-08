@@ -692,6 +692,25 @@ describe('fixManifestsAgree', () => {
   });
 });
 
+describe('fixManifestsAgree outside the repository (AISDLC-1240)', () => {
+  it('refuses to write outside projectDir and prints the path and command', () => {
+    const pluginDir = join(tmpDir, 'ai-sdlc-plugin');
+    writePluginManifests(pluginDir, { rootVersion: '2.0.0', nestedVersion: '1.0.0' });
+    const writes: string[] = [];
+    const adapters = makeAdapters({
+      writeFile: (p) => void writes.push(p),
+      env: { CLAUDE_PLUGIN_ROOT: pluginDir },
+    });
+    const project = join(tmpDir, 'elsewhere');
+    mkdirSync(project, { recursive: true });
+    const fix = fixManifestsAgree(makeCtx(adapters, project));
+    expect(fix.applied).toBe(false);
+    expect(writes).toEqual([]);
+    expect(fix.detail).toContain(join(pluginDir, '.claude-plugin', 'plugin.json'));
+    expect(fix.detail).toContain('cp "');
+  });
+});
+
 // ── checkAttestationGovernanceCheck (check 7, reuse of AISDLC-560) ────
 
 describe('checkAttestationGovernanceCheck', () => {

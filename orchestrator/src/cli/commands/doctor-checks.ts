@@ -45,7 +45,7 @@
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
 import { CLIENT_SIDE_ONLY_MESSAGE } from './branch-protection-shared.js';
 import { homedir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { parse as parseYaml } from 'yaml';
 import {
@@ -581,6 +581,17 @@ export function fixManifestsAgree(ctx: DoctorRunContext): DoctorFixResult {
   const rootRaw = ctx.adapters.readFile(rootPath);
   if (rootRaw == null) {
     return { id: 'manifests-agree', applied: false, detail: `${rootPath} missing — cannot sync` };
+  }
+  // `doctor --fix` never writes outside the repository root (AISDLC-1240): a
+  // plugin install under ~/.claude/plugins/cache is the operator's to change.
+  const rel = relative(resolve(ctx.projectDir), resolve(nestedPath));
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    const cmd = `cp "${rootPath}" "${nestedPath}"`;
+    return {
+      id: 'manifests-agree',
+      applied: false,
+      detail: `not writing outside the repository: ${nestedPath}. Run this yourself: ${cmd}`,
+    };
   }
   // Root `plugin.json` is treated as the source of truth: it's the one
   // release-please's `extra-files` config bumps directly (AISDLC-574).
