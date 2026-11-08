@@ -1,4 +1,4 @@
-import { redactSecrets } from '../security/secret-redact.js';
+import { redactSecrets, SECRET_KEY_NAME } from '../security/secret-redact.js';
 import type { JsonValue } from './types.js';
 
 /**
@@ -12,6 +12,7 @@ import type { JsonValue } from './types.js';
 const AWS_SECRET_VALUE = /^[A-Za-z0-9/+=]{40}$/;
 const HEX_40 = /^[0-9a-f]{40}$/i;
 const ACCESS_KEY_ID = /^(?:AKIA|ASIA)[0-9A-Z]{16}$/;
+const KEY_MARKER = '[REDACTED:SECRET_KEY]';
 const MARKER = '[REDACTED:AWS_SECRET_KEY]';
 
 function isAwsSecret(value: JsonValue): boolean {
@@ -23,6 +24,7 @@ function holdsAccessKeyId(items: readonly JsonValue[]): boolean {
 }
 
 function redactEntry(key: string, value: JsonValue, idAdjacent: boolean): JsonValue {
+  if (SECRET_KEY_NAME.test(key)) return KEY_MARKER;
   const secretKey = /secret/i.test(key);
   if (isAwsSecret(value) && (secretKey || idAdjacent)) return MARKER;
   if (secretKey && Array.isArray(value)) {

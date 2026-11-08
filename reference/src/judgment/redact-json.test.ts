@@ -31,7 +31,7 @@ describe('redactJsonValue (secret shapes)', () => {
 
   it('redacts secrets that appear in object keys', () => {
     const out = JSON.stringify(redactJsonValue({ [`TOKEN=abc`]: 'v' }));
-    expect(out).toBe('{"TOKEN=[REDACTED:ENV_SECRET]":"v"}');
+    expect(out).toBe('{"TOKEN=[REDACTED:ENV_SECRET]":"[REDACTED:SECRET_KEY]"}');
   });
 });
 
@@ -93,5 +93,32 @@ describe('redactJsonValue (own keys)', () => {
     const k2 = 'AKIAIOSFODNN7EXAMPLF';
     const out = redactJsonValue({ [k1]: 1, [k2]: 2 }) as Record<string, number>;
     expect(out).toEqual({ '[REDACTED:AWS_ACCESS_KEY]': 2 });
+  });
+});
+
+describe('key-aware redaction (AISDLC-630.4)', () => {
+  it('redacts any shape under secret-named keys', () => {
+    const out = redactJsonValue({
+      a: {
+        password: 'hunter2',
+        'api-key': 12345,
+        apiKey: ['x', 'y'],
+        secret_token: { n: 1 },
+        credentials: 'plain',
+      },
+    }) as { a: Record<string, unknown> };
+    for (const v of Object.values(out.a)) expect(v).toBe('[REDACTED:SECRET_KEY]');
+  });
+
+  it('leaves unmatched values under other keys, still redacts shapes', () => {
+    const fake = ['sk', 'live', 'abcdefghijklmnopqrstuvwx'].join('_');
+    const out = redactJsonValue({ name: 'hello', note: fake }) as Record<string, string>;
+    expect(out.name).toBe('hello');
+    expect(out.note).not.toContain(fake);
+  });
+
+  it('shares one key list with the string redactor module', async () => {
+    const mod = await import('../security/secret-redact.js');
+    expect(mod.SECRET_KEY_NAME.source).toContain(mod.SECRET_KEY_FRAGMENTS.join('|'));
   });
 });
