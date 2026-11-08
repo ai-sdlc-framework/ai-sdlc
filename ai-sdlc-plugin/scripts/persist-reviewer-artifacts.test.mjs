@@ -258,6 +258,59 @@ describe('persist-reviewer-artifacts.sh', () => {
     }
   });
 
+  it('--nonce-marker refuses a transcript without the marker and persists one with it (AISDLC-701)', () => {
+    const { root, claudeProjectsDir, worktree } = makeHarness();
+    try {
+      const marker = '[[ai-sdlc-nonce: ' + 'a'.repeat(64) + ']]';
+      writeTranscript(claudeProjectsDir, 'p', 's1', 'agent-no', '{"event":"x"}\n');
+      writeTranscript(claudeProjectsDir, 'p', 's1', 'agent-yes', `{"event":"${marker}"}\n`);
+      const verdictFile = writeVerdict(root, { approved: true, findings: [], summary: 'ok' });
+      const base = [
+        '--worktree',
+        worktree,
+        '--task-id',
+        'AISDLC-701',
+        '--reviewer',
+        'code-reviewer',
+      ];
+      const env = { AI_SDLC_CLAUDE_PROJECTS_DIR: claudeProjectsDir };
+
+      const bad = run(
+        [
+          ...base,
+          '--agent-id',
+          'agent-no',
+          '--verdict-file',
+          verdictFile,
+          '--nonce-marker',
+          marker,
+        ],
+        env,
+      );
+      assert.equal(bad.code, 4);
+      assert.equal(existsSync(join(worktree, '.ai-sdlc', 'transcripts')), false);
+
+      const good = run(
+        [
+          ...base,
+          '--agent-id',
+          'agent-yes',
+          '--verdict-file',
+          verdictFile,
+          '--nonce-marker',
+          marker,
+        ],
+        env,
+      );
+      assert.equal(good.code, 0);
+
+      const plain = run([...base, '--agent-id', 'agent-no', '--verdict-file', verdictFile], env);
+      assert.equal(plain.code, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('is idempotent — re-running with the same args overwrites cleanly', () => {
     const { root, claudeProjectsDir, worktree } = makeHarness();
     try {

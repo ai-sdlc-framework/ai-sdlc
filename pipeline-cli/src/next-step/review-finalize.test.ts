@@ -298,6 +298,8 @@ describe('finalizeReview', () => {
       c.args[0]?.endsWith('persist-reviewer-artifacts.sh'),
     );
     expect(persist).toHaveLength(3);
+    // AISDLC-701: persistence refuses a transcript lacking this round's nonce marker.
+    expect(persist[0].args).toContain('--nonce-marker');
     expect(persist[0].args).toEqual(
       expect.arrayContaining([
         '--worktree',

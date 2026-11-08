@@ -20,6 +20,7 @@ import { aggregateVerdicts, buildVerdictRecordDraft } from '../steps/08-aggregat
 import type { AggregatedVerdict, ReviewerFinding, ReviewerVerdict, Severity } from '../types.js';
 import type { IndependenceTier } from '../attestation/verdict-record.js';
 import { resolveTargetBranch } from '../steps/02-compute-branch.js';
+import { nonceMarkerLiteral } from '../attestation/harness-transcript.js';
 import { writeRunFile } from './init.js';
 import type { NextStepContext, NextStepState } from './types.js';
 import { DEFAULT_HARNESS } from '../harness-defaults.js';
@@ -367,6 +368,8 @@ export async function finalizeReview(
         agentId,
         '--verdict-file',
         verdictScratch,
+        '--nonce-marker',
+        nonceMarkerLiteral(review.nonce),
       ],
       { cwd: ctx.workDir, allowFailure: true },
     );

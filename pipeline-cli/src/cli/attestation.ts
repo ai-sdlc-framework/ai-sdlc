@@ -315,7 +315,16 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
                 'one. Required for harnessTranscriptHash diff-binding — the orchestrating ' +
                 'dispatch must generate this nonce and embed it (via nonceMarkerLiteral()) in ' +
                 "the reviewer's prompt BEFORE the reviewer runs, then pass the SAME value here. " +
-                'Omit to preserve legacy behavior (a fresh nonce is generated per call).',
+                'Omit and a fresh nonce is generated that no reviewer saw, so the leaf is ' +
+                'self-authored unless --allow-role-matched-independent is set.',
+            })
+            .option('allow-role-matched-independent', {
+              type: 'boolean',
+              default: false,
+              describe:
+                'AISDLC-701: opt in to the local role-matched rule. Without it a leaf is ' +
+                "`independent` only when the nonce is found in the reviewer run's own harness " +
+                'transcript; with it, a role-matched marker under --repo-root also counts.',
             })
             .option('claude-session-id', {
               type: 'string',
@@ -551,17 +560,16 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           // for the full mechanism + honest limits. The `reason` is always
           // logged (even on success) for signer-side observability.
           //
-          // MUST run BEFORE determineVerdictClass() below: both read the same
-          // `.ai-sdlc/subagent-sessions/<agent-id>.json` SubagentStart marker,
-          // but determineVerdictClass() CONSUMES (unlinks) it on a match.
-          // Ordering it first here would make harnessTranscriptHash resolve
-          // null on every single call, even a fully-correct positive-path
-          // invocation with the nonce wired end-to-end — a dead-on-arrival
-          // regression that would only surface once the (currently
-          // unimplemented) orchestrator-side nonce injection landed. See
-          // `findMatchingSubagentMarker()` in harness-transcript.ts — it is a
-          // deliberately READ-ONLY, non-consuming scan for exactly this
-          // reason.
+          // bindLeafToReviewerRun makes ONE selection that decides both the hash
+          // and the verdict class, and claims the marker atomically (AISDLC-701),
+          // so two emit-leaf runs for one leaf cannot both be `independent`.
+          const allowRoleMatched = Boolean(args['allow-role-matched-independent']);
+          if (allowRoleMatched) {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: --allow-role-matched-independent set; a role-matched ` +
+                `marker under --repo-root can make this leaf independent without a verified nonce\n`,
+            );
+          }
           const harnessResult = bindLeafToReviewerRun({
             repoRoot,
             transcriptMtimeMs,
@@ -572,6 +580,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             agentId,
             headSha,
             taskId,
+            allowRoleMatchedIndependent: allowRoleMatched,
           });
           process.stderr.write(
             `[cli-attestation] emit-leaf: harnessTranscriptHash=${

@@ -108,11 +108,10 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import {
   REVIEWER_AGENT_TYPES,
-  consumeSubagentMarker,
+  claimAndConsumeSubagentMarker,
   determineVerdictClass,
   buildMarkerClaim,
   listSubagentMarkerCandidates,
-  selectSubagentMarker,
   stripAgentTypeNamespace,
   type ReviewerAgentType,
   type SubagentMarkerSelection,
@@ -134,55 +133,12 @@ export function nonceMarkerLiteral(nonce: string): string {
   return `[[ai-sdlc-nonce: ${nonce}]]`;
 }
 
-/** Result of a read-only (non-consuming) scan for a matching SubagentStart marker. */
+/** The facts about a `SubagentStart` marker the transcript check needs. */
 export interface HarnessMarkerMatch {
   agentId: string;
   /** `null` for legacy (pre-AISDLC-572) markers that don't carry a role. */
   agentType: string | null;
   firedAt: string;
-}
-
-/**
- * Read-only scan of `.ai-sdlc/subagent-sessions/*.json` for a marker whose
- * `firedAt` falls within `MARKER_MAX_AGE_MS` of `transcriptMtimeMs`.
- *
- * Deliberately does NOT consume (delete) the marker — `verdict-class.ts`'s
- * `determineVerdictClass` owns consumption semantics for `verdictClass`.
- * This function only needs the marker's `agentId` (to locate the harness
- * transcript file) and optional `agentType` (once AISDLC-572 lands).
- *
- * Fail-safe: any error (missing dir, unreadable/malformed file) is treated
- * as "no marker" and this function returns `null`. It never throws.
- */
-export function findMatchingSubagentMarker(opts: {
-  repoRoot: string;
-  transcriptMtimeMs: number;
-  /** The reviewer the leaf is for. A marker typed for another role never matches. */
-  reviewerName?: string;
-  /** Harness agent id of the reviewer run. When given, only that agent's marker matches. */
-  agentId?: string;
-  /** Further directories to search for markers (see {@link markerSearchRoots}). */
-  extraRoots?: readonly string[];
-}): HarnessMarkerMatch | null {
-  try {
-    const selection = selectSubagentMarker({
-      roots: [opts.repoRoot, ...(opts.extraRoots ?? [])],
-      transcriptMtimeMs: opts.transcriptMtimeMs,
-      reviewerName: opts.reviewerName,
-      agentId: opts.agentId,
-      // Legacy markers carry no role; the caller then checks the harness's
-      // own `.meta.json` role claim before trusting the transcript.
-      allowUntyped: true,
-    });
-    if (!selection) return null;
-    return {
-      agentId: selection.marker.agentId,
-      agentType: selection.marker.agentType,
-      firedAt: selection.marker.firedAt,
-    };
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -610,6 +566,13 @@ export interface ComputeHarnessTranscriptHashOptions {
   headSha?: string;
   /** AISDLC-734: task the leaf is for; part of the marker claim. */
   taskId?: string;
+  /**
+   * AISDLC-701: when the nonce is not verified, still credit a role-matched
+   * marker under `repoRoot` itself (the earlier rule). Off by default: without
+   * a nonce found in the reviewer's own harness transcript the leaf is
+   * `self-authored`.
+   */
+  allowRoleMatchedIndependent?: boolean;
 }
 
 export interface ComputeHarnessTranscriptHashResult {
@@ -793,7 +756,8 @@ export interface LeafBinding extends ComputeHarnessTranscriptHashResult {
  *    carries this leaf's diff-binding nonce. That run reviewed THIS diff.
  *    The hash is that transcript's; the class is `independent` when the
  *    marker is typed; exactly that marker is consumed.
- * 2. Otherwise the hash is `null`, and the class falls back to
+ * 2. Otherwise the hash is `null` and the class is `self-authored`, unless
+ *    `allowRoleMatchedIndependent` is set, in which case it falls back to
  *    {@link determineVerdictClass}: a role-matched marker under `repoRoot`
  *    itself. Markers in directories shared between tasks are NOT credited
  *    without the nonce, because role and timing cannot tell this task's
@@ -823,10 +787,17 @@ export function bindLeafToReviewerRun(opts: ComputeHarnessTranscriptHashOptions)
       role !== null && HARNESS_REVIEWER_AGENT_TYPES.includes(role as HarnessReviewerAgentType);
     if (typedReviewer) {
       const claim = buildMarkerClaim(opts.headSha, opts.reviewerName, opts.taskId);
-      consumeSubagentMarker(
+      const won = claimAndConsumeSubagentMarker(
         found.selection.filePath,
         claim ? { ...claim, transcriptHash: found.result.harnessTranscriptHash } : claim,
       );
+      if (!won) {
+        return {
+          ...found.result,
+          reason: `${found.result.reason}; marker already claimed by another emit-leaf run`,
+          verdictClass: 'self-authored',
+        };
+      }
       return { ...found.result, verdictClass: 'independent' };
     }
     // An untyped (legacy) marker backs the hash through the harness's own
@@ -835,6 +806,9 @@ export function bindLeafToReviewerRun(opts: ComputeHarnessTranscriptHashOptions)
     return { ...found.result, verdictClass: 'self-authored' };
   }
 
+  if (!opts.allowRoleMatchedIndependent) {
+    return { ...found.result, verdictClass: 'self-authored' };
+  }
   return {
     ...found.result,
     verdictClass: determineVerdictClass({
