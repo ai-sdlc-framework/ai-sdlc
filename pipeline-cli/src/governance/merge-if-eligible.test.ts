@@ -2274,7 +2274,9 @@ describe('runMergeIfEligible - docs lane (AISDLC-878)', () => {
     for (const head of ['feat/x', 'ai-sdlc/aisdlc-1-x']) {
       const r = await run(base(changedFiles([[DOC]]), { headRefName: head })).promise;
       expect(r.armed).toBeFalsy();
-      expect(r.eligibility.reason).toMatch(/"ai-sdlc\/file-\*" or "docs\/\*"/);
+      expect(r.eligibility.reason).toMatch(
+        /"ai-sdlc\/file-\*" or "ai-sdlc\/update-\*" or "docs\/\*"/,
+      );
     }
   });
 

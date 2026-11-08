@@ -489,6 +489,13 @@ describe('helpers', () => {
     expect(detectKind({ headBranch: 'docs/x', taskId: 'A-1' })).toBe('docs');
     expect(detectKind({ headBranch: 'ai-sdlc/decisions-sync' })).toBe('decisions-sync');
     expect(detectKind({ headBranch: 'ai-sdlc/file-x' })).toBe('docs');
+    expect(
+      detectKind({
+        headBranch: 'ai-sdlc/update-aisdlc-1179.1',
+        title: 'chore(docs): file backlog task AISDLC-1179.1',
+        taskId: 'AISDLC-1179.1',
+      }),
+    ).toBe('docs');
     expect(detectKind({ taskId: 'A-1' })).toBe('task');
     expect(detectKind({ title: 'chore: release main' })).toBe('release');
     expect(taskIdFrom('ai-sdlc/aisdlc-12.3-foo')).toBe('AISDLC-12.3');

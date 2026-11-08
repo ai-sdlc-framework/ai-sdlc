@@ -28,7 +28,10 @@
  *     name being readable from the inflight manifest. Other callers are not
  *     checked.
  *   - `remove-verdict --task-id <id> [--from done|failed]` — Conductor uses
- *     this after fan-out completes.
+ *     this after fan-out completes. `--from done --unland --reason <text>` (AISDLC-1235)
+ *     reverses a false `mark-landed`: removes the completion marker, verdict (and with
+ *     `--with-manifest` the manifest), logs the reason to `<board>/board-events.jsonl`, and
+ *     refuses while the task has a merged code PR.
  *   - `heartbeat --task-id <id> --worker-id <id> --worker-kind <kind>
  *     [--current-step <s>]` — write or refresh a heartbeat.
  *   - `sweep [--stale-ms <n>]` — sweep stale inflight heartbeats; print the
@@ -232,6 +235,7 @@ import { resolveStuckAfterMinutes } from '../hierarchy/drain-stall.js';
 import { desktopNotice } from '../hierarchy/stall-notice.js';
 import { now as clockNow } from '../clock.js';
 import { closeSupersededPr } from '../hierarchy/superseded.js';
+import { unlandTask } from '../dispatch/unland.js';
 import { createSystemRunner } from '../hierarchy/system-runner.js';
 import type { CommandRunner } from '../hierarchy/types.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from '../dispatch/session-reaper.js';
@@ -1158,6 +1162,29 @@ export async function runDispatchCli(
         readdirSync(completed).some((f) =>
           f.toLowerCase().startsWith(`${taskId.toLowerCase()} - `),
         );
+      if (flags['unland'] === 'true') {
+        const reason = flags['reason'];
+        if (from !== 'done' || !reason || reason === 'true') {
+          process.stderr.write(
+            'cli-dispatch remove-verdict --unland: needs --from done and --reason <text>\n',
+          );
+          return 2;
+        }
+        try {
+          const removed = unlandTask(boardDir, taskId, reason, {
+            run: deps.ghRun ?? createSystemRunner(),
+            cwd: workDir,
+            withManifest: flags['with-manifest'] === 'true',
+          });
+          out({ ok: true, unlanded: taskId, removed });
+          return 0;
+        } catch (err) {
+          process.stderr.write(
+            `cli-dispatch remove-verdict --unland: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+          return 1;
+        }
+      }
       removeVerdict(boardDir, taskId, from, {
         withManifest: flags['with-manifest'] === 'true' || inCompleted,
       });
@@ -1868,7 +1895,7 @@ Subcommands:
   write-verdict --task-id <id> --outcome <enum> [--worker <name>; required for executors]
                 [--commit-sha <s>]
                 [--iterations-attempted <n>] [--session-id <uuid>] ...
-  remove-verdict --task-id <id> [--from done|failed] [--with-manifest]
+  remove-verdict --task-id <id> [--from done|failed] [--with-manifest] [--unland --reason <text>]
   push-only-check --task-id <id> [--worktree <path>]   (exit 0 push-only, 1 run a normal resume)
   heartbeat --task-id <id> --worker-id <id> --worker-kind <kind>
   sweep [--stale-ms <n>]

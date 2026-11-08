@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1235
 title: 'Reconciler treats a cli-file --update filing PR (ai-sdlc/update-<id>) as the task''s own PR and marks the task landed'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-08'
 labels:
