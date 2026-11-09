@@ -55,6 +55,24 @@ export function startSession(
   return run('tmux', ['new-session', '-d', '-s', name, '-n', name, '-c', cwd, command], { cwd });
 }
 
+/** Session environment entry naming the board that spawned a session (AISDLC-1252). */
+export const BOARD_TAG = 'AI_SDLC_BOARD_DIR';
+
+/** Tag a session with the absolute dir of the board that spawned it (session environment, not process env). */
+export function tagSessionBoard(run: CommandRunner, name: string, boardDir: string): CommandResult {
+  return run('tmux', ['set-environment', '-t', `=${name}`, BOARD_TAG, boardDir]);
+}
+
+/** The board tag of a session; undefined when absent or when tmux fails (a failure never counts as own). */
+export function sessionBoardTag(run: CommandRunner, name: string): string | undefined {
+  const r = run('tmux', ['show-environment', '-t', `=${name}`, BOARD_TAG]);
+  if (r.status !== 0) return undefined;
+  const line = r.stdout.trim();
+  const prefix = `${BOARD_TAG}=`;
+  if (!line.startsWith(prefix)) return undefined;
+  return line.slice(prefix.length) || undefined;
+}
+
 /**
  * Label one session so a terminal attached to it is recognisable: the terminal
  * title and the status line carry the agent name. Every option is scoped to the

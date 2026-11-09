@@ -14,7 +14,7 @@ import { readNvmrc } from './node-pin.js';
 import { rosterProject } from './peer-guard.js';
 import { readRosterChecked, writeRoster } from './roster.js';
 import { listInflight } from './inflight.js';
-import { hasSession, killSession, listSessionNames } from './tmux.js';
+import { hasSession, killSession, listSessionNames, sessionBoardTag } from './tmux.js';
 import type { HierarchyDeps, RosterEntry } from './types.js';
 import { launchSession, resolveProfile, ROLE_PROMPT, withProfile } from './up.js';
 import {
@@ -71,6 +71,18 @@ export async function hierarchySpawn(
   // AISDLC-1117: the roster is the authority. A session that carries the executor name but is
   // not in the roster (checked above) and holds no inflight task is an orphan: reclaim it.
   if (hasSession(deps.run, name)) {
+    const tag = sessionBoardTag(deps.run, name);
+    if (tag !== path.resolve(deps.boardDir)) {
+      const reason = `tmux session '${name}' is not tagged for this board (found ${tag === undefined ? 'no AI_SDLC_BOARD_DIR tag' : `AI_SDLC_BOARD_DIR=${tag}`}); refusing to kill and reuse it`;
+      deps.log(reason);
+      return {
+        name,
+        taskId,
+        created: false,
+        entry: existing ?? foreignEntry(name, taskId),
+        warnings: [...warnings, reason],
+      };
+    }
     killSession(deps.run, name);
     deps.log(`reclaimed orphaned tmux session '${name}' (not in the roster)`);
     warnings.push(`reclaimed orphaned tmux session '${name}'`);
@@ -123,22 +135,55 @@ export async function hierarchySpawn(
   return { name, taskId, created: true, entry, warnings };
 }
 
+/** Placeholder entry for a refused spawn that has no roster entry. */
+function foreignEntry(name: string, taskId: string): RosterEntry {
+  return {
+    role: 'executor',
+    project: '',
+    name,
+    tmuxSession: name,
+    tmuxWindow: name,
+    paneId: '',
+    pid: 0,
+    model: '',
+    permissionMode: 'bypassPermissions',
+    startedAt: '',
+    status: 'starting',
+    taskId,
+  };
+}
+
 /**
- * The tick's sweep (AISDLC-1117): kill every tmux session that is named like a spawned executor
- * but is absent from the roster and holds no inflight task. The same rule {@link hierarchySpawn}
- * applies to the one session it needs. Returns the names reaped.
+ * The tick's sweep (AISDLC-1117, AISDLC-1252): kill every tmux session that is named like a spawned
+ * executor, is absent from the roster, holds no inflight task and is tagged with this board's dir.
+ * Same-shaped sessions tagged for another board, or untagged, are skipped and logged.
  */
-export function reapOrphanExecutorSessions(deps: HierarchyDeps): string[] {
+export function sweepOrphanExecutorSessions(deps: HierarchyDeps): {
+  reaped: string[];
+  skipped: string[];
+} {
   const { roster } = readRosterChecked(deps.boardDir);
   const rostered = new Set(roster.sessions.flatMap((s) => [s.name, s.tmuxSession]));
   const holding = new Set(listInflight(deps.boardDir).map((i) => i.workerId));
+  const board = path.resolve(deps.boardDir);
   const reaped: string[] = [];
+  const skipped: string[] = [];
   for (const name of listSessionNames(deps.run)) {
     if (!isSpawnedExecutorName(name) || rostered.has(name) || holding.has(name)) continue;
+    if (sessionBoardTag(deps.run, name) !== board) {
+      skipped.push(name);
+      deps.log(`skipped foreign executor session '${name}'`);
+      continue;
+    }
     if (killSession(deps.run, name).status === 0) {
       reaped.push(name);
       deps.log(`reaped orphaned tmux session '${name}' (not in the roster)`);
     }
   }
-  return reaped;
+  return { reaped, skipped };
+}
+
+/** {@link sweepOrphanExecutorSessions}, returning the names reaped. */
+export function reapOrphanExecutorSessions(deps: HierarchyDeps): string[] {
+  return sweepOrphanExecutorSessions(deps).reaped;
 }

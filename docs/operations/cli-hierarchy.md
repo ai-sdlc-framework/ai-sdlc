@@ -770,6 +770,7 @@ command at once, with no `enqueue` wake to wait for. `status` lists each dynamic
 `dynamic executor: <name> task <id> age <age> (<state>)`, one line per roster entry that carries a `taskId`.
 A tmux session of that name that the roster does not know, with no inflight task, is an orphan (AISDLC-1117): `spawn` kills it and
 creates the session, and the dispatch tick reaps every such session on its own (listed in the tick result as `orphansReaped`).
+Every session is tagged at creation with `AI_SDLC_BOARD_DIR=<absolute board dir>` (a tmux session environment entry, set right after `new-session`; a failed tag fails the spawn). Sweep and `spawn` act only on sessions whose tag equals their own board dir: an untagged session, a differently tagged one, or one whose `show-environment` fails is foreign and is left alone (logged as `skipped foreign executor session '<name>'`; `spawn` returns `created: false` naming the tag it found). Two hierarchies may therefore share one tmux server without reaping each other.
 A rostered live session is never touched. The last tick's spawn failures print in `status` as `spawn error: task <id>: <error>`,
 and the drain-stall check counts spawn errors with no live executor as a stall. `down` also kills the session of an ephemeral executor.
 The session ends with its task (one task per executor). With the variable set, `executor-start` claims only that task, exits `1` naming the reason

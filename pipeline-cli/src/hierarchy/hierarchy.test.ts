@@ -220,6 +220,7 @@ function makeFakeTmux(registryDir: string): FakeTmux {
           : fail('unknown option');
       }
       case 'select-window':
+      case 'set-environment':
         return ok();
       default:
         return fail('unknown');
