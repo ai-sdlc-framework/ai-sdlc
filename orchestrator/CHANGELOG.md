@@ -5,6 +5,21 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.42.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.41.0...orchestrator-v0.42.0) (2026-11-09)
+
+
+### Bug Fixes
+
+* **orchestrator:** init scaffolds manifest entries; doctor --fix stays inside the repo (AISDLC-1240) ([#2572](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2572)) ([27057e2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/27057e2f1cf1ce2ad14f27a69726345fd63e7fd5))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/pipeline-cli bumped to 0.42.0
+    * @ai-sdlc/reference bumped to 0.42.0
+
 ## [0.41.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.40.0...orchestrator-v0.41.0) (2026-11-08)
 
 

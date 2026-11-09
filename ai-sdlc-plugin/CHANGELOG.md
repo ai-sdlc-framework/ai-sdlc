@@ -5,6 +5,13 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.42.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.41.0...ai-sdlc-plugin-v0.42.0) (2026-11-09)
+
+
+### Miscellaneous
+
+* **ai-sdlc-plugin:** Synchronize node-packages versions
+
 ## [0.41.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.40.0...ai-sdlc-plugin-v0.41.0) (2026-11-08)
 
 

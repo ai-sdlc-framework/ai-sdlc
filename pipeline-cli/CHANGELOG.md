@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.42.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.41.0...pipeline-cli-v0.42.0) (2026-11-09)
+
+
+### Features
+
+* **pipeline-cli:** cli-file task --close moves a superseded task to completed (AISDLC-1241) ([#2578](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2578)) ([37fc45b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/37fc45b2ccac233c3fda9b87f1b459f96d1eae9a))
+* **pipeline-cli:** enqueue a landed filing's task from its brief on the tick (AISDLC-1242) ([#2590](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2590)) ([101baad](https://github.com/ai-sdlc-framework/ai-sdlc/commit/101baadc90f4ead6bbf6490ccd3d56bc42d68291))
+* **pipeline-cli:** route held tasks that cannot clear to the planner once (AISDLC-1244) ([#2593](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2593)) ([1389dd2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1389dd2e85ab0580f51dfe041ecc91f83cc20ba3))
+* **pipeline-cli:** run Stage-3 reviewers inside a proxy-only container (AISDLC-521) ([#2584](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2584)) ([b1b54fc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b1b54fc3e089a2630e4fc5ae4a24fa9cad7d7e0d))
+* **pipeline-cli:** tick retires failed verdicts of landed tasks (AISDLC-1243) ([#2592](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2592)) ([49b9ef3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/49b9ef328f1386e49e4d07016530b8084e33fb13))
+
+
+### Bug Fixes
+
+* **orchestrator:** init scaffolds manifest entries; doctor --fix stays inside the repo (AISDLC-1240) ([#2572](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2572)) ([27057e2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/27057e2f1cf1ce2ad14f27a69726345fd63e7fd5))
+* **pipeline-cli:** compute review spawn list from the Step 8 coverage rule (AISDLC-1251) ([#2606](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2606)) ([26db95e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/26db95e817ff9854d9c7318dfb2032176b9742a2))
+* **pipeline-cli:** decision --file filings use per-event branches (AISDLC-1249) ([#2601](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2601)) ([324dbf2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/324dbf21900c59622eba2de4474347c279e7c48d))
+* **pipeline-cli:** read task class from base-ref task file (AISDLC-654.1) ([#2574](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2574)) ([accd803](https://github.com/ai-sdlc-framework/ai-sdlc/commit/accd803ee831edc0d1974a9249694a8955bb6b37))
+* **pipeline-cli:** refuse filing branches in classifyPr and write-manifest (AISDLC-1248) ([#2599](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2599)) ([051123e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/051123e34a42bc654cea5bccfe983f330e25cacb))
+* **pipeline-cli:** scope the orphan-executor sweep to its own board (AISDLC-1252) ([#2608](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2608)) ([e32cb30](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e32cb30bb1c3bb897360ffca93ffd0555accffb0))
+* **pipeline-cli:** spawn list always covers the coverage rule (AISDLC-1247) ([#2604](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2604)) ([d975a2c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d975a2c4f37dd8e824be4838446792a92eb2519d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.42.0
+
 ## [0.41.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.40.0...pipeline-cli-v0.41.0) (2026-11-08)
 
 
