@@ -125,7 +125,7 @@
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.13.0",
+    "eslint": "^10.14.0",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
     "js-yaml": "5.5.0",
