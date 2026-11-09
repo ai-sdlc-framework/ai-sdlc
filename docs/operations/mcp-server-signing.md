@@ -84,11 +84,24 @@ export AISDLC_SIGNING_KEY_PATH=~/.ai-sdlc/signing-key.pem
 # 2. Run the sign script.
 node scripts/sign-mcp-tarball.mjs --version <VERSION>
 
-# 3. Commit the envelope.
+# 3. Land the envelope through a PR (main requires one; never push main).
+git checkout -b ai-sdlc/mcp-envelope-<VERSION>
 git add .ai-sdlc/attestations/mcp-server-<VERSION>.dsse.json
-git commit -m "chore(release): sign @ai-sdlc/plugin-mcp-server@<VERSION> tarball DSSE envelope (AISDLC-439)"
-git push origin main
+git commit -m "chore(ci): sign @ai-sdlc/plugin-mcp-server@<VERSION> tarball DSSE envelope (AISDLC-439)"
+git push --force-with-lease -u origin HEAD:refs/heads/ai-sdlc/mcp-envelope-<VERSION>
+gh pr create --base main --title "chore(ci): sign @ai-sdlc/plugin-mcp-server@<VERSION> tarball DSSE envelope (AISDLC-439)" --body "Manual recovery of the lost envelope for <VERSION>."
 ```
+
+## Automatic landing (branch + PR)
+
+The release workflow commits the envelope on `ai-sdlc/mcp-envelope-<version>`
+(scope `ci`), pushes that branch with the workflow token, opens a PR against
+`main`, and arms it with
+`node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm`.
+It never pushes `main`. Reruns are idempotent: the branch is lease-pushed
+and `gh pr create` is skipped when the PR is already open. If arming is
+refused the job logs a `::warning::` and the PR waits for an operator. For a
+release whose envelope was lost, use the manual recovery above (same branch name).
 
 ## Manual verification
 

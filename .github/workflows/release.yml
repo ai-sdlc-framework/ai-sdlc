@@ -83,7 +83,8 @@ jobs:
     if: needs.release-please.outputs.releases_created == 'true' || (github.event_name == 'workflow_dispatch' && inputs.force_publish == true)
     runs-on: ubuntu-latest
     permissions:
-      contents: write # need write to commit the signed DSSE envelope back
+      contents: write # push the ai-sdlc/mcp-envelope-<version> branch (never main)
+      pull-requests: write # open the envelope PR against main
       id-token: write # npm provenance
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -156,7 +157,7 @@ jobs:
       #      (predicateType: https://ai-sdlc.io/mcp-server-tarball/v1), and
       #      sign it with the operator's release signing key
       #      (AISDLC_SIGNING_KEY from repository secrets).
-      #   3. Commit the signed envelope to
+      #   3. Land the signed envelope via a branch + PR (never a push to main) at
       #      .ai-sdlc/attestations/mcp-server-<version>.dsse.json so install-
       #      time verifiers can fetch it via git pull without external infra.
       #
@@ -234,18 +235,46 @@ jobs:
           echo "envelope=${ENVELOPE_PATH}" >> "$GITHUB_OUTPUT"
           echo "skipped=false" >> "$GITHUB_OUTPUT"
 
+      # Land the envelope through a PR: main requires a pull request (also for
+      # admins), so this step never pushes to main (AISDLC-1253). Idempotent: a
+      # rerun lease-pushes the rebuilt commit to the same branch and skips
+      # `gh pr create` when a PR for the branch is already open.
       - name: Commit signed MCP server tarball envelope
         if: steps.sign-tarball.outputs.skipped != 'true' && steps.sign-tarball.outputs.envelope != ''
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
+          AI_SDLC_CALLER_ROLE: operator
+          HUSKY: '0' # skip husky hooks installed by pnpm install
         run: |
           MCP_VERSION="${{ steps.mcp-version.outputs.version }}"
           ENVELOPE_PATH="${{ steps.sign-tarball.outputs.envelope }}"
+          RELEASE_TAG="${{ github.ref_name }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          BRANCH="ai-sdlc/mcp-envelope-${MCP_VERSION}"
+          SUBJECT="chore(ci): sign @ai-sdlc/plugin-mcp-server@${MCP_VERSION} tarball DSSE envelope (AISDLC-439)"
 
           git config user.email "release-bot@ai-sdlc.io"
           git config user.name "AI-SDLC Release Bot"
 
+          git checkout -B "$BRANCH"
           git add "$ENVELOPE_PATH"
-          git commit -m "chore(release): sign @ai-sdlc/plugin-mcp-server@${MCP_VERSION} tarball DSSE envelope (AISDLC-439)"
-          git push origin HEAD:main
+          git commit --no-verify -m "$SUBJECT"
+          git push --no-verify --force-with-lease -u origin "HEAD:refs/heads/${BRANCH}"
+
+          PR_NUMBER="$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$PR_NUMBER" ]; then
+            gh pr create --base main --head "$BRANCH" \
+              --title "$SUBJECT" \
+              --body "Signed DSSE envelope for @ai-sdlc/plugin-mcp-server@${MCP_VERSION}, produced by the release workflow for ${RELEASE_TAG}. Run: ${RUN_URL}"
+            PR_NUMBER="$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')"
+          else
+            echo "[release] PR #${PR_NUMBER} already open for ${BRANCH}, skipping create (idempotent)."
+          fi
+
+          if [ -n "$PR_NUMBER" ]; then
+            node pipeline-cli/bin/cli-merge-if-eligible.mjs "$PR_NUMBER" --source-kind release --arm \
+              || echo "::warning::Could not arm envelope PR #${PR_NUMBER}; it waits for an operator."
+          fi
 
   publish-pypi:
     name: Publish Python SDK to PyPI
