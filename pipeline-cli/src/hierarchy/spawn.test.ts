@@ -9,7 +9,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { manifestPathIn } from '../dispatch/board.js';
 import { readRoster, readRosterChecked, writeRoster } from './roster.js';
 import { hierarchyDown } from './down.js';
-import { hierarchySpawn, reapOrphanExecutorSessions } from './spawn.js';
+import {
+  hierarchySpawn,
+  reapOrphanExecutorSessions,
+  sweepOrphanExecutorSessions,
+} from './spawn.js';
 import type { HierarchyDeps } from './types.js';
 import { isSpawnedExecutorNameOf, spawnedExecutorName } from './validate.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
@@ -18,17 +22,34 @@ let tmp: string;
 let deps: HierarchyDeps;
 let calls: string[][];
 let live: Set<string>;
+let tags: Map<string, string>;
+let tagFails: boolean;
+let showFails: boolean;
 
 beforeEach(() => {
   tmp = mkdtempSync(path.join(tmpdir(), 'spawn-'));
   calls = [];
   live = new Set();
+  tags = new Map();
+  tagFails = false;
+  showFails = false;
   deps = {
     run: (file, args) => {
       calls.push([file, ...args]);
       if (args[0] === 'has-session') {
         const s = (args[2] as string).replace(/^=/, '');
         return { status: live.has(s) ? 0 : 1, stdout: '', stderr: '' };
+      }
+      if (args[0] === 'set-environment') {
+        if (tagFails) return { status: 1, stdout: '', stderr: 'no server' };
+        tags.set((args[2] as string).replace(/^=/, ''), args[4] as string);
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      if (args[0] === 'show-environment') {
+        const t = tags.get((args[2] as string).replace(/^=/, ''));
+        if (showFails || t === undefined)
+          return { status: 1, stdout: '', stderr: 'unknown variable' };
+        return { status: 0, stdout: `AI_SDLC_BOARD_DIR=${t}\n`, stderr: '' };
       }
       if (args[0] === 'new-session') live.add(args[3] as string);
       return { status: 0, stdout: '', stderr: '' };
@@ -109,6 +130,7 @@ describe('hierarchySpawn', () => {
 
   it('reclaims an orphaned session the roster does not know (AISDLC-1117 AC1)', async () => {
     live.add('ai-sdlc-executor-aisdlc-999');
+    tags.set('ai-sdlc-executor-aisdlc-999', deps.boardDir);
     const r = await hierarchySpawn({ taskId: 'AISDLC-999' }, deps);
     expect(r.created).toBe(true);
     const kill = calls.findIndex((c) => c[1] === 'kill-session');
@@ -127,6 +149,7 @@ describe('hierarchySpawn', () => {
   it('sweep reaps unrostered executor sessions only (AC3)', async () => {
     await hierarchySpawn({ taskId: 'AISDLC-1' }, deps);
     live.add('ai-sdlc-executor-aisdlc-2');
+    tags.set('ai-sdlc-executor-aisdlc-2', deps.boardDir);
     live.add('my-personal');
     const run = deps.run;
     const swept: HierarchyDeps = {
@@ -140,6 +163,72 @@ describe('hierarchySpawn', () => {
     expect(calls.filter((c) => c[1] === 'kill-session').map((c) => c[3])).toEqual([
       '=ai-sdlc-executor-aisdlc-2',
     ]);
+  });
+
+  it('tags a new session with the board dir right after new-session (AISDLC-1252 AC1)', async () => {
+    await hierarchySpawn({ taskId: 'AISDLC-5' }, deps);
+    const n = calls.findIndex((c) => c[1] === 'new-session');
+    expect(calls[n + 1]).toEqual([
+      'tmux',
+      'set-environment',
+      '-t',
+      '=ai-sdlc-executor-aisdlc-5',
+      'AI_SDLC_BOARD_DIR',
+      path.resolve(deps.boardDir),
+    ]);
+  });
+
+  it('fails the spawn naming the command when the tag fails (AC1)', async () => {
+    tagFails = true;
+    await expect(hierarchySpawn({ taskId: 'AISDLC-5' }, deps)).rejects.toThrow(/set-environment/);
+    expect(calls.some((c) => c[1] === 'kill-session')).toBe(true);
+  });
+
+  function sweepDeps(): HierarchyDeps {
+    const run = deps.run;
+    return {
+      ...deps,
+      run: (f, a, o) =>
+        a[0] === 'list-sessions'
+          ? { status: 0, stdout: [...live].join('\n'), stderr: '' }
+          : run(f, a, o),
+    };
+  }
+
+  it('sweep skips foreign and untagged sessions and reports them (AC2)', () => {
+    for (const n of ['own', 'other', 'bare']) live.add(`ai-sdlc-executor-${n}`);
+    tags.set('ai-sdlc-executor-own', path.resolve(deps.boardDir));
+    tags.set('ai-sdlc-executor-other', '/elsewhere/dispatch');
+    const logs: string[] = [];
+    const d = { ...sweepDeps(), log: (m: string) => logs.push(m) };
+    const r = sweepOrphanExecutorSessions(d);
+    expect(r.reaped).toEqual(['ai-sdlc-executor-own']);
+    expect(r.skipped).toEqual(['ai-sdlc-executor-other', 'ai-sdlc-executor-bare']);
+    expect(logs).toContain("skipped foreign executor session 'ai-sdlc-executor-bare'");
+    expect(calls.filter((c) => c[1] === 'kill-session')).toHaveLength(1);
+  });
+
+  it('a show-environment failure counts as untagged (AC4)', () => {
+    live.add('ai-sdlc-executor-own');
+    tags.set('ai-sdlc-executor-own', path.resolve(deps.boardDir));
+    showFails = true;
+    expect(sweepOrphanExecutorSessions(sweepDeps()).skipped).toEqual(['ai-sdlc-executor-own']);
+    expect(calls.some((c) => c[1] === 'kill-session')).toBe(false);
+  });
+
+  it('spawn refuses to reuse a foreign or untagged stale session (AC3)', async () => {
+    live.add('ai-sdlc-executor-aisdlc-7');
+    tags.set('ai-sdlc-executor-aisdlc-7', '/elsewhere/dispatch');
+    let r = await hierarchySpawn({ taskId: 'AISDLC-7' }, deps);
+    expect(r.created).toBe(false);
+    expect(r.warnings.join(' ')).toMatch(
+      /ai-sdlc-executor-aisdlc-7.*AI_SDLC_BOARD_DIR=\/elsewhere/,
+    );
+    tags.delete('ai-sdlc-executor-aisdlc-7');
+    r = await hierarchySpawn({ taskId: 'AISDLC-7' }, deps);
+    expect(r.created).toBe(false);
+    expect(r.warnings.join(' ')).toMatch(/no AI_SDLC_BOARD_DIR tag/);
+    expect(calls.some((c) => c[1] === 'kill-session' || c[1] === 'new-session')).toBe(false);
   });
 
   it('keeps existing roster entries and reports a tmux failure', async () => {

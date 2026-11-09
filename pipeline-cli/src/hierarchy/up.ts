@@ -25,12 +25,15 @@ import { inspectVscodeTasks, syncVscodeTasks } from './terminals.js';
 import { assertDispatchModuleLoaded } from './module-health.js';
 import { overContextWarnings } from './context-size.js';
 import {
+  BOARD_TAG,
   hasSession,
+  killSession,
   markSessionOwned,
   OWNER_OPTION,
   paneInfo,
   setSessionTitles,
   startSession,
+  tagSessionBoard,
   windowLive,
 } from './tmux.js';
 import {
@@ -410,6 +413,15 @@ export async function launchSession(
   if (result.status !== 0) {
     return {
       failure: `could not start '${s.name}': ${result.stderr.trim() || 'tmux failed'}`,
+      countable: true,
+    };
+  }
+  // AISDLC-1252: tag the session with its board so another board's sweep leaves it alone.
+  const tagged = tagSessionBoard(deps.run, s.name, path.resolve(deps.boardDir));
+  if (tagged.status !== 0) {
+    killSession(deps.run, s.name);
+    return {
+      failure: `could not start '${s.name}': tmux set-environment ${BOARD_TAG} failed: ${tagged.stderr.trim() || 'tmux failed'}`,
       countable: true,
     };
   }

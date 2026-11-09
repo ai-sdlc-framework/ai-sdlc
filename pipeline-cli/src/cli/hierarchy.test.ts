@@ -2122,7 +2122,7 @@ describe('restart and register (AISDLC-713)', () => {
     const run: CommandRunner = (_f, args) => {
       calls.push([...args]);
       if (args[0] === 'display-message') return { status: 0, stdout: '%9 4242\n', stderr: '' };
-      if (args[0] === 'new-session' || args[0] === 'set-option') {
+      if (['new-session', 'set-option', 'set-environment'].includes(args[0] as string)) {
         return { status: 0, stdout: '', stderr: '' };
       }
       return { status: 1, stdout: '', stderr: '' };

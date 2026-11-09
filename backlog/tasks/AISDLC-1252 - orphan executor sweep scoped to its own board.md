@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1252
 title: 'The tick''s orphan-executor sweep kills only sessions its own board spawned, so two hierarchies on one tmux server stop reaping each other'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-09'
 labels:
