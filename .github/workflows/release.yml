@@ -244,6 +244,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
           AI_SDLC_CALLER_ROLE: operator
+          HUSKY: '0' # skip husky hooks installed by pnpm install
         run: |
           MCP_VERSION="${{ steps.mcp-version.outputs.version }}"
           ENVELOPE_PATH="${{ steps.sign-tarball.outputs.envelope }}"
@@ -257,8 +258,8 @@ jobs:
 
           git checkout -B "$BRANCH"
           git add "$ENVELOPE_PATH"
-          git commit -m "$SUBJECT"
-          git push --force-with-lease -u origin "HEAD:refs/heads/${BRANCH}"
+          git commit --no-verify -m "$SUBJECT"
+          git push --no-verify --force-with-lease -u origin "HEAD:refs/heads/${BRANCH}"
 
           PR_NUMBER="$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')"
           if [ -z "$PR_NUMBER" ]; then

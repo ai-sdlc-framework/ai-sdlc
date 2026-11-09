@@ -40,3 +40,9 @@ test('publish-npm permissions add only pull-requests: write', () => {
   assert.match(job, /pull-requests: write/);
   assert.match(job, /id-token: write/);
 });
+
+test('envelope step bypasses husky hooks on the runner', () => {
+  assert.match(release, /HUSKY: '0'/);
+  assert.match(release, /git commit --no-verify/);
+  assert.match(release, /git push --no-verify --force-with-lease/);
+});
