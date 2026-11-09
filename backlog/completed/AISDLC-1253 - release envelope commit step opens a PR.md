@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1253
 title: 'The release workflow commits the signed MCP tarball envelope with an allowed commitlint scope and lands it through a PR, not a push to protected main'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-09'
 labels:
@@ -41,14 +41,37 @@ dispatchableReason: 'Operator order 2026-11-09 01:3xZ ("file it"). Release run 4
 
 ## Acceptance Criteria
 
-- [ ] AC-1: the envelope step's commit subject uses a scope present in `commitlint.config.mjs` `scope-enum` (`ci`) and keeps `(AISDLC-439)` in the subject; a test in `.github/workflows/__tests__/` parses `release.yml` and `commitlint.config.mjs` and fails when any commit subject in `release.yml` uses a scope outside the enum.
-- [ ] AC-2: the step pushes the commit to `ai-sdlc/mcp-envelope-<version>` and opens a PR against `main` with `gh pr create` (title = commit subject; body names the release tag, package version and `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`); the workflow has no `git push origin HEAD:main` anywhere; test on the workflow text.
-- [ ] AC-3: the step is idempotent: when the branch already exists on origin it force-with-lease pushes the rebuilt commit and when a PR for that branch is already open it skips `gh pr create`; when the envelope path already exists on `origin/main` the sign step's existing skip applies and this step does not run.
-- [ ] AC-4: the opened PR is armed from the workflow with `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm` with `AI_SDLC_CALLER_ROLE` set as the release lane expects; a refusal is logged as a `::warning::` and does not fail the job (the envelope PR waits for an operator).
-- [ ] AC-5: `permissions` of the publish-npm job include `pull-requests: write` and `contents: write` only as far as this step needs; nothing else widened.
-- [ ] AC-6: `docs/operations/mcp-server-signing.md` describes the branch + PR landing and names the manual recovery for a release whose envelope was lost (sign locally, open the same-named PR), replacing any text that says the bot pushes main.
-- [ ] AC-7: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] AC-1: the envelope step's commit subject uses a scope present in `commitlint.config.mjs` `scope-enum` (`ci`) and keeps `(AISDLC-439)` in the subject; a test in `.github/workflows/__tests__/` parses `release.yml` and `commitlint.config.mjs` and fails when any commit subject in `release.yml` uses a scope outside the enum.
+- [x] AC-2: the step pushes the commit to `ai-sdlc/mcp-envelope-<version>` and opens a PR against `main` with `gh pr create` (title = commit subject; body names the release tag, package version and `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`); the workflow has no `git push origin HEAD:main` anywhere; test on the workflow text.
+- [x] AC-3: the step is idempotent: when the branch already exists on origin it force-with-lease pushes the rebuilt commit and when a PR for that branch is already open it skips `gh pr create`; when the envelope path already exists on `origin/main` the sign step's existing skip applies and this step does not run.
+- [x] AC-4: the opened PR is armed from the workflow with `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind release --arm` with `AI_SDLC_CALLER_ROLE` set as the release lane expects; a refusal is logged as a `::warning::` and does not fail the job (the envelope PR waits for an operator).
+- [x] AC-5: `permissions` of the publish-npm job include `pull-requests: write` and `contents: write` only as far as this step needs; nothing else widened.
+- [x] AC-6: `docs/operations/mcp-server-signing.md` describes the branch + PR landing and names the manual recovery for a release whose envelope was lost (sign locally, open the same-named PR), replacing any text that says the bot pushes main.
+- [x] AC-7: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## Out of scope
 
 Recovering the 0.42.0 envelope itself needs the signing key and is operator-only (class (c)); the operator signs locally and opens `ai-sdlc/mcp-envelope-0.42.0` as for 0.41.0 (#2577). This task makes 0.43.0 onward land unattended.
+
+## Final Summary
+
+## Summary
+Fixed the round-1 finding. The envelope step now sets `HUSKY: '0'` and uses `--no-verify` on both the commit and the push, so husky hooks installed by `pnpm install` can't fail the step after the npm packages are published. I added a test assertion for all three.
+
+## Changes
+- .github/workflows/release.yml
+- .github/workflows/__tests__/release-mcp-envelope-pr.test.mjs
+
+## Design decisions
+Resumed round, so I committed only and did not push. Build, lint and format:check passed. For `pnpm test` I saw only the truncated tail of the output, so "passed" rests on the overall command exiting 0. The envelope test file passes 5/5 when run on its own.
+
+## Verification
+- `pnpm build` — passed (dashboard build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (240 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
