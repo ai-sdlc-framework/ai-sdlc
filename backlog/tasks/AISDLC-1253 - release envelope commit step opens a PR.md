@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1253
 title: 'The release workflow commits the signed MCP tarball envelope with an allowed commitlint scope and lands it through a PR, not a push to protected main'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-09'
 labels:
