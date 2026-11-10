@@ -444,11 +444,12 @@ export async function prepareReview(
         workDir: ctx.workDir,
         artifactsDir,
       });
-      const promptFile = writeRunFile(
+      const files = writeReviewPromptFiles(
         ctx,
-        `review-r${round}-${agent}.md`,
+        `review-r${round}-${agent}`,
         `${p.prompt}\n\n` +
           `Diff-binding token (for attestation, do not omit from your response): ${nonceMarker}\n`,
+        reviewPromptPartBytes(ctx.env),
       );
       out.push({
         reviewer: p.reviewer,
@@ -456,7 +457,8 @@ export async function prepareReview(
         harness: reviewerHarness(p.reviewer, env, codex),
         leafModel: ctx.env.AISDLC_REVIEWER_MODEL || routed.model || fallbackLeafModel(agent),
         ...(routed.model && routed.arm !== 'default' ? { model: routed.model } : {}),
-        promptFile,
+        promptFile: files[0],
+        ...(files.length > 1 ? { promptParts: files } : {}),
       });
     }
     return out;
@@ -486,11 +488,115 @@ export async function prepareReview(
   return { kind: 'spawn', review: { ...baseReview, spawned, nonce }, classifierLine };
 }
 
+/** Bytes per prompt file: the Read tool returns ~25k tokens per call; hex hashes run ~2 bytes/token. */
+export const REVIEW_PROMPT_PART_BYTES = 40_000;
+/** Lines per prompt file, under the Read tool's default 2,000-line window. */
+export const REVIEW_PROMPT_PART_LINES = 1_500;
+
+/** Part size: `AI_SDLC_REVIEW_PROMPT_PART_BYTES` when it is an integer >= 1,000, else the default. */
+export function reviewPromptPartBytes(env: NodeJS.ProcessEnv): number {
+  const raw = Number(env.AI_SDLC_REVIEW_PROMPT_PART_BYTES);
+  return Number.isInteger(raw) && raw >= 1_000 ? raw : REVIEW_PROMPT_PART_BYTES;
+}
+
+/**
+ * Split `text` on line boundaries into chunks of at most `maxBytes` UTF-8 bytes and `maxLines`
+ * lines; a single line longer than `maxBytes` is cut by characters. `chunks.join('') === text`.
+ */
+export function splitReviewPrompt(
+  text: string,
+  maxBytes: number,
+  maxLines = REVIEW_PROMPT_PART_LINES,
+): string[] {
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes && text.split('\n').length <= maxLines) {
+    return [text];
+  }
+  const chunks: string[] = [];
+  let current = '';
+  let currentBytes = 0;
+  let currentLines = 0;
+  const flush = (): void => {
+    if (current !== '') chunks.push(current);
+    current = '';
+    currentBytes = 0;
+    currentLines = 0;
+  };
+  for (const line of text.match(/[^\n]*\n|[^\n]+$/g) ?? []) {
+    for (const piece of cutLongLine(line, maxBytes)) {
+      const bytes = Buffer.byteLength(piece, 'utf8');
+      if (currentBytes + bytes > maxBytes || currentLines + 1 > maxLines) flush();
+      current += piece;
+      currentBytes += bytes;
+      currentLines += 1;
+    }
+  }
+  flush();
+  return chunks;
+}
+
+function cutLongLine(line: string, maxBytes: number): string[] {
+  if (Buffer.byteLength(line, 'utf8') <= maxBytes) return [line];
+  const pieces: string[] = [];
+  let piece = '';
+  let pieceBytes = 0;
+  for (const ch of line) {
+    const bytes = Buffer.byteLength(ch, 'utf8');
+    if (pieceBytes + bytes > maxBytes) {
+      pieces.push(piece);
+      piece = '';
+      pieceBytes = 0;
+    }
+    piece += ch;
+    pieceBytes += bytes;
+  }
+  if (piece !== '') pieces.push(piece);
+  return pieces;
+}
+
+/** Room each part keeps for its header and its next-part pointer. */
+const PART_FRAME_BYTES = 1_000;
+
+/**
+ * Write one reviewer prompt. When it fits one Read call it goes to `<base>.md`, unchanged.
+ * Otherwise it goes to `<base>.part-<i>-of-<n>.md`, each part with a header and each but the
+ * last ending with the path of the next part. The nonce marker stays at the end of the prompt,
+ * so only the last part holds it and a reviewer must read every part to echo it.
+ * Returns the files in reading order.
+ */
+export function writeReviewPromptFiles(
+  ctx: NextStepContext,
+  base: string,
+  content: string,
+  maxBytes: number,
+): string[] {
+  const chunks = splitReviewPrompt(content, Math.max(maxBytes - PART_FRAME_BYTES, 500));
+  if (chunks.length === 1) return [writeRunFile(ctx, `${base}.md`, content)];
+  const n = chunks.length;
+  const names = chunks.map((_, i) => `${base}.part-${i + 1}-of-${n}.md`);
+  return chunks.map((chunk, i) => {
+    const header = `<!-- Review prompt part ${i + 1} of ${n}. Read all ${n} parts, in order, before you start the review. -->\n\n`;
+    const footer =
+      i < n - 1
+        ? `\n\n<!-- End of part ${i + 1} of ${n}. Continue with \`${join(ctx.filesDir, names[i + 1])}\`. -->\n`
+        : '';
+    return writeRunFile(ctx, names[i], header + chunk + footer);
+  });
+}
+
 /**
  * Short prompt the loop driver hands a reviewer instead of relaying the full prompt text
- * (AISDLC-1031). It names the prompt file only; the diff and the nonce marker stay in the file.
+ * (AISDLC-1031). It names the prompt file (or every part of a split prompt, in reading order)
+ * only; the diff and the nonce marker stay in the files.
  */
-export function bootstrapPromptFor(promptFile: string): string {
+export function bootstrapPromptFor(promptFile: string, promptParts?: readonly string[]): string {
+  if (promptParts && promptParts.length > 1) {
+    return (
+      `Your review prompt is split into ${promptParts.length} files because it is too large for one Read call. ` +
+      'Read every file with the Read tool, in this order, and only then carry out every instruction in them:\n' +
+      promptParts.map((file, i) => `${i + 1}. \`${file}\``).join('\n') +
+      '\nThe last file holds the review marker you must echo in your response.'
+    );
+  }
   return (
     `Read \`${promptFile}\` with the Read tool and carry out every instruction in it. ` +
     'The file holds your full review prompt, including the review marker you must echo in your response.'

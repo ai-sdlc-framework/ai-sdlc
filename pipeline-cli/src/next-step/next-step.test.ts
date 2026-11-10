@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEV_RETURN,
   makeHarness,
+  makeState,
   makeTask,
   writeDemoTaskFile,
   type Harness,
@@ -22,6 +23,7 @@ import { loadReviewState } from '../incremental-review/review-rounds.js';
 import { approvedWithoutReviewers } from './review-finalize.js';
 import { bootstrapPromptFor } from './review-prepare.js';
 import {
+  buildSpawnReviewers,
   DEFAULT_DEVELOPER_BUDGET_MINUTES,
   developerBudgetMinutes,
   extractJson,
@@ -1169,5 +1171,23 @@ describe('ordered developer round on a resume (AISDLC-1053)', () => {
     await nextStep(ctx, { task: 'AISDLC-900' }, resumedDeps(false));
     expect(persisted().developerRoundPending).toBeUndefined();
     expect(flag()).toBeUndefined();
+  });
+});
+
+describe('buildSpawnReviewers with a split prompt', () => {
+  it('passes promptParts through and lists every part in the bootstrap prompt', () => {
+    const parts = ['/files/review-r1-sec.part-1-of-2.md', '/files/review-r1-sec.part-2-of-2.md'];
+    const review = reviewRound(1);
+    review.spawned[1] = { ...review.spawned[1], promptFile: parts[0], promptParts: parts };
+    const rv = buildSpawnReviewers(ctx, makeState(h.root), review);
+    expect(rv.reviewers[0]).not.toHaveProperty('promptParts');
+    expect(rv.reviewers[1]).toMatchObject({
+      promptFile: parts[0],
+      promptParts: parts,
+      bootstrapPrompt: bootstrapPromptFor(parts[0], parts),
+    });
+    const boot = rv.reviewers[1].bootstrapPrompt;
+    expect(boot.indexOf(parts[0])).toBeLessThan(boot.indexOf(parts[1]));
+    expect(boot).toContain('split into 2 files');
   });
 });

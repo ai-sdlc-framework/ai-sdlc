@@ -145,6 +145,7 @@ describe('/ai-sdlc execute body is a thin next-step loop (AISDLC-762)', () => {
   it('hands each reviewer its bootstrapPrompt, never the file contents (AISDLC-1031)', () => {
     assert.match(cmdBody, /`prompt` = its `bootstrapPrompt`/);
     assert.match(cmdBody, /never read and relay the file contents/);
+    assert.match(cmdBody, /`promptParts`, every part of a prompt too large for one Read call/);
   });
 
   it('drives the pipeline through `next-step` with --task, --state and --fresh', () => {
