@@ -10,9 +10,13 @@ import {
   fetchTrustedComments,
   prepareReview,
   resolveReviewerAgent,
+  REVIEW_PROMPT_PART_BYTES,
+  REVIEW_PROMPT_PART_LINES,
   reviewerHarness,
+  reviewPromptPartBytes,
   selectByClassifier,
   selectForReview,
+  splitReviewPrompt,
 } from './review-prepare.js';
 import {
   TRUST_CHAIN_PATH_PREFIXES,
@@ -572,5 +576,154 @@ spec:
       'correctness-reviewer',
       'security-reviewer',
     ]);
+  });
+});
+
+describe('splitReviewPrompt', () => {
+  it('returns a prompt that fits as one chunk', () => {
+    expect(splitReviewPrompt('a\nb\n', 100)).toEqual(['a\nb\n']);
+  });
+
+  it('cuts on line boundaries within the byte and line limits and re-joins exactly', () => {
+    const text = Array.from({ length: 400 }, (_, i) => `line ${i} ${'x'.repeat(40)}\n`).join('');
+    const marker = `token: ${MARKER}\n`;
+    const chunks = splitReviewPrompt(text + marker, 2_000, 30);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.join('')).toBe(text + marker);
+    for (const c of chunks) {
+      expect(Buffer.byteLength(c, 'utf8')).toBeLessThanOrEqual(2_000);
+      expect(c.split('\n').filter(Boolean).length).toBeLessThanOrEqual(30);
+      expect(c.endsWith('\n')).toBe(true);
+    }
+    expect(chunks[chunks.length - 1].endsWith(marker)).toBe(true);
+    expect(chunks.slice(0, -1).some((c) => c.includes(MARKER))).toBe(false);
+  });
+
+  it('splits on the line limit alone when the bytes fit', () => {
+    const text = 'a\n'.repeat(REVIEW_PROMPT_PART_LINES + 1);
+    const chunks = splitReviewPrompt(text, 1_000_000);
+    expect(chunks).toHaveLength(2);
+    expect(chunks.join('')).toBe(text);
+  });
+
+  it('cuts a single line longer than the byte limit, multibyte characters included', () => {
+    const long = 'é'.repeat(1_500) + '\n';
+    const chunks = splitReviewPrompt(`head\n${long}tail`, 1_001);
+    expect(chunks.join('')).toBe(`head\n${long}tail`);
+    for (const c of chunks) expect(Buffer.byteLength(c, 'utf8')).toBeLessThanOrEqual(1_001);
+  });
+});
+
+describe('reviewPromptPartBytes', () => {
+  it('reads AI_SDLC_REVIEW_PROMPT_PART_BYTES and ignores invalid values', () => {
+    expect(reviewPromptPartBytes({})).toBe(REVIEW_PROMPT_PART_BYTES);
+    expect(reviewPromptPartBytes({ AI_SDLC_REVIEW_PROMPT_PART_BYTES: '5000' })).toBe(5_000);
+    for (const bad of ['abc', '10', '-5000', '5000.5', ''])
+      expect(reviewPromptPartBytes({ AI_SDLC_REVIEW_PROMPT_PART_BYTES: bad })).toBe(
+        REVIEW_PROMPT_PART_BYTES,
+      );
+  });
+});
+
+describe('prepareReview with an oversized prompt', () => {
+  const HEADER = /^<!-- Review prompt part (\d+) of (\d+)\. [^\n]* -->\n\n/;
+  const FOOTER = /\n\n<!-- End of part (\d+) of (\d+)\. Continue with `([^`]+)`\. -->\n$/;
+  const TOKEN_LINE = `Diff-binding token (for attestation, do not omit from your response): ${MARKER}\n`;
+  // ~150 KB, the shape of the lock-file diff that broke the Read tool (uv.lock).
+  const BIG_DIFF =
+    'diff --git a/uv.lock b/uv.lock\n' +
+    Array.from(
+      { length: 1_800 },
+      (_, i) => `+  { hash = "sha256:${i.toString(16).padStart(64, '0')}" },\n`,
+    ).join('');
+
+  let prevSet: string | undefined;
+  beforeEach(() => {
+    prevSet = process.env.AI_SDLC_REVIEWER_SET;
+    process.env.AI_SDLC_REVIEWER_SET = 'three';
+  });
+  afterEach(() => {
+    if (prevSet === undefined) delete process.env.AI_SDLC_REVIEWER_SET;
+    else process.env.AI_SDLC_REVIEWER_SET = prevSet;
+  });
+
+  it('keeps a prompt that fits one Read call in one file, as before', async () => {
+    script();
+    const res = await prepareReview(h.ctx, state, 1);
+    if (res.kind !== 'spawn') throw new Error('expected spawn');
+    for (const s of res.review.spawned) {
+      expect(s.promptParts).toBeUndefined();
+      expect(s.promptFile.endsWith(`review-r1-${s.agent}.md`)).toBe(true);
+      expect(readFileSync(s.promptFile, 'utf8').endsWith(TOKEN_LINE)).toBe(true);
+    }
+  });
+
+  it('splits it into ordered parts with the nonce marker in the last part only', async () => {
+    script({ diff: BIG_DIFF });
+    const res = await prepareReview(h.ctx, state, 1);
+    if (res.kind !== 'spawn') throw new Error('expected spawn');
+    for (const s of res.review.spawned) {
+      const parts = s.promptParts!;
+      expect(parts.length).toBeGreaterThan(1);
+      expect(s.promptFile).toBe(parts[0]);
+      const n = parts.length;
+      const bodies = parts.map((file, i) => {
+        expect(file.endsWith(`review-r1-${s.agent}.part-${i + 1}-of-${n}.md`)).toBe(true);
+        const text = readFileSync(file, 'utf8');
+        expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(REVIEW_PROMPT_PART_BYTES);
+        expect(text.split('\n').length).toBeLessThan(2_000);
+        expect(text.match(HEADER)?.slice(1, 3)).toEqual([String(i + 1), String(n)]);
+        const footer = text.match(FOOTER);
+        if (i < n - 1) {
+          expect(footer?.[3]).toBe(parts[i + 1]);
+          expect(text).not.toContain(MARKER);
+          expect(text).not.toContain(NONCE);
+        } else {
+          expect(footer).toBeNull();
+          expect(text.endsWith(TOKEN_LINE)).toBe(true);
+          expect(text.split(MARKER)).toHaveLength(2);
+        }
+        return text.replace(HEADER, '').replace(FOOTER, '');
+      });
+      const whole = bodies.join('');
+      expect(whole).toContain(BIG_DIFF);
+      expect(whole.endsWith(TOKEN_LINE)).toBe(true);
+      expect(whole.split(MARKER)).toHaveLength(2);
+
+      const boot = bootstrapPromptFor(s.promptFile, s.promptParts);
+      let at = -1;
+      for (const file of parts) {
+        const next = boot.indexOf(file);
+        expect(next).toBeGreaterThan(at);
+        at = next;
+      }
+      expect(boot).toContain(`split into ${n} files`);
+      expect(boot).not.toContain(MARKER);
+      expect(boot).not.toContain(NONCE);
+      expect(boot).not.toContain('sha256:');
+    }
+  });
+
+  it('honours AI_SDLC_REVIEW_PROMPT_PART_BYTES and falls back on an invalid value', async () => {
+    script({ diff: BIG_DIFF });
+    const small = await prepareReview(
+      { ...h.ctx, env: { AI_SDLC_REVIEW_PROMPT_PART_BYTES: '5000' } },
+      state,
+      1,
+    );
+    if (small.kind !== 'spawn') throw new Error('expected spawn');
+    const smallParts = small.review.spawned[0].promptParts!;
+    for (const file of smallParts)
+      expect(Buffer.byteLength(readFileSync(file, 'utf8'), 'utf8')).toBeLessThanOrEqual(5_000);
+
+    const fallback = await prepareReview(
+      { ...h.ctx, env: { AI_SDLC_REVIEW_PROMPT_PART_BYTES: 'abc' } },
+      state,
+      2,
+    );
+    if (fallback.kind !== 'spawn') throw new Error('expected spawn');
+    const defaultParts = fallback.review.spawned[0].promptParts!;
+    expect(smallParts.length).toBeGreaterThan(defaultParts.length);
+    expect(defaultParts.length).toBeLessThan(10);
   });
 });

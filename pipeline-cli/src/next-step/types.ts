@@ -44,8 +44,10 @@ export interface SpawnedReviewer {
   leafModel: string;
   /** Model to pass to the Agent call (omitted when the route is the default arm). */
   model?: string;
-  /** File holding the full reviewer prompt, nonce marker included. */
+  /** File holding the full reviewer prompt, nonce marker included; the first part when split. */
   promptFile: string;
+  /** Every part of a prompt too large for one Read call, in reading order; the last holds the marker. */
+  promptParts?: string[];
 }
 
 /** The two agents of the staged review that run a model beside the probe executors (RFC-0052). */
@@ -175,7 +177,9 @@ export interface SpawnReviewersInstruction {
   reviewers: Array<{
     agent: string;
     promptFile: string;
-    /** Short prompt to pass as the Agent `prompt`; it names `promptFile` for the reviewer to read. */
+    /** Every part of a split prompt, in reading order (absent when the prompt is one file). */
+    promptParts?: string[];
+    /** Short prompt to pass as the Agent `prompt`; it names the file(s) for the reviewer to read. */
     bootstrapPrompt: string;
     model?: string;
   }>;
