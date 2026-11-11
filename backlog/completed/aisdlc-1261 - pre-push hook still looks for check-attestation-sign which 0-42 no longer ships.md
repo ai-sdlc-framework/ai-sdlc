@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1261
 title: 'Adopter `.husky/pre-push` still looks for `scripts/check-attestation-sign.sh`, which 0.42.0 no longer ships; every push prints the "Install the ai-sdlc Claude Code plugin" hint'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-11'
 labels:
