@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { ensureRuntimeGitignore } from './execute.js';
 
 const SENTINEL = '# ai-sdlc:runtime-gitignore';
-const OLD_BLOCK = `${SENTINEL}\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n`;
+const OLD_BLOCK = `${SENTINEL}\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n.ai-sdlc/subagent-sessions/\n`;
 
 let dir: string;
 const gitignore = () => join(dir, '.gitignore');
@@ -30,7 +30,7 @@ describe('ensureRuntimeGitignore', () => {
     ensureRuntimeGitignore(dir);
     const out = readFileSync(gitignore(), 'utf-8');
     expect(out).toBe(
-      `${SENTINEL}\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n.ai-sdlc/artifacts/\n`,
+      `${SENTINEL}\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n.ai-sdlc/artifacts/\n.ai-sdlc/subagent-sessions/\n`,
     );
   });
 
@@ -56,6 +56,7 @@ describe('ensureRuntimeGitignore', () => {
     expect(out).toContain('.ai-sdlc/state.db');
     expect(out).toContain('.ai-sdlc/audit.jsonl');
     expect(out).toContain('.ai-sdlc/artifacts/');
+    expect(out).toContain('.ai-sdlc/subagent-sessions/');
   });
 
   it('writes a new block when the sentinel text only appears inside another line', () => {
@@ -92,7 +93,7 @@ describe('ensureRuntimeGitignore', () => {
 
 // DEC-0020: a broader line already ignores the directory, so `execute` must not append a
 // redundant block (the edit would otherwise land in an unrelated agent PR).
-const STATE_ONLY = `${SENTINEL}\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n`;
+const STATE_ONLY = `${SENTINEL}\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n.ai-sdlc/subagent-sessions/\n`;
 // Git calls strip GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE (husky pre-push exports them
 // from a worktree), and a fresh repository takes no template (so no seeded info/exclude).
 const gitEnv = cleanGitEnv();

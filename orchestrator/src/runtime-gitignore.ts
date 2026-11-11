@@ -17,11 +17,15 @@ export const RUNTIME_GITIGNORE_SENTINEL = '# ai-sdlc:runtime-gitignore';
  */
 export const ARTIFACTS_GITIGNORE_ENTRY = '.ai-sdlc/artifacts/';
 
+export const SUBAGENT_SESSIONS_GITIGNORE_ENTRY = '.ai-sdlc/subagent-sessions/';
+
 export const RUNTIME_GITIGNORE_PATHS: readonly string[] = [
   '.ai-sdlc/state.db',
   '.ai-sdlc/state/',
   '.ai-sdlc/audit.jsonl',
   ARTIFACTS_GITIGNORE_ENTRY,
+  // AISDLC-1260: SubagentStart markers; untracked ones would block Step 0.5.
+  SUBAGENT_SESSIONS_GITIGNORE_ENTRY,
 ];
 
 /** Strips leading and trailing slashes by index, never by a backtracking regex. */

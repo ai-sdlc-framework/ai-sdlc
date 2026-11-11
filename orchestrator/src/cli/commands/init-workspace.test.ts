@@ -276,7 +276,13 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
     await runInit(['--skip-mcp', '--yes']);
 
     const gi = readFileSync(join(tmpDir, '.gitignore'), 'utf-8');
-    expect(gi).toBe(`node_modules/\n\n${oldBlock}.ai-sdlc/artifacts/\n`);
+    expect(gi).toBe(
+      `node_modules/\n\n${oldBlock}.ai-sdlc/artifacts/\n.ai-sdlc/subagent-sessions/\n`,
+    );
+
+    // AISDLC-1260: idempotent re-run
+    await runInit(['--skip-mcp', '--yes']);
+    expect(readFileSync(join(tmpDir, '.gitignore'), 'utf-8')).toBe(gi);
   });
 
   it('emits the 3-line version provenance block at startup (AISDLC-78 AC #1)', async () => {

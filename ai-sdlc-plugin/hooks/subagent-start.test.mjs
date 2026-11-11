@@ -429,3 +429,53 @@ describe('ai-sdlc-plugin subagent-start hook — AISDLC-995 fresh-context fields
     }
   });
 });
+
+describe('ai-sdlc-plugin subagent-start hook — AISDLC-1260 marker location', () => {
+  function runWith(projectDir, env) {
+    execFileSync('node', [hookScript], {
+      input: JSON.stringify({ hook_event_name: 'SubagentStart', agent_id: 'wt-agent-1' }),
+      encoding: 'utf-8',
+      env: { ...process.env, AI_SDLC_ACTIVE_TASK_ID: '', CLAUDE_PROJECT_DIR: projectDir, ...env },
+      cwd: projectDir,
+      timeout: 5000,
+    });
+  }
+
+  it('AC-1: writes the marker under the worktree named by AI_SDLC_ACTIVE_TASK_ID', () => {
+    const projectDir = join(tmpdir(), `subagent-start-wt-${Date.now()}`);
+    const wt = join(projectDir, '.worktrees', 'aisdlc-9');
+    mkdirSync(wt, { recursive: true });
+    try {
+      runWith(projectDir, { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-9' });
+      assert.ok(existsSync(join(wt, '.ai-sdlc', 'subagent-sessions', 'wt-agent-1.json')));
+      assert.ok(!existsSync(join(projectDir, '.ai-sdlc', 'subagent-sessions')));
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('AC-1: writes the marker under the worktree named by the .active-task sentinel', () => {
+    const projectDir = join(tmpdir(), `subagent-start-sent-${Date.now()}`);
+    const wt = join(projectDir, '.worktrees', 'aisdlc-7');
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(join(projectDir, '.worktrees', '.active-task'), 'aisdlc-7\n');
+    try {
+      runWith(projectDir, {});
+      assert.ok(existsSync(join(wt, '.ai-sdlc', 'subagent-sessions', 'wt-agent-1.json')));
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('AC-2: with no active task, no UNKNOWN transcript and the marker uses the ignored project path', () => {
+    const projectDir = join(tmpdir(), `subagent-start-none-${Date.now()}`);
+    mkdirSync(projectDir, { recursive: true });
+    try {
+      runWith(projectDir, { AI_SDLC_ACTIVE_TASK_ID: 'no-such-worktree' });
+      assert.ok(existsSync(join(projectDir, '.ai-sdlc', 'subagent-sessions', 'wt-agent-1.json')));
+      assert.ok(!existsSync(join(projectDir, '.ai-sdlc', 'transcripts')));
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+});
