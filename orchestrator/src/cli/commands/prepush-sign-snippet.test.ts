@@ -13,7 +13,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HUSKY_PREPUSH_SIGN_SNIPPET } from './init-templates.js';
+import {
+  HUSKY_PREPUSH_SIGN_SNIPPET,
+  hasStaleAttestationSignReference,
+  stripStaleAttestationSignBlock,
+} from './init-templates.js';
 import { applyFeatureSelection, buildProductionAdapters, NO_FEATURES } from './init-features.js';
 import type { WizardFlags } from './init-features.js';
 
@@ -77,92 +81,36 @@ describe('HUSKY_PREPUSH_SIGN_SNIPPET — executed as sh (AISDLC-555, AISDLC-565)
     return { stdout: res.stdout ?? '', stderr: res.stderr ?? '' };
   }
 
-  /** A fake plugin dir whose signer just announces itself. */
-  function makePluginDir(marker: string): string {
-    const dir = join(repo, `plugin-${marker}`);
-    mkdirSync(join(dir, 'scripts'), { recursive: true });
-    const signer = join(dir, 'scripts', 'check-attestation-sign.sh');
-    writeFileSync(signer, `#!/usr/bin/env bash\necho "SIGNED-BY-${marker}"\n`);
-    chmodSync(signer, 0o755);
-    return dir;
-  }
-
-  function withVerdict(): void {
+  it('is silent and exits 0 even when verdicts exist (AISDLC-1261)', () => {
     mkdirSync(join(repo, '.ai-sdlc', 'verdicts'), { recursive: true });
     writeFileSync(join(repo, '.ai-sdlc', 'verdicts', 'aisdlc-1.json'), '[]');
-  }
-
-  it('resolves and runs the signer via CLAUDE_PLUGIN_ROOT', () => {
-    const plugin = makePluginDir('root');
-    withVerdict();
-    const { stdout, stderr } = runSnippet({ CLAUDE_PLUGIN_ROOT: plugin });
-    expect(stdout).toContain('SIGNED-BY-root');
-    expect(stderr).toContain('attestation signer:');
-  });
-
-  it('resolves via CLAUDE_PLUGIN_DIR when CLAUDE_PLUGIN_ROOT is unset', () => {
-    const plugin = makePluginDir('dir');
-    withVerdict();
-    const { stdout } = runSnippet({ CLAUDE_PLUGIN_DIR: plugin });
-    expect(stdout).toContain('SIGNED-BY-dir');
-  });
-
-  // THE case that had no coverage: hook installed, verdicts present, nothing
-  // resolves. Pre-fix this exited 0 with no output and the operator learned
-  // months later that no attestation was ever produced.
-  it('is LOUD when verdicts exist but no signer resolves', () => {
-    withVerdict();
-    const { stderr } = runSnippet();
-    expect(stderr).toContain('NO attestation signer');
-    expect(stderr).toContain('CLAUDE_PLUGIN_ROOT');
-  });
-
-  it('stays quiet when there is nothing to sign', () => {
-    // No verdicts: silence is correct, and must not become noise on every push.
     const { stdout, stderr } = runSnippet();
     expect(stdout.trim()).toBe('');
     expect(stderr.trim()).toBe('');
   });
 
-  it('does NOT execute a signer from the working tree', () => {
-    // Security review: the repo-relative tier put repo-tracked content on the
-    // push-time path with the operator's signing key in scope.
-    mkdirSync(join(repo, 'scripts'), { recursive: true });
-    const planted = join(repo, 'scripts', 'check-attestation-sign.sh');
-    writeFileSync(planted, '#!/usr/bin/env bash\necho "PLANTED-IN-REPO"\n');
-    chmodSync(planted, 0o755);
-    withVerdict();
-
-    const { stdout } = runSnippet();
-    expect(stdout).not.toContain('PLANTED-IN-REPO');
+  it('snapshot: carries no reference to the removed signer or its install hint', () => {
+    expect(HUSKY_PREPUSH_SIGN_SNIPPET).not.toContain('check-attestation-sign');
+    expect(HUSKY_PREPUSH_SIGN_SNIPPET).not.toContain('Install the ai-sdlc Claude Code plugin');
+    expect(HUSKY_PREPUSH_SIGN_SNIPPET).toMatchInlineSnapshot(`
+      "# ai-sdlc:attestation-sign-block
+      # No-op (AISDLC-1261): envelope signing was removed (RFC-0061 / DEC-0284); the
+      # merge gate reads the review verdict record. Kept so init/doctor stay idempotent.
+      # Git env (AISDLC-1129): runs no child process, so GIT_DIR, GIT_WORK_TREE,
+      # GIT_INDEX_FILE and GIT_PREFIX are neither read nor exported here.
+      :
+      # end ai-sdlc:attestation-sign-block
+      "
+    `);
   });
 
-  it('honours AI_SDLC_SKIP_ATTESTATION_SIGN', () => {
-    const plugin = makePluginDir('skip');
-    withVerdict();
-    const { stdout } = runSnippet({
-      CLAUDE_PLUGIN_ROOT: plugin,
-      AI_SDLC_SKIP_ATTESTATION_SIGN: '1',
-    });
-    expect(stdout).not.toContain('SIGNED-BY-skip');
-  });
-
-  // Round-2 review: the plugin-cache glob's missing `break` (last match wins
-  // instead of first) was fixed but nothing would catch a regression, because
-  // no test ever plants TWO cache entries.
-  it('takes the FIRST plugin-cache match, not the last', () => {
-    const home = join(repo, 'fake-home');
-    for (const marker of ['aaa-first', 'zzz-last']) {
-      const dir = join(home, '.claude', 'plugins', 'cache', marker, 'ai-sdlc', '1.0.0', 'scripts');
-      mkdirSync(dir, { recursive: true });
-      const signer = join(dir, 'check-attestation-sign.sh');
-      writeFileSync(signer, `#!/usr/bin/env bash\necho "SIGNED-BY-${marker}"\n`);
-      chmodSync(signer, 0o755);
-    }
-    withVerdict();
-    const { stdout } = runSnippet();
-    expect(stdout).toContain('SIGNED-BY-aaa-first');
-    expect(stdout).not.toContain('SIGNED-BY-zzz-last');
+  it('strips a pre-1261 block and keeps user content', () => {
+    const old = `echo user\n# ai-sdlc:attestation-sign-block\nbash check-attestation-sign.sh\n# end ai-sdlc:attestation-sign-block\necho after\n`;
+    expect(hasStaleAttestationSignReference(old)).toBe(true);
+    expect(stripStaleAttestationSignBlock(old)).toBe('echo user\necho after\n');
+    expect(stripStaleAttestationSignBlock(HUSKY_PREPUSH_SIGN_SNIPPET)).toBe(
+      HUSKY_PREPUSH_SIGN_SNIPPET,
+    );
   });
 });
 
@@ -286,9 +234,7 @@ describe('attestation hook install — real git push, husky v9 layout (AISDLC-55
       'ai-sdlc:attestation-sign-block',
     );
 
-    // A non-empty verdicts dir is the signer's own precondition, so the block
-    // must reach its loud "no signer resolved" diagnostic. That message is the
-    // observable proof the hook actually executed.
+    // The hook must run cleanly on push and print nothing about a signer.
     mkdirSync(join(repo, '.ai-sdlc', 'verdicts'), { recursive: true });
     writeFileSync(join(repo, '.ai-sdlc', 'verdicts', 'aisdlc-1.json'), '[]');
     writeFileSync(join(repo, 'file.txt'), 'hello\n');
@@ -296,10 +242,9 @@ describe('attestation hook install — real git push, husky v9 layout (AISDLC-55
     git(['commit', '-qm', 'init'], repo);
 
     const push = git(['push', 'origin', 'main'], repo);
-    expect(
-      push.stderr,
-      `expected the installed hook to run on push; stderr was:\n${push.stderr}`,
-    ).toContain('NO attestation signer');
+    expect(push.status, push.stderr).toBe(0);
+    expect(push.stderr).not.toContain('attestation signer');
+    expect(push.stderr).not.toContain('Install the ai-sdlc Claude Code plugin');
   });
 
   // Round-7, with a REAL symlink on a real filesystem — the stub test proves

@@ -26,9 +26,8 @@
  *   2. Call `executePipeline()` with that spawner + the operator's options.
  *   3. Hook into `onProgress` (per-iteration aggregated verdict callback)
  *      to write `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json` after
- *      every Step 8 aggregate so the husky pre-push hook
- *      (`scripts/check-attestation-sign.sh`) can auto-sign the DSSE envelope
- *      at Step 11 push time.
+ *      every Step 8 aggregate; the merge gate reads that review verdict
+ *      record (RFC-0061), no envelope is signed at push time.
  *   4. Emit `[ai-sdlc-progress] execute: <stage>` lines so the dispatching
  *      session can surface progress to the operator.
  *
@@ -283,9 +282,8 @@ export async function resolveSpawner(kind: SpawnerKind): Promise<SubagentSpawner
 }
 
 /**
- * Shape written to `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json` so the
- * husky pre-push hook (`scripts/check-attestation-sign.sh`) can auto-sign
- * the DSSE envelope. Same shape the slash command body writes
+ * Shape written to `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json`, the
+ * review verdict record the merge gate reads (RFC-0061). Same shape the slash command body writes
  * (`ai-sdlc-plugin/commands/execute.md` Step 10).
  *
  * Exported for tests.

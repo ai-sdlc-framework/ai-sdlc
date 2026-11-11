@@ -67,7 +67,11 @@ import {
   gitignoreCovers,
   interpretCheckIgnoreExit,
 } from '../../runtime-gitignore.js';
-import { HUSKY_PREPUSH_SIGN_SNIPPET } from './init-templates.js';
+import {
+  HUSKY_PREPUSH_SIGN_SNIPPET,
+  hasStaleAttestationSignReference,
+  stripStaleAttestationSignBlock,
+} from './init-templates.js';
 import {
   buildProductionDoctorAdapters,
   checkAttestationGovernance,
@@ -2760,7 +2764,7 @@ export function checkDorConfig(ctx: DoctorRunContext): DoctorCheckResult {
 
 // ── Check 8: husky pre-push attestation-sign hook ─────────────────────────
 
-const ATTESTATION_SIGN_MARKERS = ['ai-sdlc:attestation-sign-block', 'check-attestation-sign'];
+const ATTESTATION_SIGN_MARKERS = ['ai-sdlc:attestation-sign-block'];
 
 function readPrePushHook(ctx: DoctorRunContext): { path: string; text: string } | undefined {
   for (const rel of [join('.husky', 'pre-push'), join('.git', 'hooks', 'pre-push')]) {
@@ -2795,6 +2799,15 @@ export function checkHuskyPrePushGate(ctx: DoctorRunContext): DoctorCheckResult 
         'attestation is enabled but no .husky/pre-push (or .git/hooks/pre-push) exists — pushes carry no attestation',
       remediation:
         'Run `ai-sdlc doctor --fix` (writes the sign snippet) or `ai-sdlc init --add attestation`',
+    };
+  }
+  if (hasStaleAttestationSignReference(hook.text)) {
+    return {
+      id,
+      severity: 'fail',
+      title: 'pre-push: stale attestation-sign reference',
+      remediation:
+        'The hook names check-attestation-sign.sh, removed with envelope signing (RFC-0061). Run `ai-sdlc doctor --fix` or `ai-sdlc init --add attestation` to rewrite it.',
     };
   }
   if (!ATTESTATION_SIGN_MARKERS.some((m) => hook.text.includes(m))) {
@@ -2834,9 +2847,18 @@ export function fixHuskyPrePushGate(ctx: DoctorRunContext): DoctorFixResult {
       detail: 'no .husky/ directory — install husky first, then re-run',
     };
   }
-  const base = existing == null ? '' : existing.endsWith('\n') ? existing : `${existing}\n`;
+  const cleaned = existing == null ? '' : stripStaleAttestationSignBlock(existing);
+  const base = cleaned === '' || cleaned.endsWith('\n') ? cleaned : `${cleaned}\n`;
+  const stillStale = hasStaleAttestationSignReference(base);
+  if (stillStale) {
+    return {
+      id,
+      applied: false,
+      detail: `${hookPath} still names check-attestation-sign outside the ai-sdlc block — remove that line by hand`,
+    };
+  }
   ctx.adapters.writeFile(hookPath, `${base}${base ? '\n' : ''}${HUSKY_PREPUSH_SIGN_SNIPPET}`);
-  return { id, applied: true, detail: `appended the attestation sign snippet to ${hookPath}` };
+  return { id, applied: true, detail: `wrote the verdict-record pre-push block to ${hookPath}` };
 }
 
 // ── Check 9: feature-flag sanity ──────────────────────────────────────────

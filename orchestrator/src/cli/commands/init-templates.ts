@@ -380,85 +380,51 @@ export const ADOPTER_TEMPLATE_POSTS_APPROVAL: boolean = templatePostsApproval(
 );
 
 /**
- * `.husky/pre-push` (or `.git/hooks/pre-push` for non-husky repos) snippet
- * that signs an attestation when one is missing for the current HEAD.
- * Installed when `--with-attestation` is opted in.
+ * `.husky/pre-push` (or `.git/hooks/pre-push` for non-husky repos) block
+ * installed when `--with-attestation` is opted in.
  *
- * AISDLC-555: pre-fix, this snippet checked ONLY `./scripts/check-attestation-
- * sign.sh` — a path that exists in the ai-sdlc monorepo (where the hook is
- * hand-authored, not wizard-generated) but NEVER in an adopter repo, because
- * nothing ever copied that script there. The `[ -x ... ]` guard silently
- * failed forever, so `--with-attestation` produced a hook that looked
- * complete but never signed anything — the exact bug this task exists to
- * fix. `check-attestation-sign.sh` now also ships under
- * `ai-sdlc-plugin/scripts/` (AISDLC-555), so this snippet resolves it from
- * the PLUGIN INSTALL ONLY: `$CLAUDE_PLUGIN_ROOT` / `$CLAUDE_PLUGIN_DIR` (the
- * zero-config path when `git push` runs inside a Claude Code session), then a
- * read-only plugin-cache probe (bare-terminal `git push`, which never inherits
- * those env vars).
+ * AISDLC-1261: RFC-0061 / DEC-0284 removed envelope signing and the signer
+ * script left the plugin, so this block no longer resolves or runs anything.
+ * The merge gate reads the review verdict record (`cli-attestation
+ * verdict-check`); the push itself needs no hook work. The block is kept as a
+ * silent, sentinel-keyed no-op so `init` / `doctor` stay idempotent and a
+ * pre-1261 block (which still named the removed signer and printed an
+ * "Install the ai-sdlc Claude Code plugin" hint on every push) can be
+ * recognised and rewritten by {@link stripStaleAttestationSignBlock}.
  *
- * There is deliberately NO repo-local tier — see item 2 below. An earlier
- * revision of this docblock described one, which contradicted the code and,
- * worse, advertised a resolution order that was removed for security.
- *
- * Review round 1 (AISDLC-555) — TWO deliberate changes here, both correcting
- * the first version of this fix:
- *
- * 1. **It is no longer silent when nothing resolves.** The original ended in a
- *    bare `if [ -n "$HOOK" ]; then bash ...; fi` with no else, so an adopter
- *    who installed via `npm i -g @ai-sdlc/orchestrator` (the documented
- *    getting-started path) and never installed the Claude Code plugin got a
- *    hook that could never fire and never said so — reproducing the exact
- *    defect this task exists to close, for a whole adopter persona.
- *    `ai-sdlc-plugin/` is not published to npm and orchestrator's `files` is
- *    `["dist"]`, so none of the tiers can resolve in that setup.
- *
- *    Silence is still correct when there is nothing to sign, so the diagnostic
- *    fires only when `.ai-sdlc/verdicts/` is non-empty: reviewers ran, an
- *    envelope is owed, and none will be produced. That is the state an
- *    operator must never discover months later.
- *
- * 2. **The repo-relative tier was removed.** It previously preferred
- *    `./scripts/check-attestation-sign.sh` from the working tree, which put
- *    repo-tracked content on the push-time execution path with the operator's
- *    Ed25519 signing key in scope — a contributor could land that file and
- *    have it run as the maintainer on their next push. Resolution is now only
- *    from the plugin install (env vars, then the read-only cache probe).
- *
- * Adopters typically already have a `.husky/pre-push` from their existing
- * tooling; the wizard appends our snippet behind a sentinel so we can
- * extend an existing hook without trampling user content.
+ * Git environment (AISDLC-1129): the block runs no child process, so it
+ * neither reads nor exports GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE or
+ * GIT_PREFIX. A freshly created hook additionally unsets GIT_DIR,
+ * GIT_WORK_TREE, GIT_COMMON_DIR and GIT_PREFIX in its preamble; GIT_INDEX_FILE
+ * is left untouched.
  */
 export const HUSKY_PREPUSH_SIGN_SNIPPET = `# ai-sdlc:attestation-sign-block
-# Signs the DSSE attestation envelope for the current HEAD when verdict
-# files exist. Skip with AI_SDLC_SKIP_ATTESTATION_SIGN=1.
-if [ -z "\${AI_SDLC_SKIP_ATTESTATION_SIGN:-}" ]; then
-  AI_SDLC_ATTESTATION_HOOK=""
-  if [ -n "\${CLAUDE_PLUGIN_ROOT:-}" ] && [ -f "\${CLAUDE_PLUGIN_ROOT}/scripts/check-attestation-sign.sh" ]; then
-    AI_SDLC_ATTESTATION_HOOK="\${CLAUDE_PLUGIN_ROOT}/scripts/check-attestation-sign.sh"
-  elif [ -n "\${CLAUDE_PLUGIN_DIR:-}" ] && [ -f "\${CLAUDE_PLUGIN_DIR}/scripts/check-attestation-sign.sh" ]; then
-    AI_SDLC_ATTESTATION_HOOK="\${CLAUDE_PLUGIN_DIR}/scripts/check-attestation-sign.sh"
-  else
-    for _ai_sdlc_dir in "$HOME"/.claude/plugins/cache/*/ai-sdlc/*/; do
-      if [ -f "\${_ai_sdlc_dir}scripts/check-attestation-sign.sh" ]; then
-        AI_SDLC_ATTESTATION_HOOK="\${_ai_sdlc_dir}scripts/check-attestation-sign.sh"
-        break
-      fi
-    done
-  fi
-  if [ -n "$AI_SDLC_ATTESTATION_HOOK" ]; then
-    echo "[ai-sdlc] attestation signer: $AI_SDLC_ATTESTATION_HOOK" >&2
-    bash "$AI_SDLC_ATTESTATION_HOOK"
-  elif [ -n "$(ls -A .ai-sdlc/verdicts 2>/dev/null)" ]; then
-    echo "[ai-sdlc] ERROR: reviewer verdicts exist under .ai-sdlc/verdicts/ but NO attestation signer" >&2
-    echo "[ai-sdlc]   could be found — this push will carry no attestation." >&2
-    echo "[ai-sdlc]   Searched CLAUDE_PLUGIN_ROOT, CLAUDE_PLUGIN_DIR, and" >&2
-    echo "[ai-sdlc]   ~/.claude/plugins/cache/*/ai-sdlc/*/scripts/check-attestation-sign.sh" >&2
-    echo "[ai-sdlc]   Install the ai-sdlc Claude Code plugin, or set CLAUDE_PLUGIN_ROOT." >&2
-  fi
-fi
+# No-op (AISDLC-1261): envelope signing was removed (RFC-0061 / DEC-0284); the
+# merge gate reads the review verdict record. Kept so init/doctor stay idempotent.
+# Git env (AISDLC-1129): runs no child process, so GIT_DIR, GIT_WORK_TREE,
+# GIT_INDEX_FILE and GIT_PREFIX are neither read nor exported here.
+:
 # end ai-sdlc:attestation-sign-block
 `;
+
+/** True when a pre-push hook still names the removed attestation signer script. */
+export function hasStaleAttestationSignReference(text: string): boolean {
+  return text.includes('check-attestation-sign');
+}
+
+/**
+ * Remove a pre-1261 sentinel block (the one that resolved and ran the removed
+ * `check-attestation-sign.sh`) from a hook, leaving user content intact. The
+ * block is replaced only when it still names the removed script; a current
+ * no-op block is returned unchanged.
+ */
+export function stripStaleAttestationSignBlock(text: string): string {
+  if (!hasStaleAttestationSignReference(text)) return text;
+  return text.replace(
+    /# ai-sdlc:attestation-sign-block\n[\s\S]*?# end ai-sdlc:attestation-sign-block\n?/g,
+    (block) => (hasStaleAttestationSignReference(block) ? '' : block),
+  );
+}
 
 /**
  * `.ai-sdlc/trusted-reviewers.yaml` stub — empty allowlist with operator
