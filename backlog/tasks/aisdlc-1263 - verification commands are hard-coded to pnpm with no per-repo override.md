@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1263
 title: '`next-step` hard-codes `pnpm build/test/lint/format:check` as the verification commands; non-Node adopters need a `package.json` shim. Add a per-repo override.'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-11'
 labels:

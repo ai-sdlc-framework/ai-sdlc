@@ -48,17 +48,12 @@ import {
 } from './02-compute-branch.js';
 import { landPrep } from './land-prep.js';
 import { ensureWorkspaceBuilt } from './ensure-workspace-built.js';
+import { loadVerification } from './verification-config.js';
+import { VERIFICATION_KEYS } from './verify-defaults.js';
 import { decidePrDraft } from '../hierarchy/mark-ready.js';
 import { detectDraftPrForBranch } from './03-setup-worktree.js';
 import { composeJudgmentNotes } from '../judgment/agent-output-checks.js';
 import { writeEvent, type WriteEventOpts } from '../orchestrator/events.js';
-
-const VERIFY_KEYS = [
-  ['build', 'pnpm build'],
-  ['test', 'pnpm test'],
-  ['lint', 'pnpm lint'],
-  ['format', 'pnpm format:check'],
-] as const;
 
 export interface PushAndPrStepOptions extends PushAndPrOptions {
   runner?: Runner;
@@ -188,12 +183,14 @@ export function composeBody(opts: PushAndPrOptions): string {
   const notesBlock = judgmentNotes ? `\n${judgmentNotes}` : '';
 
   const summaries = opts.developerReturn.verificationSummaries;
+  const verification = loadVerification(opts.workDir);
   const verificationBlock = summaries
-    ? `\n## Verification\n\n${VERIFY_KEYS.map(
-        ([key, command]) =>
-          `- \`${command}\` - ${opts.developerReturn.verifications[key]}${
-            summaries[key] ? ` (${summaries[key]})` : ''
-          }`,
+    ? `\n## Verification\n\n${VERIFICATION_KEYS.map((key) =>
+        verification[key]
+          ? `- \`${verification[key]}\` - ${opts.developerReturn.verifications[key]}${
+              summaries[key] ? ` (${summaries[key]})` : ''
+            }`
+          : `- \`${key}\` - skipped (not configured)`,
       ).join('\n')}${
         opts.developerReturn.verificationScope
           ? `\nScope of the last verify run: ${opts.developerReturn.verificationScope}.`

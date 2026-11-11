@@ -23,12 +23,13 @@ import { consumeDeveloperRound } from '../dispatch/board.js';
 import {
   applyVerifyRun,
   claimedGreenButRed,
-  DEFAULT_VERIFY_COMMANDS,
   formatVerifyFeedback,
   recordDeveloperHonestyEvent,
   runVerifyCommands,
   writeVerifyRunState,
 } from '../steps/verify-commands.js';
+import { loadVerification } from '../steps/verification-config.js';
+import { verificationCommandList } from '../steps/verify-defaults.js';
 import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
 import { DEFAULT_MAX_ITERATIONS } from '../steps/09-iterate.js';
 import { findTaskFile } from '../steps/01-validate.js';
@@ -238,7 +239,7 @@ export async function runVerifyGate(
   const recordFile = join(artifactsDir, 'verify-runs', `${state.taskId}.json`);
   const run = await deps.runVerify({
     ...(state.verifyRan ? { narrowFrom: recordFile } : {}),
-    commands: DEFAULT_VERIFY_COMMANDS,
+    commands: verificationCommandList(loadVerification(state.workDir)),
     cwd: state.worktreePath,
     runner: ctx.runner,
     developerClaimed: developer.verifications,
