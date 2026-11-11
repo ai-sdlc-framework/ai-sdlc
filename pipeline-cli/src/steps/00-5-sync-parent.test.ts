@@ -158,6 +158,16 @@ describe('Step 0.5 — syncParentUntrackedFiles', () => {
     expect(result.reason).toContain('no task_prefix configured in backlog/config.yml');
   });
 
+  it('AISDLC-1260: refusal names untracked subagent-session markers', async () => {
+    const fake = new FakeRunner().on(
+      /^git ls-files/,
+      ok('.ai-sdlc/subagent-sessions/agent-1.json\n'),
+    );
+    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('  .ai-sdlc/subagent-sessions/agent-1.json');
+  });
+
   it('(b2) AISDLC-609: refusal message names the configured prefix when backlog/config.yml sets one', async () => {
     writeFileSync(
       join(workDir, 'backlog/config.yml'),

@@ -48,6 +48,7 @@ const {
   renderSubagentHardRules,
 } = require('./lib/governance-resolver');
 const { bannerGovernance } = require('./lib/trusted-policy');
+const { resolveMarkerRoot } = require('./lib/marker-root');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ const projectDir =
 // SubagentStart firing, regardless of whether governance context config
 // exists for this project.
 
-writeSubagentSessionMarker(projectDir, stdinRaw);
+writeSubagentSessionMarker(resolveMarkerRoot(projectDir), stdinRaw);
 
 // ── Load agent-role.yaml ─────────────────────────────────────────────
 

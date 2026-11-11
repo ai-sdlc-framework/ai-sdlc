@@ -23,6 +23,7 @@ describe('runtime gitignore list', () => {
       '.ai-sdlc/state/',
       '.ai-sdlc/audit.jsonl',
       ARTIFACTS_GITIGNORE_ENTRY,
+      '.ai-sdlc/subagent-sessions/',
     ]);
     expect(ARTIFACTS_GITIGNORE_ENTRY).toBe('.ai-sdlc/artifacts/');
   });
@@ -258,7 +259,10 @@ describe('missingRuntimeGitignorePaths', () => {
 
   it('reports only the artifacts entry for a repository initialised before it existed', () => {
     const old = `${RUNTIME_GITIGNORE_SENTINEL}\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n`;
-    expect(missingRuntimeGitignorePaths(old)).toEqual([ARTIFACTS_GITIGNORE_ENTRY]);
+    expect(missingRuntimeGitignorePaths(old)).toEqual([
+      ARTIFACTS_GITIGNORE_ENTRY,
+      '.ai-sdlc/subagent-sessions/',
+    ]);
   });
 });
 
