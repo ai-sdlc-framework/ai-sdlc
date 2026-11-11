@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1260
 title: 'subagent-start hook writes `.ai-sdlc/subagent-sessions/*.json` and `UNKNOWN-*` transcripts into the parent checkout; untracked files then block the next `next-step` at Step 0.5'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-11'
 labels:
