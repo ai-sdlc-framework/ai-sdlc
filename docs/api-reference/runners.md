@@ -84,6 +84,26 @@ The runner includes an enhanced token usage parser that first tries NDJSON `usag
 import { CodexRunner, parseTokenUsage } from '@ai-sdlc/orchestrator';
 ```
 
+### KiroRunner
+
+Invokes the [Kiro CLI](https://kiro.dev/docs/cli/) in headless mode with JSON Lines output.
+
+| Property | Value |
+|---|---|
+| CLI command | `kiro-cli chat --no-interactive --v3 --trust-workspace --trust-all-tools --output-format stream-json [--model <model>] <prompt>` |
+| stdin | None (prompt is a CLI argument) |
+| Auth | `KIRO_API_KEY` (inherited from environment; no browser login needed) |
+| Model override | `AI_SDLC_KIRO_MODEL` env var |
+| Registration | Available when `KIRO_API_KEY` is set |
+
+The runner needs the standalone `kiro-cli` binary on `PATH`; the `kiro` command opens the Kiro IDE by default and is not used. If `kiro-cli` is missing, the run fails with a setup error naming the install page.
+
+A run succeeds only when `kiro-cli` exits 0 **and** reports a `runFinished` event with `status: "success"`; its `finalText` becomes the summary. A `runError` event (`stage: "auth"` when `KIRO_API_KEY` is missing; `stage: "prompt"` for an invalid key or unknown model) is reported in `error` with the exit code. Kiro reports usage in credits rather than tokens, so `tokenUsage` is left undefined.
+
+```typescript
+import { KiroRunner } from '@ai-sdlc/orchestrator';
+```
+
 ### GenericLLMRunner
 
 Invokes any OpenAI-compatible chat completions API over HTTP.
@@ -140,6 +160,7 @@ The `ai-sdlc run` command accepts a `--runner <name>` flag to select any registe
 ```bash
 ai-sdlc run --issue 42 --runner copilot
 ai-sdlc run --issue 42 --runner cursor
+ai-sdlc run --issue 42 --runner kiro
 ai-sdlc run --issue 42 --runner claude-code   # explicit built-in default
 ```
 
@@ -147,7 +168,7 @@ If the specified name is not registered, the command fails immediately with an a
 
 ### `AI_SDLC_RUNNER_PLUGIN` environment variable
 
-To plug in a custom runner (e.g. Kiro, a proprietary agent CLI, or a test double) without forking the package, set `AI_SDLC_RUNNER_PLUGIN` to the path of a module that exports an `AgentRunner`:
+To plug in a custom runner (e.g. a proprietary agent CLI or a test double) without forking the package, set `AI_SDLC_RUNNER_PLUGIN` to the path of a module that exports an `AgentRunner`:
 
 ```bash
 export AI_SDLC_RUNNER_PLUGIN=/path/to/my-runner.mjs
@@ -221,6 +242,7 @@ const defaultRunner = registry.getDefault();
 | `copilot` | `GH_TOKEN` or `GITHUB_TOKEN` | `env` |
 | `cursor` | `CURSOR_API_KEY` | `env` |
 | `codex` | `CODEX_API_KEY` | `env` |
+| `kiro` | `KIRO_API_KEY` | `env` |
 | `openai` | `OPENAI_API_KEY` | `env` |
 | `anthropic` | `ANTHROPIC_API_KEY` | `env` |
 | `generic-llm` | `LLM_API_URL` + `LLM_API_KEY` | `env` |
@@ -263,12 +285,12 @@ See [Security > OpenShell](./security.md#createopenshellsandboxexec-config) for 
 
 ## Common Pattern
 
-All CLI-based runners (Claude Code, Copilot, Cursor, Codex) follow the same subprocess pattern:
+All CLI-based runners (Claude Code, Copilot, Cursor, Codex, Kiro) follow the same subprocess pattern:
 
 1. **Build prompt** — `buildPrompt(ctx)` constructs a prompt from issue details, constraints, codebase context, and episodic memory
 2. **Spawn CLI** — Run the agent CLI as a child process with appropriate flags
 3. **Collect output** — Buffer stdout and stderr
-4. **Parse token usage** — Extract input/output token counts from stderr for cost tracking
+4. **Parse token usage** — Extract input/output token counts from stderr for cost tracking (Kiro reports credits only, so none is recorded)
 5. **Git diff** — Run `git diff --name-only` and `git ls-files --others` to find changed files
 6. **Commit** — `git add -A` and `git commit` with the configured message template and co-author
 
@@ -281,6 +303,7 @@ All CLI-based runners (Claude Code, Copilot, Cursor, Codex) follow the same subp
 | `AI_SDLC_COPILOT_MODEL` | _(CLI default)_ | Model override for CopilotRunner |
 | `AI_SDLC_CURSOR_MODEL` | _(CLI default)_ | Model override for CursorRunner |
 | `AI_SDLC_CODEX_MODEL` | _(CLI default)_ | Model override for CodexRunner |
+| `AI_SDLC_KIRO_MODEL` | _(CLI default)_ | Model override for KiroRunner |
 | `AI_SDLC_RUNNER_TIMEOUT` | `900000` (15 min) | Runner timeout in ms (supports duration strings) |
 | `AI_SDLC_LINT_COMMAND` | _(none)_ | Lint command injected into agent prompts |
 | `AI_SDLC_FORMAT_COMMAND` | _(none)_ | Format command injected into agent prompts |

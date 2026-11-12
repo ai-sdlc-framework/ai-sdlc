@@ -4,6 +4,7 @@ import { ClaudeCodeRunner } from './claude-code.js';
 import { CopilotRunner } from './copilot.js';
 import { CursorRunner } from './cursor.js';
 import { CodexRunner } from './codex.js';
+import { KiroRunner } from './kiro.js';
 import { GenericLLMRunner } from './generic-llm.js';
 import type { AgentRunner, AgentContext, AgentResult } from './types.js';
 
@@ -196,6 +197,39 @@ describe('RunnerRegistry', () => {
       expect(registry.get('codex')).toBeInstanceOf(CodexRunner);
     });
 
+    it('kiro unavailable without KIRO_API_KEY', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({});
+
+      expect(registry.has('kiro')).toBe(false);
+      expect(registry.get('kiro')).toBeUndefined();
+    });
+
+    it('kiro unavailable with an empty KIRO_API_KEY', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({ KIRO_API_KEY: '' });
+
+      expect(registry.has('kiro')).toBe(false);
+    });
+
+    it('kiro available with KIRO_API_KEY', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({ KIRO_API_KEY: 'kiro_test123' });
+
+      expect(registry.has('kiro')).toBe(true);
+      expect(registry.get('kiro')).toBeInstanceOf(KiroRunner);
+      expect(registry.list().find((r) => r.name === 'kiro')?.source).toBe('env');
+    });
+
+    it('does not overwrite a manually registered kiro runner', () => {
+      const registry = new RunnerRegistry();
+      const custom = new MockRunner('kiro');
+      registry.register('kiro', custom);
+      registry.discoverFromEnv({ KIRO_API_KEY: 'kiro_test123' });
+
+      expect(registry.get('kiro')).toBe(custom);
+    });
+
     it('devin is not registered at all', () => {
       const registry = new RunnerRegistry();
       registry.discoverFromEnv({});
@@ -349,6 +383,18 @@ describe('resolveRunner', () => {
     expect(copilot).toBeDefined();
     const result = await resolveRunner(registry, { runnerName: copilot!.name });
     expect(result).toBeInstanceOf(CopilotRunner);
+  });
+
+  it('--runner kiro resolves to KiroRunner when KIRO_API_KEY is set', async () => {
+    const registry = createRunnerRegistry({ KIRO_API_KEY: 'kiro_test123' });
+    const result = await resolveRunner(registry, { runnerName: 'kiro' });
+    expect(result).toBeInstanceOf(KiroRunner);
+  });
+
+  it('KIRO_API_KEY alone does not change the default runner', async () => {
+    const registry = createRunnerRegistry({ KIRO_API_KEY: 'kiro_test123' });
+    const result = await resolveRunner(registry, {});
+    expect(result).toBeInstanceOf(ClaudeCodeRunner);
   });
 
   it('falls back to ClaudeCodeRunner when only built-ins are registered', async () => {

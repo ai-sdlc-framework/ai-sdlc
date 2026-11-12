@@ -112,6 +112,7 @@ export const DEFAULT_OLLAMA_API_KEY = 'ollama';
 export const DEFAULT_COPILOT_MODEL: string | undefined = process.env.AI_SDLC_COPILOT_MODEL;
 export const DEFAULT_CURSOR_MODEL: string | undefined = process.env.AI_SDLC_CURSOR_MODEL;
 export const DEFAULT_CODEX_MODEL: string | undefined = process.env.AI_SDLC_CODEX_MODEL;
+export const DEFAULT_KIRO_MODEL: string | undefined = process.env.AI_SDLC_KIRO_MODEL;
 
 // ── Generic LLM defaults ───────────────────────────────────────────
 
