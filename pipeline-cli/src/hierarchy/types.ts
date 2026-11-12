@@ -135,6 +135,8 @@ export interface HierarchyDeps {
   /** Absolute path of the running `cli-hierarchy.mjs`, written into generated VS Code tasks. Absent: `process.argv[1]`. */
   binPath?: string;
   /** Liveness probe for a pid, used by the cross-project collision check. Absent: `process.kill(pid, 0)`. */
+  /** Whether 127.0.0.1:<port> can be bound (webhook port selection); default probes with node. */
+  isPortFree?: (port: number) => boolean;
   isAlive?: (pid: number) => boolean;
   /** Whether nvm has the given node version installed. Absent: looks under `$NVM_DIR/versions/node`. */
   nodeInstalled?: (version: string) => boolean;

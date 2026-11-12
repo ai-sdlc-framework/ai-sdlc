@@ -435,6 +435,17 @@ receiver binds to `127.0.0.1` only, on `--port` or `AI_SDLC_WEBHOOK_PORT` (defau
 `/webhooks/github`. `cli-hierarchy up` starts it when the secret is set (and always starts the reconcile scheduler that consumes its wake file, see `up`). Subscribed event kinds:
 `pull_request`, `check_suite`, `check_run`, `workflow_run`, `status`, `pull_request_review`.
 
+Several projects on one host (AISDLC-1254): without `--port` or `AI_SDLC_WEBHOOK_PORT`, `webhook up` picks the
+port itself. It starts from the port recorded in the board dir's `webhook-port` file (else `spec.webhook.port`,
+default 8765) and takes the first port that binds, scanning 20 ports upward, so a second project's receiver lands on
+8766 while the first holds 8765. The choice is recorded and reused on every restart, and the forwarder is installed
+against that same port; `webhook status` prints the full target URL (`target http://127.0.0.1:<n>/webhooks/github`).
+`--port` and `AI_SDLC_WEBHOOK_PORT` pin the port and win over selection (a held pinned port is an error). When no
+candidate is free, or the receiver loses the bind, `webhook up` exits non-zero naming the port and its owner
+(`lsof`) and `webhook status` reports `webhook: collision (...)` instead of "not running" until the next
+successful start. The forwarder launchd label is still one per user, so run one `--feed gh-forward` agent per
+host or supervise the other projects' forwarders yourself.
+
 Reaching it from GitHub: `cli-hierarchy webhook up --feed gh-forward` (AISDLC-1207) installs and loads a
 launchd agent (`io.ai-sdlc.webhook-forward`, KeepAlive, plist in `~/Library/LaunchAgents`, mode 0600) that runs
 `gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:8765/webhooks/github --secret $AI_SDLC_WEBHOOK_SECRET`,

@@ -28,7 +28,7 @@ const STATE_FILE = 'webhook.json';
 /** What `status` reports about the receiver. */
 export type WebhookStatus =
   | { state: 'up'; port: number; pid: number }
-  | { state: 'off'; reason: 'no secret' | 'not running' };
+  | { state: 'off'; reason: 'no secret' | 'not running' | 'port collision'; detail?: string };
 
 /** What feeds the receiver: `gh webhook forward`, a tunnel, or nothing known (AISDLC-1157). */
 export interface WebhookFeed {
@@ -96,7 +96,97 @@ export function webhookStatus(deps: HierarchyDeps): WebhookStatus {
   const s = readState(deps.boardDir);
   if (s && (deps.isAlive ?? defaultIsAlive)(s.pid))
     return { state: 'up', port: s.port, pid: s.pid };
+  const collision = readCollision(deps.boardDir);
+  if (collision) return { state: 'off', reason: 'port collision', detail: collision };
   return { state: 'off', reason: 'not running' };
+}
+
+/** The URL the forwarder must target for a receiver on `port`. */
+export const webhookTargetUrl = (port: number): string =>
+  `http://127.0.0.1:${port}/webhooks/github`;
+
+const PORT_FILE = 'webhook-port';
+const COLLISION_FILE = 'webhook-collision.txt';
+/** Candidate ports tried from the recorded or default port when none is pinned. */
+export const WEBHOOK_PORT_SCAN = 20;
+
+function readRecordedPort(boardDir: string): number | undefined {
+  try {
+    const n = Number(readFileSync(path.join(boardDir, PORT_FILE), 'utf-8').trim());
+    if (Number.isInteger(n) && n > 0 && n <= 65535) return n;
+  } catch {
+    /* none recorded */
+  }
+  return readState(boardDir)?.port;
+}
+
+function readCollision(boardDir: string): string | undefined {
+  try {
+    return readFileSync(path.join(boardDir, COLLISION_FILE), 'utf-8').trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function recordCollision(boardDir: string, message: string): void {
+  mkdirSync(boardDir, { recursive: true });
+  writeFileSync(path.join(boardDir, COLLISION_FILE), message + '\n');
+}
+
+/** Whether 127.0.0.1:<port> can be bound; an unusable probe counts as free. */
+function defaultPortFree(deps: HierarchyDeps, port: number): boolean {
+  const script =
+    `const s=require('net').createServer();` +
+    `s.on('error',()=>process.exit(7));` +
+    `s.listen(${port},'127.0.0.1',()=>s.close(()=>process.exit(0)))`;
+  try {
+    return deps.run(process.execPath, ['-e', script], { cwd: deps.cwd })?.status !== 7;
+  } catch {
+    return true;
+  }
+}
+
+/** Best-effort `<command> (pid N)` of the listener on `port`. */
+function portOwner(deps: HierarchyDeps, port: number): string {
+  try {
+    const r = deps.run('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpc'], { cwd: deps.cwd });
+    const out = (r?.stdout ?? '').split('\n');
+    const pid = out.find((l) => l.startsWith('p'))?.slice(1);
+    const cmd = out.find((l) => l.startsWith('c'))?.slice(1);
+    if (pid) return `${cmd ?? 'unknown process'} (pid ${pid})`;
+  } catch {
+    /* lsof missing */
+  }
+  return 'an unknown process';
+}
+
+/**
+ * Choose the receiver port. A pinned port (flag or env) wins and must be free. Otherwise the
+ * recorded port is reused, else the configured default, scanning upward to the first free one.
+ * All candidates held: throws naming the first port and its owner, and records the collision.
+ */
+function selectPort(deps: HierarchyDeps, flag: string | undefined): number {
+  const free = deps.isPortFree ?? ((p: number) => defaultPortFree(deps, p));
+  const fail = (first: number, text: string): never => {
+    const message = `${text}: port ${first} is held by ${portOwner(deps, first)}`;
+    recordCollision(deps.boardDir, message);
+    throw new Error(message);
+  };
+  const raw = flag ?? deps.env[WEBHOOK_PORT_ENV];
+  if (raw !== undefined && raw !== '') {
+    const pinned = resolvePort(deps, flag);
+    return free(pinned) || pinned === 0 ? pinned : fail(pinned, `cannot bind pinned webhook port`);
+  }
+  const start = readRecordedPort(deps.boardDir) ?? loadPrLifecycleConfig(deps.cwd).webhook.port;
+  for (let p = start; p < start + WEBHOOK_PORT_SCAN && p <= 65535; p += 1) {
+    if (free(p)) {
+      mkdirSync(deps.boardDir, { recursive: true });
+      writeFileSync(path.join(deps.boardDir, PORT_FILE), `${p}\n`);
+      rmSync(path.join(deps.boardDir, COLLISION_FILE), { force: true });
+      return p;
+    }
+  }
+  return fail(start, `no free webhook port in ${start}-${start + WEBHOOK_PORT_SCAN - 1}`);
 }
 
 /** Health class of the webhook path (AISDLC-1157). */
@@ -293,14 +383,15 @@ function ageText(min: number | null): string {
  */
 export function formatWebhookStatus(w: WebhookStatus, health?: WebhookHealth): string {
   if (w.state !== 'up') {
+    if (w.reason === 'port collision') return `webhook: collision (${w.detail ?? 'port held'})`;
     return health && health.class === 'down' && health.signals.receiver === false
       ? `webhook: down (${health.reasons[0] ?? w.reason})`
       : `webhook: off (${w.reason})`;
   }
   const h = health;
   return h
-    ? `webhook: ${h.class} (port ${w.port}, last event ${ageText(h.signals.lastEventAgeMin)}, feed ${h.signals.feed})`
-    : `webhook: running (port ${w.port}, health not read)`;
+    ? `webhook: ${h.class} (port ${w.port}, last event ${ageText(h.signals.lastEventAgeMin)}, feed ${h.signals.feed}, target ${webhookTargetUrl(w.port)})`
+    : `webhook: running (port ${w.port}, target ${webhookTargetUrl(w.port)}, health not read)`;
 }
 
 function resolvePort(deps: HierarchyDeps, flag: string | undefined): number {
@@ -326,10 +417,13 @@ export function webhookUp(
   platform: NodeJS.Platform = process.platform,
 ): WebhookStatus {
   const before = webhookStatus(deps);
+  let chosen: number | undefined;
   if (feed?.kind === 'gh-forward' && feed.pid === undefined) {
     const secret = deps.env[WEBHOOK_SECRET_ENV];
     if (!secret) throw new Error(`${WEBHOOK_SECRET_ENV} is not set: cannot start the forwarder`);
-    const supervised = installForwarder(deps, secret, resolvePort(deps, portFlag), platform);
+    const fwdPort = before.state === 'up' ? before.port : selectPort(deps, portFlag);
+    if (before.state !== 'up') chosen = fwdPort;
+    const supervised = installForwarder(deps, secret, fwdPort, platform);
     feed = supervised ? { kind: 'gh-forward', agent: FORWARDER_LABEL } : feed;
   }
   if (before.state === 'up') {
@@ -341,7 +435,7 @@ export function webhookUp(
     deps.log(`webhook off: ${WEBHOOK_SECRET_ENV} is not set (poll-only mode)`);
     return before;
   }
-  const port = resolvePort(deps, portFlag);
+  const port = chosen ?? selectPort(deps, portFlag);
   spawner(process.execPath, [
     deps.binPath ?? process.argv[1] ?? '',
     'webhook',
@@ -400,7 +494,19 @@ export async function webhookServe(
     port: resolvePort(deps, portFlag),
     debounceMs: loadPrLifecycleConfig(deps.cwd).webhook.debounceMs,
   });
-  await receiver.start();
+  try {
+    await receiver.start();
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === 'EADDRINUSE') {
+      const port = resolvePort(deps, portFlag);
+      const message = `cannot bind webhook port: port ${port} is held by ${portOwner(deps, port)}`;
+      recordCollision(deps.boardDir, message);
+      throw new Error(message, { cause: e });
+    }
+    throw e;
+  }
+  rmSync(path.join(deps.boardDir, COLLISION_FILE), { force: true });
   mkdirSync(deps.boardDir, { recursive: true });
   writeFileSync(
     stateFile(deps.boardDir),
