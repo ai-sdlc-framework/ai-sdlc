@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defaultRunner } from './exec.js';
-import { buildTrustedPush, resolveTrustedPushInputs, runTrustedPush } from './trusted-push.js';
+import {
+  buildTrustedPush,
+  parseUrlCredentialHelpers,
+  resolveTrustedPushInputs,
+  runTrustedPush,
+} from './trusted-push.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -130,6 +135,34 @@ describe('trusted pipeline push (AISDLC-731)', () => {
     expect(t.args[i + 2]).toBe('credential.helper=store');
     expect(t.args).toContain('core.askPass=/a');
     expect(buildTrustedPush({ mainCheckout: '/m' }, ['push']).args).toContain('core.askPass=');
+  });
+
+  it('re-adds global URL-scoped helpers under their own key (AISDLC-1262)', () => {
+    const out =
+      'credential.https://github.com.helper !/usr/bin/gh auth git-credential\ncredential.helper store\n';
+    const urlCredentialHelpers = parseUrlCredentialHelpers(out);
+    expect(urlCredentialHelpers).toEqual([
+      { key: 'credential.https://github.com.helper', value: '!/usr/bin/gh auth git-credential' },
+    ]);
+    const t = buildTrustedPush({ mainCheckout: '/m', urlCredentialHelpers }, ['push']);
+    const reset = t.args.indexOf('credential.https://github.com.helper=');
+    expect(reset).toBeGreaterThan(0);
+    expect(t.args).toContain(
+      'credential.https://github.com.helper=!/usr/bin/gh auth git-credential',
+    );
+    expect(parseUrlCredentialHelpers('')).toEqual([]);
+  });
+
+  it('does not re-add a worktree/local URL-scoped helper; no global helper leaves args unchanged', () => {
+    const f = fixture();
+    git(f.wt, 'config', 'credential.https://github.com.helper', '!planted');
+    const inputs = resolveTrustedPushInputs(f.main, f.wt);
+    const built = buildTrustedPush(inputs, ['push']);
+    expect(built.args.join(' ')).not.toContain('planted');
+    const base = buildTrustedPush({ mainCheckout: '/m' }, ['push']).args;
+    expect(
+      buildTrustedPush({ mainCheckout: '/m', urlCredentialHelpers: [] }, ['push']).args,
+    ).toEqual(base);
   });
 
   it('does not run a planted credential.helper or core.askPass', async () => {
