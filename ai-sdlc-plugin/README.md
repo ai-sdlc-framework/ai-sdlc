@@ -202,71 +202,19 @@ reads the review verdict record (`cli-attestation verdict-check`), and a v6 enve
 is refused with `attestation-schema-v6-refused`. The `init-signing-key` command and the
 keyring prerequisite were removed in RFC-0061 phase 3.
 
-## Attestation pre-push hook — shipping + install (AISDLC-555)
+## Pre-push hook and the verdict record (RFC-0061, AISDLC-1261)
 
-`/ai-sdlc execute` Step 10 does not sign attestations inline; it writes reviewer
-verdicts to `.ai-sdlc/verdicts/<task-id>.json` and delegates the actual DSSE
-sign + commit to a **git pre-push hook** (AISDLC-133). Two things have to be
-true for that hook to ever fire in an adopter repo:
+`/ai-sdlc execute` Step 10 writes reviewer verdicts to
+`.ai-sdlc/verdicts/<task-id>.json`; the merge gate reads that review verdict
+record (`cli-attestation verdict-check`). Nothing is signed at push time, and
+`check-attestation-sign.sh` no longer ships.
 
-1. **The hook script has to ship somewhere the adopter can reach it.** It does:
-   `ai-sdlc-plugin/scripts/check-attestation-sign.sh` — installed alongside
-   `sign-attestation.mjs` in every topology (marketplace cache,
-   `CLAUDE_PLUGIN_ROOT` checkout, or this monorepo). It resolves the signer
-   relative to its **own on-disk directory** (not `$CLAUDE_PLUGIN_ROOT`, not the
-   worktree root), so it works even when a bare `git push` in a plain terminal
-   never inherited any Claude Code env var. This monorepo's own dogfood
-   `.husky/pre-push` is unaffected — it still calls the separate, unmodified
-   `scripts/check-attestation-sign.sh` copy at the repo root directly.
-
-2. **Something has to WRITE the hook into the adopter's repo.** `ai-sdlc init
-   --with-attestation` (or `--add attestation`) already does this — it was
-   producing a `.husky/pre-push` block that checked ONLY the repo-relative
-   `./scripts/check-attestation-sign.sh` path, which never exists outside this
-   monorepo. AISDLC-555 fixed the block (`HUSKY_PREPUSH_SIGN_SNIPPET` in
-   `orchestrator/src/cli/commands/init-templates.ts`) to resolve the script the
-   same way slash-command bodies do: repo-local copy first (dogfood
-   back-compat), then `$CLAUDE_PLUGIN_ROOT` / `$CLAUDE_PLUGIN_DIR` (git push run
-   inside a Claude Code session), then a **read-only** plugin-cache probe (bare
-   terminal, matching the security posture of `resolve-pipeline-cli.sh`
-   topology 4 — never self-heals from a user-writable cache dir).
-
-**Entry point.** `ai-sdlc init --with-attestation` / `--add attestation` is the
-canonical, already-discoverable entry point — this is "whatever an adopter
-already runs" (task Scope item 3), not a new command to learn.
-`applyFeatureSelection()`'s hook-writing block in `init-features.ts` is the
-independently callable, reusable **installer**: it takes `(projectDir,
-selection, flags, adapters)`, is idempotent (`appendOnce` keyed on the
-`# ai-sdlc:attestation-sign-block` sentinel — a second run is a no-op), and
-appends to rather than clobbers a pre-existing hook. AISDLC-560's `init`
-/ `doctor` work should call this function (or invoke `applyFeatureSelection`
-with `selection.attestation = true`) rather than reimplementing hook-writing.
-
-**Husky vs. non-husky (AC #4).** `resolveHookTarget(projectDir, adapters)`
-decides the target file:
-
-- `package.json` parses and does **not** declare a `husky` dependency →
-  `.git/hooks/pre-push` — git's own native hook path, always executed
-  regardless of husky configuration.
-- Everything else (no `package.json`, unreadable/malformed `package.json`, or
-  `husky` IS declared) → `.husky/pre-push` — the pre-AISDLC-555 default. This
-  fails open to the common case: most repos running `ai-sdlc init
-  --with-attestation` are JS/TS projects that already use, or will shortly
-  `npm install` and pick up, husky.
-
-Either target is `chmod 0755`'d after every write/append — a freshly written
-hook that isn't executable is silently never run by git, which would have
-looked like AC #2 passing when it hadn't.
-
-**Verified end-to-end outside the monorepo (AC #5):** a scratch git repo (no
-ai-sdlc git history, no inherited hooks) with a fake plugin install directory
-(built `@ai-sdlc/orchestrator` + `@ai-sdlc/pipeline-cli`, plus the two
-`ai-sdlc-plugin/scripts/*` files) reproduced the full round trip in two
-configurations: (a) `CLAUDE_PLUGIN_ROOT` set (the `/ai-sdlc execute` push path)
-and (b) neither env var set, with the fake plugin install placed under
-`~/.claude/plugins/cache/<marketplace>/ai-sdlc/<version>/` (the bare-terminal
-`git push` path). Both produced a **committed v6 DSSE envelope** from a verdict
-file present at push time, and a second run was a clean idempotent no-op.
+`ai-sdlc init --with-attestation` / `--add attestation` still writes a
+sentinel-keyed (`# ai-sdlc:attestation-sign-block`) no-op block into
+`.husky/pre-push` (or `.git/hooks/pre-push`), so re-runs stay idempotent. A
+hook written by an older release that still names the removed script is
+reported by `ai-sdlc doctor` as `pre-push: stale attestation-sign reference`;
+`doctor --fix` or a re-run of `init` rewrites it.
 
 ## `ai-sdlc init` — CI-safe by default (AISDLC-263)
 
