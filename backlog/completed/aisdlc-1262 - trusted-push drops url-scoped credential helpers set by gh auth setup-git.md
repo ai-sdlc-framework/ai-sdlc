@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1262
 title: '`trusted-push` re-adds only plain global `credential.helper`; a URL-scoped helper from `gh auth setup-git` (`credential.<url>.helper` with the GitHub HTTPS origin as `<url>`) is dropped and the push fails with "could not read Username"'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-11'
 labels:
