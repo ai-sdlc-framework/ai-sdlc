@@ -54,6 +54,7 @@ import {
   type WizardFlags,
 } from './init-features.js';
 import { scaffoldConfig } from '@ai-sdlc/pipeline-cli/config-manifest';
+import { scaffoldVerification } from '@ai-sdlc/pipeline-cli/verification';
 import { REVIEW_POLICY_INIT_LINE } from './doctor-checks.js';
 import {
   CALIBRATION_YAML_STUB,
@@ -498,6 +499,8 @@ async function scaffoldManifestEntries(
   if (dryRun) return;
   const result = await scaffoldConfig({ projectDir, skipOperatorInput: true });
   for (const path of result.created) console.log(`${prefix}  created ${path}`);
+  const verification = scaffoldVerification(projectDir);
+  if (verification) console.log(`${prefix}  created ${verification}`);
 }
 
 /** Initialize the workspace root with workspace.yaml. */

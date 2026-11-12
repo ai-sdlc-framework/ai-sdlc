@@ -85,6 +85,10 @@
       "types": "./dist/runtime/index.d.ts",
       "import": "./dist/runtime/index.js"
     },
+    "./verification": {
+      "types": "./dist/steps/verification-config.d.ts",
+      "import": "./dist/steps/verification-config.js"
+    },
     "./config-manifest": {
       "types": "./dist/config-manifest/manifest.d.ts",
       "import": "./dist/config-manifest/manifest.js"
