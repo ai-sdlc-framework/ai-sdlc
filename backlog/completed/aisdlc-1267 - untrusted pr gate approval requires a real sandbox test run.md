@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1267
 title: 'Untrusted PR gate: the sandbox test stage runs, and approval requires its result'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-13'
 labels:
