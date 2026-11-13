@@ -38,6 +38,11 @@ import {
   runReviewerMatrix,
   FakeModelClient,
   InferenceProxyClient,
+  GATE_MAX_TOKENS_CEILING,
+  clampGateMaxTokens,
+  assertDiffWithinCap,
+  DiffTooLargeError,
+  formatUsageSummary,
 } from './reviewer-runner.js';
 import type { ReviewerRole, ModelRequest } from './reviewer-runner.js';
 import type { ReviewerVerdict } from './report-validator.js';
@@ -900,7 +905,7 @@ describe('InferenceProxyClient — AI_SDLC_REVIEWER_MODEL env var', () => {
     }
   });
 
-  it('uses AI_SDLC_REVIEWER_MODEL env var as the model when set', async () => {
+  it('ignores AI_SDLC_REVIEWER_MODEL: the gate model is pinned in code', async () => {
     process.env['AI_SDLC_REVIEWER_MODEL'] = 'claude-opus-4-9';
 
     const client = new InferenceProxyClient({
@@ -917,7 +922,7 @@ describe('InferenceProxyClient — AI_SDLC_REVIEWER_MODEL env var', () => {
 
     await client.complete({ systemPrompt: 'sys', userMessage: 'user' });
     const body = JSON.parse(capturedBodies[0]) as Record<string, unknown>;
-    expect(body['model']).toBe('claude-opus-4-9');
+    expect(body['model']).toBe(CLAUDE_SONNET_MODEL_ID);
   });
 
   it('defaults to the central Sonnet id when AI_SDLC_REVIEWER_MODEL is not set', async () => {
@@ -938,6 +943,72 @@ describe('InferenceProxyClient — AI_SDLC_REVIEWER_MODEL env var', () => {
     await client.complete({ systemPrompt: 'sys', userMessage: 'user' });
     const body = JSON.parse(capturedBodies[0]) as Record<string, unknown>;
     expect(body['model']).toBe(CLAUDE_SONNET_MODEL_ID);
+  });
+});
+
+// ── AISDLC-1266 spend controls ───────────────────────────────────────────────
+
+describe('spend controls (AISDLC-1266)', () => {
+  it('clamps max_tokens to the ceiling whatever the request says', async () => {
+    expect(clampGateMaxTokens(1_000_000)).toBe(GATE_MAX_TOKENS_CEILING);
+    expect(clampGateMaxTokens(undefined)).toBe(GATE_MAX_TOKENS_CEILING);
+    expect(clampGateMaxTokens(100)).toBe(100);
+    const client = new InferenceProxyClient({ host: 'h', port: 1, sessionToken: 't' });
+    const bodies: string[] = [];
+    client._httpRequest = async (_u, opts) => {
+      bodies.push(opts.body);
+      return JSON.stringify({ content: [{ type: 'text', text: 'ok' }] });
+    };
+    await client.complete({ systemPrompt: 's', userMessage: 'u', maxTokens: 999_999 });
+    expect((JSON.parse(bodies[0]) as Record<string, unknown>)['max_tokens']).toBe(
+      GATE_MAX_TOKENS_CEILING,
+    );
+  });
+
+  it('refuses a diff over the byte cap with an error naming the cap', () => {
+    expect(() => assertDiffWithinCap('x'.repeat(11), 10)).toThrow(DiffTooLargeError);
+    expect(() => assertDiffWithinCap('x'.repeat(11), 10)).toThrow(/maxDiffBytes=10/);
+    expect(() => assertDiffWithinCap('x'.repeat(10), 10)).not.toThrow();
+  });
+
+  it('records per-reviewer token usage from Anthropic and OpenAI shapes', async () => {
+    const shapes = [
+      { content: [{ type: 'text', text: 'a' }], usage: { input_tokens: 5, output_tokens: 7 } },
+      {
+        choices: [{ message: { content: 'b' } }],
+        usage: { prompt_tokens: 3, completion_tokens: 4 },
+      },
+    ];
+    const got: unknown[] = [];
+    for (const shape of shapes) {
+      const client = new InferenceProxyClient({ host: 'h', port: 1, sessionToken: 't' });
+      client._httpRequest = async () => JSON.stringify(shape);
+      got.push(await client.complete({ systemPrompt: 's', userMessage: 'u' }));
+    }
+    expect(got).toEqual([
+      { content: 'a', inputTokens: 5, outputTokens: 7 },
+      { content: 'b', inputTokens: 3, outputTokens: 4 },
+    ]);
+  });
+
+  it('runReviewerMatrix collects usage and the summary lists tokens per reviewer', async () => {
+    const client = {
+      complete: async () => ({
+        content: JSON.stringify({ approved: true, findings: [], promptInjectionDetected: false }),
+        inputTokens: 10,
+        outputTokens: 2,
+      }),
+    };
+    const result = await runReviewerMatrix({
+      prDiff: 'd',
+      prNumber: 1,
+      differentialTest: DIFFERENTIAL_TEST_RESULT,
+      modelClient: client,
+    });
+    expect(result.usage?.security).toEqual({ inputTokens: 10, outputTokens: 2 });
+    const md = formatUsageSummary(result.usage);
+    expect(md).toContain('| code | 10 | 2 |');
+    expect(formatUsageSummary(undefined)).toContain('| test | n/a | n/a |');
   });
 });
 

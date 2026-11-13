@@ -63,6 +63,10 @@ contentHeuristics:
 
 sandboxDriver: docker
 
+# AISDLC-1266: largest PR diff (bytes) that may be sent to the reviewers.
+# A larger diff fails the run before any model call.
+maxDiffBytes: 200000
+
 # Resource limits per OQ-3 resolution.
 # Configurable: integration/e2e suites may need higher; strict compliance may need lower.
 # Breach behavior: hard abort + needs-maintainer-review label + Decision G0 routing.

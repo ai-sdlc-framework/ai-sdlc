@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1266
 title: 'Untrusted PR gate: no model spend without a maintainer action, and a hard cap on what one run can spend'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-13'
 labels:

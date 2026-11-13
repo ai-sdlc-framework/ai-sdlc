@@ -62,7 +62,7 @@ name: Untrusted-Contributor PR Verification Gate
 # status, so a skipped job on a same-repo PR blocks nothing.
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
 
 # Workflow-level permissions: read-only default per Scorecard TokenPermissionsID.
@@ -92,6 +92,7 @@ jobs:
     name: 'Stage 0+1: Trust Classification + AST Gate'
     if: github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       statuses: write
       pull-requests: write
@@ -340,6 +341,10 @@ jobs:
       needs.classify-and-gate.outputs.trust != 'trusted' &&
       needs.classify-and-gate.outputs.gate_outcome == 'pass'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # AISDLC-1266: the only job that reads ANTHROPIC_API_KEY. The `ucvg-review`
+    # environment requires a maintainer approval for every run (and its head).
+    environment: ucvg-review
     permissions:
       statuses: write
       pull-requests: read
@@ -608,6 +613,7 @@ jobs:
       needs.classify-and-gate.outputs.gate_outcome == 'pass' &&
       needs.sandbox-and-review.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       statuses: write
 
@@ -779,6 +785,7 @@ jobs:
         )
       )
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       statuses: write
       issues: write
@@ -921,6 +928,7 @@ jobs:
       github.event.pull_request.head.repo.full_name != github.repository &&
       needs.classify-and-gate.outputs.flag_on != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       statuses: write
 
@@ -952,6 +960,7 @@ jobs:
       needs.classify-and-gate.outputs.flag_on == 'true' &&
       needs.classify-and-gate.outputs.trust == 'trusted'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       statuses: write
 
@@ -992,6 +1001,7 @@ jobs:
     name: Governance boundary
     if: github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: read

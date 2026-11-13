@@ -106,7 +106,16 @@ export interface SandboxConfig {
    * Default: `ci` (hermetic ephemeral sandbox in CI).
    */
   deployment?: 'ci' | 'local';
+
+  /**
+   * AISDLC-1266: largest PR diff (bytes) that may reach a model. Larger diffs
+   * are refused before any model call.
+   */
+  maxDiffBytes: number;
 }
+
+/** Built-in default for `maxDiffBytes`. */
+export const DEFAULT_MAX_DIFF_BYTES = 200_000;
 
 export interface ResourceLimits {
   /** Wall-clock timeout in seconds. Default 600 (10 minutes). */
@@ -151,6 +160,7 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
   },
   complianceRegime: 'none',
   deployment: 'ci',
+  maxDiffBytes: DEFAULT_MAX_DIFF_BYTES,
 };
 
 // ── RFC-0022 regime override ──────────────────────────────────────────────────
@@ -296,6 +306,12 @@ function parseSandboxConfig(yamlText: string): SandboxConfig {
     // deployment
     const deployment = doc['deployment'];
     if (deployment === 'ci' || deployment === 'local') result.deployment = deployment;
+
+    // maxDiffBytes
+    const maxDiff = doc['maxDiffBytes'];
+    if (typeof maxDiff === 'number' && Number.isFinite(maxDiff) && maxDiff > 0) {
+      result.maxDiffBytes = maxDiff;
+    }
 
     // differentialTest.resourceLimits
     const dt = doc['differentialTest'];

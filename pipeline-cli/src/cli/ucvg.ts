@@ -29,6 +29,7 @@
  */
 
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -54,6 +55,9 @@ import {
   runReviewerMatrix,
   FakeModelClient,
   InferenceProxyClient,
+  assertDiffWithinCap,
+  DiffTooLargeError,
+  formatUsageSummary,
   type ModelClient,
 } from '../pipeline/reviewer-runner.js';
 import {
@@ -85,6 +89,17 @@ export function isUntrustedPrGateEnabled(
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+}
+
+/** Append markdown to the GitHub job summary when running in Actions (AISDLC-1266). */
+function appendJobSummary(markdown: string): void {
+  const path = process.env['GITHUB_STEP_SUMMARY'];
+  if (!path) return;
+  try {
+    appendFileSync(path, markdown + '\n');
+  } catch {
+    // The summary is informational; never fail the run over it.
+  }
 }
 
 function fail(reason: string, code = 1): never {
@@ -238,6 +253,17 @@ async function runSandboxAndReview(args: {
   const prDiff = _ucvgSeams.computePrDiffFn
     ? _ucvgSeams.computePrDiffFn(args.prContentDir, args.baseSha, args.headSha)
     : computePrDiff(args.prContentDir, args.baseSha, args.headSha);
+
+  // AISDLC-1266: refuse an oversized diff before the proxy starts or any model call.
+  try {
+    assertDiffWithinCap(prDiff, sandboxConfig.maxDiffBytes);
+  } catch (err) {
+    if (err instanceof DiffTooLargeError) {
+      appendJobSummary(`### UCVG review refused\n\n${err.message}\n`);
+      fail(err.message);
+    }
+    throw err;
+  }
 
   // ── RFC-0043 AQ2 — InferenceProxy lifecycle ────────────────────────────────
   //
@@ -416,6 +442,7 @@ async function runSandboxAndReview(args: {
     }
     writeFileSync(reportPath, JSON.stringify(report, null, 2));
     process.stderr.write(`[stage-2/3] unsigned report written: ${reportPath}\n`);
+    appendJobSummary(formatUsageSummary(reviewerResult.usage));
     emit({ ok: true, reportPath });
   } finally {
     if (baseTreeDir) rmSync(baseTreeDir, { recursive: true, force: true });
