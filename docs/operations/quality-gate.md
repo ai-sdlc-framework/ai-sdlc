@@ -414,3 +414,16 @@ The `review-verdict-shadow` job in `ai-sdlc-gate.yml` runs `cli-attestation verd
 Writer coverage (AISDLC-1193): every approved Step 11 push carries a verdict ref, including resumed and no-reviewer rounds (the draft is built at ship time when missing) and heads the pre-push hook moved (the refspec is rebuilt per push attempt). An approved push that still has no ref names the reason in the run notes. Pushes outside Step 11 (planner, rebase-resolver) get no writer; they are covered by the AISDLC-1172 carry-forward (`ok-carried:<sha>`, AISDLC-1170).
 
 Reviewer set (AISDLC-1247, AISDLC-1251): `computeRequiredReviewers` (`pipeline-cli/src/attestation/review-coverage.ts`) is the single rule both the spawn list and the Step 8 gate read: `selectForReview` receives its `required` set and forces every name in it, security included (a delta resume keeps its delta-derived set, and the staged path appends security to its beside list), so the narrowing classifier drops only optional reviewers and the merged set never fails its own Step 8 coverage gate.
+
+## Untrusted PR gate: spend controls (AISDLC-1266)
+
+The untrusted-PR gate bills `ANTHROPIC_API_KEY` against a limited monthly credit, so the model stage never starts on an outsider's event alone. Stage 1 (`classify-and-gate`: trust classification and the path gate, no model call) runs on every fork PR event. `sandbox-and-review`, the only job that reads the key, declares the GitHub environment `ucvg-review`; GitHub pauses each run until a required reviewer approves it, and the approval covers that run and its head only. The `edited` trigger is removed, every job sets `timeout-minutes`, and a diff over `maxDiffBytes` (`.ai-sdlc/untrusted-pr-gate.yaml`, default 200000) fails the run before any model call. The reviewer model and the `max_tokens` ceiling are fixed in code, and the job summary lists input and output tokens per reviewer.
+
+Operator steps (these cannot be done from a PR):
+
+1. Create the environment `ucvg-review` (Settings, Environments).
+2. Set the maintainer as its required reviewer.
+3. Store `ANTHROPIC_API_KEY` as a secret of that environment.
+4. Delete the repository-level `ANTHROPIC_API_KEY` secret.
+
+Until these steps are done the model stage cannot obtain the key. The provider-side spend limit on the key is a separate operator setting.

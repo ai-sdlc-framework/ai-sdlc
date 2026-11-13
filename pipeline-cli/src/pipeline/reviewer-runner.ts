@@ -75,6 +75,72 @@ export interface ModelRequest {
 export interface ModelResponse {
   /** The model's raw text output. */
   content: string;
+  /** Provider-reported input tokens, when the response carried usage. */
+  inputTokens?: number;
+  /** Provider-reported output tokens, when the response carried usage. */
+  outputTokens?: number;
+}
+
+// ── Spend controls (AISDLC-1266) ──────────────────────────────────────────────
+
+/** Reviewer model fixed in code for the gate path; no environment variable overrides it. */
+export const GATE_REVIEWER_MODEL = CLAUDE_SONNET_MODEL_ID;
+
+/** Hard ceiling on `max_tokens` for any gate-path request. */
+export const GATE_MAX_TOKENS_CEILING = 4096;
+
+/** Clamp a requested `max_tokens` to the gate ceiling. */
+export function clampGateMaxTokens(requested: number | undefined): number {
+  const n =
+    typeof requested === 'number' && Number.isFinite(requested) && requested > 0
+      ? requested
+      : GATE_MAX_TOKENS_CEILING;
+  return Math.min(Math.floor(n), GATE_MAX_TOKENS_CEILING);
+}
+
+/** Error thrown when a diff exceeds the configured byte cap; names the cap. */
+export class DiffTooLargeError extends Error {
+  constructor(
+    readonly actualBytes: number,
+    readonly capBytes: number,
+  ) {
+    super(
+      `diff is ${String(actualBytes)} bytes, over the configured cap maxDiffBytes=${String(capBytes)}; no model call made`,
+    );
+    this.name = 'DiffTooLargeError';
+  }
+}
+
+/** Refuse a diff larger than `capBytes` before any model call. */
+export function assertDiffWithinCap(diff: string, capBytes: number): void {
+  const actual = Buffer.byteLength(diff, 'utf8');
+  if (actual > capBytes) throw new DiffTooLargeError(actual, capBytes);
+}
+
+/** Token usage of one reviewer. */
+export interface ReviewerUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/** Markdown for the job summary: input and output tokens per reviewer. */
+export function formatUsageSummary(
+  usage: Partial<Record<ReviewerRole, ReviewerUsage>> | undefined,
+): string {
+  const lines = [
+    '### UCVG reviewer token usage',
+    '',
+    '| Reviewer | Input tokens | Output tokens |',
+    '| --- | ---: | ---: |',
+  ];
+  const roles: ReviewerRole[] = ['code', 'test', 'security'];
+  for (const role of roles) {
+    const u = usage?.[role];
+    lines.push(
+      `| ${role} | ${u ? String(u.inputTokens) : 'n/a'} | ${u ? String(u.outputTokens) : 'n/a'} |`,
+    );
+  }
+  return lines.join('\n') + '\n';
 }
 
 /**
@@ -474,6 +540,8 @@ export interface ReviewerMatrixResult {
     approved: boolean;
     blockingFindings: number;
   };
+  /** Token usage per reviewer when the model client reported it (AISDLC-1266). */
+  usage?: Partial<Record<ReviewerRole, ReviewerUsage>>;
 }
 
 /**
@@ -503,6 +571,7 @@ export async function runReviewerMatrix(input: ReviewerMatrixInput): Promise<Rev
 
   const roles: ReviewerRole[] = ['code', 'test', 'security'];
   const verdictMap: Partial<Record<ReviewerRole, ReviewerVerdict>> = {};
+  const usage: Partial<Record<ReviewerRole, ReviewerUsage>> = {};
 
   for (const role of roles) {
     process.stderr.write(`[reviewer-runner] running ${role} reviewer for PR #${prNumber}...\n`);
@@ -520,9 +589,15 @@ export async function runReviewerMatrix(input: ReviewerMatrixInput): Promise<Rev
       const response = await modelClient.complete({
         systemPrompt,
         userMessage,
-        maxTokens: 4096,
+        maxTokens: GATE_MAX_TOKENS_CEILING,
       });
       rawResponse = response.content;
+      if (response.inputTokens !== undefined || response.outputTokens !== undefined) {
+        usage[role] = {
+          inputTokens: response.inputTokens ?? 0,
+          outputTokens: response.outputTokens ?? 0,
+        };
+      }
     } catch (err) {
       // Model call failed — fail-closed verdict
       process.stderr.write(
@@ -553,7 +628,7 @@ export async function runReviewerMatrix(input: ReviewerMatrixInput): Promise<Rev
 
   const consensus = computeConsensus(verdicts, differentialTest);
 
-  return { verdicts, consensus };
+  return { verdicts, consensus, usage };
 }
 
 // ── HTTP proxy client implementation ─────────────────────────────────────────
@@ -607,8 +682,9 @@ export class InferenceProxyClient implements ModelClient {
   constructor(config: InferenceProxyClientConfig) {
     this.config = {
       provider: 'anthropic',
-      model: process.env['AI_SDLC_REVIEWER_MODEL'] ?? CLAUDE_SONNET_MODEL_ID,
       ...config,
+      // Pinned in code for the gate path: neither config nor env can change it.
+      model: GATE_REVIEWER_MODEL,
     };
   }
 
@@ -618,7 +694,7 @@ export class InferenceProxyClient implements ModelClient {
 
     const body = JSON.stringify({
       model,
-      max_tokens: request.maxTokens ?? 4096,
+      max_tokens: clampGateMaxTokens(request.maxTokens),
       system: request.systemPrompt,
       messages: [{ role: 'user', content: request.userMessage }],
     });
@@ -649,6 +725,7 @@ export class InferenceProxyClient implements ModelClient {
 
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const obj = parsed as Record<string, unknown>;
+      const tokens = extractUsage(obj);
 
       // Anthropic format: { content: [{ type: 'text', text: '...' }] }
       if (Array.isArray(obj['content'])) {
@@ -658,7 +735,7 @@ export class InferenceProxyClient implements ModelClient {
         if (textBlock) {
           const text = (textBlock as Record<string, unknown>)['text'];
           if (typeof text === 'string') {
-            return { content: text };
+            return { content: text, ...tokens };
           }
         }
       }
@@ -671,7 +748,7 @@ export class InferenceProxyClient implements ModelClient {
           if (msg && typeof msg === 'object') {
             const content = (msg as Record<string, unknown>)['content'];
             if (typeof content === 'string') {
-              return { content };
+              return { content, ...tokens };
             }
           }
         }
@@ -680,6 +757,22 @@ export class InferenceProxyClient implements ModelClient {
 
     return { content: responseBody };
   }
+}
+
+/** Read provider usage (Anthropic or OpenAI field names) from a parsed response. */
+function extractUsage(obj: Record<string, unknown>): {
+  inputTokens?: number;
+  outputTokens?: number;
+} {
+  const u = obj['usage'];
+  if (!u || typeof u !== 'object') return {};
+  const r = u as Record<string, unknown>;
+  const i = r['input_tokens'] ?? r['prompt_tokens'];
+  const o = r['output_tokens'] ?? r['completion_tokens'];
+  return {
+    ...(typeof i === 'number' ? { inputTokens: i } : {}),
+    ...(typeof o === 'number' ? { outputTokens: o } : {}),
+  };
 }
 
 // ── HTTP request seam ─────────────────────────────────────────────────────────

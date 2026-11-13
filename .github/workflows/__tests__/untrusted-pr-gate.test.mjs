@@ -28,7 +28,7 @@
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -1262,5 +1262,37 @@ describe('AISDLC-1268 — verdict-writer holds contents:write only after an arti
     const w = vw();
     assert.match(w.concurrency.group, /workflow_run\.id/);
     assert.doesNotMatch(w.concurrency.group, /head_branch/);
+  });
+});
+
+// ── AISDLC-1266: spend controls ──────────────────────────────────────────────
+
+describe('AISDLC-1266 — no model spend without a maintainer action', () => {
+  it('pull_request_target types do not include edited', () => {
+    const types = getTriggers(wf).pull_request_target?.types ?? [];
+    assert.ok(!types.includes('edited'), 'edited must not trigger the gate');
+  });
+
+  it('sandbox-and-review declares environment ucvg-review and no other job in any workflow does', () => {
+    assert.equal(wf.jobs['sandbox-and-review'].environment, 'ucvg-review');
+    for (const file of readdirSync(WORKFLOWS_DIR).filter((f) => f.endsWith('.yml'))) {
+      const doc = loadYaml(resolve(WORKFLOWS_DIR, file));
+      for (const [jobId, job] of Object.entries(doc.jobs ?? {})) {
+        const env = typeof job.environment === 'string' ? job.environment : job.environment?.name;
+        if (env === 'ucvg-review') {
+          assert.equal(`${file}:${jobId}`, `${WORKFLOW_NAME}:sandbox-and-review`);
+        }
+      }
+    }
+  });
+
+  it('classify-and-gate declares no environment', () => {
+    assert.equal(wf.jobs['classify-and-gate'].environment, undefined);
+  });
+
+  it('every job sets timeout-minutes', () => {
+    for (const [jobId, job] of Object.entries(wf.jobs)) {
+      assert.equal(typeof job['timeout-minutes'], 'number', `${jobId} needs timeout-minutes`);
+    }
   });
 });
