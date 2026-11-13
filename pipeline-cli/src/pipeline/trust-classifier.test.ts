@@ -9,6 +9,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import {
   classifyTrust,
@@ -126,9 +129,22 @@ describe('loadAllowlistedAuthors', () => {
     removeFixtureDir(workDir);
   });
 
-  it('returns empty array when trusted-reviewers.yaml does not exist', () => {
-    const logins = loadAllowlistedAuthors(workDir);
-    expect(logins).toHaveLength(0);
+  it('throws naming the file when trusted-reviewers.yaml does not exist', () => {
+    expect(() => loadAllowlistedAuthors(workDir)).toThrow(/trusted-reviewers\.yaml/);
+  });
+
+  it('throws naming the file on invalid YAML and classifyTrust fails closed', () => {
+    writeTrustedReviewers(workDir, 'allowlist: [unclosed');
+    expect(() => loadAllowlistedAuthors(workDir)).toThrow(/trusted-reviewers\.yaml/);
+    const r = classifyTrust({
+      author: 'alice',
+      isFork: false,
+      reviewerAuthorityModel: 'allowlist',
+      workDir,
+    });
+    expect(r.classification).toBe('untrusted');
+    expect(r.reason).toBe('config-unreadable');
+    expect(r.configError).toMatch(/trusted-reviewers\.yaml/);
   });
 
   it('returns allowlisted logins when file has allowlist block', () => {
@@ -254,8 +270,8 @@ describe('classifyTrust', () => {
     expect(result.reason).toBe('author-not-in-allowlist');
   });
 
-  it('classifies fork-PR as UNTRUSTED when no allowlist file exists', () => {
-    // No file written — empty allowlist
+  it('classifies fork-PR as UNTRUSTED (config-unreadable) when no allowlist file exists', () => {
+    // No file written — fail closed, never "no config"
     const result = classifyTrust({
       author: 'some-author',
       isFork: true,
@@ -263,7 +279,8 @@ describe('classifyTrust', () => {
       workDir,
     });
     expect(result.classification).toBe('untrusted');
-    expect(result.reason).toBe('fork-pr-always-untrusted');
+    expect(result.reason).toBe('config-unreadable');
+    expect(result.configError).toMatch(/trusted-reviewers\.yaml/);
     expect(result.allowlistedAuthors).toHaveLength(0);
   });
 
@@ -426,3 +443,29 @@ describe('shouldEngageUcvg', () => {
     expect(shouldEngageUcvg(result)).toBe(false);
   });
 });
+
+// ── Built CLI under plain node (AISDLC-1265): no Vitest-supplied `require` ───
+const BUILT_CLI = fileURLToPath(new URL('../../bin/cli-ucvg.mjs', import.meta.url));
+const BUILT_DIST = fileURLToPath(new URL('../../dist/cli/ucvg.js', import.meta.url));
+
+describe.skipIf(!existsSync(BUILT_DIST))(
+  'trust classifier from built dist under plain node',
+  () => {
+    it('reads the trust file: listed login trusted, unlisted untrusted', () => {
+      const workDir = makeTempWorkDir();
+      try {
+        writeTrustedReviewers(workDir, TRUSTED_REVIEWERS_WITH_ALLOWLIST);
+        const run = (author: string): string =>
+          execFileSync(
+            process.execPath,
+            [BUILT_CLI, 'classify', '--author', author, '--is-fork', 'true', '--work-dir', workDir],
+            { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+          ).trim();
+        expect(run('alice')).toBe('trusted');
+        expect(run('mallory')).toBe('untrusted');
+      } finally {
+        removeFixtureDir(workDir);
+      }
+    });
+  },
+);

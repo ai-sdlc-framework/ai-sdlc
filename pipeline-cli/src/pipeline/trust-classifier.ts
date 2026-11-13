@@ -24,8 +24,9 @@
  * @module pipeline/trust-classifier
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { load as loadYaml } from 'js-yaml';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,7 +41,8 @@ export type TrustReason =
   | 'author-in-allowlist'
   | 'reviewerAuthorityModel-open'
   | 'fork-pr-always-untrusted'
-  | 'author-not-in-allowlist';
+  | 'author-not-in-allowlist'
+  | 'config-unreadable';
 
 export interface TrustResult {
   classification: TrustClassification;
@@ -51,6 +53,8 @@ export interface TrustResult {
   reviewerAuthorityModel: ReviewerAuthorityModel;
   /** Authors found in the allowlist at evaluation time (for audit). */
   allowlistedAuthors: string[];
+  /** Set when the trust file could not be read or parsed (fail-closed). Names the file. */
+  configError?: string;
 }
 
 /**
@@ -117,61 +121,64 @@ export interface TrustedReviewersAllowlist {
 /**
  * Parse the `allowlist.authors` field from `trusted-reviewers.yaml`.
  *
- * Returns an empty array if:
- *  - The file does not exist
- *  - The file has no `allowlist:` block
- *  - The `allowlist.authors` array is empty or missing
- *
- * Throws only on parse errors (malformed YAML), not on missing fields.
+ * Throws (message names the file) when the file is missing, unreadable or not
+ * valid YAML. A readable file with no `allowlist:` block yields an empty list.
  *
  * This function performs NO network calls (OQ-1 invariant).
  */
 export function loadAllowlistedAuthors(workDir: string = process.cwd()): string[] {
   const yamlPath = join(workDir, '.ai-sdlc', 'trusted-reviewers.yaml');
-  if (!existsSync(yamlPath)) return [];
-
-  const raw = readFileSync(yamlPath, 'utf8');
-  return extractAllowlistedAuthorsFromYaml(raw);
+  let raw: string;
+  try {
+    raw = readFileSync(yamlPath, 'utf8');
+  } catch (err) {
+    throw new Error(`cannot read trust file ${yamlPath}: ${(err as Error).message}`, {
+      cause: err,
+    });
+  }
+  return extractAllowlistedAuthorsFromYaml(raw, yamlPath);
 }
 
 /**
  * Extract `allowlist.authors[].login` values from raw YAML text.
  *
- * Uses `js-yaml` (a pipeline-cli production dependency) for reliable YAML
- * parsing — the same library used by the drift workflow's Python `yaml.safe_load`
- * equivalent. This eliminates the prior parser-divergence risk where the
- * hand-rolled state machine and the workflow's Python parser could disagree
- * on a security-critical allowlist (reviewer finding #4).
+ * Throws on invalid YAML (never returns an empty list for a parse error).
+ * `sourcePath` is used in the error message.
  *
  * Exported for unit testing (AC#9).
  */
-export function extractAllowlistedAuthorsFromYaml(yamlText: string): string[] {
+export function extractAllowlistedAuthorsFromYaml(
+  yamlText: string,
+  sourcePath: string = '.ai-sdlc/trusted-reviewers.yaml',
+): string[] {
+  // An empty file is a valid "no allowlist"; js-yaml rejects empty input.
+  if (yamlText.trim() === '') return [];
+  let doc: unknown;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const jsYaml = require('js-yaml') as typeof import('js-yaml');
-    const doc = jsYaml.load(yamlText) as Record<string, unknown> | null;
-    if (!doc || typeof doc !== 'object') return [];
+    doc = loadYaml(yamlText);
+  } catch (err) {
+    throw new Error(`cannot parse trust file ${sourcePath}: ${(err as Error).message}`, {
+      cause: err,
+    });
+  }
+  if (!doc || typeof doc !== 'object') return [];
 
-    const allowlist = doc['allowlist'];
-    if (!allowlist || typeof allowlist !== 'object') return [];
+  const allowlist = (doc as Record<string, unknown>)['allowlist'];
+  if (!allowlist || typeof allowlist !== 'object') return [];
 
-    const authorsRaw = (allowlist as Record<string, unknown>)['authors'];
-    if (!Array.isArray(authorsRaw)) return [];
+  const authorsRaw = (allowlist as Record<string, unknown>)['authors'];
+  if (!Array.isArray(authorsRaw)) return [];
 
-    const logins: string[] = [];
-    for (const entry of authorsRaw) {
-      if (entry && typeof entry === 'object') {
-        const login = (entry as Record<string, unknown>)['login'];
-        if (typeof login === 'string' && login.length > 0) {
-          logins.push(login);
-        }
+  const logins: string[] = [];
+  for (const entry of authorsRaw) {
+    if (entry && typeof entry === 'object') {
+      const login = (entry as Record<string, unknown>)['login'];
+      if (typeof login === 'string' && login.length > 0) {
+        logins.push(login);
       }
     }
-    return logins;
-  } catch {
-    // Malformed YAML — return empty rather than throwing (conservative: no file = no trust)
-    return [];
   }
+  return logins;
 }
 
 // ── Classification logic ─────────────────────────────────────────────────────
@@ -206,7 +213,20 @@ export function classifyTrust(input: TrustClassifierInput): TrustResult {
   }
 
   // Load allowlist from static file (NO live API — OQ-1 invariant)
-  const allowlistedAuthors = loadAllowlistedAuthors(workDir);
+  let allowlistedAuthors: string[];
+  try {
+    allowlistedAuthors = loadAllowlistedAuthors(workDir);
+  } catch (err) {
+    // Fail closed: an unreadable trust file never means "no config".
+    return {
+      classification: 'untrusted',
+      reason: 'config-unreadable',
+      author,
+      reviewerAuthorityModel,
+      allowlistedAuthors: [],
+      configError: (err as Error).message,
+    };
+  }
 
   // Rule 2: author in static allowlist → trusted regardless of fork status.
   // GitHub logins are case-insensitive (github.com/Alice == github.com/alice).

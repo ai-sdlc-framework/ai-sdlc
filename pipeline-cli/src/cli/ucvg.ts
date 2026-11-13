@@ -112,6 +112,7 @@ function runClassify(args: { author: string; isFork: boolean; workDir: string })
         reason: result.reason,
         author: result.author,
         allowlistedAuthors: result.allowlistedAuthors,
+        ...(result.configError ? { configError: result.configError } : {}),
       }) + '\n',
     );
   } catch (err) {
@@ -158,6 +159,8 @@ async function runAstGateCli(args: {
       status: 'modified' as const,
     }));
 
+    // A config that cannot be read or parsed throws here and lands in the
+    // fail-closed catch below (block, message names the file).
     const config = loadAstGateConfig(args.workDir);
     const result = runAstGate(changedFiles, config);
 
@@ -184,7 +187,12 @@ async function runAstGateCli(args: {
     process.stderr.write(
       `[stage-1] AST gate error — failing closed to 'abort-protected-path': ${(err as Error).message}\n`,
     );
-    emit({ outcome: 'abort-protected-path', offendingPaths: [], heuristicFindings: [] });
+    emit({
+      outcome: 'abort-protected-path',
+      offendingPaths: [],
+      heuristicFindings: [],
+      configError: (err as Error).message,
+    });
     process.exit(1);
   }
 }
