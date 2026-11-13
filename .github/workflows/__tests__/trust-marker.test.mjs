@@ -106,9 +106,11 @@ for (const [file, jobId] of [
   });
 }
 
-test('untrusted-pr-gate.yml triggers on edited so a base change re-runs the check', () => {
+test('untrusted-pr-gate.yml does not trigger on edited (AISDLC-1266) but keeps push-driven types', () => {
   const doc = yaml.load(readFileSync(join(WORKFLOWS, 'untrusted-pr-gate.yml'), 'utf8'));
-  assert.ok(doc.on.pull_request_target.types.includes('edited'));
+  const types = doc.on.pull_request_target.types;
+  assert.ok(!types.includes('edited'));
+  assert.ok(types.includes('synchronize'));
 });
 
 test('untrusted-pr-gate.yml governance-boundary job is unflagged, base-checkout, env-bound', () => {
