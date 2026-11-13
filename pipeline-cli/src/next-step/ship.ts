@@ -488,16 +488,19 @@ async function shipInner(
   for (let attempt = 0; attempt < PUSH_ATTEMPTS; attempt += 1) {
     // RFC-0061: branch and verdict ref in one atomic push (built per attempt: a pre-push fixup
     // can change the head).
-    const verdictRef = needsHuman
-      ? { refspec: null }
-      : await buildVerdictRefspec(
-          runner,
-          wt,
-          verdict.verdictRecordDraft,
-          `origin/${resolveTargetBranch(ctx.workDir)}`,
-          undefined,
-          priorPr?.prNumber ?? 0,
-        );
+    // AISDLC-1270: a record names its PR and PR 0 is no record, so with no PR yet the ref is
+    // deferred and pushed right after `gh pr create` (Step 11b) once the number is known.
+    const verdictRef =
+      needsHuman || !priorPr
+        ? { refspec: null }
+        : await buildVerdictRefspec(
+            runner,
+            wt,
+            verdict.verdictRecordDraft,
+            `origin/${resolveTargetBranch(ctx.workDir)}`,
+            undefined,
+            priorPr.prNumber,
+          );
     if ('note' in verdictRef && verdictRef.note) verdictNotes.push(verdictRef.note);
     const pushArgs = verdictRef.refspec
       ? ['push', '-u', '--atomic', 'origin', state.branch, verdictRef.refspec]
@@ -545,7 +548,7 @@ async function shipInner(
         seenBeforeFetch,
         verdictRef.refspec,
       );
-      if (!verdictRef.refspec && !needsHuman) {
+      if (!verdictRef.refspec && !needsHuman && priorPr) {
         verdictNotes.push(
           'verdict ref not pushed on the lease fallback push: no verdict refspec could be built',
         );
@@ -627,6 +630,32 @@ async function shipInner(
     prNumber = m ? Number(m[1]) : null;
   }
   if (prUrl) recordSessionPr(ctx, state.taskIdLower, prUrl);
+
+  // AISDLC-1270: the deferred verdict ref (no PR existed at Step 11a) goes out now, naming the PR.
+  if (!needsHuman && !priorPr && prNumber !== null) {
+    const late = await buildVerdictRefspec(
+      runner,
+      wt,
+      verdict.verdictRecordDraft,
+      `origin/${resolveTargetBranch(ctx.workDir)}`,
+      undefined,
+      prNumber,
+    );
+    if (late.note) notes.push(late.note);
+    if (late.refspec) {
+      const lp = await runTrustedPush(
+        runner,
+        { mainCheckout: ctx.workDir, worktree: wt },
+        ['push', 'origin', late.refspec],
+        { allowFailure: true, timeout: PUSH_TIMEOUT_MS, env: pushEnv },
+      );
+      if (lp.code !== 0) {
+        notes.push(
+          `verdict ref not pushed after PR creation: ${(lp.stderr || lp.stdout).trim().split('\n').pop()}`,
+        );
+      }
+    }
+  }
 
   // Step 11c — incremental-review marker, only ever bound to an APPROVED state.
   if (!needsHuman && prNumber !== null && state.review?.incremental.contentHash) {
