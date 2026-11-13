@@ -111,7 +111,7 @@ export interface SandboxConfig {
    * AISDLC-1266: largest PR diff (bytes) that may reach a model. Larger diffs
    * are refused before any model call.
    */
-  maxDiffBytes: number;
+  maxDiffBytes?: number;
 }
 
 /** Built-in default for `maxDiffBytes`. */

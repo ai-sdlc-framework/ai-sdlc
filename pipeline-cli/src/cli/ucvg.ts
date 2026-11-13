@@ -48,7 +48,11 @@ import { runReviewerMatrixInContainer } from '../pipeline/reviewer-container.js'
 import { classifyTrust } from '../pipeline/trust-classifier.js';
 import { runAstGate, loadAstGateConfig, buildBlockedEvent } from '../pipeline/ast-gate.js';
 import type { ChangedFile } from '../pipeline/ast-gate.js';
-import { loadSandboxConfig, runSandbox } from '../pipeline/sandbox-runner.js';
+import {
+  DEFAULT_MAX_DIFF_BYTES,
+  loadSandboxConfig,
+  runSandbox,
+} from '../pipeline/sandbox-runner.js';
 import type { DifferentialTestResult } from '../pipeline/sandbox-runner.js';
 import { runCleanRoomSigner, unsignedReportPath } from '../pipeline/clean-room-signer.js';
 import {
@@ -256,7 +260,7 @@ async function runSandboxAndReview(args: {
 
   // AISDLC-1266: refuse an oversized diff before the proxy starts or any model call.
   try {
-    assertDiffWithinCap(prDiff, sandboxConfig.maxDiffBytes);
+    assertDiffWithinCap(prDiff, sandboxConfig.maxDiffBytes ?? DEFAULT_MAX_DIFF_BYTES);
   } catch (err) {
     if (err instanceof DiffTooLargeError) {
       appendJobSummary(`### UCVG review refused\n\n${err.message}\n`);
