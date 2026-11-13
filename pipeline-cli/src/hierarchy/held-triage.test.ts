@@ -50,7 +50,9 @@ describe('classifyHold', () => {
         onBoard: false,
         dependencyText: '---\ndispatchable: false\n---\n- [ ] closes after a-1 lands',
       }),
-    ).toBe('circular');
+    ).toBe('operator-gated');
+    expect(classifyHold({ heldId: 'A-1', onBoard: false, dependsOnHeld: true })).toBe('circular');
+    expect(classifyHold({ heldId: 'A-1', onBoard: true, failed: true })).toBe('failed-dependency');
     expect(isDispatchableFalse('---\ndispatchable: true\n---')).toBe(false);
   });
 });
@@ -59,7 +61,7 @@ describe('listHeld fixtures', () => {
   it('506/496 is operator-gated, 1179.1/1179 is circular, a queued dependency waits', () => {
     task('AISDLC-496', 'dispatchable: false', 'operator reason');
     queue('AISDLC-506', ['AISDLC-496']);
-    task('AISDLC-1179', 'dispatchable: false', 'remaining: AISDLC-1179.1');
+    task('AISDLC-1179', 'dispatchable: false\ndependencies: [AISDLC-1179.1]', 'remaining');
     queue('AISDLC-1179.1', ['AISDLC-1179']);
     queue('AISDLC-7', ['AISDLC-8']);
     queue('AISDLC-8', []);
@@ -70,6 +72,35 @@ describe('listHeld fixtures', () => {
     expect(by['AISDLC-1179.1']?.class).toBe('circular');
     expect(by['AISDLC-7']?.class).toBe('waiting');
     expect(by['AISDLC-9']?.class).toBe('absent');
+  });
+
+  it('a body mention is not a cycle; direct and indirect cycles are; a failed dependency is labelled', () => {
+    task('IO-39', 'dependencies: []');
+    task('IO-42', 'dependencies: []');
+    task('IO-48', 'dependencies: [IO-42]', 'unblocks IO-43');
+    task('IO-43', 'dependencies: [IO-39, IO-42, IO-48]');
+    queue('IO-43', ['IO-48']);
+    task('C-2', 'dependencies:\n  - C-3');
+    task('C-3', 'dependencies: ["C-1"]');
+    task('C-1', 'dependencies: [C-2]');
+    queue('C-1', ['C-2']);
+    task('D-2', 'dependencies: [D-1]');
+    task('D-1', 'dependencies: [D-2]');
+    queue('D-1', ['D-2']);
+    const by = Object.fromEntries(listHeld(board, root).map((r) => [r.taskId, r]));
+    expect(by['IO-43']?.class).toBe('absent');
+    expect(by['C-1']?.class).toBe('circular');
+    expect(by['D-1']?.class).toBe('circular');
+  });
+
+  it('labels a failed dependency and names it a failed task to the planner', () => {
+    mkdirSync(path.join(board, 'failed'), { recursive: true });
+    writeFileSync(path.join(board, 'failed', 'IO-48.diagnostic.json'), '{}');
+    queue('IO-43', ['IO-48']);
+    const notify = vi.fn();
+    triageHeld(board, root, now, notify);
+    expect(notify.mock.calls[0]![0]).toContain('IO-48, a failed task');
+    expect(listHeld(board, root)[0]?.class).toBe('failed-dependency');
   });
 
   it('returns nothing without a queue', () => {
