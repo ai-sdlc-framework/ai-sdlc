@@ -2707,6 +2707,41 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(entryOf(planner)?.pid).not.toBe(old.pid);
   });
 
+  it('restart --all stops then starts the scheduler and records the new pid', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    const events: string[] = [];
+    deps.isAlive = (p) => p === 4242;
+    deps.killProcess = (pid) => events.push(`kill ${pid}`);
+    deps.spawnScheduler = () => {
+      events.push('spawn');
+      return 5151;
+    };
+    await hierarchyRestartAll({}, deps);
+    expect(events.slice(0, 2)).toEqual(['kill 4242', 'spawn']);
+    const rec = JSON.parse(readFileSync(path.join(boardDir, 'reconcile-scheduler.json'), 'utf8'));
+    expect(rec.pid).toBe(5151);
+  });
+
+  it('restart --all leaves the webhook alone without a secret, restarts it with one', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    await hierarchyRestartAll({}, deps);
+    expect(logs.some((l) => l.includes('webhook stopped'))).toBe(false);
+    deps.env = { AI_SDLC_WEBHOOK_SECRET: 's' };
+    await hierarchyRestartAll({}, deps);
+    expect(logs.some((l) => l.includes('webhook starting'))).toBe(true);
+  });
+
+  it('restart <name> leaves the scheduler alone; a scheduler failure warns only', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    const n = schedulerSpawns.length;
+    await hierarchyRestart({ session: Q('executor-alpha') }, deps);
+    expect(schedulerSpawns).toHaveLength(n);
+    deps.spawnScheduler = () => undefined;
+    const res = await hierarchyRestartAll({}, deps);
+    expect(logs.some((l) => l.includes('warning: reconcile scheduler not restarted'))).toBe(true);
+    expect(res.failed).toEqual([]);
+  });
+
   it('restart --all restarts dispatch and idle executors now and defers busy ones', async () => {
     fake.startedAtMs = later;
     deps.now = () => new Date(later);

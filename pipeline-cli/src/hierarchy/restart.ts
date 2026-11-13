@@ -27,7 +27,7 @@ import { holdsInflight } from './clear.js';
 import { writeHandoff } from './handoff.js';
 import { stopSessionWindow } from './down.js';
 import { listInflight } from './inflight.js';
-import { schedulerUp } from './reconcile-scheduler.js';
+import { schedulerDown, schedulerUp } from './reconcile-scheduler.js';
 import { readSessionRegistry } from './registry.js';
 import {
   defaultProjectForBoard,
@@ -47,7 +47,7 @@ import {
   ROLE_PROMPT,
   withProfile,
 } from './up.js';
-import { webhookUp } from './webhook.js';
+import { webhookDown, webhookUp } from './webhook.js';
 import { assertModel, assertPermissionMode, splitSessionName } from './validate.js';
 
 /** Options for `restart`. */
@@ -327,6 +327,27 @@ function reRegisterDispatchServices(deps: HierarchyDeps): void {
   }
 }
 
+/**
+ * `restart --all`: stop and start the reconcile scheduler and, when a secret is set, the webhook
+ * receiver, so both run the installed code. A failure is a warning naming the process (AISDLC-1272).
+ */
+function restartDispatchServices(deps: HierarchyDeps): void {
+  try {
+    schedulerDown(deps, deps.killProcess);
+    schedulerUp(deps, deps.spawnScheduler);
+  } catch (err) {
+    deps.log(`warning: reconcile scheduler not restarted: ${(err as Error).message}`);
+  }
+  if (deps.env.AI_SDLC_WEBHOOK_SECRET) {
+    try {
+      webhookDown(deps, deps.killProcess);
+      webhookUp(deps);
+    } catch (err) {
+      deps.log(`warning: webhook receiver not restarted: ${(err as Error).message}`);
+    }
+  }
+}
+
 /** Result of `restart --all`. */
 export interface RestartAllResult {
   restarted: RestartResult[];
@@ -347,6 +368,7 @@ export async function hierarchyRestartAll(
 ): Promise<RestartAllResult> {
   const { roster } = readRosterChecked(deps.boardDir);
   const out: RestartAllResult = { restarted: [], deferred: [], failed: [], skipped: [] };
+  restartDispatchServices(deps);
   // The calling session cannot restart itself without killing this command; leave it for another session.
   const dispatch = roster.sessions.filter((e) => {
     if (e.role !== 'operator-dispatch') return false;
