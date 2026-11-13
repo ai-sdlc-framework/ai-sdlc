@@ -338,54 +338,94 @@ describe('mergeInjectionDetection — injection detected', () => {
   });
 });
 
+const PASSING_SANDBOX = { upstreamSuitePassed: true, newTestsPassed: true };
+
 // ── computeConsensus ──────────────────────────────────────────────────────────
 
 describe('computeConsensus — all approve', () => {
   it('returns approved:true when all three reviewers approve', () => {
-    const result = computeConsensus({
-      code: APPROVED_VERDICT,
-      test: APPROVED_VERDICT,
-      security: APPROVED_VERDICT,
-    });
+    const result = computeConsensus(
+      {
+        code: APPROVED_VERDICT,
+        test: APPROVED_VERDICT,
+        security: APPROVED_VERDICT,
+      },
+      PASSING_SANDBOX,
+    );
     expect(result.approved).toBe(true);
     expect(result.blockingFindings).toBe(0);
   });
 });
 
+describe('computeConsensus — sandbox gate (AISDLC-1267)', () => {
+  const all = { code: APPROVED_VERDICT, test: APPROVED_VERDICT, security: APPROVED_VERDICT };
+  it('rejects when the upstream suite did not pass', () => {
+    expect(
+      computeConsensus(all, { upstreamSuitePassed: false, newTestsPassed: true }).approved,
+    ).toBe(false);
+  });
+  it('rejects when the new tests did not pass', () => {
+    expect(
+      computeConsensus(all, { upstreamSuitePassed: true, newTestsPassed: false }).approved,
+    ).toBe(false);
+  });
+  it('rejects when the sandbox errored', () => {
+    expect(
+      computeConsensus(all, {
+        upstreamSuitePassed: true,
+        newTestsPassed: true,
+        sandboxError: true,
+      }).approved,
+    ).toBe(false);
+  });
+});
+
 describe('computeConsensus — any reject', () => {
   it('returns approved:false when code reviewer rejects', () => {
-    const result = computeConsensus({
-      code: REJECTED_VERDICT,
-      test: APPROVED_VERDICT,
-      security: APPROVED_VERDICT,
-    });
+    const result = computeConsensus(
+      {
+        code: REJECTED_VERDICT,
+        test: APPROVED_VERDICT,
+        security: APPROVED_VERDICT,
+      },
+      PASSING_SANDBOX,
+    );
     expect(result.approved).toBe(false);
   });
 
   it('returns approved:false when test reviewer rejects', () => {
-    const result = computeConsensus({
-      code: APPROVED_VERDICT,
-      test: REJECTED_VERDICT,
-      security: APPROVED_VERDICT,
-    });
+    const result = computeConsensus(
+      {
+        code: APPROVED_VERDICT,
+        test: REJECTED_VERDICT,
+        security: APPROVED_VERDICT,
+      },
+      PASSING_SANDBOX,
+    );
     expect(result.approved).toBe(false);
   });
 
   it('returns approved:false when security reviewer rejects', () => {
-    const result = computeConsensus({
-      code: APPROVED_VERDICT,
-      test: APPROVED_VERDICT,
-      security: REJECTED_VERDICT,
-    });
+    const result = computeConsensus(
+      {
+        code: APPROVED_VERDICT,
+        test: APPROVED_VERDICT,
+        security: REJECTED_VERDICT,
+      },
+      PASSING_SANDBOX,
+    );
     expect(result.approved).toBe(false);
   });
 
   it('returns approved:false when all three reject', () => {
-    const result = computeConsensus({
-      code: REJECTED_VERDICT,
-      test: REJECTED_VERDICT,
-      security: REJECTED_VERDICT,
-    });
+    const result = computeConsensus(
+      {
+        code: REJECTED_VERDICT,
+        test: REJECTED_VERDICT,
+        security: REJECTED_VERDICT,
+      },
+      PASSING_SANDBOX,
+    );
     expect(result.approved).toBe(false);
     expect(result.blockingFindings).toBe(3); // 3 major findings (one per reviewer)
   });
@@ -398,11 +438,14 @@ describe('computeConsensus — injection detected voids approval', () => {
       findings: [],
       promptInjectionDetected: true, // but injection was detected
     };
-    const result = computeConsensus({
-      code: injectionVerdict,
-      test: APPROVED_VERDICT,
-      security: APPROVED_VERDICT,
-    });
+    const result = computeConsensus(
+      {
+        code: injectionVerdict,
+        test: APPROVED_VERDICT,
+        security: APPROVED_VERDICT,
+      },
+      PASSING_SANDBOX,
+    );
     expect(result.approved).toBe(false);
   });
 });
@@ -427,18 +470,24 @@ describe('computeConsensus — blockingFindings count', () => {
       findings: [{ severity: 'suggestion', message: 'non-blocking suggestion' }],
       promptInjectionDetected: false,
     };
-    const result = computeConsensus({ code: codeVerdict, test: testVerdict, security: secVerdict });
+    const result = computeConsensus(
+      { code: codeVerdict, test: testVerdict, security: secVerdict },
+      PASSING_SANDBOX,
+    );
     // critical (1) + major (1) = 2 blocking; minor and suggestion are not blocking
     expect(result.blockingFindings).toBe(2);
     expect(result.approved).toBe(false);
   });
 
   it('blockingFindings is 0 for all-approve with no findings', () => {
-    const result = computeConsensus({
-      code: APPROVED_VERDICT,
-      test: APPROVED_VERDICT,
-      security: APPROVED_VERDICT,
-    });
+    const result = computeConsensus(
+      {
+        code: APPROVED_VERDICT,
+        test: APPROVED_VERDICT,
+        security: APPROVED_VERDICT,
+      },
+      PASSING_SANDBOX,
+    );
     expect(result.blockingFindings).toBe(0);
   });
 });
@@ -512,15 +561,16 @@ describe('buildReviewerUserMessage', () => {
     expect(msg).toContain('87.5'); // coverage pct
   });
 
-  it('includes upstream and head test output summaries', () => {
+  it('does not include raw sandbox test output (AISDLC-1267)', () => {
     const dt: DifferentialTestResult = {
       ...DIFFERENTIAL_TEST_RESULT,
       upstreamSuiteOutput: 'upstream-output-here',
       newTestsOutput: 'head-output-here',
     };
     const msg = buildReviewerUserMessage(CLEAN_DIFF, dt, 42);
-    expect(msg).toContain('upstream-output-here');
-    expect(msg).toContain('head-output-here');
+    expect(msg).not.toContain('upstream-output-here');
+    expect(msg).not.toContain('head-output-here');
+    expect(msg).toContain('PASSED');
   });
 
   it('shows FAILED when tests did not pass', () => {

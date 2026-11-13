@@ -28,7 +28,16 @@
  * @module cli/ucvg
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { buildCleanRoomVerdict, writeVerdictArtifact } from '../attestation/verdict-untrusted.js';
 import { validateReport } from '../pipeline/report-validator.js';
 import { execFileSync } from 'node:child_process';
@@ -318,11 +327,19 @@ async function runSandboxAndReview(args: {
     }
   }
 
+  let baseTreeDir: string | undefined;
   try {
     // Run Stage 2 differential testing inside the Docker sandbox.
     // MAJOR fix #7: upstreamMainRef must be baseSha (the target-branch base), NOT headSha.
     // Differential testing compares PR head against the target-branch base, not itself.
     process.stderr.write('[stage-2] running differential tests in OpenShell sandbox...\n');
+    // AISDLC-1267: export the base commit so the container can run the upstream
+    // suite against the base. Skipped in fixture-demo mode (tarball carries it).
+    baseTreeDir = process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR']
+      ? undefined
+      : stageBaseTree(args.prContentDir, args.baseSha);
+    // A sandbox `error`/`resource-breach` outcome is a rejection, never a pass:
+    // extractDifferentialTestResult sets sandboxError. A throw writes no report.
     const sandboxResult = await runSandbox({
       prNumber: args.prNumber,
       prDiff,
@@ -333,6 +350,7 @@ async function runSandboxAndReview(args: {
       // When proxy is not running, these are undefined (existing CI behaviour).
       sandboxEnv,
       proxyHostArgs,
+      baseTreeDir,
     });
 
     // Extract differential test result from sandbox output.
@@ -400,6 +418,7 @@ async function runSandboxAndReview(args: {
     process.stderr.write(`[stage-2/3] unsigned report written: ${reportPath}\n`);
     emit({ ok: true, reportPath });
   } finally {
+    if (baseTreeDir) rmSync(baseTreeDir, { recursive: true, force: true });
     // Always stop the proxy — credential must not linger after the run completes.
     if (proxy !== null) {
       await proxy.stop();
@@ -588,6 +607,30 @@ function computePrDiff(prContentDir: string, baseSha: string, headSha: string): 
   );
 }
 
+/**
+ * Export the base commit into a fresh temp dir (data only: `git archive` never
+ * runs fork code). Returns undefined on failure; the in-container script then
+ * fails closed because no base tree is present (AISDLC-1267).
+ */
+function stageBaseTree(prContentDir: string, baseSha: string): string | undefined {
+  if (!/^[0-9a-f]{7,64}$/i.test(baseSha)) return undefined;
+  const dir = mkdtempSync(join(tmpdir(), 'ucvg-base-'));
+  try {
+    const tarball = execFileSync('git', ['-C', prContentDir, 'archive', '--format=tar', baseSha], {
+      maxBuffer: 512 * 1024 * 1024,
+    });
+    execFileSync('tar', ['-x', '-C', dir], { input: tarball });
+    // The container runs as nobody; make the staged tree readable.
+    chmodSync(dir, 0o755);
+    execFileSync('chmod', ['-R', 'a+rX', dir]);
+    return dir;
+  } catch (err) {
+    process.stderr.write(`[stage-2] base tree staging failed: ${(err as Error).message}\n`);
+    rmSync(dir, { recursive: true, force: true });
+    return undefined;
+  }
+}
+
 function extractDifferentialTestResult(sandboxResult: unknown): DifferentialTestResult {
   // Extract differential test data from the sandbox result.
   //
@@ -608,6 +651,7 @@ function extractDifferentialTestResult(sandboxResult: unknown): DifferentialTest
     newTestsPassed: false,
     newTestsOutput: '',
     newCodeCoveragePct: 0,
+    sandboxError: true,
   };
   if (!r || typeof r !== 'object') return FAILURE_RESULT;
 

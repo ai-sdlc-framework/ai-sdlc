@@ -197,12 +197,6 @@ export function buildReviewerUserMessage(
     `- Upstream test suite (base branch): ${differentialTest.upstreamSuitePassed ? 'PASSED' : 'FAILED'}`,
     `- New tests (PR head): ${differentialTest.newTestsPassed ? 'PASSED' : 'FAILED'}`,
     `- Code coverage: ${differentialTest.newCodeCoveragePct.toFixed(1)}%`,
-    '',
-    'Upstream test output (truncated):',
-    differentialTest.upstreamSuiteOutput.slice(0, 500) || '(no output)',
-    '',
-    'Head test output (truncated):',
-    differentialTest.newTestsOutput.slice(0, 500) || '(no output)',
   ].join('\n');
 
   return [
@@ -387,22 +381,35 @@ export function mergeInjectionDetection(
 
 // ── Consensus computation ─────────────────────────────────────────────────────
 
+/** The Stage 2 flags that gate approval. A sandbox error is a rejection. */
+export type SandboxGate = Pick<
+  DifferentialTestResult,
+  'upstreamSuitePassed' | 'newTestsPassed' | 'sandboxError'
+>;
+
 /**
  * Compute the consensus across all three reviewer verdicts.
  *
- * Consensus rules (RFC-0043 §Stage 3):
+ * Consensus rules (RFC-0043 §Stage 2/3, AISDLC-1267):
+ *  - The sandbox gate must hold: the upstream suite passed, the new tests
+ *    passed, and the sandbox did not error. Otherwise `approved` is false
+ *    whatever the reviewers said.
  *  - `approved` is true ONLY when ALL THREE reviewers approve.
  *  - `blockingFindings` is the count of `critical` or `major` findings across all reviewers.
  *  - Any `promptInjectionDetected: true` voids approval regardless of `approved` fields.
  *
  * @param verdicts - The three reviewer verdicts.
+ * @param sandbox - The Stage 2 pass/fail flags (required: no default can approve).
  * @returns The consensus object for the report.
  */
-export function computeConsensus(verdicts: {
-  code: ReviewerVerdict;
-  test: ReviewerVerdict;
-  security: ReviewerVerdict;
-}): { approved: boolean; blockingFindings: number } {
+export function computeConsensus(
+  verdicts: {
+    code: ReviewerVerdict;
+    test: ReviewerVerdict;
+    security: ReviewerVerdict;
+  },
+  sandbox: SandboxGate,
+): { approved: boolean; blockingFindings: number } {
   const all = [verdicts.code, verdicts.test, verdicts.security];
 
   // Any injection detected → void approval
@@ -418,7 +425,12 @@ export function computeConsensus(verdicts: {
     );
   }, 0);
 
-  const approved = allApprove && !anyInjection && blockingFindings === 0;
+  const sandboxPassed =
+    sandbox.upstreamSuitePassed === true &&
+    sandbox.newTestsPassed === true &&
+    sandbox.sandboxError !== true;
+
+  const approved = allApprove && !anyInjection && blockingFindings === 0 && sandboxPassed;
 
   return { approved, blockingFindings };
 }
@@ -539,7 +551,7 @@ export async function runReviewerMatrix(input: ReviewerMatrixInput): Promise<Rev
     security: verdictMap['security']!,
   };
 
-  const consensus = computeConsensus(verdicts);
+  const consensus = computeConsensus(verdicts, differentialTest);
 
   return { verdicts, consensus };
 }

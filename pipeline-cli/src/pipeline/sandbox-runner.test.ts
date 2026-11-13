@@ -33,6 +33,7 @@ import {
   createSandboxDriver,
   runSandbox,
   DEFAULT_RESOURCE_LIMITS,
+  DEFAULT_SANDBOX_IMAGE,
   DEFAULT_SANDBOX_CONFIG,
   WITHHELD_ENV_VARS,
   RESOURCE_EXHAUSTED_DECISION_SUMMARY,
@@ -2547,7 +2548,7 @@ describe('DockerSandboxDriver — hermetic lifecycle via _spawnProcess seam', ()
   );
 
   it(
-    'uses default node:22-slim image when AI_SDLC_SANDBOX_IMAGE is not set',
+    'uses the digest-pinned default image when AI_SDLC_SANDBOX_IMAGE is not set',
     withIntegrationFlag(async () => {
       const origImage = process.env['AI_SDLC_SANDBOX_IMAGE'];
       delete process.env['AI_SDLC_SANDBOX_IMAGE'];
@@ -2562,7 +2563,7 @@ describe('DockerSandboxDriver — hermetic lifecycle via _spawnProcess seam', ()
         await driver.spawn(LIFECYCLE_INPUT as Parameters<typeof driver.spawn>[0]);
 
         const runArgs = driver.spawnedArgLists[0] ?? [];
-        expect(runArgs).toContain('node:22-slim');
+        expect(runArgs).toContain(DEFAULT_SANDBOX_IMAGE);
       } finally {
         if (origImage !== undefined) {
           process.env['AI_SDLC_SANDBOX_IMAGE'] = origImage;
@@ -3723,5 +3724,48 @@ describe('driver availability (AISDLC-515.1 AC-2, AC-3)', () => {
 
   it('assertSandboxDriverAvailable passes for docker on a bare host', () => {
     expect(() => assertSandboxDriverAvailable(DEFAULT_SANDBOX_CONFIG, HOST_NONE)).not.toThrow();
+  });
+});
+
+describe('digest-pinned images and base tree staging (AISDLC-1267)', () => {
+  const BASE_LIMITS = { ...DEFAULT_RESOURCE_LIMITS };
+  const makeCidFilePath = (): string => '/tmp/cid-test/cid';
+  it('pins the default sandbox and relay images by digest (no floating tag)', async () => {
+    const { DEFAULT_RELAY_IMAGE, DEFAULT_REVIEWER_IMAGE } = await import('./reviewer-container.js');
+    for (const img of [DEFAULT_SANDBOX_IMAGE, DEFAULT_RELAY_IMAGE, DEFAULT_REVIEWER_IMAGE]) {
+      expect(img).toMatch(/@sha256:[0-9a-f]{64}$/);
+      expect(img).not.toMatch(/:latest/);
+    }
+  });
+
+  it('mounts the base tree read-only before the image', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      cidFilePath: makeCidFilePath(),
+      image: 'img',
+      command: ['true'],
+      baseTreeDir: '/tmp/base-x',
+    });
+    const i = args.indexOf('/tmp/base-x:/sandbox/base:ro');
+    expect(i).toBeGreaterThan(0);
+    expect(args[i - 1]).toBe('-v');
+    expect(i).toBeLessThan(args.indexOf('img'));
+  });
+
+  it('omits the base mount when none is staged', () => {
+    const args = buildDockerRunArgs({
+      resourceLimits: BASE_LIMITS,
+      seccompProfileJson: '{}',
+      cidFilePath: makeCidFilePath(),
+      image: 'img',
+      command: ['true'],
+    });
+    expect(args).not.toContain('-v');
+  });
+
+  it('the script copies the staged base tree into the workspace', () => {
+    const script = buildDifferentialTestScript('a'.repeat(40));
+    expect(script).toContain('cp -R "/sandbox/base/." repo/');
   });
 });
