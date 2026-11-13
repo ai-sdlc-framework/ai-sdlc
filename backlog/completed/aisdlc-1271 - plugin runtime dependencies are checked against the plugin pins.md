@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1271
 title: 'Plugin runtime dependencies: every command checks the installed versions against the plugin pins'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-13'
 labels:
