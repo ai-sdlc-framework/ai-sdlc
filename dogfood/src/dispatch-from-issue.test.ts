@@ -338,6 +338,12 @@ describe('fetchGhIssueAsTaskSpec (AISDLC-393 AC-2)', () => {
     };
     await fetchGhIssueAsTaskSpec(99, { gh });
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toEqual(['issue', 'view', '99', '--json', 'number,title,body,state,labels']);
+    expect(calls[0]).toEqual([
+      'issue',
+      'view',
+      '99',
+      '--json',
+      'number,title,body,state,labels,authorAssociation',
+    ]);
   });
 });

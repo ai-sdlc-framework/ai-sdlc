@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1269
 title: 'Issue execution: refuse an issue written by someone outside the project unless a maintainer has marked it, and fence the issue text in the developer prompt'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-13'
 labels:
