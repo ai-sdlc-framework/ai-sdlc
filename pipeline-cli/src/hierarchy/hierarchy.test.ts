@@ -71,6 +71,7 @@ import {
 import { executorStart } from './executor-start.js';
 import { isNodeInstalled, paneNodeVersion, readNvmrc } from './node-pin.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
+import { resolveSendTarget } from './tmux.js';
 
 const NOW = new Date('2026-09-30T12:00:00.000Z');
 
@@ -2534,6 +2535,41 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(hasLaunchEnv(started[0] as string, alpha, 'executor')).toBe(true);
     expect(started[0]).toContain("'/ai-sdlc executor'");
     expect(validateHierarchyRoster(after).valid).toBe(true);
+  });
+
+  it('records the new pane, pid and startedAt, and send reaches the restarted session at once (AISDLC-1258)', async () => {
+    const old = entryOf(alpha) as RosterEntry;
+    fake.startedAtMs = later;
+    deps.now = () => new Date(later);
+    await hierarchyRestart({ session: 'executor-alpha' }, deps);
+    const fresh = entryOf(alpha) as RosterEntry;
+    expect(fresh.paneId).toMatch(/^%/);
+    expect(fresh.paneId).not.toBe(old.paneId);
+    expect(fresh.pid).not.toBe(old.pid);
+    expect(fresh.startedAt).toBe(new Date(later).toISOString());
+    expect(resolveSendTarget(fake.run, fresh.tmuxSession, fresh.tmuxWindow, fresh.paneId)).toBe(
+      fresh.paneId,
+    );
+    expect(() => resolveSendTarget(fake.run, old.tmuxSession, old.tmuxWindow, old.paneId)).toThrow(
+      /stale/,
+    );
+  });
+
+  it('fails loudly when the roster disagrees with the new tmux window (AISDLC-1258)', async () => {
+    const inner = fake.run;
+    let started = false;
+    let paneReads = 0;
+    deps.run = (file, args, options) => {
+      if (args[0] === 'new-session') started = true;
+      if (started && args[0] === 'display-message' && args.at(-1) === '#{pane_id} #{pane_pid}') {
+        paneReads += 1;
+        if (paneReads > 1) return { status: 0, stdout: '%999 1\n', stderr: '' };
+      }
+      return inner(file, args, options);
+    };
+    await expect(hierarchyRestart({ session: 'executor-alpha' }, deps)).rejects.toThrow(
+      /inconsistent with its tmux window: paneId %\d+ but the new window is %999/,
+    );
   });
 
   it('a planner-role caller restarts an executor; a second caller inside the lock window is refused naming the holder (AISDLC-1110)', async () => {
