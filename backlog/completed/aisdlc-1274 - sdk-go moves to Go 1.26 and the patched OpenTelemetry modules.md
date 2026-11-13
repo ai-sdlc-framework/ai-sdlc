@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1274
 title: 'sdk-go: move to Go 1.26 and the patched OpenTelemetry modules (Dependabot alert 173)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-13'
 labels:
