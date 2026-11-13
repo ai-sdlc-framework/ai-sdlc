@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1273
 title: 'Held-task triage: "circular" only for a real dependency cycle, and a failed dependency gets its own label'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-13'
 labels:
