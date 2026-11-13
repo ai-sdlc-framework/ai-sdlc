@@ -20,7 +20,12 @@ import {
 } from './verdict-record.js';
 
 export type VerdictFailCode =
-  'no-record' | 'subject-mismatch' | 'coverage-short' | 'replay-dirty' | 'tier-short';
+  | 'no-record'
+  | 'subject-mismatch'
+  | 'coverage-short'
+  | 'replay-dirty'
+  | 'tier-short'
+  | 'not-clean-room';
 
 export interface VerdictCheckResult {
   /** `ok`, `ok-carried:<sha>` or a failure code. */
@@ -37,6 +42,11 @@ export interface VerdictCheckOpts {
   /** Paths the PR touches; null fails closed to the three-reviewer set. */
   changedPaths: readonly string[] | null;
   requiredTier?: IndependenceTier;
+  /**
+   * AISDLC-1268: a fork head passes only with a record the gate's clean-room path wrote
+   * (`issuedBy.principal: ci-clean-room`). Carry-forward is not consulted for such a head.
+   */
+  requireCleanRoom?: boolean;
   /** AISDLC-1170 carry-forward; called once when no record exists for the head. */
   carryForward?: (headSha: string) => Promise<{ from: string } | null>;
 }
@@ -55,7 +65,8 @@ export async function checkVerdict(opts: VerdictCheckOpts): Promise<VerdictCheck
     opts.runner('git', args, { cwd: opts.cwd, allowFailure: true, timeout: 120_000 });
 
   const noRecord = async (why: string): Promise<VerdictCheckResult> => {
-    const carried = opts.carryForward ? await opts.carryForward(opts.headSha) : null;
+    const carried =
+      opts.carryForward && !opts.requireCleanRoom ? await opts.carryForward(opts.headSha) : null;
     if (carried) {
       return {
         code: `ok-carried:${carried.from}`,
@@ -84,6 +95,13 @@ export async function checkVerdict(opts: VerdictCheckOpts): Promise<VerdictCheck
   }
   if (!recordMatchesLeaves(parsed, leaves.stdout)) {
     return fail('replay-dirty', 'leaves digest does not match the record');
+  }
+
+  if (opts.requireCleanRoom && parsed.issuedBy.principal !== 'ci-clean-room') {
+    return fail(
+      'not-clean-room',
+      `fork head needs a clean-room record; this one was issued by ${parsed.issuedBy.principal}`,
+    );
   }
 
   const required = computeRequiredReviewers({ changedPaths: opts.changedPaths });

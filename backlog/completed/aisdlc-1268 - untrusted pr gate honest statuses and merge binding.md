@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1268
 title: 'Untrusted PR gate: no green status without a review, and the merge gate requires the gate verdict for fork PRs'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-13'
 labels:

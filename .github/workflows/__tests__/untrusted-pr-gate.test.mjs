@@ -1235,3 +1235,32 @@ describe('AISDLC-515.1 — effective driver availability refusal uses the degrad
     assert.equal(block.if, "steps.check-sandbox.outputs.degraded == 'true'");
   });
 });
+
+describe('AISDLC-1268 — no success on the gate context without a review', () => {
+  it('flag-off-status and trusted-author-status never post success on ai-sdlc/untrusted-pr-gate', () => {
+    for (const id of ['flag-off-status', 'trusted-author-status']) {
+      const script = JSON.stringify(wf.jobs[id].steps.map((s) => s.with?.script ?? ''));
+      assert.match(script, /createCommitStatus/);
+      assert.doesNotMatch(script, /context: 'ai-sdlc\/untrusted-pr-gate'/, id);
+      assert.match(script, /ai-sdlc\/untrusted-pr-gate-skipped/, id);
+      assert.match(script, /No review ran/, id);
+    }
+  });
+});
+
+describe('AISDLC-1268 — verdict-writer holds contents:write only after an artifact check', () => {
+  const vw = () => loadYaml(resolve(dirname(WORKFLOW_PATH), 'verdict-writer.yml'));
+  it('only the write job has contents: write, and it needs the artifact check', () => {
+    const w = vw();
+    assert.equal(w.jobs['check-artifact'].permissions.contents, undefined);
+    assert.notEqual(w.permissions.contents, 'write');
+    assert.equal(w.jobs.write.permissions.contents, 'write');
+    assert.equal(w.jobs.write.needs, 'check-artifact');
+    assert.match(w.jobs.write.if, /has_artifact == 'true'/);
+  });
+  it('concurrency is keyed on the run id', () => {
+    const w = vw();
+    assert.match(w.concurrency.group, /workflow_run\.id/);
+    assert.doesNotMatch(w.concurrency.group, /head_branch/);
+  });
+});

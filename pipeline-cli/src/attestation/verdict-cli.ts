@@ -31,6 +31,8 @@ export interface VerdictCheckRun {
   /** The PR number; scopes the carry-forward search. Omitted means any PR. */
   pullRequest?: number;
   requiredTier?: IndependenceTier;
+  /** AISDLC-1268: the head is in a fork, so only a clean-room record passes. */
+  requireCleanRoom?: boolean;
   /** Post the `ai-sdlc/attestation` status (CI only): success when ok, failure otherwise. */
   postStatus: boolean;
   /** Appended to the job summary when given. */
@@ -131,6 +133,7 @@ export async function runVerdictCheck(run: VerdictCheckRun): Promise<VerdictChec
     headSha: run.headSha,
     changedPaths,
     requiredTier: run.requiredTier,
+    requireCleanRoom: run.requireCleanRoom,
     carryForward: makeCarryForward(run.runner, run.cwd, replayBase, run.pullRequest),
   });
 

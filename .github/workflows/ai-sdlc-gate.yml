@@ -626,12 +626,16 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           # This job runs the BASE tree's CLI (trusted code, checked out from base.sha), so a PR
           # cannot change the CLI that judges it. Main's CLI accepts --pull-request (AISDLC-1172).
+          # AISDLC-1268: a fork head passes only with a record the clean-room path wrote.
+          EXTRA=()
+          if [ "$HEAD_REPO_FULL" != "$REPOSITORY" ]; then EXTRA+=(--require-clean-room); fi
           node pipeline-cli/bin/cli-attestation.mjs verdict-check \
             --head "$HEAD_SHA" --base "$BASE_SHA" --repository "$REPOSITORY" \
-            --pull-request "$PR_NUMBER" --post-status
+            --pull-request "$PR_NUMBER" --post-status "${EXTRA[@]}"
 
   # AISDLC-717: re-run the release content allowlist on every push to the release-please branch,
   # so a release PR armed for auto-merge cannot merge content that was not eligible when armed.
