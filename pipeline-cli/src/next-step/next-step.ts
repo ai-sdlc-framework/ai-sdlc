@@ -382,7 +382,8 @@ export function buildSpawnReviewers(
     reviewers: review.spawned.map((r) => ({
       agent: r.agent,
       promptFile: r.promptFile,
-      bootstrapPrompt: bootstrapPromptFor(r.promptFile),
+      ...(r.promptParts ? { promptParts: r.promptParts } : {}),
+      bootstrapPrompt: bootstrapPromptFor(r.promptFile, r.promptParts),
       ...(r.model ? { model: r.model } : {}),
     })),
     replyShape:
