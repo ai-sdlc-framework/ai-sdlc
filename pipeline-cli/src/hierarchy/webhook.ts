@@ -75,7 +75,7 @@ function defaultIsAlive(pid: number): boolean {
 
 const stateFile = (boardDir: string): string => path.join(boardDir, STATE_FILE);
 
-function readState(boardDir: string): WebhookState | undefined {
+export function readState(boardDir: string): WebhookState | undefined {
   try {
     const s = JSON.parse(readFileSync(stateFile(boardDir), 'utf-8')) as Partial<WebhookState>;
     return typeof s.pid === 'number' && typeof s.port === 'number'

@@ -27,7 +27,7 @@ import { holdsInflight } from './clear.js';
 import { writeHandoff } from './handoff.js';
 import { stopSessionWindow } from './down.js';
 import { listInflight } from './inflight.js';
-import { schedulerUp } from './reconcile-scheduler.js';
+import { schedulerDown, schedulerUp } from './reconcile-scheduler.js';
 import { readSessionRegistry } from './registry.js';
 import {
   defaultProjectForBoard,
@@ -47,7 +47,7 @@ import {
   ROLE_PROMPT,
   withProfile,
 } from './up.js';
-import { webhookUp } from './webhook.js';
+import { readState as readWebhookState, webhookDown, webhookUp } from './webhook.js';
 import { assertModel, assertPermissionMode, splitSessionName } from './validate.js';
 
 /** Options for `restart`. */
@@ -64,6 +64,8 @@ export interface RestartOptions {
   force?: boolean;
   /** Who takes the restart lock (default `callerName`, else `operator`). */
   lockHolder?: string;
+  /** `restart --all` already restarted the scheduler and receiver; skip the dispatch re-register. */
+  servicesHandled?: boolean;
 }
 
 /** The roster fields a restart or register changes. */
@@ -287,7 +289,7 @@ export async function hierarchyRestart(
     sessionPermissionMode: next.permissionMode,
   });
   for (const w of warnings) deps.log(`warning: ${w}`);
-  if (next.role === 'operator-dispatch') reRegisterDispatchServices(deps);
+  if (next.role === 'operator-dispatch' && !opts.servicesHandled) reRegisterDispatchServices(deps);
   deps.log(
     `restarted ${next.role} '${next.tmuxWindow}'${stop.forced ? ' (window closed after no exit)' : ''}; pid ${entry.pid} -> ${next.pid}`,
   );
@@ -327,6 +329,35 @@ function reRegisterDispatchServices(deps: HierarchyDeps): void {
   }
 }
 
+/**
+ * `restart --all`: stop and start the reconcile scheduler and, when a secret is set, the webhook
+ * receiver, so both run the installed code. A failure is a warning naming the process (AISDLC-1272).
+ */
+function restartDispatchServices(deps: HierarchyDeps): void {
+  try {
+    schedulerDown(deps, deps.killProcess);
+    schedulerUp(deps, deps.spawnScheduler);
+  } catch (err) {
+    deps.log(`warning: reconcile scheduler not restarted: ${(err as Error).message}`);
+  }
+  if (deps.env.AI_SDLC_WEBHOOK_SECRET) {
+    try {
+      // Down removes the supervised forwarder and the state file; carry the recorded port and
+      // feed back into up so the receiver keeps its port and the forwarder is reinstalled.
+      const recorded = readWebhookState(deps.boardDir);
+      webhookDown(deps, deps.killProcess);
+      webhookUp(
+        deps,
+        recorded ? String(recorded.port) : undefined,
+        undefined,
+        recorded?.feed?.agent ? { kind: recorded.feed.kind } : recorded?.feed,
+      );
+    } catch (err) {
+      deps.log(`warning: webhook receiver not restarted: ${(err as Error).message}`);
+    }
+  }
+}
+
 /** Result of `restart --all`. */
 export interface RestartAllResult {
   restarted: RestartResult[];
@@ -347,6 +378,7 @@ export async function hierarchyRestartAll(
 ): Promise<RestartAllResult> {
   const { roster } = readRosterChecked(deps.boardDir);
   const out: RestartAllResult = { restarted: [], deferred: [], failed: [], skipped: [] };
+  restartDispatchServices(deps);
   // The calling session cannot restart itself without killing this command; leave it for another session.
   const dispatch = roster.sessions.filter((e) => {
     if (e.role !== 'operator-dispatch') return false;
@@ -371,6 +403,7 @@ export async function hierarchyRestartAll(
         {
           session: entry.name,
           afterTask: defer,
+          servicesHandled: true,
           ...(opts.waitSec === undefined ? {} : { waitSec: opts.waitSec }),
         },
         deps,

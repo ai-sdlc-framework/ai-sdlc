@@ -636,7 +636,11 @@ re-registers the reconcile scheduler and, when `AI_SDLC_WEBHOOK_SECRET` is set, 
 receiver. A window that is already gone (a crash) is simply started.
 
 `--all` restarts dispatch, then every idle executor, now; each busy executor is restarted at
-its task boundary, as `--after-task` does. The planner is left alone. One failure does not
+its task boundary, as `--after-task` does. The planner is left alone. `--all` also stops and
+starts the reconcile scheduler and, when `AI_SDLC_WEBHOOK_SECRET` is set, the webhook receiver
+(left alone when it is unset), so every process of the hierarchy runs the installed code; a
+failure to stop or start either is a warning naming it and does not abort the session restarts.
+`restart <name>` for one session leaves both running. One failure does not
 stop the rest; the JSON lists `restarted`, `deferred`, `failed` and `skipped`, and the exit is `1` when
 any failed.
 
