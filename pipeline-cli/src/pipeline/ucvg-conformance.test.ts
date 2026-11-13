@@ -510,10 +510,9 @@ describe('RFC-0043 OQ-1 — trust source is static file (no live GitHub API)', (
     expect(result.classification).toBe('trusted');
   });
 
-  it('returns empty allowlist when trusted-reviewers.yaml is absent', () => {
+  it('throws naming the file when trusted-reviewers.yaml is absent (fail closed)', () => {
     // No file written in this tmpDir
-    const authors = loadAllowlistedAuthors(tmpDir);
-    expect(authors).toHaveLength(0);
+    expect(() => loadAllowlistedAuthors(tmpDir)).toThrow(/trusted-reviewers\.yaml/);
   });
 
   it('returns empty allowlist when file has no allowlist block', () => {

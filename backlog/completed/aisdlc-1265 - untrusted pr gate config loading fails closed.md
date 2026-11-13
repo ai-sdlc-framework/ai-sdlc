@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1265
 title: 'Untrusted PR gate: the trust list and the path-gate config load at runtime and a load failure fails closed'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-13'
 labels:
