@@ -59,7 +59,11 @@ function runnerFor(rec: string | null, leaves: string | null, fetchOk = true): R
 
 async function check(
   rec: ReturnType<typeof build> | null,
-  extra: { tier?: 'none' | 'attested' | 'isolated'; mutate?: (r: VerdictRecord) => void } = {},
+  extra: {
+    pr?: number;
+    tier?: 'none' | 'attested' | 'isolated';
+    mutate?: (r: VerdictRecord) => void;
+  } = {},
   head = HEAD,
   carry?: () => Promise<{ from: string } | null>,
 ) {
@@ -68,6 +72,7 @@ async function check(
     runner: runnerFor(rec ? JSON.stringify(rec.record) : null, rec?.leaves ?? null, rec !== null),
     cwd: '.',
     headSha: head,
+    pullRequest: extra.pr ?? 1,
     changedPaths: null,
     requiredTier: extra.tier,
     carryForward: carry,
@@ -88,6 +93,7 @@ describe('checkVerdict', () => {
       runner: runnerFor(null, null),
       cwd: '.',
       headSha: HEAD,
+      pullRequest: 1,
       changedPaths: null,
     });
     expect(r1.code).toBe('no-record');
@@ -95,6 +101,7 @@ describe('checkVerdict', () => {
       runner: runnerFor('{"x":1}', ''),
       cwd: '.',
       headSha: HEAD,
+      pullRequest: 1,
       changedPaths: null,
     });
     expect(r2.code).toBe('no-record');
@@ -110,12 +117,31 @@ describe('checkVerdict', () => {
   it('subject-mismatch', async () => {
     expect((await check(build({}), {}, 'd'.repeat(40))).code).toBe('subject-mismatch');
   });
+  it('pr-mismatch: same head, record issued for another PR (AISDLC-1270)', async () => {
+    const r = await check(build({}), { pr: 2 });
+    expect(r.code).toBe('pr-mismatch');
+    expect(r.ok).toBe(false);
+  });
+  it('treats a record with a zero PR number as no record (AISDLC-1270)', async () => {
+    const r = await check(build({}), { mutate: (rec) => (rec.subject.pullRequest = 0) });
+    expect(r.code).toBe('no-record');
+  });
+  it('a zero-PR record falls through to carry-forward (AISDLC-1270)', async () => {
+    const r = await check(
+      build({}),
+      { mutate: (rec) => (rec.subject.pullRequest = 0) },
+      HEAD,
+      async () => ({ from: 'abc' }),
+    );
+    expect(r.code).toBe('ok-carried:abc');
+  });
   it('replay-dirty', async () => {
     const b = build({});
     const r = await checkVerdict({
       runner: runnerFor(JSON.stringify(b.record), b.leaves + 'tampered\n'),
       cwd: '.',
       headSha: HEAD,
+      pullRequest: 1,
       changedPaths: null,
     });
     expect(r.code).toBe('replay-dirty');
@@ -150,6 +176,7 @@ describe('runVerdictCheck', () => {
       repository: 'o/r',
       headSha: HEAD,
       baseSha: 'c'.repeat(40),
+      pullRequest: 1,
       postStatus: true,
       ...over,
     });
@@ -292,6 +319,7 @@ describe('checkVerdict requireCleanRoom (AISDLC-1268)', () => {
       runner: runnerFor(b ? JSON.stringify(b.record) : null, b?.leaves ?? null, b !== null),
       cwd: '.',
       headSha: HEAD,
+      pullRequest: 1,
       changedPaths: null,
       requireCleanRoom: true,
       carryForward: carry,
@@ -314,6 +342,7 @@ describe('checkVerdict requireCleanRoom (AISDLC-1268)', () => {
       runner: runnerFor(JSON.stringify(b.record), b.leaves),
       cwd: '.',
       headSha: HEAD,
+      pullRequest: 1,
       changedPaths: null,
     });
     expect(r.code).toBe('ok');

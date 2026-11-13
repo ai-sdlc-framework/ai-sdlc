@@ -22,6 +22,7 @@ import {
 export type VerdictFailCode =
   | 'no-record'
   | 'subject-mismatch'
+  | 'pr-mismatch'
   | 'coverage-short'
   | 'replay-dirty'
   | 'tier-short'
@@ -39,6 +40,8 @@ export interface VerdictCheckOpts {
   cwd: string;
   remote?: string;
   headSha: string;
+  /** AISDLC-1270: the PR under test; a record counts only for the PR it was issued for. */
+  pullRequest: number;
   /** Paths the PR touches; null fails closed to the three-reviewer set. */
   changedPaths: readonly string[] | null;
   requiredTier?: IndependenceTier;
@@ -92,6 +95,17 @@ export async function checkVerdict(opts: VerdictCheckOpts): Promise<VerdictCheck
 
   if (parsed.subject.headSha !== opts.headSha) {
     return fail('subject-mismatch', `record is for ${parsed.subject.headSha}`);
+  }
+  // AISDLC-1270: a record without a usable PR number predates this check; the review round
+  // writes a fresh one, so it counts as no record.
+  if (!Number.isInteger(parsed.subject.pullRequest) || parsed.subject.pullRequest <= 0) {
+    return noRecord('record carries no usable pull request number');
+  }
+  if (parsed.subject.pullRequest !== opts.pullRequest) {
+    return fail(
+      'pr-mismatch',
+      `record is for PR #${parsed.subject.pullRequest}, not #${opts.pullRequest}`,
+    );
   }
   if (!recordMatchesLeaves(parsed, leaves.stdout)) {
     return fail('replay-dirty', 'leaves digest does not match the record');

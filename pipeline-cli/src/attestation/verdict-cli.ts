@@ -28,8 +28,8 @@ export interface VerdictCheckRun {
   repository: string;
   headSha: string;
   baseSha: string;
-  /** The PR number; scopes the carry-forward search. Omitted means any PR. */
-  pullRequest?: number;
+  /** The PR number under test (AISDLC-1270); scopes the record and the carry-forward search. */
+  pullRequest: number;
   requiredTier?: IndependenceTier;
   /** AISDLC-1268: the head is in a fork, so only a clean-room record passes. */
   requireCleanRoom?: boolean;
@@ -73,7 +73,7 @@ export async function listEarlierSubjects(
       const parsed = VerdictRecordSchema.parse(JSON.parse(rec.stdout));
       if (parsed.verdict !== 'approved' || !parsed.coverage.satisfied) continue;
       const pr = parsed.subject.pullRequest;
-      if (pullRequest !== undefined && pr !== pullRequest && pr !== 0) {
+      if (pullRequest !== undefined && pr !== pullRequest) {
         continue;
       }
       found.push({
@@ -131,6 +131,7 @@ export async function runVerdictCheck(run: VerdictCheckRun): Promise<VerdictChec
     runner: run.runner,
     cwd: run.cwd,
     headSha: run.headSha,
+    pullRequest: run.pullRequest,
     changedPaths,
     requiredTier: run.requiredTier,
     requireCleanRoom: run.requireCleanRoom,

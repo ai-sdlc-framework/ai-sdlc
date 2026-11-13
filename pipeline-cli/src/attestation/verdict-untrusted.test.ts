@@ -126,6 +126,7 @@ describe('verdict-untrusted', () => {
       runner,
       cwd: dir,
       headSha: HEAD,
+      pullRequest: b.record.subject.pullRequest,
       changedPaths: null,
       requiredTier: 'isolated',
     });
