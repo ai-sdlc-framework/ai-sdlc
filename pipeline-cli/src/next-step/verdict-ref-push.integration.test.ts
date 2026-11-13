@@ -58,7 +58,7 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 /** The Step 11 loop: rebuild the refspec per attempt, push the branch atomically with it. */
 async function pushLoop(): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const v = await buildVerdictRefspec(defaultRunner, wt, DRAFT, 'origin/main');
+    const v = await buildVerdictRefspec(defaultRunner, wt, DRAFT, 'origin/main', undefined, 2413);
     const args = v.refspec
       ? ['push', '-u', '--atomic', 'origin', 'feat', v.refspec]
       : ['push', '-u', 'origin', 'feat'];
@@ -76,6 +76,7 @@ describe('verdict ref against a local bare remote (AISDLC-1193)', () => {
       runner: defaultRunner,
       cwd: wt,
       headSha: head,
+      pullRequest: 2413,
       changedPaths: CHANGED,
     });
     expect(res.code).toBe('ok');
