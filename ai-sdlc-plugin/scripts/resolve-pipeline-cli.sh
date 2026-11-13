@@ -34,6 +34,11 @@
 #   5. Monorepo dogfood fallback: $(pwd)/pipeline-cli/bin
 #      → Works when run from within the ai-sdlc monorepo. Fails in adopter projects.
 #
+#   AISDLC-1271: topologies 1, 3 and the self-location fallback also compare the
+#   installed version of each exact-pinned runtimeDependencies entry to plugin.json
+#   (local files only). A mismatch self-heals; if it persists the script exits 1
+#   naming the package, installed version, pin and directory.
+#
 #   6. Nothing found → print actionable error to stderr, exit 1.
 #
 # Usage (called from execute.md path-resolution preamble):
@@ -110,7 +115,60 @@ _mcp_usable() {
 # slow — removed.
 _deps_complete() {
   local plugin_dir="$1"
-  _is_usable "$plugin_dir/$PIPELINE_CLI_REL" && _mcp_usable "$plugin_dir"
+  _is_usable "$plugin_dir/$PIPELINE_CLI_REL" && _mcp_usable "$plugin_dir" && [ -z "$(_pin_mismatch "$plugin_dir")" ]
+}
+
+# AISDLC-1271: the installed version of every runtimeDependencies entry with an
+# EXACT pin must equal that pin. Local files only (plugin.json + each installed
+# package.json): no network, so it is safe on this hot path. Prints
+# "<package> <installed> <pin>" for the first mismatch, nothing when all match.
+# A range pin, a missing plugin.json, an unreadable package.json or a missing node
+# skips the comparison (the existence checks above stay the only gate).
+_pin_mismatch() {
+  local plugin_dir="$1"
+  command -v node >/dev/null 2>&1 || return 0
+  node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const dir = process.argv[1];
+    const exact = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+    let deps;
+    try {
+      const manifest = path.join(dir, ".claude-plugin", "plugin.json");
+      const file = fs.existsSync(manifest) ? manifest : path.join(dir, "plugin.json");
+      deps = JSON.parse(fs.readFileSync(file, "utf-8")).runtimeDependencies;
+    } catch { process.exit(0); }
+    if (!deps || typeof deps !== "object") process.exit(0);
+    for (const [name, pin] of Object.entries(deps)) {
+      if (typeof pin !== "string" || !exact.test(pin)) continue;
+      let installed;
+      try {
+        installed = JSON.parse(fs.readFileSync(path.join(dir, "node_modules", name, "package.json"), "utf-8")).version;
+      } catch { continue; }
+      if (typeof installed === "string" && installed !== pin) {
+        process.stdout.write(name + " " + installed + " " + pin);
+        process.exit(0);
+      }
+    }
+  ' "$plugin_dir" 2>/dev/null || true
+}
+
+_note_mismatch() {
+  local mm
+  mm="$(_pin_mismatch "$1")"
+  [ -z "$mm" ] || echo "resolve-pipeline-cli.sh: runtime dependency out of date in $1 ($mm: package installed pin) — running self-heal" >&2
+}
+
+# AISDLC-1271: after a self-heal attempt, a directory that still holds a mismatched
+# runtime dependency is never used: print package, installed version, pin and
+# directory, then exit 1 (no bin path on stdout).
+_exit_if_mismatch() {
+  local plugin_dir="$1" mm
+  mm="$(_pin_mismatch "$plugin_dir")"
+  [ -z "$mm" ] && return 0
+  set -- $mm
+  echo "resolve-pipeline-cli.sh: ERROR — $1 is installed at version $2 but plugin.json pins $3 in $plugin_dir; self-heal did not converge. Run: bash \"$plugin_dir/scripts/install-runtime-deps.sh\" \"$plugin_dir\"" >&2
+  exit 1
 }
 
 # ── Topology 0 (AISDLC-716): the repo's own pipeline-cli build ──────────────
@@ -241,7 +299,9 @@ if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
     MISSING="pipeline-cli"
     _is_usable "$CANDIDATE" && MISSING="plugin-mcp-server"
     echo "resolve-pipeline-cli.sh: @ai-sdlc/$MISSING missing in $CLAUDE_PLUGIN_DIR — attempting self-heal..." >&2
-    if bash "$SELF_HEAL_SCRIPT" "$CLAUDE_PLUGIN_DIR" >&2; then
+    _note_mismatch "$CLAUDE_PLUGIN_DIR"
+    if bash "$SELF_HEAL_SCRIPT" "$CLAUDE_PLUGIN_DIR" >&2 || { _exit_if_mismatch "$CLAUDE_PLUGIN_DIR"; false; }; then
+      _exit_if_mismatch "$CLAUDE_PLUGIN_DIR"
       if _deps_complete "$CLAUDE_PLUGIN_DIR"; then
         echo "resolve-pipeline-cli.sh: self-heal succeeded" >&2
         printf '%s' "$CANDIDATE"
@@ -268,7 +328,9 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
     MISSING="pipeline-cli"
     _is_usable "$CANDIDATE" && MISSING="plugin-mcp-server"
     echo "resolve-pipeline-cli.sh: @ai-sdlc/$MISSING missing in $CLAUDE_PLUGIN_ROOT — attempting self-heal..." >&2
-    if bash "$SELF_HEAL_SCRIPT" "$CLAUDE_PLUGIN_ROOT" >&2; then
+    _note_mismatch "$CLAUDE_PLUGIN_ROOT"
+    if bash "$SELF_HEAL_SCRIPT" "$CLAUDE_PLUGIN_ROOT" >&2 || { _exit_if_mismatch "$CLAUDE_PLUGIN_ROOT"; false; }; then
+      _exit_if_mismatch "$CLAUDE_PLUGIN_ROOT"
       if _deps_complete "$CLAUDE_PLUGIN_ROOT"; then
         echo "resolve-pipeline-cli.sh: self-heal (CLAUDE_PLUGIN_ROOT) succeeded" >&2
         printf '%s' "$CANDIDATE"
@@ -369,7 +431,9 @@ if [ -n "$SELF_PLUGIN_DIR" ]; then
     MISSING="pipeline-cli"
     _is_usable "$CANDIDATE" && MISSING="plugin-mcp-server"
     echo "resolve-pipeline-cli.sh: @ai-sdlc/$MISSING missing in $SELF_PLUGIN_DIR (self-location fallback — neither CLAUDE_PLUGIN_DIR nor CLAUDE_PLUGIN_ROOT is set) — attempting self-heal..." >&2
-    if bash "$SELF_HEAL_SCRIPT" "$SELF_PLUGIN_DIR" >&2; then
+    _note_mismatch "$SELF_PLUGIN_DIR"
+    if bash "$SELF_HEAL_SCRIPT" "$SELF_PLUGIN_DIR" >&2 || { _exit_if_mismatch "$SELF_PLUGIN_DIR"; false; }; then
+      _exit_if_mismatch "$SELF_PLUGIN_DIR"
       if _deps_complete "$SELF_PLUGIN_DIR"; then
         echo "resolve-pipeline-cli.sh: self-heal (self-location) succeeded" >&2
         printf '%s' "$CANDIDATE"
