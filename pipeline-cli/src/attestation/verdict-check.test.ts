@@ -277,3 +277,45 @@ describe('runVerdictCheck', () => {
     expect(calls.some((c) => c.includes('POST'))).toBe(false);
   });
 });
+
+describe('checkVerdict requireCleanRoom (AISDLC-1268)', () => {
+  const withPrincipal = (principal: 'pipeline-step-11' | 'ci-clean-room') => {
+    const b = build({});
+    b.record.issuedBy.principal = principal;
+    return b;
+  };
+  const run = (
+    b: ReturnType<typeof build> | null,
+    carry?: () => Promise<{ from: string } | null>,
+  ) =>
+    checkVerdict({
+      runner: runnerFor(b ? JSON.stringify(b.record) : null, b?.leaves ?? null, b !== null),
+      cwd: '.',
+      headSha: HEAD,
+      changedPaths: null,
+      requireCleanRoom: true,
+      carryForward: carry,
+    });
+  it('fails a fork head with no record, without consulting carry-forward', async () => {
+    const r = await run(null, async () => ({ from: 'abc' }));
+    expect(r.code).toBe('no-record');
+  });
+  it('fails a fork head whose only record came from another tier', async () => {
+    const r = await run(withPrincipal('pipeline-step-11'));
+    expect(r.code).toBe('not-clean-room');
+    expect(r.ok).toBe(false);
+  });
+  it('passes a fork head with a clean-room record', async () => {
+    expect((await run(withPrincipal('ci-clean-room'))).code).toBe('ok');
+  });
+  it('leaves a same-repo head unchanged', async () => {
+    const b = withPrincipal('pipeline-step-11');
+    const r = await checkVerdict({
+      runner: runnerFor(JSON.stringify(b.record), b.leaves),
+      cwd: '.',
+      headSha: HEAD,
+      changedPaths: null,
+    });
+    expect(r.code).toBe('ok');
+  });
+});

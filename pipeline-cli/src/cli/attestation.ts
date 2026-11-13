@@ -897,7 +897,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
       // ── verdict-check (RFC-0061 Phase 2: the required check) ─────────────────
       .command(
         'verdict-check',
-        'Check refs/ai-sdlc/verdicts/<head> and print a reason code (ok, ok-carried:<sha>, no-record, subject-mismatch, coverage-short, replay-dirty, tier-short). --post-status posts the ai-sdlc/attestation status; exits 1 unless the result is ok.',
+        'Check refs/ai-sdlc/verdicts/<head> and print a reason code (ok, ok-carried:<sha>, no-record, subject-mismatch, coverage-short, replay-dirty, tier-short, not-clean-room). --require-clean-room (fork heads) accepts only a clean-room record. --post-status posts the ai-sdlc/attestation status; exits 1 unless the result is ok.',
         (y: Argv) =>
           y
             .option('head', { type: 'string', demandOption: true })
@@ -905,6 +905,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             .option('repository', { type: 'string', demandOption: true })
             .option('pull-request', { type: 'number' })
             .option('required-tier', { type: 'string', choices: [...INDEPENDENCE_TIERS] })
+            .option('require-clean-room', { type: 'boolean', default: false })
             .option('post-status', { type: 'boolean', default: false }),
         async (args) => {
           const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
@@ -917,6 +918,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
             baseSha: args['base'] as string,
             pullRequest: args['pull-request'] as number | undefined,
             requiredTier: args['required-tier'] as IndependenceTier | undefined,
+            requireCleanRoom: args['require-clean-room'] as boolean,
             postStatus: args['post-status'] as boolean,
             writeSummary: summaryFile ? (md) => appendFileSync(summaryFile, md + '\n') : undefined,
           });

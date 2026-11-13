@@ -931,14 +931,14 @@ jobs:
           github-token: ${{ github.token }}
           script: |
             // Feature flag is OFF — UCVG path not engaged.
-            // Post a neutral success status so the check is visible but not blocking.
+            // AISDLC-1268: never success on the gate context; no review ran.
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: context.payload.pull_request.head.sha,
               state: 'success',
-              context: 'ai-sdlc/untrusted-pr-gate',
-              description: 'Skipped: untrusted-pr gate is disabled (feature flag off)',
+              context: 'ai-sdlc/untrusted-pr-gate-skipped',
+              description: 'No review ran: untrusted-pr gate is disabled (feature flag off)',
             });
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -962,13 +962,14 @@ jobs:
           github-token: ${{ github.token }}
           script: |
             // Author is trusted — UCVG not engaged; existing review path applies.
+            // AISDLC-1268: never success on the gate context; no review ran here.
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
               sha: context.payload.pull_request.head.sha,
               state: 'success',
-              context: 'ai-sdlc/untrusted-pr-gate',
-              description: 'Skipped: author is trusted; existing review path applies',
+              context: 'ai-sdlc/untrusted-pr-gate-skipped',
+              description: 'No review ran: author is trusted; existing review path applies',
             });
 
   # ────────────────────────────────────────────────────────────────────────────

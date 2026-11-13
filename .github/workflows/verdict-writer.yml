@@ -17,15 +17,41 @@ permissions:
   contents: read
 
 concurrency:
-  group: verdict-writer-${{ github.event.workflow_run.head_branch }}
+  group: verdict-writer-${{ github.event.workflow_run.id }}
   cancel-in-progress: false
 
 jobs:
-  write:
-    name: Write verdict record
+  # AISDLC-1268: a run that produced no artifact (every fork PR with the gate off, a trusted
+  # author, a stage-1 rejection) ends green here without ever starting the job that can write.
+  check-artifact:
+    name: Check for the verdict record artifact
     if: >-
       github.event.workflow_run.event == 'pull_request_target' &&
       github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      has_artifact: ${{ steps.find.outputs.has_artifact }}
+    steps:
+      - id: find
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.payload.workflow_run.id,
+            });
+            const found = artifacts.some((a) => a.name === 'ucvg-verdict-record' && !a.expired);
+            core.setOutput('has_artifact', found ? 'true' : 'false');
+            if (!found) core.info('No verdict record artifact for this run; nothing to write.');
+
+  write:
+    name: Write verdict record
+    needs: check-artifact
+    if: needs.check-artifact.outputs.has_artifact == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
