@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1258
 title: cli-hierarchy restart leaves a stale pane id in the roster
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-09'
 labels:
