@@ -58,13 +58,18 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
 import { buildReviewerProxyEnv } from './inference-proxy.js';
-import { validateSandboxEnv, DOCKER_SECCOMP_PROFILE } from './sandbox-runner.js';
+import {
+  validateSandboxEnv,
+  DOCKER_SECCOMP_PROFILE,
+  DEFAULT_SANDBOX_IMAGE,
+} from './sandbox-runner.js';
 import type { DifferentialTestResult } from './sandbox-runner.js';
 import {
   InferenceProxyClient,
   runReviewerMatrix,
   parseReviewerResponse,
   computeConsensus,
+  type SandboxGate,
 } from './reviewer-runner.js';
 import type { ReviewerMatrixResult } from './reviewer-runner.js';
 import type { ReviewerVerdict } from './report-validator.js';
@@ -78,11 +83,12 @@ export const REVIEWER_APP_DIR = '/sandbox/app';
 export const REVIEWER_INPUT_FILE = 'input.json';
 export const REVIEWER_VERDICTS_FILE = 'verdicts.json';
 /** Relay image (small, ships a TCP forwarder). */
-export const DEFAULT_RELAY_IMAGE = 'alpine/socat:latest';
+export const DEFAULT_RELAY_IMAGE =
+  'alpine/socat@sha256:beb4a68d9e4fe6b0f21ea774a0fde6c31f580dde6368939ed70100c5385b015e';
 /** Env var that overrides (pins) the relay image, e.g. to a digest. */
 export const RELAY_IMAGE_ENV = 'AI_SDLC_REVIEWER_RELAY_IMAGE';
 /** Reviewer image (needs node). */
-export const DEFAULT_REVIEWER_IMAGE = 'node:22-slim';
+export const DEFAULT_REVIEWER_IMAGE = DEFAULT_SANDBOX_IMAGE;
 
 /** Result of one docker CLI invocation. */
 export interface DockerExecResult {
@@ -302,7 +308,7 @@ export async function runReviewerEntrypoint(
  * Parse the verdict file host-side. Fail-closed: a missing/corrupt file or a
  * missing role yields a rejecting verdict, never an approval.
  */
-export function readReviewerVerdicts(outDir: string): ReviewerMatrixResult {
+export function readReviewerVerdicts(outDir: string, sandbox: SandboxGate): ReviewerMatrixResult {
   const file = join(outDir, REVIEWER_VERDICTS_FILE);
   let parsed: Record<string, unknown> = {};
   if (existsSync(file)) {
@@ -316,7 +322,7 @@ export function readReviewerVerdicts(outDir: string): ReviewerMatrixResult {
   const one = (role: string): ReviewerVerdict =>
     parseReviewerResponse(parsed[role] === undefined ? '' : JSON.stringify(parsed[role]));
   const verdicts = { code: one('code'), test: one('test'), security: one('security') };
-  return { verdicts, consensus: computeConsensus(verdicts) };
+  return { verdicts, consensus: computeConsensus(verdicts, sandbox) };
 }
 
 export interface RunReviewerInContainerInput {
@@ -423,10 +429,10 @@ export async function runReviewerMatrixInContainer(
     // The exit code is advisory; the verdict file is authoritative and parsed
     // fail-closed, so a crashed container yields rejecting verdicts.
     await exec(runArgs);
-    return readReviewerVerdicts(outDir);
+    return readReviewerVerdicts(outDir, input.differentialTest);
   } catch (err) {
     process.stderr.write(`[reviewer-container] ${(err as Error).message}; failing closed\n`);
-    return readReviewerVerdicts(outDir);
+    return readReviewerVerdicts(outDir, input.differentialTest);
   } finally {
     if (created.relay) await exec(['rm', '-f', names.relay]);
     await exec(['rm', '-f', names.reviewer]);

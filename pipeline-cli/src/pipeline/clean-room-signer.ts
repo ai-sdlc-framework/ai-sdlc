@@ -223,6 +223,23 @@ export function runCleanRoomSigner(opts: CleanRoomSignerOptions): CleanRoomSigne
     };
   }
 
+  // (d) AISDLC-1267: the sandbox test flags are checked here directly,
+  // independent of the consensus value: upstream suite AND new tests passed.
+  if (
+    report.differentialTest.upstreamSuitePassed !== true ||
+    report.differentialTest.newTestsPassed !== true
+  ) {
+    return {
+      success: false,
+      phase: 'consensus-rejected',
+      error:
+        `[clean-room-signer] Signing refused: sandbox tests did not pass ` +
+        `(upstreamSuitePassed=${String(report.differentialTest.upstreamSuitePassed)}, ` +
+        `newTestsPassed=${String(report.differentialTest.newTestsPassed)}). ` +
+        `Approval requires both to be true.`,
+    };
+  }
+
   const reviewerNames = ['code', 'test', 'security'] as const;
   for (const name of reviewerNames) {
     const reviewer = report.reviewers[name];

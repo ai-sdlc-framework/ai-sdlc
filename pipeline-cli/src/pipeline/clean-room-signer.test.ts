@@ -56,6 +56,31 @@ const VALID_REPORT: UntrustedPrReport = {
   consensus: { approved: true, blockingFindings: 0 },
 };
 
+describe('Stage 4 sandbox test flags (AISDLC-1267)', () => {
+  for (const flags of [
+    { upstreamSuitePassed: false, newTestsPassed: true },
+    { upstreamSuitePassed: true, newTestsPassed: false },
+  ]) {
+    it(`refuses an approved consensus when ${JSON.stringify(flags)}`, () => {
+      const dir = makeTmpDir();
+      const report = {
+        ...VALID_REPORT,
+        differentialTest: { ...VALID_REPORT.differentialTest, ...flags },
+      };
+      const path = unsignedReportPath(dir, 42);
+      writeJson(path, report);
+      const res = runCleanRoomSigner({
+        reportArtifactPath: path,
+        headSha: 'a'.repeat(40),
+        workDir: dir,
+      });
+      expect(res.success).toBe(false);
+      if (!res.success) expect(res.error).toContain('sandbox tests did not pass');
+      removeFixtureDir(dir);
+    });
+  }
+});
+
 // ── Isolation invariant tests (AC#8) ─────────────────────────────────────────
 
 describe('detectSandboxArtifacts (AC#8)', () => {
