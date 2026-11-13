@@ -144,7 +144,7 @@ export interface HierarchyDeps {
   parentPid?: (pid: number) => number | null;
   /** Starts the detached reconcile scheduler and returns its pid. Absent: a real detached spawn. */
   spawnScheduler?: (file: string, args: readonly string[]) => number | undefined;
-  /** Sends SIGTERM to a pid when `restart --all` stops the scheduler or receiver. Absent: `process.kill`. */
+  /** Sends SIGTERM to a pid when `restart --all` stops the scheduler or receiver. Absent: the default SIGTERM via `process.kill`. */
   killProcess?: (pid: number) => void;
   /** Records orchestrator events (session started, context cleared). Absent: nothing is recorded. */
   emit?: EventEmitter;

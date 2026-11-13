@@ -47,7 +47,7 @@ import {
   ROLE_PROMPT,
   withProfile,
 } from './up.js';
-import { webhookDown, webhookUp } from './webhook.js';
+import { readState as readWebhookState, webhookDown, webhookUp } from './webhook.js';
 import { assertModel, assertPermissionMode, splitSessionName } from './validate.js';
 
 /** Options for `restart`. */
@@ -64,6 +64,8 @@ export interface RestartOptions {
   force?: boolean;
   /** Who takes the restart lock (default `callerName`, else `operator`). */
   lockHolder?: string;
+  /** `restart --all` already restarted the scheduler and receiver; skip the dispatch re-register. */
+  servicesHandled?: boolean;
 }
 
 /** The roster fields a restart or register changes. */
@@ -287,7 +289,7 @@ export async function hierarchyRestart(
     sessionPermissionMode: next.permissionMode,
   });
   for (const w of warnings) deps.log(`warning: ${w}`);
-  if (next.role === 'operator-dispatch') reRegisterDispatchServices(deps);
+  if (next.role === 'operator-dispatch' && !opts.servicesHandled) reRegisterDispatchServices(deps);
   deps.log(
     `restarted ${next.role} '${next.tmuxWindow}'${stop.forced ? ' (window closed after no exit)' : ''}; pid ${entry.pid} -> ${next.pid}`,
   );
@@ -340,8 +342,16 @@ function restartDispatchServices(deps: HierarchyDeps): void {
   }
   if (deps.env.AI_SDLC_WEBHOOK_SECRET) {
     try {
+      // Down removes the supervised forwarder and the state file; carry the recorded port and
+      // feed back into up so the receiver keeps its port and the forwarder is reinstalled.
+      const recorded = readWebhookState(deps.boardDir);
       webhookDown(deps, deps.killProcess);
-      webhookUp(deps);
+      webhookUp(
+        deps,
+        recorded ? String(recorded.port) : undefined,
+        undefined,
+        recorded?.feed?.agent ? { kind: recorded.feed.kind } : recorded?.feed,
+      );
     } catch (err) {
       deps.log(`warning: webhook receiver not restarted: ${(err as Error).message}`);
     }
@@ -393,6 +403,7 @@ export async function hierarchyRestartAll(
         {
           session: entry.name,
           afterTask: defer,
+          servicesHandled: true,
           ...(opts.waitSec === undefined ? {} : { waitSec: opts.waitSec }),
         },
         deps,

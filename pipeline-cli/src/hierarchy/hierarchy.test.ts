@@ -2731,6 +2731,30 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(logs.some((l) => l.includes('webhook starting'))).toBe(true);
   });
 
+  it('restart --all keeps the recorded webhook port and forwarder feed', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    deps.env = { AI_SDLC_WEBHOOK_SECRET: 's', HOME: path.join(boardDir, 'home') };
+    const baseRun = deps.run;
+    deps.run = (f, a, o) =>
+      f === 'gh' || f === 'launchctl'
+        ? { status: 0, stdout: 'o/r\n', stderr: '' }
+        : baseRun(f, a, o);
+    const stateFile = path.join(boardDir, 'webhook.json');
+    writeFileSync(
+      stateFile,
+      JSON.stringify({ pid: 7777, port: 4567, feed: { kind: 'gh-forward', agent: 'fwd' } }) + '\n',
+    );
+    const events: string[] = [];
+    deps.isAlive = (p) => p === 7777;
+    deps.killProcess = (pid) => events.push(`kill ${pid}`);
+    logs.length = 0;
+    await hierarchyRestartAll({}, deps);
+    expect(events).toContain('kill 7777');
+    expect(logs.some((l) => l.includes('webhook stopped (port 4567)'))).toBe(true);
+    expect(logs.some((l) => l.includes('webhook starting on 127.0.0.1:4567'))).toBe(true);
+    expect(logs.filter((l) => l.includes('warning: webhook receiver'))).toEqual([]);
+  });
+
   it('restart <name> leaves the scheduler alone; a scheduler failure warns only', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
     const n = schedulerSpawns.length;
