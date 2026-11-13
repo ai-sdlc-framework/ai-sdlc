@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1272
 title: 'cli-hierarchy restart --all restarts the reconcile scheduler and the webhook receiver'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-13'
 labels:
