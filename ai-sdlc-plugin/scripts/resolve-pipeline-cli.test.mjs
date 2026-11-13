@@ -912,3 +912,134 @@ describe('AISDLC-1024: AI_SDLC_PIPELINE_REF builds or reuses the pinned commit',
     rmSync(base, { recursive: true, force: true });
   });
 });
+
+describe('AISDLC-1271: installed runtime dependencies are checked against the plugin pins', () => {
+  const PINS = {
+    '@ai-sdlc/orchestrator': '0.42.0',
+    '@ai-sdlc/pipeline-cli': '0.42.0',
+    '@ai-sdlc/plugin-mcp-server': '0.9.2',
+  };
+
+  function setupDir(name, { pins = PINS, installed = {} } = {}) {
+    const dir = join(tmpDir, name);
+    createFakePipelineBin(join(dir, PIPELINE_CLI_REL));
+    createFakeMcpBundle(dir);
+    mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+    writeFileSync(
+      join(dir, '.claude-plugin/plugin.json'),
+      JSON.stringify({ name: 'ai-sdlc', version: '0.42.0', runtimeDependencies: pins }),
+    );
+    writeVersions(dir, installed);
+    writeFileSync(join(dir, 'node_modules/.ai-sdlc-installed'), '');
+    return dir;
+  }
+
+  function writeVersions(dir, installed) {
+    for (const [pkg, version] of Object.entries(installed)) {
+      mkdirSync(join(dir, 'node_modules', pkg), { recursive: true });
+      writeFileSync(
+        join(dir, 'node_modules', pkg, 'package.json'),
+        JSON.stringify({ name: pkg, version }),
+      );
+    }
+  }
+
+  function envFor(dir, extra = {}) {
+    const home = join(tmpDir, `home-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(home, { recursive: true });
+    return { CLAUDE_PLUGIN_DIR: dir, CLAUDE_PLUGIN_ROOT: '', HOME: home, ...extra };
+  }
+
+  // Installer stub: converges the named packages to the given versions.
+  function stubInstaller(dir, versions) {
+    const scriptsDir = join(dir, 'scripts');
+    mkdirSync(scriptsDir, { recursive: true });
+    const writes = Object.entries(versions)
+      .map(
+        ([pkg, v]) =>
+          `mkdir -p "$1/node_modules/${pkg}" && echo '{"name":"${pkg}","version":"${v}"}' > "$1/node_modules/${pkg}/package.json"`,
+      )
+      .join('\n');
+    writeFileSync(
+      join(scriptsDir, 'install-runtime-deps.sh'),
+      `#!/usr/bin/env bash\ntouch "$1/.heal-ran"\n${writes}\n`,
+    );
+  }
+
+  it('matching exact pins resolve on the fast path; no network command or installer runs', () => {
+    const dir = setupDir('pins-match', { installed: PINS });
+    stubInstaller(dir, {});
+    // Fake network tools that would leave a marker if spawned.
+    const binDir = join(tmpDir, 'pins-match-fakebin');
+    mkdirSync(binDir, { recursive: true });
+    for (const tool of ['npm', 'npx', 'curl', 'wget']) {
+      writeFileSync(join(binDir, tool), `#!/bin/sh\ntouch "${dir}/.network-used"\n`);
+      chmodSync(join(binDir, tool), 0o755);
+    }
+    const { exitCode, stdout } = runScript(
+      envFor(dir, { PATH: `${binDir}:${process.env.PATH}` }),
+      join(tmpDir, 'pins-match-cwd'),
+    );
+    assert.equal(exitCode, 0);
+    assert.equal(stdout, join(dir, PIPELINE_CLI_REL));
+    assert.equal(existsSync(join(dir, '.network-used')), false, 'no network command spawned');
+    assert.equal(existsSync(join(dir, '.heal-ran')), false, 'no self-heal when pins match');
+  });
+
+  it('a stale install with the sentinel self-heals to the pinned version', () => {
+    const dir = setupDir('pins-stale', {
+      installed: { ...PINS, '@ai-sdlc/pipeline-cli': '0.41.0', '@ai-sdlc/orchestrator': '0.41.0' },
+    });
+    stubInstaller(dir, { '@ai-sdlc/pipeline-cli': '0.42.0', '@ai-sdlc/orchestrator': '0.42.0' });
+    const { exitCode, stdout, stderr } = runScript(envFor(dir), join(tmpDir, 'pins-stale-cwd'));
+    assert.equal(exitCode, 0, stderr);
+    assert.equal(stdout, join(dir, PIPELINE_CLI_REL));
+    assert.equal(existsSync(join(dir, '.heal-ran')), true);
+    const v = JSON.parse(
+      readFileSync(join(dir, 'node_modules/@ai-sdlc/pipeline-cli/package.json'), 'utf-8'),
+    ).version;
+    assert.equal(v, '0.42.0');
+  });
+
+  it('exits non-zero naming package, installed version, pin and directory when the heal does not converge', () => {
+    const dir = setupDir('pins-stuck', {
+      installed: { ...PINS, '@ai-sdlc/pipeline-cli': '0.41.0' },
+    });
+    stubInstaller(dir, {}); // installs nothing
+    const { exitCode, stdout, stderr } = runScript(envFor(dir), join(tmpDir, 'pins-stuck-cwd'));
+    assert.equal(exitCode, 1);
+    assert.equal(stdout, '', 'no usable bin path is printed');
+    assert.match(
+      stderr,
+      /@ai-sdlc\/pipeline-cli is installed at version 0\.41\.0 but plugin\.json pins 0\.42\.0/,
+    );
+    assert.ok(stderr.includes(dir));
+  });
+
+  it('exits non-zero when the installer itself fails and the mismatch remains', () => {
+    const dir = setupDir('pins-installer-fails', {
+      installed: { ...PINS, '@ai-sdlc/orchestrator': '0.41.0' },
+    });
+    mkdirSync(join(dir, 'scripts'), { recursive: true });
+    writeFileSync(join(dir, 'scripts/install-runtime-deps.sh'), '#!/usr/bin/env bash\nexit 1\n');
+    const { exitCode, stdout, stderr } = runScript(
+      envFor(dir),
+      join(tmpDir, 'pins-installer-fails-cwd'),
+    );
+    assert.equal(exitCode, 1);
+    assert.equal(stdout, '');
+    assert.match(stderr, /@ai-sdlc\/orchestrator is installed at version 0\.41\.0/);
+  });
+
+  it('a range pin skips the local comparison and keeps the existing behaviour', () => {
+    const dir = setupDir('pins-range', {
+      pins: { ...PINS, '@ai-sdlc/pipeline-cli': '^0.42.0' },
+      installed: { ...PINS, '@ai-sdlc/pipeline-cli': '0.41.0' },
+    });
+    stubInstaller(dir, {});
+    const { exitCode, stdout } = runScript(envFor(dir), join(tmpDir, 'pins-range-cwd'));
+    assert.equal(exitCode, 0);
+    assert.equal(stdout, join(dir, PIPELINE_CLI_REL));
+    assert.equal(existsSync(join(dir, '.heal-ran')), false);
+  });
+});
