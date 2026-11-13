@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1270
 title: 'Verdict check: a verdict record counts only for the pull request it was issued for'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-13'
 labels:
