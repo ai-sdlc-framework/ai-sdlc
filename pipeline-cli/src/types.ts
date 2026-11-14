@@ -684,6 +684,8 @@ export interface PushAndPrOptions {
    * (committed or not) between the base and the branch.
    */
   untrusted?: boolean;
+  /** AISDLC-1275 - HEAD recorded at Step 3, before the developer ran; the untrusted check diffs against it. */
+  untrustedBaseSha?: string;
   /**
    * AISDLC-393 — GitHub issue number. REQUIRED when `sourceKind === 'gh-issue'`.
    * Used to format `(closes #N)` in the title and `Closes #N` in the body.

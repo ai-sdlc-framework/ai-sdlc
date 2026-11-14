@@ -1074,7 +1074,7 @@ describe('integration — executePipeline (full Step 0-13)', () => {
         .on(/^git worktree add/, ok())
         .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
         .on(
-          (c, a) => c === 'git' && a[0] === 'rev-parse' && a[1] === 'refs/ai-sdlc/untrusted-base',
+          (c, a) => c === 'git' && a[0] === 'rev-parse' && a[1] === 'HEAD',
           ok('c'.repeat(40) + '\n'),
         )
         .on(
@@ -1155,7 +1155,7 @@ describe('integration — executePipeline (full Step 0-13)', () => {
       const runner = new FakeRunner()
         .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
         .on(
-          (c, a) => c === 'git' && a[0] === 'rev-parse' && a[1] === 'refs/ai-sdlc/untrusted-base',
+          (c, a) => c === 'git' && a[0] === 'rev-parse' && a[1] === 'HEAD',
           ok('c'.repeat(40) + '\n'),
         )
         .on(

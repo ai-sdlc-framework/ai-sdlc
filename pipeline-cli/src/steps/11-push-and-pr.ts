@@ -539,6 +539,44 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
     (opts.logger ?? DEFAULT_LOGGER).warn(lease.message);
   }
 
+  // 0-pre. AISDLC-1275 - an untrusted run is checked for protected-path changes before any push.
+  //   The base is the SHA the pipeline recorded at Step 3, before the developer ran. It is never
+  //   fetched or read from git config (remote.origin.url/pushurl/insteadOf, branch names and
+  //   refs are all agent-writable). The check runs before the late rebase so the diff holds only
+  //   the agent's own changes; over-reporting fails closed.
+  if (opts.untrusted) {
+    let paths: string[];
+    try {
+      const baseSha = opts.untrustedBaseSha ?? '';
+      if (!/^[0-9a-f]{40,64}$/i.test(baseSha)) {
+        throw new Error('no base sha was recorded at Step 3');
+      }
+      paths = await findProtectedPathChanges({
+        worktreePath: opts.worktreePath,
+        baseRef: baseSha,
+        runner,
+      });
+    } catch (err) {
+      return {
+        pushed: false,
+        prUrl: null,
+        cause: UNTRUSTED_PROTECTED_CAUSE,
+        reason: `${UNTRUSTED_PROTECTED_CAUSE}: could not verify changed paths (${
+          err instanceof Error ? err.message : String(err)
+        }); push refused`,
+      };
+    }
+    if (paths.length > 0) {
+      return {
+        pushed: false,
+        prUrl: null,
+        cause: UNTRUSTED_PROTECTED_CAUSE,
+        protectedPaths: paths,
+        reason: `${UNTRUSTED_PROTECTED_CAUSE}: untrusted run changed protected path(s): ${paths.join(', ')}`,
+      };
+    }
+  }
+
   // 0. AISDLC-232 — Late-rebase: fetch + rebase origin/main before pushing.
   //    This catches conflicts that accumulated while the dev ran (Steps 5-10
   //    take 20-40 min; origin/main may have moved). Mechanical conflicts are
@@ -583,54 +621,6 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   // 0b. RFC-0061 Phase 2 (AISDLC-1172): no re-sign here. Step 11 produces no v6 envelope; the review
   //     verdict is a ref outside the branch and a late-rebase auto-resolve is judged by the
   //     clean-replay carry-forward rule at check time.
-
-  // 0b2. AISDLC-1275 - an untrusted run is checked for protected-path changes before any push.
-  if (opts.untrusted) {
-    let paths: string[];
-    try {
-      // The agent can rewrite origin/<target> and remote.origin.fetch, so fetch the base into a
-      // private ref with an explicit refspec and diff against its SHA.
-      const baseFetch = await runner(
-        'git',
-        ['fetch', 'origin', `+refs/heads/${targetBranch}:refs/ai-sdlc/untrusted-base`],
-        { cwd: opts.worktreePath, allowFailure: true },
-      );
-      if (baseFetch.code !== 0) {
-        throw new Error(`base fetch failed: ${baseFetch.stderr.trim() || 'unknown error'}`);
-      }
-      const baseRev = await runner('git', ['rev-parse', 'refs/ai-sdlc/untrusted-base'], {
-        cwd: opts.worktreePath,
-        allowFailure: true,
-      });
-      const baseSha = baseRev.stdout.trim();
-      if (baseRev.code !== 0 || !/^[0-9a-f]{40,64}$/i.test(baseSha)) {
-        throw new Error('could not resolve the base sha');
-      }
-      paths = await findProtectedPathChanges({
-        worktreePath: opts.worktreePath,
-        baseRef: baseSha,
-        runner,
-      });
-    } catch (err) {
-      return {
-        pushed: false,
-        prUrl: null,
-        cause: UNTRUSTED_PROTECTED_CAUSE,
-        reason: `${UNTRUSTED_PROTECTED_CAUSE}: could not verify changed paths (${
-          err instanceof Error ? err.message : String(err)
-        }); push refused`,
-      };
-    }
-    if (paths.length > 0) {
-      return {
-        pushed: false,
-        prUrl: null,
-        cause: UNTRUSTED_PROTECTED_CAUSE,
-        protectedPaths: paths,
-        reason: `${UNTRUSTED_PROTECTED_CAUSE}: untrusted run changed protected path(s): ${paths.join(', ')}`,
-      };
-    }
-  }
 
   // 0c. AISDLC-1019 - refuse the clobber signature before anything is pushed.
   const clobber = await checkClobberSignature(opts, targetBranch, runner);

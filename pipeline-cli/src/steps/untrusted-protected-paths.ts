@@ -16,6 +16,8 @@ export const UNTRUSTED_PROTECTED_PATHS: readonly (readonly string[])[] = [
   ['.claude'],
   ['.husky'],
   ['ai-sdlc-plugin', 'hooks'],
+  // The `.git/*` entries never match git-reported paths (git does not list .git); kept for
+  // parity with the hook's UNTRUSTED_PROTECTED list, which the parity test compares.
   ['.git', 'hooks'],
   ['.git', 'config'],
   ['.git', 'worktrees'],
@@ -37,7 +39,7 @@ export function isUntrustedProtectedPath(p: string): boolean {
 
 /**
  * List every protected path changed since `baseRef`: committed, staged, unstaged and untracked.
- * Callers must run this after the late rebase so the base is current.
+ * `baseRef` must be a SHA recorded before the agent ran.
  * Renames are split into delete + add so both ends are checked; mode changes and deletions
  * appear in `git diff --name-only`.
  */

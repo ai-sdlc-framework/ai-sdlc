@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { defaultRunner as realRunner } from '../runtime/exec.js';
 import {
   checkClobberSignature,
   composeBody,
@@ -436,29 +439,27 @@ describe('Step 11 — composeBody', () => {
 });
 
 describe('Step 11 — pushAndPr', () => {
+  const BASE = 'a'.repeat(40);
+  const untrustedOpts = () => ({
+    taskId: 'AISDLC-1',
+    workDir: tmp,
+    worktreePath: tmp,
+    branch: 'b',
+    task,
+    developerReturn: dev,
+    verdict: approved,
+    untrusted: true,
+    untrustedBaseSha: BASE,
+  });
+
   it('untrusted run with a protected-path change is not pushed (AISDLC-1275)', async () => {
     const fake = new FakeRunner()
-      .on(/^git fetch origin \+refs\/heads\/.*:refs\/ai-sdlc\/untrusted-base/, ok())
-      .on(
-        (c, a) => c === 'git' && a[0] === 'rev-parse' && a[1] === 'refs/ai-sdlc/untrusted-base',
-        ok('a'.repeat(40) + '\n'),
-      )
       .on(
         (c, a) => c === 'git' && a[0] === 'diff' && a.includes('-z'),
         ok('.ai-sdlc/agent-role.yaml\0src/a.ts\0.husky/pre-push\0'),
       )
       .on(/^git push/, ok());
-    const r = await pushAndPr({
-      taskId: 'AISDLC-1',
-      workDir: tmp,
-      worktreePath: tmp,
-      branch: 'b',
-      task,
-      developerReturn: dev,
-      verdict: approved,
-      untrusted: true,
-      runner: fake.toRunner(),
-    });
+    const r = await pushAndPr({ ...untrustedOpts(), runner: fake.toRunner() });
     expect(r.pushed).toBe(false);
     expect(r.cause).toBe('untrusted-protected-path');
     expect(r.protectedPaths).toEqual(['.ai-sdlc/agent-role.yaml', '.husky/pre-push']);
@@ -468,74 +469,71 @@ describe('Step 11 — pushAndPr', () => {
 
   it('untrusted run fails closed when the path listing fails (AISDLC-1275)', async () => {
     const fake = new FakeRunner()
-      .on(/^git fetch origin \+refs\/heads\/.*:refs\/ai-sdlc\/untrusted-base/, ok())
-      .on(
-        (c, a) => c === 'git' && a[0] === 'rev-parse' && a[1] === 'refs/ai-sdlc/untrusted-base',
-        ok('a'.repeat(40) + '\n'),
-      )
       .on((c, a) => c === 'git' && a[0] === 'diff' && a.includes('-z'), fail('boom'))
       .on(/^git push/, ok());
-    const r = await pushAndPr({
-      taskId: 'AISDLC-1',
-      workDir: tmp,
-      worktreePath: tmp,
-      branch: 'b',
-      task,
-      developerReturn: dev,
-      verdict: approved,
-      untrusted: true,
-      runner: fake.toRunner(),
-    });
+    const r = await pushAndPr({ ...untrustedOpts(), runner: fake.toRunner() });
     expect(r.pushed).toBe(false);
     expect(r.cause).toBe('untrusted-protected-path');
-    expect(r.reason).toContain('untrusted-protected-path');
     expect(fake.calls.some((c) => c.args[0] === 'push')).toBe(false);
   });
 
-  it('untrusted run diffs against a freshly fetched private base sha, not origin/main (AISDLC-1275)', async () => {
-    const sha = 'b'.repeat(40);
-    const fake = new FakeRunner()
-      .on(/^git fetch origin \+refs\/heads\/.*:refs\/ai-sdlc\/untrusted-base/, ok())
-      .on(
-        (c, a) => c === 'git' && a[0] === 'rev-parse' && a[1] === 'refs/ai-sdlc/untrusted-base',
-        ok(sha + '\n'),
-      )
-      .on(/^git push/, ok());
-    await pushAndPr({
-      taskId: 'AISDLC-1',
-      workDir: tmp,
-      worktreePath: tmp,
-      branch: 'b',
-      task,
-      developerReturn: dev,
-      verdict: approved,
-      untrusted: true,
-      runner: fake.toRunner(),
-    });
+  it('untrusted run diffs against the Step 3 base sha and never fetches or reads the remote (AISDLC-1275)', async () => {
+    const fake = new FakeRunner().on(/^git push/, ok());
+    await pushAndPr({ ...untrustedOpts(), runner: fake.toRunner() });
     const diffs = fake.calls.filter((c) => c.args[0] === 'diff' && c.args.includes('-z'));
     expect(diffs.length).toBeGreaterThan(0);
-    for (const d of diffs) expect(d.args).toContain(sha);
-    expect(fake.calls.some((c) => c.args.join(' ').includes('origin/main..'))).toBe(false);
+    for (const d of diffs) expect(d.args).toContain(BASE);
+    const fetchesBeforeCheck = fake.calls
+      .slice(
+        0,
+        fake.calls.findIndex((c) => c.args[0] === 'log'),
+      )
+      .filter((c) => c.args[0] === 'fetch' || c.args[0] === 'ls-remote');
+    expect(fetchesBeforeCheck).toEqual([]);
   });
 
-  it('untrusted run fails closed when the private base fetch fails (AISDLC-1275)', async () => {
-    const fake = new FakeRunner()
-      .on(/^git fetch origin \+refs\/heads\/.*:refs\/ai-sdlc\/untrusted-base/, fail('nope'))
-      .on(/^git push/, ok());
+  it('untrusted run fails closed when no base sha was recorded (AISDLC-1275)', async () => {
+    const fake = new FakeRunner().on(/^git push/, ok());
     const r = await pushAndPr({
-      taskId: 'AISDLC-1',
-      workDir: tmp,
-      worktreePath: tmp,
-      branch: 'b',
-      task,
-      developerReturn: dev,
-      verdict: approved,
-      untrusted: true,
+      ...untrustedOpts(),
+      untrustedBaseSha: '',
       runner: fake.toRunner(),
     });
     expect(r.pushed).toBe(false);
     expect(r.cause).toBe('untrusted-protected-path');
     expect(fake.calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+
+  it('a rewritten remote.origin.url, pushurl and insteadOf cannot hide a protected change (AISDLC-1275)', () => {
+    const sh = (cwd: string, ...args: string[]) =>
+      execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+    const repo = mkdtempSync(join(tmpdir(), 'rewrite-'));
+    sh(repo, 'init', '-q', '-b', 'main');
+    sh(repo, 'config', 'user.email', 't@t');
+    sh(repo, 'config', 'user.name', 't');
+    writeFileSync(join(repo, 'a.txt'), 'a');
+    sh(repo, 'add', '.');
+    sh(repo, 'commit', '-qm', 'base');
+    const base = sh(repo, 'rev-parse', 'HEAD');
+    mkdirSync(join(repo, '.ai-sdlc'));
+    writeFileSync(join(repo, '.ai-sdlc', 'agent-role.yaml'), 'x');
+    sh(repo, 'add', '.');
+    sh(repo, 'commit', '-qm', 'evil');
+    // The agent rewrites every agent-writable pointer so origin/main == HEAD.
+    sh(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    sh(repo, 'config', 'remote.origin.url', '.');
+    sh(repo, 'config', 'remote.origin.pushurl', 'https://github.com/x/y.git');
+    sh(repo, 'config', 'url../.insteadOf', 'https://github.com/x/y.git');
+    return pushAndPr({
+      ...untrustedOpts(),
+      worktreePath: repo,
+      untrustedBaseSha: base,
+      runner: realRunner,
+    }).then((r) => {
+      expect(r.pushed).toBe(false);
+      expect(r.cause).toBe('untrusted-protected-path');
+      expect(r.protectedPaths).toEqual(['.ai-sdlc/agent-role.yaml']);
+    });
   });
 
   it('trusted run does not run the protected-path check (AISDLC-1275)', async () => {

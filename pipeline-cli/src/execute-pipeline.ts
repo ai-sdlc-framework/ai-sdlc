@@ -231,6 +231,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
   let syntheticTaskFile: string | undefined;
   // AISDLC-730: set once an untrusted marker may exist, so `finally` removes it.
   let untrustedMarkerWritten = false;
+  let untrustedBaseSha = '';
 
   try {
     // Step 3
@@ -298,6 +299,13 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     // TRUSTED run first clears any stale marker left in this reused worktree, so a
     // previous untrusted run can never lock a trusted session out.
     if (untrustedReason) {
+      // AISDLC-1275 - record the base before the developer runs; agent-writable git state
+      // (remotes, refs, branches) can never move it.
+      const head = await (opts.runner ?? defaultRunner)('git', ['rev-parse', 'HEAD'], {
+        cwd: branch.worktreePath,
+        allowFailure: true,
+      });
+      untrustedBaseSha = head.code === 0 ? head.stdout.trim() : '';
       untrustedMarkerWritten = true;
       const marker = writeUntrustedMarker(branch.worktreePath, untrustedReason);
       if (!marker) {
@@ -662,7 +670,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       // AISDLC-393 — `'gh-issue'` formats the PR title with `(closes #N)` and
       // prepends `Closes #N` to the body so the issue auto-closes on merge.
       sourceKind,
-      ...(untrustedReason ? { untrusted: true } : {}),
+      ...(untrustedReason ? { untrusted: true, untrustedBaseSha } : {}),
       ...(opts.issueNumber !== undefined ? { issueNumber: opts.issueNumber } : {}),
     });
     if (!push.pushed) {
