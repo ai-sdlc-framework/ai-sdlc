@@ -44,7 +44,10 @@ const saved: Record<string, string | undefined> = {};
 function setSecrets(): void {
   for (const k of [...SECRETS, ...UNTRUSTED_ENV_ALLOWLIST]) saved[k] = process.env[k];
   for (const k of SECRETS) process.env[k] = 'sekret';
-  for (const k of UNTRUSTED_ENV_ALLOWLIST) process.env[k] = process.env[k] ?? 'v';
+  for (const k of UNTRUSTED_ENV_ALLOWLIST) {
+    if (k === 'TMPDIR' || k === 'TMP' || k === 'TEMP') process.env[k] = tmpdir();
+    else process.env[k] = process.env[k] ?? 'v';
+  }
 }
 afterEach(() => {
   for (const [k, v] of Object.entries(saved)) {
