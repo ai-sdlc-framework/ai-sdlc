@@ -210,6 +210,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
   let iterationsTotal = 0;
   let finalAggregated: AggregatedVerdict | null = null;
   let aborted: string | null = null;
+  let cause: PipelineResult['cause'];
   let worktreeCreated = false;
   // AISDLC-200 — `setupCompleted` flips true once Steps 3-4 BOTH succeed.
   // The best-effort worktree removal in the `finally` only fires when this
@@ -661,10 +662,16 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       // AISDLC-393 — `'gh-issue'` formats the PR title with `(closes #N)` and
       // prepends `Closes #N` to the body so the issue auto-closes on merge.
       sourceKind,
+      ...(untrustedReason ? { untrusted: true } : {}),
       ...(opts.issueNumber !== undefined ? { issueNumber: opts.issueNumber } : {}),
     });
     if (!push.pushed) {
-      if (push.rebaseConflict) {
+      if (push.cause) {
+        // AISDLC-1275 - the branch changes a protected path; nothing was pushed.
+        outcome = 'aborted';
+        cause = push.cause;
+        aborted = push.reason ?? push.cause;
+      } else if (push.rebaseConflict) {
         // AISDLC-232 — late-rebase hit semantic conflicts. Surface as a
         // dedicated outcome so the orchestrator tick can continue to the next
         // task without rolling back the dev's commits (the branch is intact
@@ -705,7 +712,10 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
               `${readyResult.stderr.trim() || readyResult.stdout.trim() || 'unknown error'}`,
           );
         }
-        const armResult = await armViaGate({ prNumber: prNum, runner, cwd: opts.workDir });
+        // AISDLC-1275 - an untrusted run is never armed; a human merges it.
+        const armResult = untrustedReason
+          ? { ok: true as const }
+          : await armViaGate({ prNumber: prNum, runner, cwd: opts.workDir });
         if (!armResult.ok) {
           logger.warn(
             `[ai-sdlc] Step 11 auto-promote: auto-merge arm refused (non-fatal): ${armResult.reason}`,
@@ -837,6 +847,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     iterations: iterationsTotal,
     finalVerdict: finalAggregated,
     notes: finalNotes,
+    ...(cause ? { cause } : {}),
   };
 }
 

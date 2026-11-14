@@ -219,6 +219,8 @@ export interface PipelineResult {
   iterations: number;
   finalVerdict: AggregatedVerdict | null;
   notes?: string;
+  /** AISDLC-1275 - machine-readable failure cause. */
+  cause?: 'untrusted-protected-path';
 }
 
 export type PipelineOutcome =
@@ -678,6 +680,11 @@ export interface PushAndPrOptions {
    */
   sourceKind?: 'backlog' | 'gh-issue';
   /**
+   * AISDLC-1275 - the run is untrusted: before the push, refuse any change to a protected path
+   * (committed or not) between the base and the branch.
+   */
+  untrusted?: boolean;
+  /**
    * AISDLC-393 — GitHub issue number. REQUIRED when `sourceKind === 'gh-issue'`.
    * Used to format `(closes #N)` in the title and `Closes #N` in the body.
    */
@@ -716,6 +723,9 @@ export interface PushAndPrResult {
   prUrl: string | null;
   /** When push fails non-fast-forward we abort cleanly with a reason. */
   reason?: string;
+  /** AISDLC-1275 - set with `protectedPaths` when an untrusted run changed a protected path. */
+  cause?: 'untrusted-protected-path';
+  protectedPaths?: string[];
   /**
    * AISDLC-232 — set when the late-rebase before push hit semantic conflicts
    * that could not be auto-resolved. The push was NOT attempted. The worktree

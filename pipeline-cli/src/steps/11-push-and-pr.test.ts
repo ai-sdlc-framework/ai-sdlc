@@ -436,6 +436,68 @@ describe('Step 11 — composeBody', () => {
 });
 
 describe('Step 11 — pushAndPr', () => {
+  it('untrusted run with a protected-path change is not pushed (AISDLC-1275)', async () => {
+    const fake = new FakeRunner()
+      .on(
+        (c, a) => c === 'git' && a[0] === 'diff' && a.includes('-z'),
+        ok('.ai-sdlc/agent-role.yaml\0src/a.ts\0.husky/pre-push\0'),
+      )
+      .on(/^git push/, ok());
+    const r = await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      untrusted: true,
+      runner: fake.toRunner(),
+    });
+    expect(r.pushed).toBe(false);
+    expect(r.cause).toBe('untrusted-protected-path');
+    expect(r.protectedPaths).toEqual(['.ai-sdlc/agent-role.yaml', '.husky/pre-push']);
+    expect(r.reason).toContain('.ai-sdlc/agent-role.yaml');
+    expect(fake.calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+
+  it('untrusted run fails closed when the path listing fails (AISDLC-1275)', async () => {
+    const fake = new FakeRunner()
+      .on((c, a) => c === 'git' && a[0] === 'diff' && a.includes('-z'), fail('boom'))
+      .on(/^git push/, ok());
+    const r = await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      untrusted: true,
+      runner: fake.toRunner(),
+    });
+    expect(r.pushed).toBe(false);
+    expect(r.reason).toContain('untrusted-protected-path');
+    expect(fake.calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+
+  it('trusted run does not run the protected-path check (AISDLC-1275)', async () => {
+    const fake = new FakeRunner()
+      .on(/^git push -u origin/, ok())
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/1\n'));
+    await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      runner: fake.toRunner(),
+    });
+    expect(fake.calls.some((c) => c.args[0] === 'ls-files')).toBe(false);
+  });
+
   it('happy path returns prUrl', async () => {
     const fake = new FakeRunner()
       .on(/^git push -u origin/, ok())

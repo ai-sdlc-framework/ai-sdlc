@@ -46,6 +46,10 @@ import {
   parsePipelineBacklogKey,
   resolveTargetBranch,
 } from './02-compute-branch.js';
+import {
+  findProtectedPathChanges,
+  UNTRUSTED_PROTECTED_CAUSE,
+} from './untrusted-protected-paths.js';
 import { landPrep } from './land-prep.js';
 import { ensureWorkspaceBuilt } from './ensure-workspace-built.js';
 import { loadVerification } from './verification-config.js';
@@ -579,6 +583,35 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   // 0b. RFC-0061 Phase 2 (AISDLC-1172): no re-sign here. Step 11 produces no v6 envelope; the review
   //     verdict is a ref outside the branch and a late-rebase auto-resolve is judged by the
   //     clean-replay carry-forward rule at check time.
+
+  // 0b2. AISDLC-1275 - an untrusted run is checked for protected-path changes before any push.
+  if (opts.untrusted) {
+    let paths: string[];
+    try {
+      paths = await findProtectedPathChanges({
+        worktreePath: opts.worktreePath,
+        baseRef: `origin/${targetBranch}`,
+        runner,
+      });
+    } catch (err) {
+      return {
+        pushed: false,
+        prUrl: null,
+        reason: `${UNTRUSTED_PROTECTED_CAUSE}: could not verify changed paths (${
+          err instanceof Error ? err.message : String(err)
+        }); push refused`,
+      };
+    }
+    if (paths.length > 0) {
+      return {
+        pushed: false,
+        prUrl: null,
+        cause: UNTRUSTED_PROTECTED_CAUSE,
+        protectedPaths: paths,
+        reason: `${UNTRUSTED_PROTECTED_CAUSE}: untrusted run changed protected path(s): ${paths.join(', ')}`,
+      };
+    }
+  }
 
   // 0c. AISDLC-1019 - refuse the clobber signature before anything is pushed.
   const clobber = await checkClobberSignature(opts, targetBranch, runner);
