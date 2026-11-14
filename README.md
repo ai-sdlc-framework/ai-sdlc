@@ -92,7 +92,7 @@ Full setup, runner configuration, agent-runner reference, and the session-hierar
 
 → [Getting Started](https://ai-sdlc.io/docs/getting-started?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=body-docs-getting-started) · [Tutorials](https://ai-sdlc.io/docs/tutorials?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=body-docs-tutorials) · [API Reference](https://ai-sdlc.io/docs/api-reference?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=body-docs-api-reference) · [Operations Runbooks](docs/operations/)
 
-The framework is agent-agnostic — Claude Code, Codex, Cursor, Copilot, Aider, or any OpenAI-compatible API. See the [Agent Runner Reference](https://ai-sdlc.io/docs/api-reference/runners?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=body-docs-api-reference-runners).
+The framework is agent-agnostic — Claude Code, Codex, Cursor, Copilot, Kiro, Aider, or any OpenAI-compatible API. See the [Agent Runner Reference](https://ai-sdlc.io/docs/api-reference/runners?utm_source=github&utm_medium=readme&utm_campaign=ai-sdlc-repo&utm_content=body-docs-api-reference-runners).
 
 ---
 
