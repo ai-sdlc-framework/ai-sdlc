@@ -145,10 +145,15 @@ An untrusted run (a `gh-issue` or `rework-pr` source, AISDLC-1277) starts its de
 
 Authentication: the child has no `ANTHROPIC_API_KEY`, no `CLAUDE_CONFIG_DIR` and an empty `HOME`, so it cannot reach the subscription login or plugin and hook config kept under `~/.claude`. This mode is credential-less by design; a real untrusted run that needs a model login must be given one by a separate, operator-approved mechanism (a dedicated low-privilege config directory), which this task does not add. An issue-sourced run never uses the in-session Agent path: `runGhIssue` stops when `claude` is not on PATH and otherwise runs the shell spawner (tested in `next-step/gh-issue.test.ts`).
 
-Three exposures remain, because the agent still runs as the maintainer's OS user:
+Container isolation (AISDLC-1278): when the spawner is built through `defaultSpawner` (the path `gh-issue` and `rework-pr` use), the untrusted agent runs in a Docker container (`runtime/untrusted-container.ts`) that sees ONE host path, the task worktree, mounted at `/workspace`. It has no home, SSH socket or Docker socket mount, runs from a digest-pinned image (`AI_SDLC_UNTRUSTED_AGENT_IMAGE` overrides; it must provide the `claude` CLI), and is attached only to a per-run `--internal` network whose single peer is a relay to the pipeline's model proxy. The proxy binds loopback only (asserted) and holds the real credential; the container env carries the proxy address and session token but no model credential and no `*_TOKEN`, `*_KEY` or `*_SECRET`. With no container runtime the run stops before any agent starts and the error names `docker`. The container, relay, network and proxy are removed after every run, success or failure. A trusted run is unchanged.
 
-1. **Absolute-path reads.** The agent can read any file the user can read by absolute path (for example `/Users/<name>/.ssh/...`).
-2. **Network.** The agent can reach the network, so it can send data out.
-3. **Restoring the real `HOME`.** `USER` is inherited and the allowed `pnpm test|build|lint|format` scripts run repository code, which can set `HOME` back to the real directory and reach keychain-backed `gh` or git credentials. The allowlist excludes `node` and `npx` directly, but a package script is still arbitrary code.
+The pipeline stays on the host. Steps 10 and 11 run every `git` call with `core.hooksPath` (main checkout), `core.fsmonitor=false`, `core.sshCommand=ssh` and `protocol.ext.allow=never` overridden on the command line, so worktree config the agent set cannot run agent-chosen code; Step 11 still pushes and opens the PR with the pipeline's credentials. Because the worktree's `.git` points outside the one mount, git write commands do not work inside the container; Step 10 stages and commits on the host.
 
-Only OS-level isolation (a container with no host mounts and no network, as the reviewer sandbox has) closes both. That layer is a separate decision.
+Dependency limit: a run whose diff (against `origin/main`, committed or not) changes a dependency manifest or lockfile (`package.json`, `pnpm-lock.yaml`, `requirements*.txt`, `Cargo.toml`, `go.mod` and similar) stops before Step 10 with a message naming the file.
+
+Limits that remain:
+
+1. **Worktree contents.** The agent can read and change everything in the worktree, including repository secrets committed there.
+2. **Model proxy.** The proxy forwards model requests with the pipeline's credential, within its rate and size caps; the agent can spend that budget. The proxy runs in agent mode for these sessions (tool-use and review-shape gates are skipped).
+3. **Host git filters.** A `filter.*` driver set in worktree config plus `.gitattributes` is not covered by the command-line overrides.
+4. **Without the container option.** A spawner built directly, without `untrustedContainer`, keeps the AISDLC-1277 host behaviour (env isolation only) and the exposures it lists: absolute-path reads, open network, and restoring the real `HOME` through package scripts.

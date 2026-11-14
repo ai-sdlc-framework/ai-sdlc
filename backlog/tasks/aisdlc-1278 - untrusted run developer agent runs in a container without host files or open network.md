@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1278
 title: 'Untrusted run: the developer agent runs in a container without host files or open network'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-13'
 labels:

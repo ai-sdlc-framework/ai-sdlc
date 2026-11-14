@@ -48,6 +48,8 @@ import {
   withUntrustedEnv,
   writeUntrustedMarker,
 } from './runtime/untrusted-env.js';
+import { assertNoDependencyChange, hardenGitRunner } from './runtime/untrusted-container.js';
+import { defaultRunner as defaultGitRunner } from './runtime/exec.js';
 import { buildJudgmentContext, getMergeBaseDiff } from './judgment/index.js';
 import { routingArtifactsDir, routingRecordable } from './routing/artifacts-dir.js';
 import { recordReviewerSetOutcome } from './steps/reviewer-set-comparison.js';
@@ -598,6 +600,13 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       });
     }
 
+    // AISDLC-1278: an untrusted run may not change dependencies, and every host git call
+    // from here on ignores worktree config that would run agent-chosen code.
+    const hostRunner = untrustedReason
+      ? hardenGitRunner(opts.runner ?? defaultGitRunner, opts.workDir)
+      : opts.runner;
+    if (untrustedReason) await assertNoDependencyChange(hostRunner!, branch.worktreePath);
+
     // Step 10 — finalize (skipped when needs-human-attention)
     await finalizeTask({
       taskId: opts.taskId,
@@ -607,7 +616,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       developerReturn: loop.finalDeveloperReturn,
       verdict: loop.finalVerdict,
       iterations: loop.iterations,
-      runner: opts.runner,
+      runner: hostRunner,
       skipCommit: opts.skipFinalizeCommit,
       // AISDLC-393 — `'gh-issue'` skips the backlog file move/patch but still
       // signs the attestation envelope + commits it as a chore so push lands
@@ -658,7 +667,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       ...(loop.iterations <= 1 && initialVerdict.groundingAnnotations
         ? { groundingAnnotations: initialVerdict.groundingAnnotations }
         : {}),
-      runner: opts.runner,
+      runner: hostRunner,
       ...(resume || fixesPr !== undefined ? { resume: true } : {}),
       ...(fixesPr !== undefined ? { fixesPr } : {}),
       ...((resume || fixesPr !== undefined) && setup.remoteSha

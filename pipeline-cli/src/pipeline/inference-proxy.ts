@@ -152,6 +152,13 @@ export interface InferenceProxyConfig {
    * with `--add-host=inference.local:<host-ip>`).
    */
   bindAddress?: string;
+  /**
+   * AISDLC-1278: serve a developer-agent session. The agent's calls carry tool
+   * definitions and are not review-shaped, so the tool-use and review-shape
+   * gates are skipped. The path allowlist, session token, rate and size caps
+   * and credential redaction still apply. Default false (reviewer sessions).
+   */
+  agentSession?: boolean;
 }
 
 /** Result returned by `proxy.start()`. */
@@ -714,12 +721,12 @@ export class InferenceProxy {
       // will reject it as non-review-shaped (parsedBody remains null → false).
     }
 
-    if (detectToolUse(parsedBody)) {
+    if (this.config.agentSession !== true && detectToolUse(parsedBody)) {
       this.sendDenial(res, 422, 'tool-use-refused', req, rawBody.length);
       return;
     }
 
-    if (!isReviewShapedCall(parsedBody)) {
+    if (this.config.agentSession !== true && !isReviewShapedCall(parsedBody)) {
       // SECURITY: Any call that does not conform to the review shape (JSON object
       // with a `messages` array) is rejected 422. This includes non-JSON bodies,
       // missing `messages`, and any other structural deviation. Without this gate,
