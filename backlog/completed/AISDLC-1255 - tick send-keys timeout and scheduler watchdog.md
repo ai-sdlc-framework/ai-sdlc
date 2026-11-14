@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1255
 title: 'The hierarchy tick bounds every tmux child with a timeout and the reconcile scheduler reports and replaces a tick older than its interval'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-09'
 labels:
@@ -38,9 +38,34 @@ dispatchableReason: 'DRAFT, awaiting operator go (peer report from ai-sdlc-io-pl
 
 ## Acceptance Criteria
 
-- [ ] AC-1: the command runner used by hierarchy tmux calls accepts a timeout; `sendExit`, `confirmExitDialog` and the brief/notify `send-keys` calls pass one (default 5s, env-overridable); a timed-out call returns a non-zero status with `timedOut: true`; unit tests with a fake runner.
-- [ ] AC-2: when `sendExit` times out or the pane does not exist, the retire path falls back to `killPane` (then `kill-session`) and the tick result names the fallback; test.
-- [ ] AC-3: the reconcile scheduler persists `{pid, startedAt}` of the running tick in `reconcile-scheduler.json`; a tick older than `tickStallMinutes` (default 2x interval) is killed (SIGTERM then SIGKILL), a `tick-stalled` event is appended to `board-events.jsonl`, and the next tick starts; test with a fake clock and process table.
-- [ ] AC-4: `cli-hierarchy status` prints `scheduler: STALLED (last tick <age>)` when `last tick` exceeds the interval and the scheduler pid is alive; `up` otherwise; test.
-- [ ] AC-5: `docs/operations/cli-hierarchy.md` documents the timeout, the watchdog and the status line, with the manual recovery (`kill <child pid>`).
-- [ ] AC-6: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] AC-1: the command runner used by hierarchy tmux calls accepts a timeout; `sendExit`, `confirmExitDialog` and the brief/notify `send-keys` calls pass one (default 5s, env-overridable); a timed-out call returns a non-zero status with `timedOut: true`; unit tests with a fake runner.
+- [x] AC-2: when `sendExit` times out or the pane does not exist, the retire path falls back to `killPane` (then `kill-session`) and the tick result names the fallback; test.
+- [x] AC-3: the reconcile scheduler persists `{pid, startedAt}` of the running tick in `reconcile-scheduler.json`; a tick older than `tickStallMinutes` (default 2x interval) is killed (SIGTERM then SIGKILL), a `tick-stalled` event is appended to `board-events.jsonl`, and the next tick starts; test with a fake clock and process table.
+- [x] AC-4: `cli-hierarchy status` prints `scheduler: STALLED (last tick <age>)` when `last tick` exceeds the interval and the scheduler pid is alive; `up` otherwise; test.
+- [x] AC-5: `docs/operations/cli-hierarchy.md` documents the timeout, the watchdog and the status line, with the manual recovery (`kill <child pid>`).
+- [x] AC-6: `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Final Summary
+
+## Summary
+Addressed all round-1 review findings. `status` now reports STALLED only when a live tick has run past the stall limit, or when work is queued and the last tick is older than the limit. An idle scheduler with an empty queue shows `up`. The watchdog and `status` share one stall limit, `hostStallMs`. The watchdog signals only the negative pid (the tick's own process group), with no lone-pid fallback, so a reused pid is never signalled. The reap test now queues work and checks that the next tick starts.
+
+## Changes
+- pipeline-cli/src/hierarchy/host-liveness.ts
+- pipeline-cli/src/hierarchy/reconcile-scheduler.ts
+- pipeline-cli/src/hierarchy/hierarchy.test.ts
+- pipeline-cli/src/hierarchy/tick-watchdog.test.ts
+
+## Design decisions
+Resumed round: committed only, no push (the orchestrator pushes). The first commit attempt failed commitlint on header length, so I retried with a shorter subject. If a custom `intervalMs` is passed to `startHostWatch`, `status` cannot see it. Production never passes one.
+
+## Verification
+- `pnpm build` — passed (dashboard build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (240 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
