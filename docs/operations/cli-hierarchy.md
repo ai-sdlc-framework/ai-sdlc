@@ -635,6 +635,10 @@ write; no other entry, window or inflight manifest is touched. Restarting
 re-registers the reconcile scheduler and, when `AI_SDLC_WEBHOOK_SECRET` is set, the webhook
 receiver. A window that is already gone (a crash) is simply started.
 
+After the write, `restart` reads the roster back and compares the entry's `paneId`, `pid` and
+`startedAt` with the new tmux window; any mismatch fails the command loudly (naming each field)
+instead of leaving a stale pane that `send` would later refuse (AISDLC-1258).
+
 `--all` restarts dispatch, then every idle executor, now; each busy executor is restarted at
 its task boundary, as `--after-task` does. The planner is left alone. `--all` also stops and
 starts the reconcile scheduler and, when `AI_SDLC_WEBHOOK_SECRET` is set, the webhook receiver

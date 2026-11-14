@@ -145,6 +145,34 @@ function replaceEntry(deps: HierarchyDeps, name: string, next: RosterEntry | nul
   });
 }
 
+/**
+ * AISDLC-1258: after the roster write, read it back and compare with the new tmux window.
+ * @throws naming each field that disagrees, so a stale pane never survives silently.
+ */
+function verifyRestarted(deps: HierarchyDeps, next: RosterEntry): void {
+  const recorded = readRosterChecked(deps.boardDir).roster.sessions.find(
+    (e) => e.name === next.name,
+  );
+  const pane = paneInfo(deps.run, next.tmuxSession, next.tmuxWindow);
+  const problems: string[] = [];
+  if (!recorded) problems.push('the entry is missing from the roster');
+  else {
+    if (!pane.paneId) problems.push('the new tmux pane cannot be read');
+    else if (recorded.paneId !== pane.paneId) {
+      problems.push(`paneId ${recorded.paneId || '(empty)'} but the new window is ${pane.paneId}`);
+    }
+    if (recorded.pid !== next.pid) problems.push(`pid ${recorded.pid} but started ${next.pid}`);
+    if (recorded.startedAt !== next.startedAt) {
+      problems.push(`startedAt ${recorded.startedAt} but started ${next.startedAt}`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `restart of '${next.name}' left the roster inconsistent with its tmux window: ${problems.join('; ')}. Run cli-hierarchy register ${next.name} (executors) or cli-hierarchy down --role ${next.name} then up`,
+    );
+  }
+}
+
 /** True when `pid` is `ancestor` or one of its descendants. */
 function isSelfOrDescendant(
   pid: number,
@@ -281,6 +309,7 @@ export async function hierarchyRestart(
   }
   const next = launched.entry;
   replaceEntry(deps, entry.name, next);
+  verifyRestarted(deps, next);
   deps.emit?.({
     type: 'HierarchySessionStarted',
     sessionName: next.name,
