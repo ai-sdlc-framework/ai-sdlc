@@ -140,14 +140,18 @@ describe('untrusted spawn isolation (AISDLC-1277)', () => {
     const argv = new ShellClaudePSpawner().buildArgv(untrustedOpts);
     expect(argv).not.toContain('bypassPermissions');
     expect(argv[argv.indexOf('--permission-mode') + 1]).toBe('acceptEdits');
-    expect(argv).toContain('--allowedTools');
-    expect(argv[argv.indexOf('--allowedTools') + 1]).toContain('Edit');
+    // Single-token form: the variadic --allowedTools must not swallow the prompt.
+    const tools = argv.find((a) => a.startsWith('--allowedTools='));
+    expect(tools).toContain('Edit');
+    expect(argv).not.toContain('--allowedTools');
+    expect(argv[argv.length - 1]).toBe(untrustedOpts.prompt);
+    expect(argv.indexOf(tools as string)).toBe(argv.length - 2);
   });
 
   it('a trusted spawn is unchanged', () => {
     const argv = new ShellClaudePSpawner().buildArgv({ ...untrustedOpts, env: undefined });
     expect(argv[argv.indexOf('--permission-mode') + 1]).toBe('bypassPermissions');
-    expect(argv).not.toContain('--allowedTools');
+    expect(argv.some((a) => a.startsWith('--allowedTools'))).toBe(false);
     expect(isUntrustedSpawnEnv({ AI_SDLC_UNTRUSTED_RUN: '0' })).toBe(false);
   });
 });

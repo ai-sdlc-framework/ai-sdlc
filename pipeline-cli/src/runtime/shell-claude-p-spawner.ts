@@ -204,7 +204,7 @@ export class ShellClaudePSpawner implements SubagentSpawner {
       untrusted && this.permissionMode === 'bypassPermissions'
         ? UNTRUSTED_PERMISSION_MODE
         : this.permissionMode;
-    const toolsArgv = untrusted ? ['--allowedTools', UNTRUSTED_ALLOWED_TOOLS.join(',')] : [];
+    const toolsArgv = untrusted ? [`--allowedTools=${UNTRUSTED_ALLOWED_TOOLS.join(',')}`] : [];
     return [
       '--print',
       '--output-format',
