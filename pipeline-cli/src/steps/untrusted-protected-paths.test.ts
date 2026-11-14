@@ -65,6 +65,18 @@ describe('findProtectedPathChanges (AISDLC-1275)', () => {
     expect(await check()).toEqual(['.husky/pre-push']);
   });
 
+  it('refuses a protected change committed then restored in the working tree', async () => {
+    put('.ai-sdlc/agent-role.yaml', 'evil\n');
+    commit('evil');
+    git('checkout', 'base', '--', '.ai-sdlc/agent-role.yaml');
+    expect(await check()).toEqual(['.ai-sdlc/agent-role.yaml']);
+  });
+
+  it('matches protected segments case-insensitively', () => {
+    expect(isUntrustedProtectedPath('.AI-SDLC/x.yaml')).toBe(true);
+    expect(isUntrustedProtectedPath('.GitHub/Workflows/ci.yml')).toBe(true);
+  });
+
   it('refuses a rename out of a protected directory', async () => {
     git('mv', '.github/workflows/ci.yml', 'src/ci.yml');
     commit();
@@ -106,7 +118,7 @@ describe('findProtectedPathChanges (AISDLC-1275)', () => {
   it('throws when git fails (fail closed)', async () => {
     await expect(
       findProtectedPathChanges({ worktreePath: repo, baseRef: 'nope', runner: defaultRunner }),
-    ).rejects.toThrow(/git diff failed/);
+    ).rejects.toThrow(/git log failed/);
   });
 });
 

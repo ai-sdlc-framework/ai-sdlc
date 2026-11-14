@@ -597,6 +597,7 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
       return {
         pushed: false,
         prUrl: null,
+        cause: UNTRUSTED_PROTECTED_CAUSE,
         reason: `${UNTRUSTED_PROTECTED_CAUSE}: could not verify changed paths (${
           err instanceof Error ? err.message : String(err)
         }); push refused`,

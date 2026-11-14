@@ -25,7 +25,11 @@ export const UNTRUSTED_PROTECTED_CAUSE = 'untrusted-protected-path';
 
 /** True when a repo-relative path contains a protected segment sequence. */
 export function isUntrustedProtectedPath(p: string): boolean {
-  const segs = p.split('/').filter((s) => s !== '' && s !== '.');
+  // Case-insensitive: macOS/Windows checkouts are case-insensitive, so `.AI-SDLC/` is the same dir.
+  const segs = p
+    .toLowerCase()
+    .split('/')
+    .filter((s) => s !== '' && s !== '.');
   return UNTRUSTED_PROTECTED_PATHS.some((seq) =>
     segs.some((_, i) => seq.every((part, j) => segs[i + j] === part)),
   );
@@ -33,6 +37,7 @@ export function isUntrustedProtectedPath(p: string): boolean {
 
 /**
  * List every protected path changed since `baseRef`: committed, staged, unstaged and untracked.
+ * Callers must run this after the late rebase so the base is current.
  * Renames are split into delete + add so both ends are checked; mode changes and deletions
  * appear in `git diff --name-only`.
  */
@@ -48,7 +53,19 @@ export async function findProtectedPathChanges(opts: {
     }
     return r.stdout.split('\0').filter((s) => s !== '');
   };
+  // Every path touched by any commit in base..HEAD (the push sends commits, not the working tree,
+  // so a protected change committed then restored on disk must still be caught), plus the dirty tree.
+  const committed = await run([
+    'log',
+    '--name-only',
+    '--no-renames',
+    '--format=',
+    '-z',
+    `${opts.baseRef}..HEAD`,
+  ]);
   const changed = await run(['diff', '--name-only', '--no-renames', '-z', opts.baseRef]);
   const untracked = await run(['ls-files', '--others', '--exclude-standard', '-z']);
-  return [...new Set([...changed, ...untracked])].filter(isUntrustedProtectedPath).sort();
+  return [...new Set([...committed, ...changed, ...untracked])]
+    .filter(isUntrustedProtectedPath)
+    .sort();
 }
