@@ -1,6 +1,7 @@
 /** AISDLC-1278 — untrusted developer agent runs in a container. */
 import { describe, expect, it } from 'vitest';
 import { EventEmitter } from 'node:events';
+import { createServer } from 'node:http';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -389,7 +390,9 @@ describe.skipIf(!hasDocker || process.env.AI_SDLC_SANDBOX_INTEGRATION_TESTS !== 
       return status;
     };
     const stubProxy = async (): Promise<ProxyHandle> => {
-      const srv = createServer((_q, r) => r.end('ok')).listen(0, '127.0.0.1');
+      const srv = createServer((_q, r) => {
+        r.end('ok');
+      }).listen(0, '127.0.0.1');
       await new Promise((ok) => srv.once('listening', ok));
       const port = (srv.address() as { port: number }).port;
       return {
