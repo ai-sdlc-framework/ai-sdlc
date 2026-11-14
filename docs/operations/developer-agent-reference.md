@@ -143,9 +143,12 @@ Force-push is `--force-with-lease` only (allowed by default via `allowForcePush:
 
 An untrusted run (a `gh-issue` or `rework-pr` source, AISDLC-1277) starts its developer agent through `ShellClaudePSpawner` with an allowlisted environment (`PATH`, locale, `TERM`, `TMPDIR`, `USER`, `LOGNAME` and the `AI_SDLC_*` signal keys), a throwaway empty `HOME` removed when the run ends, `GIT_CONFIG_NOSYSTEM=1`, a non-bypass permission mode (`acceptEdits`) and an explicit `--allowedTools` list. The pipeline process keeps its own credentials and does the push and PR (Step 11).
 
-Two exposures remain, because the agent still runs as the maintainer's OS user:
+Authentication: the child has no `ANTHROPIC_API_KEY`, no `CLAUDE_CONFIG_DIR` and an empty `HOME`, so it cannot reach the subscription login or plugin and hook config kept under `~/.claude`. This mode is credential-less by design; a real untrusted run that needs a model login must be given one by a separate, operator-approved mechanism (a dedicated low-privilege config directory), which this task does not add. An issue-sourced run never uses the in-session Agent path: `runGhIssue` stops when `claude` is not on PATH and otherwise runs the shell spawner (tested in `next-step/gh-issue.test.ts`).
+
+Three exposures remain, because the agent still runs as the maintainer's OS user:
 
 1. **Absolute-path reads.** The agent can read any file the user can read by absolute path (for example `/Users/<name>/.ssh/...`).
 2. **Network.** The agent can reach the network, so it can send data out.
+3. **Restoring the real `HOME`.** `USER` is inherited and the allowed `pnpm test|build|lint|format` scripts run repository code, which can set `HOME` back to the real directory and reach keychain-backed `gh` or git credentials. The allowlist excludes `node` and `npx` directly, but a package script is still arbitrary code.
 
 Only OS-level isolation (a container with no host mounts and no network, as the reviewer sandbox has) closes both. That layer is a separate decision.

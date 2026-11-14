@@ -124,9 +124,10 @@ export const UNTRUSTED_ALLOWED_TOOLS: readonly string[] = Object.freeze([
   'Bash(git log:*)',
   'Bash(git add:*)',
   'Bash(git commit:*)',
-  'Bash(pnpm:*)',
-  'Bash(npx:*)',
-  'Bash(node:*)',
+  'Bash(pnpm test:*)',
+  'Bash(pnpm build:*)',
+  'Bash(pnpm lint:*)',
+  'Bash(pnpm format:*)',
   'Bash(ls:*)',
 ]);
 
