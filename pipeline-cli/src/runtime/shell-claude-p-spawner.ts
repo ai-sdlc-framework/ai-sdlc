@@ -77,6 +77,15 @@ import {
 } from '../types.js';
 import { DEFAULT_ROLE_MODELS } from '../routing/default-table.js';
 import { resolveModel } from '../routing/resolve-model.js';
+import {
+  UNTRUSTED_ALLOWED_TOOLS,
+  UNTRUSTED_PERMISSION_MODE,
+  buildUntrustedChildEnv,
+  isUntrustedSpawnEnv,
+} from './untrusted-env.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /**
  * Subset of `child_process.spawn` we depend on. Tests inject a fake to assert
@@ -189,21 +198,46 @@ export class ShellClaudePSpawner implements SubagentSpawner {
   buildArgv(opts: SpawnOpts): string[] {
     const model = this.modelFor(opts);
     const modelArgv = model ? ['--model', model] : [];
+    const untrusted = isUntrustedSpawnEnv(opts.env);
+    // AISDLC-1277: an untrusted spawn never runs in bypass mode and names its tools.
+    const mode =
+      untrusted && this.permissionMode === 'bypassPermissions'
+        ? UNTRUSTED_PERMISSION_MODE
+        : this.permissionMode;
+    const toolsArgv = untrusted ? [`--allowedTools=${UNTRUSTED_ALLOWED_TOOLS.join(',')}`] : [];
     return [
       '--print',
       '--output-format',
       'json',
       '--permission-mode',
-      this.permissionMode,
+      mode,
       '--agent',
       opts.type,
       ...modelArgv,
       ...this.extraArgs,
+      ...toolsArgv,
       opts.prompt,
     ];
   }
 
-  private spawn1(opts: SpawnOpts): Promise<SubagentResult> {
+  /**
+   * AISDLC-1277: an untrusted spawn gets an allowlisted env and a throwaway
+   * HOME that is removed when the run ends, on success and on failure.
+   */
+  private async spawn1(opts: SpawnOpts): Promise<SubagentResult> {
+    if (!isUntrustedSpawnEnv(opts.env)) return this.run(opts, undefined);
+    const home = mkdtempSync(join(tmpdir(), 'ai-sdlc-untrusted-home-'));
+    try {
+      return await this.run(opts, buildUntrustedChildEnv(process.env, opts.env, home));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  private run(
+    opts: SpawnOpts,
+    isolatedEnv: NodeJS.ProcessEnv | undefined,
+  ): Promise<SubagentResult> {
     const start = Date.now();
     const argv = this.buildArgv(opts);
     const timeoutMs = opts.timeout ?? this.defaultTimeoutMs;
@@ -213,7 +247,11 @@ export class ShellClaudePSpawner implements SubagentSpawner {
       try {
         child = this.processSpawner(this.binary, argv, {
           cwd: opts.cwd,
-          ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
+          ...(isolatedEnv
+            ? { env: isolatedEnv }
+            : opts.env
+              ? { env: { ...process.env, ...opts.env } }
+              : {}),
         });
       } catch (err) {
         const wallClockMs = Date.now() - start;

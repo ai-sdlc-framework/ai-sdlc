@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1277
 title: 'Untrusted run: the developer agent starts without host credentials and not in bypass mode'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-13'
 labels:
