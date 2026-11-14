@@ -443,11 +443,11 @@ against that same port; `webhook status` prints the full target URL (`target htt
 `--port` and `AI_SDLC_WEBHOOK_PORT` pin the port and win over selection (a held pinned port is an error). When no
 candidate is free, or the receiver loses the bind, `webhook up` exits non-zero naming the port and its owner
 (`lsof`) and `webhook status` reports `webhook: collision (...)` instead of "not running" until the next
-successful start. The forwarder launchd label is still one per user, so run one `--feed gh-forward` agent per
-host or supervise the other projects' forwarders yourself.
+successful start. The forwarder launchd label is per project
+(`com.ai-sdlc.webhook.<board-dir-name>-<hash>`, derived from the board dir), so two projects never collide.
 
 Reaching it from GitHub: `cli-hierarchy webhook up --feed gh-forward` (AISDLC-1207) installs and loads a
-launchd agent (`io.ai-sdlc.webhook-forward`, KeepAlive, plist in `~/Library/LaunchAgents`, mode 0600) that runs
+launchd agent (`com.ai-sdlc.webhook.<project-slug>`, KeepAlive, plist in `~/Library/LaunchAgents`, mode 0600) that runs
 `gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:8765/webhooks/github --secret $AI_SDLC_WEBHOOK_SECRET`,
 so the feed survives a closed terminal, sleep and a network drop. The hook secret must equal the receiver's, or
 every delivery is a 401; a missing `AI_SDLC_WEBHOOK_SECRET` is therefore an error. Before loading, `webhook up`
@@ -456,7 +456,15 @@ fails with `HTTP 422 Hook already exists`); hooks of any other name are never to
 feed from the agent label (`launchctl print`), not a recorded pid, and `webhook down` unloads the agent, deletes
 the plist and removes any leftover `cli` hook. Without launchd (Linux, Windows) `webhook up` prints the forwarder
 command and loads nothing: run it under your own supervisor (a systemd unit with `Restart=always`, or a restart
-loop) and delete the `cli` hook before each start. A named tunnel (for example Cloudflare Tunnel) pointing at
+loop) and delete the `cli` hook before each start.
+
+**`launchctl bootstrap` error 5 (AISDLC-1256).** launchd answers `Bootstrap failed: 5: Input/output error` when a job
+with the same label is already loaded (a stale entry from a crash or an earlier session) or the plist path moved under
+the label. `webhook up` runs `launchctl bootout gui/<uid>/<label>` and retries bootstrap once. If the retry fails it
+prints the launchctl stderr, the plist path and the two manual commands (`launchctl bootout gui/<uid>/<label>`,
+`launchctl bootstrap gui/<uid> <plist>`), starts the receiver in the foreground session anyway and exits non-zero:
+the feed works until logout but is not persisted. `webhook status` prints `persisted: launchd <label>` or
+`persisted: no (<reason>)`, read from `launchctl print gui/<uid>/<label>`. A named tunnel (for example Cloudflare Tunnel) pointing at
 `127.0.0.1:8765` is the alternative for daily use (`--feed tunnel`).
 
 **Health (AISDLC-1157).** A live receiver pid does not prove events arrive: the forwarder is a separate

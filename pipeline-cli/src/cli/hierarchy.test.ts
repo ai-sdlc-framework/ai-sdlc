@@ -297,10 +297,11 @@ describe('runHierarchyCli', () => {
 
   it('webhook status and usage errors', async () => {
     expect(await runHierarchyCli(['webhook', 'status'], overrides())).toBe(0);
-    expect(logs).toEqual(['webhook: off (no secret)']);
+    expect(logs[0]).toMatch(/^webhook: off \(no secret\)\npersisted: no \(/);
     logs.length = 0;
     expect(await runHierarchyCli(['webhook', 'status', '--json'], overrides())).toBe(0);
-    expect(JSON.parse(logs[0] as string)).toEqual({ state: 'off', reason: 'no secret' });
+    expect(JSON.parse(logs[0] as string)).toMatchObject({ state: 'off', reason: 'no secret' });
+    expect(JSON.parse(logs[0] as string).persisted).toMatch(/^persisted: no/);
     expect(await runHierarchyCli(['webhook', 'down'], overrides())).toBe(0);
     expect(await runHierarchyCli(['webhook', 'up'], overrides())).toBe(0);
     vi.spyOn(process.stderr, 'write').mockReturnValue(true);
@@ -310,7 +311,7 @@ describe('runHierarchyCli', () => {
   it('webhook status reports off (not running) with a secret and no receiver', async () => {
     const env = { AI_SDLC_WEBHOOK_SECRET: 'x' };
     expect(await runHierarchyCli(['webhook', 'status'], overrides({ env }))).toBe(0);
-    expect(logs).toEqual(['webhook: down (receiver process is not running)']);
+    expect(logs[0]).toMatch(/^webhook: down \(receiver process is not running\)\npersisted: no/);
   });
 
   it('down reports an unknown role with exit 1', async () => {

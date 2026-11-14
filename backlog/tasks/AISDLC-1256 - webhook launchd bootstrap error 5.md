@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1256
 title: 'The webhook forwarder recovers from `launchctl bootstrap` error 5 (Input/output error) by bootout-then-bootstrap and reports an unpersisted receiver in status'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-09'
 labels:
