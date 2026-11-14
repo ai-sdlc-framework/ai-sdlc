@@ -12,12 +12,14 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { HierarchyDeps } from './types.js';
+import { forwarderLabel, forwarderPersistence, forwarderPlistPath } from './webhook-forwarder.js';
 import {
   formatWebhookStatus,
   parseFeed,
   trackPrActivity,
   webhookDown,
   webhookHealth,
+  webhookPersistence,
   webhookServe,
   webhookStatus,
   webhookUp,
@@ -270,17 +272,16 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
     webhookUp(deps, undefined, spawner, { kind: 'gh-forward' }, 'darwin');
     const deletes = calls.filter((c) => c.includes('DELETE'));
     expect(deletes).toEqual([['gh', 'api', '-X', 'DELETE', 'repos/o/r/hooks/1']]);
-    const plist = readFileSync(
-      path.join(home, 'Library/LaunchAgents/io.ai-sdlc.webhook-forward.plist'),
-      'utf-8',
-    );
+    const label = forwarderLabel(deps);
+    expect(label).toMatch(/^com\.ai-sdlc\.webhook\./);
+    const plist = readFileSync(path.join(home, `Library/LaunchAgents/${label}.plist`), 'utf-8');
     expect(plist).toContain('<string>--secret</string>');
     expect(plist).toContain('<string>s3</string>');
     expect(plist).toContain('http://127.0.0.1:9001/webhooks/github');
     expect(calls.some((c) => c[0] === 'launchctl' && c[1] === 'bootstrap')).toBe(true);
     expect(spawner).toHaveBeenCalledWith(
       process.execPath,
-      expect.arrayContaining(['--feed-agent', 'io.ai-sdlc.webhook-forward']),
+      expect.arrayContaining(['--feed-agent', label]),
     );
   });
 
@@ -308,6 +309,74 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
     expect(() => webhookUp(norepo, undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin')).toThrow(
       /cannot resolve/,
     );
+  });
+
+  it('recovers from bootstrap error 5 by bootout then one retry (AC-1)', () => {
+    const base = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' });
+    let boots = 0;
+    const deps = {
+      ...base,
+      run: (f: string, a: readonly string[]) => {
+        if (f === 'launchctl' && a[0] === 'bootstrap') {
+          boots += 1;
+          calls.push([f, ...a]);
+          return boots === 1
+            ? { status: 5, stdout: '', stderr: 'Bootstrap failed: 5: Input/output error' }
+            : { status: 0, stdout: '', stderr: '' };
+        }
+        return mkRun()(f, a);
+      },
+    } as unknown as HierarchyDeps;
+    webhookUp(deps, undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin');
+    expect(boots).toBe(2);
+    const boots2 = calls.filter((c) => c[0] === 'launchctl' && c[1] === 'bootout');
+    expect(boots2.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('a second error 5 reports stderr, plist and manual commands, receiver still starts (AC-2)', () => {
+    const base = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' });
+    const deps = {
+      ...base,
+      run: (f: string, a: readonly string[]) =>
+        f === 'launchctl' && a[0] === 'bootstrap'
+          ? { status: 5, stdout: '', stderr: 'Bootstrap failed: 5: Input/output error' }
+          : mkRun()(f, a),
+    } as unknown as HierarchyDeps;
+    const spawner = vi.fn();
+    let msg = '';
+    try {
+      webhookUp(deps, undefined, spawner, { kind: 'gh-forward' }, 'darwin');
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toContain('Bootstrap failed: 5');
+    expect(msg).toContain(forwarderPlistPath(deps));
+    expect(msg).toContain('launchctl bootout gui/');
+    expect(msg).toContain('launchctl bootstrap gui/');
+    expect(spawner).toHaveBeenCalled();
+  });
+
+  it('labels are per board dir (AC-3)', () => {
+    const a = forwarderLabel({ boardDir: '/x/one/dispatch' } as HierarchyDeps);
+    const b = forwarderLabel({ boardDir: '/x/two/dispatch' } as HierarchyDeps);
+    expect(a).not.toBe(b);
+    expect(a).toMatch(/^com\.ai-sdlc\.webhook\.dispatch-[0-9a-f]{8}$/);
+  });
+
+  it('persistence line reads launchctl print (AC-4)', () => {
+    const env = { HOME: home };
+    expect(webhookPersistence(mkd(env, true), 'darwin')).toMatch(
+      /^persisted: launchd com\.ai-sdlc\.webhook\./,
+    );
+    expect(webhookPersistence(mkd(env, false), 'darwin')).toMatch(/^persisted: no \(.* not loaded/);
+    expect(forwarderPersistence(mkd(env), undefined, 'linux')).toMatch(/^persisted: no/);
+    const boom = {
+      ...mkd(env),
+      run: () => {
+        throw new Error('x');
+      },
+    } as unknown as HierarchyDeps;
+    expect(webhookPersistence(boom)).toContain('persisted: no');
   });
 
   it('status reads the agent label; down unloads and removes leftover hooks', () => {

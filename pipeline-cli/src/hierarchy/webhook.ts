@@ -14,8 +14,10 @@ import { DEFAULT_WEBHOOK_PORT, loadPrLifecycleConfig } from './pr-lifecycle-conf
 import { eventEntries } from './pr-snapshot.js';
 import type { HierarchyDeps } from './types.js';
 import {
-  FORWARDER_LABEL,
+  ForwarderPersistError,
   forwarderAgentAlive,
+  forwarderLabel,
+  forwarderPersistence,
   installForwarder,
   removeForwarder,
 } from './webhook-forwarder.js';
@@ -287,7 +289,7 @@ function forwarderSignal(
 ): WebhookSignals['forwarder'] {
   const alive = deps.isAlive ?? defaultIsAlive;
   if (feed?.kind === 'none') return 'none';
-  if (feed?.agent) return forwarderAgentAlive(deps) ? 'alive' : 'dead';
+  if (feed?.agent) return forwarderAgentAlive(deps, feed.agent) ? 'alive' : 'dead';
   if (feed?.pid !== undefined) return alive(feed.pid) ? 'alive' : 'dead';
   try {
     const r = deps.run('pgrep', ['-f', feed?.kind === 'tunnel' ? 'tunnel' : 'gh webhook forward'], {
@@ -394,6 +396,14 @@ export function formatWebhookStatus(w: WebhookStatus, health?: WebhookHealth): s
     : `webhook: running (port ${w.port}, target ${webhookTargetUrl(w.port)}, health not read)`;
 }
 
+/** The `persisted:` status line (AISDLC-1256). */
+export function webhookPersistence(
+  deps: HierarchyDeps,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return forwarderPersistence(deps, readState(deps.boardDir)?.feed?.agent, platform);
+}
+
 function resolvePort(deps: HierarchyDeps, flag: string | undefined): number {
   const raw = flag ?? deps.env[WEBHOOK_PORT_ENV];
   if (raw === undefined || raw === '') return loadPrLifecycleConfig(deps.cwd).webhook.port;
@@ -418,17 +428,25 @@ export function webhookUp(
 ): WebhookStatus {
   const before = webhookStatus(deps);
   let chosen: number | undefined;
+  let persistError: ForwarderPersistError | undefined;
   if (feed?.kind === 'gh-forward' && feed.pid === undefined) {
     const secret = deps.env[WEBHOOK_SECRET_ENV];
     if (!secret) throw new Error(`${WEBHOOK_SECRET_ENV} is not set: cannot start the forwarder`);
     const fwdPort = before.state === 'up' ? before.port : selectPort(deps, portFlag);
     if (before.state !== 'up') chosen = fwdPort;
-    const supervised = installForwarder(deps, secret, fwdPort, platform);
-    feed = supervised ? { kind: 'gh-forward', agent: FORWARDER_LABEL } : feed;
+    try {
+      const supervised = installForwarder(deps, secret, fwdPort, platform);
+      feed = supervised ? { kind: 'gh-forward', agent: forwarderLabel(deps) } : feed;
+    } catch (e) {
+      if (!(e instanceof ForwarderPersistError)) throw e;
+      // The receiver still starts (foreground session only); the command then exits non-zero.
+      persistError = e;
+    }
   }
   if (before.state === 'up') {
     if (feed) recordFeed(deps.boardDir, feed);
     deps.log(`webhook already running on 127.0.0.1:${before.port}`);
+    if (persistError) throw persistError;
     return before;
   }
   if (before.reason === 'no secret') {
@@ -454,6 +472,7 @@ export function webhookUp(
       : []),
   ]);
   deps.log(`webhook starting on 127.0.0.1:${port}`);
+  if (persistError) throw persistError;
   return before;
 }
 
@@ -469,7 +488,7 @@ export function webhookDown(
   kill: (pid: number) => void = (pid) => process.kill(pid, 'SIGTERM'),
 ): boolean {
   const s = readState(deps.boardDir);
-  if (s?.feed?.agent) removeForwarder(deps);
+  if (s?.feed?.agent) removeForwarder(deps, s.feed.agent);
   if (!s) {
     deps.log('webhook not running');
     return false;
