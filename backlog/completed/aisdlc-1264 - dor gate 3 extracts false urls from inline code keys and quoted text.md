@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1264
 title: 'DoR Gate 3 extracts false URLs from inline-code config keys and quoted text, so a valid task filing is refused'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-13'
 labels:
