@@ -51,6 +51,8 @@ export interface CommandResult {
   status: number | null;
   stdout: string;
   stderr: string;
+  /** True when the runner killed the process for exceeding `timeoutMs` (AISDLC-1255). */
+  timedOut?: boolean;
 }
 
 /**
@@ -61,7 +63,7 @@ export interface CommandResult {
 export type CommandRunner = (
   file: string,
   args: readonly string[],
-  options?: { cwd?: string },
+  options?: { cwd?: string; timeoutMs?: number },
 ) => CommandResult;
 
 /**
@@ -71,7 +73,7 @@ export type CommandRunner = (
 export type AsyncCommandRunner = (
   file: string,
   args: readonly string[],
-  options?: { cwd?: string },
+  options?: { cwd?: string; timeoutMs?: number },
 ) => Promise<CommandResult>;
 
 /** Entry of the harness session registry (one JSON file per live session). */

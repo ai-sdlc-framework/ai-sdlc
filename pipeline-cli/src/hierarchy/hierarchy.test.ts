@@ -609,6 +609,35 @@ describe('hierarchy up', () => {
     expect(fake.calls.some((c) => c.args[0] === 'set-option' && c.args.includes('-g'))).toBe(false);
   });
 
+  it('a timed-out /exit falls back to kill-pane and the outcome names it (AISDLC-1255)', async () => {
+    await hierarchyUp(baseOpts, deps);
+    const inner = deps.run;
+    const seen: (number | undefined)[] = [];
+    deps.run = (f, a, o) => {
+      if (f === 'tmux') seen.push(o?.timeoutMs);
+      if (a[0] === 'send-keys' && a.includes('/exit')) {
+        return { status: 124, stdout: '', stderr: '', timedOut: true };
+      }
+      return inner(f, a, o);
+    };
+    const result = await hierarchyDown({ role: 'executor-beta' }, deps);
+    expect(result.stopped[0]?.fallback).toBe('exit request timed out; kill-pane');
+    expect(result.stopped[0]?.forced).toBe(true);
+    expect(fake.calls.some((c) => c.args[0] === 'kill-pane')).toBe(true);
+    expect(seen.every((t) => t === 5000)).toBe(true);
+  });
+
+  it('a failed /exit (pane gone) also falls back', async () => {
+    await hierarchyUp(baseOpts, deps);
+    const inner = deps.run;
+    deps.run = (f, a, o) =>
+      a[0] === 'send-keys' && a.includes('/exit')
+        ? { status: 1, stdout: '', stderr: "can't find pane" }
+        : inner(f, a, o);
+    const result = await hierarchyDown({ role: 'executor-beta' }, deps);
+    expect(result.stopped[0]?.fallback).toBe('exit request failed; kill-pane');
+  });
+
   it('honours an explicit planner permission mode and --no-planner', async () => {
     await hierarchyUp({ ...baseOpts, executors: 0, plannerPermissionMode: 'plan' }, deps);
     expect(newWindowCommands()[0]).toContain("--permission-mode 'plan'");
@@ -2993,6 +3022,51 @@ describe('reconcile scheduler ownership (AISDLC-932)', () => {
     const result = hierarchyStatus(deps);
     expect(result.scheduler).toEqual({ state: 'up', pid: 4242 });
     expect(formatStatus(result)).toContain('scheduler: up (pid 4242)');
+  });
+
+  it('status prints STALLED when the last tick is older than the stall limit (AISDLC-1255)', async () => {
+    await hierarchyUp(opts, deps);
+    deps.isAlive = (p) => p === 4242;
+    const state = path.join(boardDir, 'operator-dispatch.state.json');
+    writeFileSync(
+      state,
+      JSON.stringify({
+        schemaVersion: 'v1',
+        ingested: {},
+        rejected: {},
+        handled: [],
+        lastTickAt: new Date(NOW.getTime() - 600_000).toISOString(),
+      }),
+    );
+    // an idle scheduler (empty queue) with an old last tick is healthy
+    expect(hierarchyStatus(deps).scheduler).toEqual({ state: 'up', pid: 4242 });
+    mkdirSync(path.join(boardDir, 'queue'), { recursive: true });
+    writeFileSync(path.join(boardDir, 'queue', 'AISDLC-1.dispatch.json'), '{}');
+    const result = hierarchyStatus(deps);
+    expect(result.scheduler).toEqual({ state: 'up', pid: 4242, stalled: { ageSec: 600 } });
+    expect(formatStatus(result)).toContain('scheduler: STALLED (last tick 600s ago, pid 4242)');
+    writeFileSync(
+      state,
+      JSON.stringify({
+        schemaVersion: 'v1',
+        ingested: {},
+        rejected: {},
+        handled: [],
+        lastTickAt: new Date(NOW.getTime() - 5_000).toISOString(),
+      }),
+    );
+    expect(formatStatus(hierarchyStatus(deps))).toContain('scheduler: up (pid 4242)');
+    // a live tick running past the limit is stalled even with a fresh last tick or no queue
+    rmSync(path.join(boardDir, 'queue', 'AISDLC-1.dispatch.json'));
+    const sched = path.join(boardDir, 'reconcile-scheduler.json');
+    writeFileSync(
+      sched,
+      JSON.stringify({ pid: 4242, tick: { pid: 4243, startedAt: NOW.getTime() - 600_000 } }),
+    );
+    deps.isAlive = () => true;
+    expect(hierarchyStatus(deps).scheduler).toMatchObject({ state: 'up', stalled: {} });
+    deps.isAlive = (p) => p === 4242;
+    expect(hierarchyStatus(deps).scheduler).toEqual({ state: 'up', pid: 4242 });
   });
 
   it('down stops it, a role-limited down leaves it', async () => {

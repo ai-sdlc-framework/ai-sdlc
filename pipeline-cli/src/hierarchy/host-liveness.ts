@@ -6,8 +6,17 @@
  * shows the age and who ticked.
  */
 
+import process from 'node:process';
+
 import { readLoopState } from './dispatch-loop.js';
 import { peekQueue } from '../dispatch/board.js';
+import {
+  checkRunningTick,
+  clearTickRecord,
+  tickStallMs,
+  writeTickRecord,
+  type WatchdogDeps,
+} from './tick-watchdog.js';
 
 /** The host's tick interval (mirrors `DEFAULT_TICK_MS` in the dispatch hook). */
 export const HOST_TICK_INTERVAL_MS = 30_000;
@@ -45,17 +54,60 @@ export function formatLastTick(
 export interface HostWatchDeps {
   boardDir: string;
   now: () => Date;
-  /** Runs one tick as the scheduler; the scheduler never calls it while the host is alive. */
-  runTick: () => void;
+  /**
+   * Starts one tick as the scheduler (the scheduler never calls it while the host is alive). A tick
+   * started without waiting returns its pid and calls `onExit` when it ends, so the watchdog can
+   * track it (AISDLC-1255).
+   */
+  runTick: (onExit: () => void) => number | void;
   intervalMs?: number;
+  /** Process table for the watchdog (tests). */
+  watchdog?: Pick<WatchdogDeps, 'isAlive' | 'kill' | 'later'>;
+  /** Stall limit override (tests); default {@link tickStallMs}. */
+  stallMs?: number;
 }
+
+/** The one stall limit the watchdog and `status` share (AISDLC-1255). */
+export function hostStallMs(intervalMs?: number, env: NodeJS.ProcessEnv = process.env): number {
+  return tickStallMs(intervalMs ?? HOST_TICK_INTERVAL_MS, env);
+}
+
+const defaultWatchdog: Pick<WatchdogDeps, 'isAlive' | 'kill'> = {
+  isAlive: (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  kill: (pid, signal) => {
+    // Only the negative pid (the tick is its own process-group leader): a reused pid is never
+    // signalled as a lone process.
+    process.kill(-pid, signal);
+  },
+};
 
 /** One check: tick when the host is silent and work is queued. Returns whether it ticked. */
 export function hostWatchCheck(deps: HostWatchDeps): boolean {
+  // A live tick within its limit keeps the scheduler single-flight; a stalled one is killed and
+  // replaced (AISDLC-1255).
+  const running = checkRunningTick({
+    boardDir: deps.boardDir,
+    now: deps.now,
+    stallMs: deps.stallMs ?? hostStallMs(deps.intervalMs),
+    ...defaultWatchdog,
+    ...deps.watchdog,
+  });
+  if (running === 'running') return false;
   if (!hostTickStale(deps.boardDir, deps.now())) return false;
   if (peekQueue(deps.boardDir).queued === 0) return false;
   try {
-    deps.runTick();
+    const started = deps.now().getTime();
+    const pid: number | void = deps.runTick(() => {
+      if (typeof pid === 'number') clearTickRecord(deps.boardDir, pid);
+    });
+    if (typeof pid === 'number') writeTickRecord(deps.boardDir, { pid, startedAt: started });
   } catch {
     /* retried at the next check */
   }

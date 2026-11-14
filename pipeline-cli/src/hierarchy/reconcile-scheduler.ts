@@ -9,13 +9,17 @@ import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } f
 import path from 'node:path';
 import process from 'node:process';
 
+import { hostStallMs, lastTickInfo } from './host-liveness.js';
+import { peekQueue } from '../dispatch/board.js';
 import { reconcileLogPath } from './pr-rows.js';
+import { readTickRecord } from './tick-watchdog.js';
 import type { HierarchyDeps } from './types.js';
 
 const STATE_FILE = 'reconcile-scheduler.json';
 
 /** What `status` reports about the scheduler. */
-export type SchedulerStatus = { state: 'up'; pid: number } | { state: 'off' };
+export type SchedulerStatus =
+  { state: 'up'; pid: number; stalled?: { ageSec: number } } | { state: 'off' };
 
 /** Starts a detached process and returns its pid (undefined when it has none). */
 export type PidSpawner = (
@@ -63,14 +67,30 @@ function readPid(boardDir: string): number | undefined {
 /** Whether a live scheduler is recorded. */
 export function schedulerStatus(deps: HierarchyDeps): SchedulerStatus {
   const pid = readPid(deps.boardDir);
-  return pid !== undefined && (deps.isAlive ?? defaultIsAlive)(pid)
-    ? { state: 'up', pid }
-    : { state: 'off' };
+  if (pid === undefined || !(deps.isAlive ?? defaultIsAlive)(pid)) return { state: 'off' };
+  // AISDLC-1255: stuck = a live tick running past the stall limit, or work queued while the last
+  // tick is older than the limit. An idle scheduler with an empty queue is healthy.
+  const limitMs = hostStallMs(undefined, deps.env);
+  const now = deps.now().getTime();
+  const last = lastTickInfo(deps.boardDir, deps.now());
+  const rec = readTickRecord(deps.boardDir);
+  const running =
+    rec !== undefined && now - rec.startedAt > limitMs && (deps.isAlive ?? defaultIsAlive)(rec.pid);
+  const queuedStale =
+    last !== undefined && last.ageSec * 1000 > limitMs && peekQueue(deps.boardDir).queued > 0;
+  if (running || queuedStale) {
+    const ageSec = last?.ageSec ?? Math.round((now - (rec?.startedAt ?? now)) / 1000);
+    return { state: 'up', pid, stalled: { ageSec } };
+  }
+  return { state: 'up', pid };
 }
 
 /** The status line, `scheduler: up (pid N)` or `scheduler: off`. */
 export function formatSchedulerStatus(s: SchedulerStatus): string {
-  return s.state === 'up' ? `scheduler: up (pid ${s.pid})` : 'scheduler: off';
+  if (s.state === 'off') return 'scheduler: off';
+  return s.stalled
+    ? `scheduler: STALLED (last tick ${s.stalled.ageSec}s ago, pid ${s.pid})`
+    : `scheduler: up (pid ${s.pid})`;
 }
 
 /** Start the scheduler detached and record its pid; a live one is left alone. */

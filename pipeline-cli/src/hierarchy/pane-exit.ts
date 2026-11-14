@@ -23,7 +23,7 @@ import type { DispatchVerdict } from '../dispatch/types.js';
 import { readLoopState, saveLoopState } from './dispatch-loop.js';
 import { listInflight } from './inflight.js';
 import { readRosterChecked, writeRoster } from './roster.js';
-import { hasSession } from './tmux.js';
+import { hasSession, tmuxRun } from './tmux.js';
 import type { CommandResult, CommandRunner, HierarchyDeps } from './types.js';
 import { isSpawnedExecutorName } from './validate.js';
 
@@ -39,12 +39,12 @@ export function installPaneExitHook(
   binPath: string,
 ): CommandResult {
   const cmd = `run-shell -b "node '${binPath}' pane-exited ${session}"`;
-  return run('tmux', ['set-hook', '-w', '-t', `=${session}:${session}`, HOOK, cmd]);
+  return tmuxRun(run, ['set-hook', '-w', '-t', `=${session}:${session}`, HOOK, cmd]);
 }
 
 /** Remove the exit hook; a failure (window already gone) is harmless. */
 export function removePaneExitHook(run: CommandRunner, session: string): CommandResult {
-  return run('tmux', ['set-hook', '-u', '-w', '-t', `=${session}:${session}`, HOOK]);
+  return tmuxRun(run, ['set-hook', '-u', '-w', '-t', `=${session}:${session}`, HOOK]);
 }
 
 /** What {@link hierarchyPaneExited} did. */

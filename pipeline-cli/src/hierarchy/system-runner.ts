@@ -19,11 +19,16 @@ export function createSystemRunner(): CommandRunner {
       cwd: options?.cwd,
       encoding: 'utf-8',
       maxBuffer: MAX_BUFFER,
+      ...(options?.timeoutMs !== undefined
+        ? { timeout: options.timeoutMs, killSignal: 'SIGKILL' as const }
+        : {}),
     });
+    const timedOut = (result.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
     return {
-      status: result.status,
+      status: timedOut ? 124 : result.status,
       stdout: result.stdout ?? '',
       stderr: result.stderr ?? (result.error ? result.error.message : ''),
+      ...(timedOut ? { timedOut: true } : {}),
     };
   };
 }
