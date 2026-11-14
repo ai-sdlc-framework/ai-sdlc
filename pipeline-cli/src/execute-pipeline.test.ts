@@ -1339,6 +1339,10 @@ describe('integration — executePipeline (full Step 0-13)', () => {
         ...process.env,
         CLAUDE_PROJECT_DIR: worktreePath,
         AI_SDLC_ACTIVE_TASK_ID: 'gh-issue-700',
+        // AISDLC-1276: an untrusted run ignores permittedExternalPaths, and CI (GITHUB_ACTIONS)
+        // reads as untrusted. This test exercises the trusted allowlist, so mark it internal.
+        AI_SDLC_INTERNAL_RUN: '1',
+        AI_SDLC_UNTRUSTED_RUN: '',
       };
 
       // POSITIVE case — Write to a path under permittedExternalPaths.
