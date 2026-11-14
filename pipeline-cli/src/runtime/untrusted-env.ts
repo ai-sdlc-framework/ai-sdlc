@@ -88,3 +88,72 @@ export function clearUntrustedMarker(worktreePath: string): boolean {
   rmSync(file, { force: true });
   return true;
 }
+
+/**
+ * AISDLC-1277 — credential isolation for untrusted spawns.
+ *
+ * Parent env keys an untrusted agent may inherit. Everything else (GH_TOKEN,
+ * ANTHROPIC_API_KEY, NPM_TOKEN, SSH_AUTH_SOCK, ...) is dropped. `HOME` is never
+ * inherited: it is a throwaway directory created per run.
+ */
+export const UNTRUSTED_ENV_ALLOWLIST: readonly string[] = Object.freeze([
+  'PATH',
+  'LANG',
+  'LC_ALL',
+  'TERM',
+  'TMPDIR',
+  'USER',
+  'LOGNAME',
+]);
+
+/** Fixed keys the pipeline adds so git and gh find no credential. */
+const UNTRUSTED_FIXED_ENV: Readonly<Record<string, string>> = Object.freeze({
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_TERMINAL_PROMPT: '0',
+});
+
+/** Tools an untrusted agent may use (no network or credential-bearing CLIs). */
+export const UNTRUSTED_ALLOWED_TOOLS: readonly string[] = Object.freeze([
+  'Read',
+  'Write',
+  'Edit',
+  'Glob',
+  'Grep',
+  'Bash(git status:*)',
+  'Bash(git diff:*)',
+  'Bash(git log:*)',
+  'Bash(git add:*)',
+  'Bash(git commit:*)',
+  'Bash(pnpm:*)',
+  'Bash(npx:*)',
+  'Bash(node:*)',
+  'Bash(ls:*)',
+]);
+
+/** Non-bypass permission mode used for untrusted spawns. */
+export const UNTRUSTED_PERMISSION_MODE = 'acceptEdits';
+
+/** True when the spawn carries the untrusted-run signal. */
+export function isUntrustedSpawnEnv(env: NodeJS.ProcessEnv | undefined): boolean {
+  const v = env?.AI_SDLC_UNTRUSTED_RUN;
+  return typeof v === 'string' && v !== '' && v !== '0';
+}
+
+/**
+ * Build the child env for an untrusted spawn: allowlisted parent keys, the
+ * caller's AI_SDLC_* signal keys, a throwaway HOME and the fixed no-credential keys.
+ */
+export function buildUntrustedChildEnv(
+  parentEnv: NodeJS.ProcessEnv,
+  optsEnv: NodeJS.ProcessEnv | undefined,
+  home: string,
+): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const k of UNTRUSTED_ENV_ALLOWLIST) {
+    if (parentEnv[k] !== undefined) out[k] = parentEnv[k];
+  }
+  for (const [k, v] of Object.entries(optsEnv ?? {})) {
+    if (k.startsWith('AI_SDLC_') && v !== undefined) out[k] = v;
+  }
+  return { ...out, ...UNTRUSTED_FIXED_ENV, HOME: home };
+}

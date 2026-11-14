@@ -138,3 +138,14 @@ The PreToolUse hook blocks `.ai-sdlc/**` and `.github/workflows/**` for runs mar
 ## Force-push and merge policy
 
 Force-push is `--force-with-lease` only (allowed by default via `allowForcePush: leaseOnOwnBranch`, no operator prompt) and is REQUIRED after the mandatory rebase, because the rebase changes the SHA; plain `--force` stays forbidden. Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging the only path is `cli-merge-if-eligible`.
+
+## Untrusted run: what the agent can still reach
+
+An untrusted run (a `gh-issue` or `rework-pr` source, AISDLC-1277) starts its developer agent through `ShellClaudePSpawner` with an allowlisted environment (`PATH`, locale, `TERM`, `TMPDIR`, `USER`, `LOGNAME` and the `AI_SDLC_*` signal keys), a throwaway empty `HOME` removed when the run ends, `GIT_CONFIG_NOSYSTEM=1`, a non-bypass permission mode (`acceptEdits`) and an explicit `--allowedTools` list. The pipeline process keeps its own credentials and does the push and PR (Step 11).
+
+Two exposures remain, because the agent still runs as the maintainer's OS user:
+
+1. **Absolute-path reads.** The agent can read any file the user can read by absolute path (for example `/Users/<name>/.ssh/...`).
+2. **Network.** The agent can reach the network, so it can send data out.
+
+Only OS-level isolation (a container with no host mounts and no network, as the reviewer sandbox has) closes both. That layer is a separate decision.
