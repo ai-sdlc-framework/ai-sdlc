@@ -37,6 +37,9 @@ export function isUntrustedProtectedPath(p: string): boolean {
   );
 }
 
+/** Make git ignore refs/replace/*, as `git push` does. */
+export const NO_REPLACE_ENV: NodeJS.ProcessEnv = { GIT_NO_REPLACE_OBJECTS: '1' };
+
 /**
  * List every protected path changed since `baseRef`: committed, staged, unstaged and untracked.
  * `baseRef` must be a SHA recorded before the agent ran.
@@ -46,10 +49,19 @@ export function isUntrustedProtectedPath(p: string): boolean {
 export async function findProtectedPathChanges(opts: {
   worktreePath: string;
   baseRef: string;
+  /** Exact commit that will be pushed; defaults to symbolic HEAD. */
+  headRef?: string;
   runner: Runner;
 }): Promise<string[]> {
+  const head = opts.headRef ?? 'HEAD';
+  // GIT_NO_REPLACE_OBJECTS=1: `git push` ignores refs/replace/*, so the check must too, or a replace
+  // ref could show a harmless commit while the push sends the real protected change.
   const run = async (args: string[]): Promise<string[]> => {
-    const r = await opts.runner('git', args, { cwd: opts.worktreePath, allowFailure: true });
+    const r = await opts.runner('git', args, {
+      cwd: opts.worktreePath,
+      allowFailure: true,
+      env: NO_REPLACE_ENV,
+    });
     if (r.code !== 0) {
       throw new Error(`git ${args[0]} failed: ${r.stderr.trim() || 'unknown error'}`);
     }
@@ -63,11 +75,11 @@ export async function findProtectedPathChanges(opts: {
     '--no-renames',
     '--format=',
     '-z',
-    `${opts.baseRef}..HEAD`,
+    `${opts.baseRef}..${head}`,
   ]);
   // Tree-to-tree: catches a merge commit (git log prints no paths for one) and any commit-tree
   // built history, independent of the working tree.
-  const treeDiff = await run(['diff', '--name-only', '--no-renames', '-z', opts.baseRef, 'HEAD']);
+  const treeDiff = await run(['diff', '--name-only', '--no-renames', '-z', opts.baseRef, head]);
   const changed = await run(['diff', '--name-only', '--no-renames', '-z', opts.baseRef]);
   const untracked = await run(['ls-files', '--others', '--exclude-standard', '-z']);
   return [...new Set([...committed, ...treeDiff, ...changed, ...untracked])]

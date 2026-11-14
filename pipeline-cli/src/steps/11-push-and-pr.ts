@@ -49,6 +49,7 @@ import {
 import {
   findProtectedPathChanges,
   UNTRUSTED_PROTECTED_CAUSE,
+  NO_REPLACE_ENV,
 } from './untrusted-protected-paths.js';
 import { landPrep } from './land-prep.js';
 import { ensureWorkspaceBuilt } from './ensure-workspace-built.js';
@@ -488,6 +489,7 @@ async function untrustedPushCheck(
   let paths: string[];
   let sha: string;
   try {
+    // Limitation: on a resumed worktree the base recorded at Step 3 may predate earlier rounds.
     const baseSha = opts.untrustedBaseSha ?? '';
     if (!/^[0-9a-f]{40,64}$/i.test(baseSha)) {
       throw new Error('no base sha was recorded at Step 3');
@@ -495,12 +497,14 @@ async function untrustedPushCheck(
     const head = await runner('git', ['rev-parse', 'HEAD'], {
       cwd: opts.worktreePath,
       allowFailure: true,
+      env: NO_REPLACE_ENV,
     });
     sha = head.code === 0 ? head.stdout.trim() : '';
     if (!/^[0-9a-f]{40,64}$/i.test(sha)) throw new Error('could not resolve HEAD');
     paths = await findProtectedPathChanges({
       worktreePath: opts.worktreePath,
       baseRef: baseSha,
+      headRef: sha,
       runner,
     });
   } catch (err) {
@@ -672,7 +676,12 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
     { allowFailure: true },
   );
   let diverged: { remote: string; head: string | null } | null = null;
-  if (pushResult.code !== 0 && /non-fast-forward|rejected|stale info/i.test(pushResult.stderr)) {
+  // Untrusted runs skip the retries: they would push a SHA other than the one that was checked.
+  if (
+    !opts.untrusted &&
+    pushResult.code !== 0 &&
+    /non-fast-forward|rejected|stale info/i.test(pushResult.stderr)
+  ) {
     // AISDLC-1016: the remote may hold only the pre-rebase copy of this very branch.
     const retry = await leasePushOwnRebase(opts, runner, preRebaseSha);
     if (retry) pushResult = retry;

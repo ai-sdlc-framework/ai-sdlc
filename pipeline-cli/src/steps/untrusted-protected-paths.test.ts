@@ -72,6 +72,23 @@ describe('findProtectedPathChanges (AISDLC-1275)', () => {
     expect(await check()).toEqual(['.ai-sdlc/agent-role.yaml']);
   });
 
+  it('refuses a protected change hidden behind a git replace ref', async () => {
+    put('.ai-sdlc/agent-role.yaml', 'evil\n');
+    commit('evil');
+    const real = git('rev-parse', 'HEAD').trim();
+    const harmless = git('commit-tree', 'base^{tree}', '-p', 'base', '-m', 'ok').trim();
+    git('replace', real, harmless);
+    expect(await check()).toEqual(['.ai-sdlc/agent-role.yaml']);
+    expect(
+      await findProtectedPathChanges({
+        worktreePath: repo,
+        baseRef: 'base',
+        headRef: real,
+        runner: defaultRunner,
+      }),
+    ).toEqual(['.ai-sdlc/agent-role.yaml']);
+  });
+
   it('matches protected segments case-insensitively', () => {
     expect(isUntrustedProtectedPath('.AI-SDLC/x.yaml')).toBe(true);
     expect(isUntrustedProtectedPath('.GitHub/Workflows/ci.yml')).toBe(true);
