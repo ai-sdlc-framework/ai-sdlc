@@ -1134,12 +1134,58 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (AISDLC-720 round 2)', () 
     );
     const env = { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-720' };
     assert.ok(!isDenied(run('Write', join(outside, 'plain', 'a.txt'), env)), 'internal baseline');
-    assert.ok(!isDenied(run('Write', join(outside, 'plain', 'a.txt'), { ...env, ...U })));
+    // AISDLC-1276: an untrusted run's permittedExternalPaths grants nothing.
+    assert.ok(isDenied(run('Write', join(outside, 'plain', 'a.txt'), { ...env, ...U })));
     assert.ok(!isDenied(run('Write', join(outside, '.ai-sdlc', 'x.yaml'), env)), 'internal ok');
     assert.ok(isDenied(run('Write', join(outside, '.ai-sdlc', 'x.yaml'), { ...env, ...U })));
     assert.ok(
       isDenied(run('Edit', join(outside, '.GitHub', 'Workflows', 'ci.yml'), { ...env, ...U })),
     );
+  });
+
+  it('AISDLC-1276: untrusted denies code-execution and agent-instruction files', () => {
+    for (const rel of [
+      'package.json',
+      'orchestrator/package.json',
+      'pnpm-lock.yaml',
+      'pnpm-workspace.yaml',
+      '.npmrc',
+      'CLAUDE.md',
+      'docs/CLAUDE.md',
+      '.mcp.json',
+      'scripts/x.sh',
+    ]) {
+      for (const tool of ['Write', 'Edit']) {
+        const r = run(tool, join(dir, rel), U);
+        assert.ok(isDenied(r), `${tool} ${rel}`);
+        assert.match(
+          JSON.parse(r.output).hookSpecificOutput.permissionDecisionReason,
+          /maintainer|cli-decisions/,
+        );
+        assert.ok(!isDenied(run(tool, join(dir, rel))), `trusted ${tool} ${rel}`);
+      }
+    }
+  });
+
+  it('AISDLC-1276: untrusted task file listing permittedExternalPaths grants nothing', () => {
+    mkdirSync(join(dir, 'backlog', 'tasks'), { recursive: true });
+    const ext = join(tmpdir(), `enforce-1276-ext-${Date.now()}`);
+    mkdirSync(ext, { recursive: true });
+    const tf = join(dir, 'backlog', 'tasks', 'aisdlc-1276 - t.md');
+    writeFileSync(tf, '---\nid: AISDLC-1276\n---\n');
+    const env = { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-1276', ...U };
+    // The run edits its own synthetic task file first, then attempts the write.
+    assert.ok(!isDenied(run('Edit', tf, env)));
+    writeFileSync(tf, `---\nid: AISDLC-1276\npermittedExternalPaths:\n  - '${ext}'\n---\n`);
+    assert.ok(isDenied(run('Write', join(ext, 'a.txt'), env)));
+    rmSync(ext, { recursive: true, force: true });
+  });
+
+  it('AISDLC-1276: untrusted write into another checkout without a marker is denied', () => {
+    const other = join(tmpdir(), `enforce-1276-other-${Date.now()}`);
+    mkdirSync(join(other, '.git'), { recursive: true });
+    assert.ok(isDenied(run('Write', join(other, 'src.txt'), U)));
+    rmSync(other, { recursive: true, force: true });
   });
 
   it('#2 untrusted: .active-task writes are refused', () => {

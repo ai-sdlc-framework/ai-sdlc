@@ -310,6 +310,15 @@ const UNTRUSTED_PROTECTED = [
   ['.git', 'config'],
   // AISDLC-730: worktree admin dirs hold the untrusted marker.
   ['.git', 'worktrees'],
+  // AISDLC-1276: files that run code or instruct an agent on a maintainer machine or in CI.
+  // Matched at any depth, case-insensitively (compared lowercase).
+  ['package.json'],
+  ['pnpm-lock.yaml'],
+  ['pnpm-workspace.yaml'],
+  ['.npmrc'],
+  ['scripts'],
+  ['claude.md'],
+  ['.mcp.json'],
 ];
 
 /** Does this POSIX-style path contain a protected segment sequence (case-insensitive)? */
@@ -401,7 +410,7 @@ function untrustedMessage(what) {
     `${what} is governance config or enforcement code, and this run is marked untrusted${why} ` +
     `(AI_SDLC_UNTRUSTED_RUN or the git-dir untrusted marker is set for fork PRs, outside authors, or issue-sourced runs). ` +
     `Rule (AISDLC-720, untrusted-run protected paths): untrusted runs cannot change .ai-sdlc/**, .github/workflows/**, .claude/**, .husky/**, ` +
-    `ai-sdlc-plugin/hooks/** or .active-task. Next step: describe the needed change in the PR (a maintainer reviews every PR) ` +
+    `ai-sdlc-plugin/hooks/**, .active-task, package.json, lockfiles, .npmrc, pnpm-workspace.yaml, scripts/**, CLAUDE.md or .mcp.json, and cannot write outside their own worktree. Next step: describe the needed change in the PR (a maintainer reviews every PR) ` +
     `or issue body, or record it with 'node pipeline-cli/bin/cli-decisions.mjs escalate'; do not retry or route around this. ` +
     `A trusted CI job (not one that takes outside input) that legitimately needs this sets ` +
     `AI_SDLC_INTERNAL_RUN=1 in the step-level env: of that step only, never at job or workflow ` +
@@ -654,7 +663,8 @@ function enforceWriteEdit(filePath) {
   // AISDLC-605: scratch space (session scratch dir, OS temp dirs) is allowed by
   // default. Never inside the project root (main checkout / other worktrees) and
   // never inside a git repository (sibling repos), so confinement is unchanged.
-  if (isScratchPath(absPath, projectAbs)) return;
+  // AISDLC-1276: an untrusted run writes only inside its own worktree, scratch space included.
+  if (!UNTRUSTED.untrusted && isScratchPath(absPath, projectAbs)) return;
 
   // Path is OUTSIDE the agent's home — only allowed if the active task's
   // permittedExternalPaths covers it. This applies uniformly whether the
@@ -1086,6 +1096,9 @@ function matchGlob(glob, path) {
  * Returns [] when no active task, no matching task file, or no frontmatter field.
  */
 function loadPermittedExternalPaths(projectAbs, searchFrom) {
+  // AISDLC-1276: an untrusted run's task file is synthetic and writable by the run itself, so
+  // it grants nothing; an untrusted run never writes outside its own worktree.
+  if (UNTRUSTED.untrusted) return [];
   const task = loadActiveTaskFile(projectAbs, searchFrom);
   if (!task) return [];
   const fmMatch = task.content.match(/^---\n([\s\S]*?)\n---/);
