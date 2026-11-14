@@ -397,8 +397,11 @@ export function formatWebhookStatus(w: WebhookStatus, health?: WebhookHealth): s
 }
 
 /** The `persisted:` status line (AISDLC-1256). */
-export function webhookPersistence(deps: HierarchyDeps): string {
-  return forwarderPersistence(deps, readState(deps.boardDir)?.feed?.agent);
+export function webhookPersistence(
+  deps: HierarchyDeps,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return forwarderPersistence(deps, readState(deps.boardDir)?.feed?.agent, platform);
 }
 
 function resolvePort(deps: HierarchyDeps, flag: string | undefined): number {

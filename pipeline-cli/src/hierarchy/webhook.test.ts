@@ -365,10 +365,10 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
 
   it('persistence line reads launchctl print (AC-4)', () => {
     const env = { HOME: home };
-    expect(webhookPersistence(mkd(env, true))).toMatch(
+    expect(webhookPersistence(mkd(env, true), 'darwin')).toMatch(
       /^persisted: launchd com\.ai-sdlc\.webhook\./,
     );
-    expect(webhookPersistence(mkd(env, false))).toMatch(/^persisted: no \(.* not loaded/);
+    expect(webhookPersistence(mkd(env, false), 'darwin')).toMatch(/^persisted: no \(.* not loaded/);
     expect(forwarderPersistence(mkd(env), undefined, 'linux')).toMatch(/^persisted: no/);
     const boom = {
       ...mkd(env),
