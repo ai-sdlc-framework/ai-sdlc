@@ -72,19 +72,30 @@ const inlineSpec = {
   filePath: '<inline>',
 };
 
-const markerPath = () => join(tmp, '.worktrees', 'aisdlc-300', '.git', 'ai-sdlc-untrusted');
+// The worktree `.git` is a gitdir file under the main checkout, as git writes it (AISDLC-1278).
+const gitDirPath = () => join(tmp, '.git', 'worktrees', 'aisdlc-300');
+const markerPath = () => join(gitDirPath(), 'ai-sdlc-untrusted');
+function setupWorktreeGit(): void {
+  mkdirSync(gitDirPath(), { recursive: true });
+  mkdirSync(join(tmp, '.worktrees', 'aisdlc-300'), { recursive: true });
+  writeFileSync(join(tmp, '.worktrees', 'aisdlc-300', '.git'), `gitdir: ${gitDirPath()}\n`);
+}
 const spawnEnvs: Array<Record<string, string> | undefined> = [];
 const markerDuringDev: boolean[] = [];
 let devThrows = false;
+let devRepoints = false;
 
 async function run(sourceKind?: 'backlog' | 'gh-issue', inline = false, diffFails = false) {
   writeTaskFile(tmp, { id: 'AISDLC-300', title: 'x', status: 'To Do', acceptanceCriteria: ['a'] });
-  mkdirSync(join(tmp, '.worktrees', 'aisdlc-300', '.git'), { recursive: true });
+  setupWorktreeGit();
   const spawner = new MockSpawner({
     developer: (o) => {
       spawnEnvs.push(o.env);
       markerDuringDev.push(existsSync(markerPath()));
       if (devThrows) throw new Error('developer exploded');
+      if (devRepoints) {
+        writeFileSync(join(tmp, '.worktrees', 'aisdlc-300', '.git'), 'gitdir: .g\n');
+      }
       return { type: 'developer', output: '', parsed: dev, status: 'success', durationMs: 0 };
     },
     'code-reviewer': (o) => {
@@ -202,9 +213,22 @@ describe('executePipeline reviewer-set wiring', () => {
     expect(existsSync(markerPath())).toBe(false);
   });
 
+  it('AISDLC-1278: a repointed worktree .git after the developer spawn stops the run before any reviewer or host git call', async () => {
+    devRepoints = true;
+    let result;
+    try {
+      result = await run('gh-issue');
+    } finally {
+      devRepoints = false;
+    }
+    expect(result.outcome).toBe('aborted');
+    expect(result.reviewerSpawns).toBe(0);
+    expect(result.prUrl ?? null).toBeNull();
+  });
+
   it('AISDLC-730: a trusted run clears a stale marker before it starts', async () => {
     markerDuringDev.length = 0;
-    mkdirSync(join(tmp, '.worktrees', 'aisdlc-300', '.git'), { recursive: true });
+    setupWorktreeGit();
     writeFileSync(markerPath(), 'gh-issue source\n');
     await run('backlog');
     expect(markerDuringDev).toEqual([false]);

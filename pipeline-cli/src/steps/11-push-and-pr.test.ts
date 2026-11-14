@@ -501,6 +501,8 @@ describe('Step 11 — pushAndPr', () => {
     const fake = new FakeRunner().on(headOk, ok(`${SHA}\n`)).on(/^git push/, ok());
     await pushAndPr({ ...untrustedOpts(), runner: fake.toRunner() });
     expect(fake.calls.some((c) => ['rebase'].includes(c.args[0]!))).toBe(false);
+    // no prettier or other worktree-resolved binary runs on the host (AISDLC-1278)
+    expect(fake.calls.some((c) => c.command === 'pnpm')).toBe(false);
     const push = fake.calls.find((c) => c.args[0] === 'push');
     expect(push?.args).toContain(`${SHA}:refs/heads/b`);
     // the check ran on that same HEAD, after the rev-parse and before the push

@@ -33,6 +33,7 @@ import {
   type DockerExec,
 } from '../pipeline/reviewer-container.js';
 import type { Runner } from './exec.js';
+import type { SubagentSpawner } from '../types.js';
 
 /** In-container path of the task worktree (the only host mount). */
 export const UNTRUSTED_WORKSPACE_DIR = '/workspace';
@@ -273,7 +274,7 @@ export async function withUntrustedContainer<T>(
  * in CI against the pushed tree instead. Signing programs, fsmonitor, the ssh command,
  * attribute files and external transports are pinned.
  */
-export function hostGitOverrides(_mainCheckout?: string): string[] {
+export function hostGitOverrides(): string[] {
   return [
     'core.hooksPath=/dev/null',
     'core.fsmonitor=false',
@@ -317,10 +318,51 @@ function realpathOr(p: string): string {
 }
 
 /** Wrap a runner so every `git` call carries `hostGitOverrides`. Other commands pass through. */
-export function hardenGitRunner(inner: Runner, mainCheckout: string): Runner {
-  const overrides = hostGitOverrides(mainCheckout);
-  return (command, args, opts) =>
-    inner(command, command === 'git' ? [...overrides, ...args] : args, opts);
+export function hardenGitRunner(inner: Runner): Runner {
+  const overrides = hostGitOverrides();
+  return (command, args, opts) => {
+    if (command !== 'git') return inner(command, args, opts);
+    // `diff.external` and textconv drivers run programs; refuse them on every host diff.
+    const safe =
+      args[0] === 'diff'
+        ? [
+            'diff',
+            ...['--no-ext-diff', '--no-textconv'].filter((f) => !args.includes(f)),
+            ...args.slice(1),
+          ]
+        : args;
+    return inner(command, [...overrides, ...safe], opts);
+  };
+}
+
+/**
+ * Wrap a spawner so the worktree gitdir is re-verified after every spawn returns (also
+ * when it throws), before the caller runs any host git call against the worktree.
+ */
+export function withGitdirCheck(
+  inner: SubagentSpawner,
+  getWorktree: () => string | null,
+  mainCheckout: string,
+): SubagentSpawner {
+  const check = (): void => {
+    const wt = getWorktree();
+    if (wt) assertWorktreeGitdir(wt, mainCheckout);
+  };
+  const guard = async <T>(run: () => Promise<T>): Promise<T> => {
+    let out: T;
+    try {
+      out = await run();
+    } catch (err) {
+      check();
+      throw err;
+    }
+    check();
+    return out;
+  };
+  return {
+    spawn: (o) => guard(() => inner.spawn(o)),
+    spawnParallel: (os) => guard(() => inner.spawnParallel(os)),
+  };
 }
 
 // ── Dependency manifest limit ─────────────────────────────────────────────────
@@ -362,11 +404,17 @@ export async function assertNoDependencyChange(runner: Runner, worktree: string)
     cwd: worktree,
     allowFailure: true,
   });
+  if (committed.code !== 0) {
+    throw new Error('untrusted run: could not list committed changes; stopping before push.');
+  }
   for (const f of committed.stdout.split('\n')) if (f.trim()) files.add(f.trim());
   const status = await runner('git', ['status', '--porcelain', '-uall', '-z'], {
     cwd: worktree,
     allowFailure: true,
   });
+  if (status.code !== 0) {
+    throw new Error('untrusted run: could not read worktree status; stopping before push.');
+  }
   const entries = status.stdout.split('\0').filter((e) => e !== '');
   for (let i = 0; i < entries.length; i++) {
     files.add(entries[i].slice(3));

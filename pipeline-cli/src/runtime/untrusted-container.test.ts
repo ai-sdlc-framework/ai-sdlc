@@ -21,6 +21,7 @@ import {
   hardenGitRunner,
   hostGitOverrides,
   isDependencyManifest,
+  withGitdirCheck,
   withUntrustedContainer,
   type ProxyHandle,
 } from './untrusted-container.js';
@@ -250,7 +251,7 @@ describe('spawner in container mode (AC5, AC8, AC9)', () => {
 
 describe('host git hardening (AC6)', () => {
   it('overrides pin hooks, fsmonitor and ssh command', () => {
-    const o = hostGitOverrides('/main');
+    const o = hostGitOverrides();
     expect(o).toContain('core.hooksPath=/dev/null');
     expect(o).toContain('commit.gpgsign=false');
     expect(o).toContain('gpg.program=false');
@@ -264,12 +265,66 @@ describe('host git hardening (AC6)', () => {
       seen.push([c, ...a]);
       return { code: 0, stdout: '', stderr: '' };
     };
-    const r = hardenGitRunner(inner, '/main');
+    const r = hardenGitRunner(inner);
     await r('git', ['status']);
     await r('gh', ['pr', 'view']);
     expect(seen[0].slice(-1)).toEqual(['status']);
     expect(seen[0]).toContain('core.hooksPath=/dev/null');
     expect(seen[1]).toEqual(['gh', 'pr', 'view']);
+  });
+
+  it('diff calls refuse external diff and textconv', async () => {
+    const seen: string[][] = [];
+    const inner: Runner = async (c, a) => {
+      seen.push([c, ...a]);
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    await hardenGitRunner(inner)('git', ['diff', '--name-only', 'a...b']);
+    expect(seen[0]).toContain('--no-ext-diff');
+    expect(seen[0]).toContain('--no-textconv');
+  });
+
+  it('withGitdirCheck re-verifies the gitdir after each spawn, including a throwing one', async () => {
+    const mkd = (content: string) => {
+      const wt = mkdtempSync(join(tmpdir(), 'gc-wt-'));
+      const main = mkdtempSync(join(tmpdir(), 'gc-main-'));
+      mkdirSync(join(main, '.git', 'worktrees', 'w'), { recursive: true });
+      writeFileSync(join(wt, '.git'), content.replace('MAIN', main));
+      return { wt, main };
+    };
+    const ok = { output: '', exitCode: 0 } as never;
+    const inner = {
+      spawn: async () => ok,
+      spawnParallel: async () => [ok],
+    };
+    const good = mkd('gitdir: MAIN/.git/worktrees/w\n');
+    const g = withGitdirCheck(inner, () => good.wt, good.main);
+    await expect(g.spawn({ type: 'developer', prompt: 'p', cwd: good.wt })).resolves.toBe(ok);
+    // Nothing to check before the worktree exists.
+    const early = withGitdirCheck(inner, () => null, good.main);
+    await expect(early.spawn({ type: 'developer', prompt: 'p', cwd: '/x' })).resolves.toBe(ok);
+
+    const bad = mkd('gitdir: .g\n');
+    const b = withGitdirCheck(inner, () => bad.wt, bad.main);
+    await expect(b.spawn({ type: 'developer', prompt: 'p', cwd: bad.wt })).rejects.toThrow(
+      /no longer points/,
+    );
+    await expect(
+      b.spawnParallel([{ type: 'developer', prompt: 'p', cwd: bad.wt }]),
+    ).rejects.toThrow(/no longer points/);
+    const thrower = withGitdirCheck(
+      {
+        spawn: async () => {
+          throw new Error('boom');
+        },
+        spawnParallel: async () => [],
+      },
+      () => bad.wt,
+      bad.main,
+    );
+    await expect(thrower.spawn({ type: 'developer', prompt: 'p', cwd: bad.wt })).rejects.toThrow(
+      /no longer points/,
+    );
   });
 
   it('a planted core.hooksPath does not run under the hardened git', () => {
@@ -287,7 +342,7 @@ describe('host git hardening (AC6)', () => {
     g('config', 'core.hooksPath', evil);
     writeFileSync(join(repo, 'f'), 'x');
     g('add', 'f');
-    g(...hostGitOverrides(main), 'commit', '-q', '-m', 'm');
+    g(...hostGitOverrides(), 'commit', '-q', '-m', 'm');
     expect(spawnSync('test', ['-e', marker]).status).not.toBe(0);
   });
 });
@@ -364,6 +419,14 @@ describe('dependency manifest limit (AC7)', () => {
     await expect(assertNoDependencyChange(r, '/w')).rejects.toThrow(/package\.json/);
   });
 
+  it('fails closed when the diff or status command errors', async () => {
+    const failing =
+      (which: 'diff' | 'status'): Runner =>
+      async (_c, a) => ({ code: a[0] === which ? 128 : 0, stdout: '', stderr: 'fatal' });
+    await expect(assertNoDependencyChange(failing('diff'), '/w')).rejects.toThrow(/committed/);
+    await expect(assertNoDependencyChange(failing('status'), '/w')).rejects.toThrow(/status/);
+  });
+
   it('passes a clean diff', async () => {
     await expect(
       assertNoDependencyChange(runnerFor('src/a.ts\n', '?? new.ts\n'), '/w'),
@@ -375,7 +438,7 @@ const hasDocker = spawnSync('docker', ['version'], { stdio: 'ignore' }).status =
 describe.skipIf(!hasDocker || process.env.AI_SDLC_SANDBOX_INTEGRATION_TESTS !== '1')(
   'container integration (skipped: needs a docker runtime and AI_SDLC_SANDBOX_INTEGRATION_TESTS=1)',
   () => {
-    // Needs AI_SDLC_UNTRUSTED_AGENT_IMAGE (digest ref with sh and node) so the pull is real.
+    // Needs AI_SDLC_UNTRUSTED_AGENT_IMAGE (digest ref with sh, wget and grep) so the pull is real.
     const image = process.env.AI_SDLC_UNTRUSTED_AGENT_IMAGE;
     const runIn = async (script: string, wt: string, up: () => Promise<ProxyHandle>) => {
       let status: number | null = -1;

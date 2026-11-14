@@ -51,6 +51,7 @@ import {
 import {
   assertNoDependencyChange,
   assertWorktreeGitdir,
+  withGitdirCheck,
   hardenGitRunner,
 } from './runtime/untrusted-container.js';
 import { defaultRunner as defaultGitRunner } from './runtime/exec.js';
@@ -103,7 +104,20 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       : opts.taskSpec && opts.sourceKind === undefined
         ? 'inline taskSpec source'
         : null;
-  const spawner = untrustedReason ? withUntrustedEnv(opts.spawner, untrustedReason) : opts.spawner;
+  // AISDLC-1278: the agent can rewrite the worktree `.git` file from inside the container, so
+  // the gitdir is re-checked after every untrusted spawn returns, before any host git call.
+  // `hostRunner` carries the git hardening for every host git call from Step 6 on.
+  let untrustedWorktree: string | null = null;
+  const spawner = untrustedReason
+    ? withGitdirCheck(
+        withUntrustedEnv(opts.spawner, untrustedReason),
+        () => untrustedWorktree,
+        opts.workDir,
+      )
+    : opts.spawner;
+  const hostRunner = untrustedReason
+    ? hardenGitRunner(opts.runner ?? defaultGitRunner)
+    : opts.runner;
   // Review depth may only be relaxed for work the caller says is trusted backlog work.
   // An inline taskSpec with no sourceKind came from outside the backlog: untrusted.
   const reviewSourceKind: 'backlog' | 'gh-issue' | undefined =
@@ -198,6 +212,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     ...(fixesPr !== undefined ? { fixesPr } : {}),
     ...(fixesPr !== undefined && claimed?.prHeadRef ? { prHeadRef: claimed.prHeadRef } : {}),
   });
+  untrustedWorktree = branch.worktreePath;
 
   // AISDLC-200 — Wrap Steps 3-13 (NOT just 5-13) in a try/finally so that
   // any throw from Step 4 (status flip + sentinel write) AFTER Step 3
@@ -388,7 +403,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
           getMergeBaseDiff({
             workDir: opts.workDir,
             worktreePath: branch.worktreePath,
-            runner: opts.runner,
+            runner: hostRunner,
           }),
       },
       initialResult: devSpawn,
@@ -457,7 +472,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
           cwd: branch.worktreePath,
           developerClaimed: initialDev.verifications,
           boardDir: dispatchBoardDir(opts.workDir),
-          ...(opts.runner ? { runner: opts.runner } : {}),
+          ...(hostRunner ? { runner: hostRunner } : {}),
           ...(opts.verifyTimeoutMs !== undefined ? { timeoutMs: opts.verifyTimeoutMs } : {}),
         });
         firstVerify = false;
@@ -515,7 +530,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       branch: branch.branch,
       worktreePath: branch.worktreePath,
       workDir: opts.workDir,
-      runner: opts.runner,
+      runner: hostRunner,
       sourceKind: reviewSourceKind,
     });
     // Reviewers must never run on an empty or partial diff.
@@ -557,7 +572,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       grounding: {
         ctx: judgmentCtx,
         worktreePath: branch.worktreePath,
-        ...(opts.runner ? { runner: opts.runner } : {}),
+        ...(hostRunner ? { runner: hostRunner } : {}),
       },
       verdicts: initialVerdicts,
       harnessNote: reviewBuild.harnessNote,
@@ -581,7 +596,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       sourceKind,
       reviewSourceKind,
       spawner: spawner,
-      ...(opts.runner ? { runner: opts.runner } : {}),
+      ...(hostRunner ? { runner: hostRunner } : {}),
       onIteration: opts.onProgress,
       ...(opts.onDeveloperContractRetry
         ? { onDeveloperContractRetry: opts.onDeveloperContractRetry }
@@ -606,9 +621,6 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
 
     // AISDLC-1278: an untrusted run may not change dependencies, and every host git call
     // from here on ignores worktree config that would run agent-chosen code.
-    const hostRunner = untrustedReason
-      ? hardenGitRunner(opts.runner ?? defaultGitRunner, opts.workDir)
-      : opts.runner;
     if (untrustedReason) {
       assertWorktreeGitdir(branch.worktreePath, opts.workDir);
       await assertNoDependencyChange(hostRunner!, branch.worktreePath);
