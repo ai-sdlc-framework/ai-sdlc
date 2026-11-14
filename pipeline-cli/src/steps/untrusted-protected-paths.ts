@@ -63,9 +63,12 @@ export async function findProtectedPathChanges(opts: {
     '-z',
     `${opts.baseRef}..HEAD`,
   ]);
+  // Tree-to-tree: catches a merge commit (git log prints no paths for one) and any commit-tree
+  // built history, independent of the working tree.
+  const treeDiff = await run(['diff', '--name-only', '--no-renames', '-z', opts.baseRef, 'HEAD']);
   const changed = await run(['diff', '--name-only', '--no-renames', '-z', opts.baseRef]);
   const untracked = await run(['ls-files', '--others', '--exclude-standard', '-z']);
-  return [...new Set([...committed, ...changed, ...untracked])]
+  return [...new Set([...committed, ...treeDiff, ...changed, ...untracked])]
     .filter(isUntrustedProtectedPath)
     .sort();
 }

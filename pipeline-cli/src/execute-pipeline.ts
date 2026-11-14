@@ -668,7 +668,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     if (!push.pushed) {
       if (push.cause) {
         // AISDLC-1275 - the branch changes a protected path; nothing was pushed.
-        outcome = 'aborted';
+        outcome = 'aborted'; // PipelineOutcome equivalent of the AC's `failed`
         cause = push.cause;
         aborted = push.reason ?? push.cause;
       } else if (push.rebaseConflict) {

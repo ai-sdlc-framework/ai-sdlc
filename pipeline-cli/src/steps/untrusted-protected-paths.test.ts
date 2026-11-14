@@ -115,6 +115,34 @@ describe('findProtectedPathChanges (AISDLC-1275)', () => {
     ]);
   });
 
+  it('refuses a protected change that exists only in a merge commit', async () => {
+    git('checkout', '-q', '-b', 'side');
+    put('.ai-sdlc/agent-role.yaml', 'evil\n');
+    commit('side');
+    git('checkout', '-q', 'main');
+    put('src/m.ts');
+    commit('main');
+    git('merge', '--no-ff', '-q', '-m', 'merge', 'side');
+    expect(await check()).toEqual(['.ai-sdlc/agent-role.yaml']);
+  });
+
+  it('refuses a commit-tree merge even when the working tree is restored', async () => {
+    put('.ai-sdlc/agent-role.yaml', 'evil\n');
+    git('add', '-A');
+    const tree = execFileSync('git', ['write-tree'], { cwd: repo, encoding: 'utf8' }).trim();
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+    const merge = execFileSync('git', ['commit-tree', tree, '-p', head, '-p', head, '-m', 'm'], {
+      cwd: repo,
+      encoding: 'utf8',
+    }).trim();
+    git('update-ref', 'HEAD', merge);
+    git('reset', '-q', '--mixed', 'HEAD');
+    put('.ai-sdlc/agent-role.yaml', 'a\n');
+    git('checkout-index', '-q', '-f', '.ai-sdlc/agent-role.yaml');
+    git('update-index', '--assume-unchanged', '.ai-sdlc/agent-role.yaml');
+    expect(await check()).toEqual(['.ai-sdlc/agent-role.yaml']);
+  });
+
   it('throws when git fails (fail closed)', async () => {
     await expect(
       findProtectedPathChanges({ worktreePath: repo, baseRef: 'nope', runner: defaultRunner }),

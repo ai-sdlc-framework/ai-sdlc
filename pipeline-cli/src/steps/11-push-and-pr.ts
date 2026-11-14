@@ -588,9 +588,27 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   if (opts.untrusted) {
     let paths: string[];
     try {
+      // The agent can rewrite origin/<target> and remote.origin.fetch, so fetch the base into a
+      // private ref with an explicit refspec and diff against its SHA.
+      const baseFetch = await runner(
+        'git',
+        ['fetch', 'origin', `+refs/heads/${targetBranch}:refs/ai-sdlc/untrusted-base`],
+        { cwd: opts.worktreePath, allowFailure: true },
+      );
+      if (baseFetch.code !== 0) {
+        throw new Error(`base fetch failed: ${baseFetch.stderr.trim() || 'unknown error'}`);
+      }
+      const baseRev = await runner('git', ['rev-parse', 'refs/ai-sdlc/untrusted-base'], {
+        cwd: opts.worktreePath,
+        allowFailure: true,
+      });
+      const baseSha = baseRev.stdout.trim();
+      if (baseRev.code !== 0 || !/^[0-9a-f]{40,64}$/i.test(baseSha)) {
+        throw new Error('could not resolve the base sha');
+      }
       paths = await findProtectedPathChanges({
         worktreePath: opts.worktreePath,
-        baseRef: `origin/${targetBranch}`,
+        baseRef: baseSha,
         runner,
       });
     } catch (err) {

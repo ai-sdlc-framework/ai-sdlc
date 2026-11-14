@@ -438,6 +438,11 @@ describe('Step 11 — composeBody', () => {
 describe('Step 11 — pushAndPr', () => {
   it('untrusted run with a protected-path change is not pushed (AISDLC-1275)', async () => {
     const fake = new FakeRunner()
+      .on(/^git fetch origin \+refs\/heads\/.*:refs\/ai-sdlc\/untrusted-base/, ok())
+      .on(
+        (c, a) => c === 'git' && a[0] === 'rev-parse' && a[1] === 'refs/ai-sdlc/untrusted-base',
+        ok('a'.repeat(40) + '\n'),
+      )
       .on(
         (c, a) => c === 'git' && a[0] === 'diff' && a.includes('-z'),
         ok('.ai-sdlc/agent-role.yaml\0src/a.ts\0.husky/pre-push\0'),
@@ -463,6 +468,11 @@ describe('Step 11 — pushAndPr', () => {
 
   it('untrusted run fails closed when the path listing fails (AISDLC-1275)', async () => {
     const fake = new FakeRunner()
+      .on(/^git fetch origin \+refs\/heads\/.*:refs\/ai-sdlc\/untrusted-base/, ok())
+      .on(
+        (c, a) => c === 'git' && a[0] === 'rev-parse' && a[1] === 'refs/ai-sdlc/untrusted-base',
+        ok('a'.repeat(40) + '\n'),
+      )
       .on((c, a) => c === 'git' && a[0] === 'diff' && a.includes('-z'), fail('boom'))
       .on(/^git push/, ok());
     const r = await pushAndPr({
@@ -477,7 +487,54 @@ describe('Step 11 — pushAndPr', () => {
       runner: fake.toRunner(),
     });
     expect(r.pushed).toBe(false);
+    expect(r.cause).toBe('untrusted-protected-path');
     expect(r.reason).toContain('untrusted-protected-path');
+    expect(fake.calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+
+  it('untrusted run diffs against a freshly fetched private base sha, not origin/main (AISDLC-1275)', async () => {
+    const sha = 'b'.repeat(40);
+    const fake = new FakeRunner()
+      .on(/^git fetch origin \+refs\/heads\/.*:refs\/ai-sdlc\/untrusted-base/, ok())
+      .on(
+        (c, a) => c === 'git' && a[0] === 'rev-parse' && a[1] === 'refs/ai-sdlc/untrusted-base',
+        ok(sha + '\n'),
+      )
+      .on(/^git push/, ok());
+    await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      untrusted: true,
+      runner: fake.toRunner(),
+    });
+    const diffs = fake.calls.filter((c) => c.args[0] === 'diff' && c.args.includes('-z'));
+    expect(diffs.length).toBeGreaterThan(0);
+    for (const d of diffs) expect(d.args).toContain(sha);
+    expect(fake.calls.some((c) => c.args.join(' ').includes('origin/main..'))).toBe(false);
+  });
+
+  it('untrusted run fails closed when the private base fetch fails (AISDLC-1275)', async () => {
+    const fake = new FakeRunner()
+      .on(/^git fetch origin \+refs\/heads\/.*:refs\/ai-sdlc\/untrusted-base/, fail('nope'))
+      .on(/^git push/, ok());
+    const r = await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      untrusted: true,
+      runner: fake.toRunner(),
+    });
+    expect(r.pushed).toBe(false);
+    expect(r.cause).toBe('untrusted-protected-path');
     expect(fake.calls.some((c) => c.args[0] === 'push')).toBe(false);
   });
 
