@@ -400,10 +400,14 @@ export function isDependencyManifest(path: string): boolean {
  */
 export async function assertNoDependencyChange(runner: Runner, worktree: string): Promise<void> {
   const files = new Set<string>();
-  const committed = await runner('git', ['diff', '--name-only', 'origin/main...HEAD'], {
-    cwd: worktree,
-    allowFailure: true,
-  });
+  const committed = await runner(
+    'git',
+    ['diff', '--name-only', '--no-renames', 'origin/main...HEAD'],
+    {
+      cwd: worktree,
+      allowFailure: true,
+    },
+  );
   if (committed.code !== 0) {
     throw new Error('untrusted run: could not list committed changes; stopping before push.');
   }

@@ -510,6 +510,13 @@ describe('Step 11 — pushAndPr', () => {
     expect(idx('log')).toBeLessThan(idx('push'));
   });
 
+  it('untrusted run does not build the workspace even when node_modules exists (AISDLC-1278)', async () => {
+    mkdirSync(join(tmp, 'node_modules', '.bin'), { recursive: true });
+    const fake = new FakeRunner().on(headOk, ok(`${HEAD_SHA}\n`)).on(/^git push/, ok());
+    await pushAndPr({ ...untrustedOpts(), runner: fake.toRunner() });
+    expect(fake.calls.some((c) => c.command === 'pnpm')).toBe(false);
+  });
+
   it('untrusted run refuses a protected change that appears after the build step (AISDLC-1275)', async () => {
     // The check is the last step before the push: a protected change in the listing blocks it
     // even though an earlier listing would have been clean.

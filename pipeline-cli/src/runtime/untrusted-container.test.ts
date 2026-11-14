@@ -410,6 +410,16 @@ describe('dependency manifest limit (AC7)', () => {
     expect(calls.find((a) => a[0] === 'status')).toEqual(['status', '--porcelain', '-uall', '-z']);
   });
 
+  it('lists committed changes without rename detection', async () => {
+    const calls: string[][] = [];
+    const r: Runner = async (_c, a) => {
+      calls.push(a);
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    await assertNoDependencyChange(r, '/w');
+    expect(calls.find((a) => a[0] === 'diff')).toContain('--no-renames');
+  });
+
   it('catches the origin of a rename', async () => {
     const r: Runner = async (_c, a) => ({
       code: 0,

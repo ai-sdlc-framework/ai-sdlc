@@ -153,6 +153,8 @@ Dependency limit: a run whose diff (against `origin/main`, committed or not, inc
 
 Limits that remain:
 
+0. **Step 11 build skipped.** An untrusted run skips the pre-push workspace build, because it would run worktree-planted binaries (`node_modules/.bin`) on the host; CI builds the pushed tree.
+
 1. **Worktree contents.** The agent can read and change everything in the worktree, including repository secrets committed there.
 2. **Model proxy.** The proxy forwards model requests with the pipeline's credential, within its rate and size caps; the agent can spend that budget. The proxy runs in agent mode for these sessions (tool-use and review-shape gates are skipped).
 3. **Host git filters.** A `filter.*` driver set in worktree config plus `.gitattributes` is not covered by the command-line overrides.
