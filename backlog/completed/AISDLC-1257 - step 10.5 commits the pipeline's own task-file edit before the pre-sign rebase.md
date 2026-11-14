@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1257
 title: step 10.5 commits the pipeline's own task-file edit before the pre-sign rebase
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-09'
 labels:
@@ -29,14 +29,38 @@ The monorepo rarely hits this because the developer usually moves the task file 
 
 ## Acceptance Criteria
 
-- [ ] Step 10.5 commits an uncommitted modification to the task's own file under `backlog/tasks/` before `git rebase`, using the same commit path as the review ledger; the commit is omitted when the file is clean or already moved.
-- [ ] A dirty tracked path that is not the task file or the ledger still fails with `dirty-worktree`, and the `Dirty paths:` list contains tracked paths only.
-- [ ] Untracked `.active-task`, `.ai-sdlc/.last-build-sha` and `.ai-sdlc/review-state/` are reported in a separate `Untracked runtime files (add to .gitignore):` note, never as the cause.
-- [ ] Unit tests in `pipeline-cli/src/next-step/__tests__/` cover: flip-only dirt (rebase proceeds, one chore commit), flip plus foreign dirt (refuses, names the foreign path only), task file already moved to `backlog/completed/` (no commit).
-- [ ] `docs/operations/backlog-and-execution-reference.md` Step 10.5 paragraph names the task-file commit next to the ledger commit.
+- [x] Step 10.5 commits an uncommitted modification to the task's own file under `backlog/tasks/` before `git rebase`, using the same commit path as the review ledger; the commit is omitted when the file is clean or already moved.
+- [x] A dirty tracked path that is not the task file or the ledger still fails with `dirty-worktree`, and the `Dirty paths:` list contains tracked paths only.
+- [x] Untracked `.active-task`, `.ai-sdlc/.last-build-sha` and `.ai-sdlc/review-state/` are reported in a separate `Untracked runtime files (add to .gitignore):` note, never as the cause.
+- [x] Unit tests in `pipeline-cli/src/next-step/__tests__/` cover: flip-only dirt (rebase proceeds, one chore commit), flip plus foreign dirt (refuses, names the foreign path only), task file already moved to `backlog/completed/` (no commit).
+- [x] `docs/operations/backlog-and-execution-reference.md` Step 10.5 paragraph names the task-file commit next to the ledger commit.
 
 ## Notes
 
 - Alternative considered: committing the flip in step 4 (begin-task). Rejected for now: step 4 runs before the developer, and a commit there changes the base every developer round sees and the push-count assumptions of AISDLC-1227 (Step 11 is the sole pusher). Step 10.5 already owns "commit pipeline residue before the rebase".
 - Adopter-side: the io repo `.gitignore` lacks the three runtime entries. Whether `ai-sdlc init` should scaffold them is a separate question for the io planner; not in scope here.
 - Source: cross-session message from ai-sdlc-io-planner 2026-11-09 ~15:4xZ (IO-42 round 2 commit 2150f8b, IO-53 dev commit af0c0a7).
+
+## Final Summary
+
+## Summary
+Step 10.5 now commits an uncommitted task-file edit under backlog/tasks/ together with the review ledger before the pre-sign rebase. No commit is made when the file is clean or already under backlog/completed/. The dirty-worktree note lists tracked paths only, and the untracked runtime files go in a separate 'Untracked runtime files (add to .gitignore):' note.
+
+## Changes
+- pipeline-cli/src/next-step/ship.ts
+- pipeline-cli/src/next-step/ship.test.ts
+- docs/operations/backlog-and-execution-reference.md
+
+## Design decisions
+The three new tests run against real git: flip-only, flip plus foreign dirt, and task file already moved to backlog/completed/. The pipeline's own In Progress status flip of the AISDLC-1257 task file is not in the pushed commit. It is a local uncommitted change, which the pipeline can commit under the new behaviour, so the branch has 1 commit. The git add runs once per path, because a single pathspec matching nothing (no ledger yet) fails the whole add. The push has to be run as a bare git -C <worktree> push --force-with-lease ... command, because the hook rejects it when it follows cd && or a pipe.
+
+## Verification
+- `pnpm build` — passed (dashboard build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (240 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 parallel reviews approved (harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
