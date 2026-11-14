@@ -459,6 +459,57 @@ describe('preSignRebase against real git and the real ledger writer (AISDLC-1021
     expect(r).toMatchObject({ kind: 'failed', cause: 'ledger-not-staged' });
     expect((r as { reason: string }).reason).toContain('.gitignore:1:.ai-sdlc/reviews/');
   });
+
+  describe('task-file status flip (AISDLC-1257)', () => {
+    const taskRel = 'backlog/tasks/aisdlc-1021 - demo.md';
+    const commitCount = (): number => Number(git(clone, 'rev-list', '--count', 'HEAD').trim());
+
+    const trackTask = (dir: 'tasks' | 'completed'): string => {
+      mkdirSync(join(clone, 'backlog', dir), { recursive: true });
+      const rel = `backlog/${dir}/aisdlc-1021 - demo.md`;
+      writeFileSync(join(clone, rel), 'status: To Do\n');
+      git(clone, 'add', '--', rel);
+      git(clone, 'commit', '-m', 'add task');
+      return rel;
+    };
+
+    it('commits a flip-only task file once, then rebases', async () => {
+      setup();
+      trackTask('tasks');
+      writeFileSync(join(clone, taskRel), 'status: In Progress\n');
+      const before = commitCount();
+      const r = await run();
+      expect(r.kind).not.toBe('failed');
+      // one chore commit survives the rebase on top of main's moved commit
+      expect(commitCount()).toBe(before + 2);
+      expect(git(clone, 'log', '-3', '--format=%s')).toContain('chore: commit task status');
+      expect(git(clone, 'status', '--porcelain').trim()).toBe('');
+    });
+
+    it('refuses foreign dirt, naming only tracked paths and a runtime note separately', async () => {
+      setup();
+      trackTask('tasks');
+      writeFileSync(join(clone, taskRel), 'status: In Progress\n');
+      writeFileSync(join(clone, 'README.md'), 'dirty\n');
+      writeFileSync(join(clone, '.active-task'), 'x\n');
+      const r = await run();
+      expect(r).toMatchObject({ kind: 'failed', cause: 'dirty-worktree' });
+      const reason = (r as { reason: string }).reason;
+      expect(reason).toMatch(/Dirty paths: M README\.md\./);
+      expect(reason).not.toMatch(/Dirty paths:[^.]*active-task/);
+      expect(reason).toContain('Untracked runtime files (add to .gitignore): .active-task');
+    });
+
+    it('makes no commit when the task file already moved to backlog/completed', async () => {
+      setup();
+      trackTask('completed');
+      const before = commitCount();
+      const r = await run();
+      expect(r.kind).not.toBe('failed');
+      expect(commitCount()).toBe(before + 1); // only main's commit, via rebase
+      expect(git(clone, 'log', '-3', '--format=%s')).not.toContain('chore: commit');
+    });
+  });
 });
 
 /** Give the repo a CodeQL workflow that runs on pull requests (task PRs open draft). */
