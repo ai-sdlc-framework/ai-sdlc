@@ -440,6 +440,8 @@ describe('Step 11 — composeBody', () => {
 
 describe('Step 11 — pushAndPr', () => {
   const BASE = 'a'.repeat(40);
+  const HEAD_SHA = 'c'.repeat(40);
+  const headOk = (c: string, a: string[]) => c === 'git' && a[0] === 'rev-parse' && a[1] === 'HEAD';
   const untrustedOpts = () => ({
     taskId: 'AISDLC-1',
     workDir: tmp,
@@ -454,6 +456,7 @@ describe('Step 11 — pushAndPr', () => {
 
   it('untrusted run with a protected-path change is not pushed (AISDLC-1275)', async () => {
     const fake = new FakeRunner()
+      .on(headOk, ok(`${HEAD_SHA}\n`))
       .on(
         (c, a) => c === 'git' && a[0] === 'diff' && a.includes('-z'),
         ok('.ai-sdlc/agent-role.yaml\0src/a.ts\0.husky/pre-push\0'),
@@ -469,6 +472,7 @@ describe('Step 11 — pushAndPr', () => {
 
   it('untrusted run fails closed when the path listing fails (AISDLC-1275)', async () => {
     const fake = new FakeRunner()
+      .on(headOk, ok(`${HEAD_SHA}\n`))
       .on((c, a) => c === 'git' && a[0] === 'diff' && a.includes('-z'), fail('boom'))
       .on(/^git push/, ok());
     const r = await pushAndPr({ ...untrustedOpts(), runner: fake.toRunner() });
@@ -478,7 +482,7 @@ describe('Step 11 — pushAndPr', () => {
   });
 
   it('untrusted run diffs against the Step 3 base sha and never fetches or reads the remote (AISDLC-1275)', async () => {
-    const fake = new FakeRunner().on(/^git push/, ok());
+    const fake = new FakeRunner().on(headOk, ok(`${HEAD_SHA}\n`)).on(/^git push/, ok());
     await pushAndPr({ ...untrustedOpts(), runner: fake.toRunner() });
     const diffs = fake.calls.filter((c) => c.args[0] === 'diff' && c.args.includes('-z'));
     expect(diffs.length).toBeGreaterThan(0);
@@ -490,6 +494,34 @@ describe('Step 11 — pushAndPr', () => {
       )
       .filter((c) => c.args[0] === 'fetch' || c.args[0] === 'ls-remote');
     expect(fetchesBeforeCheck).toEqual([]);
+  });
+
+  it('untrusted run skips the late rebase and pushes the checked sha explicitly (AISDLC-1275)', async () => {
+    const SHA = HEAD_SHA;
+    const fake = new FakeRunner().on(headOk, ok(`${SHA}\n`)).on(/^git push/, ok());
+    await pushAndPr({ ...untrustedOpts(), runner: fake.toRunner() });
+    expect(fake.calls.some((c) => ['rebase'].includes(c.args[0]!))).toBe(false);
+    const push = fake.calls.find((c) => c.args[0] === 'push');
+    expect(push?.args).toContain(`${SHA}:refs/heads/b`);
+    // the check ran on that same HEAD, after the rev-parse and before the push
+    const idx = (n: string) => fake.calls.findIndex((c) => c.args[0] === n);
+    expect(idx('log')).toBeLessThan(idx('push'));
+  });
+
+  it('untrusted run refuses a protected change that appears after the build step (AISDLC-1275)', async () => {
+    // The check is the last step before the push: a protected change in the listing blocks it
+    // even though an earlier listing would have been clean.
+    const fake = new FakeRunner()
+      .on(headOk, ok(`${HEAD_SHA}\n`))
+      .on(
+        (c, a) => c === 'git' && a[0] === 'log' && a.includes('-z'),
+        ok('.github/workflows/ci.yml\0'),
+      )
+      .on(/^git push/, ok());
+    const r = await pushAndPr({ ...untrustedOpts(), runner: fake.toRunner() });
+    expect(r.pushed).toBe(false);
+    expect(r.protectedPaths).toEqual(['.github/workflows/ci.yml']);
+    expect(fake.calls.some((c) => c.args[0] === 'push')).toBe(false);
   });
 
   it('untrusted run fails closed when no base sha was recorded (AISDLC-1275)', async () => {

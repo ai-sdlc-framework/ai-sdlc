@@ -471,6 +471,51 @@ async function firstPushLease(
   return { sha, policyNever: false };
 }
 
+/** AISDLC-1275: check the exact HEAD about to be pushed; returns its SHA or the refusal result. */
+async function untrustedPushCheck(
+  opts: PushAndPrStepOptions,
+  runner: Runner,
+): Promise<{ sha: string } | { refusal: PushAndPrResult }> {
+  const refuse = (reason: string, extra: Partial<PushAndPrResult> = {}) => ({
+    refusal: {
+      pushed: false,
+      prUrl: null,
+      cause: UNTRUSTED_PROTECTED_CAUSE,
+      reason: `${UNTRUSTED_PROTECTED_CAUSE}: ${reason}`,
+      ...extra,
+    } as PushAndPrResult,
+  });
+  let paths: string[];
+  let sha: string;
+  try {
+    const baseSha = opts.untrustedBaseSha ?? '';
+    if (!/^[0-9a-f]{40,64}$/i.test(baseSha)) {
+      throw new Error('no base sha was recorded at Step 3');
+    }
+    const head = await runner('git', ['rev-parse', 'HEAD'], {
+      cwd: opts.worktreePath,
+      allowFailure: true,
+    });
+    sha = head.code === 0 ? head.stdout.trim() : '';
+    if (!/^[0-9a-f]{40,64}$/i.test(sha)) throw new Error('could not resolve HEAD');
+    paths = await findProtectedPathChanges({
+      worktreePath: opts.worktreePath,
+      baseRef: baseSha,
+      runner,
+    });
+  } catch (err) {
+    return refuse(
+      `could not verify changed paths (${err instanceof Error ? err.message : String(err)}); push refused`,
+    );
+  }
+  if (paths.length > 0) {
+    return refuse(`untrusted run changed protected path(s): ${paths.join(', ')}`, {
+      protectedPaths: paths,
+    });
+  }
+  return { sha };
+}
+
 /** AISDLC-1054: append "Fixed by <task id>" to the body of the PR this task fixes; creates no PR. */
 async function noteFixedBy(opts: PushAndPrStepOptions, runner: Runner): Promise<PushAndPrResult> {
   const pr = String(opts.fixesPr);
@@ -539,44 +584,6 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
     (opts.logger ?? DEFAULT_LOGGER).warn(lease.message);
   }
 
-  // 0-pre. AISDLC-1275 - an untrusted run is checked for protected-path changes before any push.
-  //   The base is the SHA the pipeline recorded at Step 3, before the developer ran. It is never
-  //   fetched or read from git config (remote.origin.url/pushurl/insteadOf, branch names and
-  //   refs are all agent-writable). The check runs before the late rebase so the diff holds only
-  //   the agent's own changes; over-reporting fails closed.
-  if (opts.untrusted) {
-    let paths: string[];
-    try {
-      const baseSha = opts.untrustedBaseSha ?? '';
-      if (!/^[0-9a-f]{40,64}$/i.test(baseSha)) {
-        throw new Error('no base sha was recorded at Step 3');
-      }
-      paths = await findProtectedPathChanges({
-        worktreePath: opts.worktreePath,
-        baseRef: baseSha,
-        runner,
-      });
-    } catch (err) {
-      return {
-        pushed: false,
-        prUrl: null,
-        cause: UNTRUSTED_PROTECTED_CAUSE,
-        reason: `${UNTRUSTED_PROTECTED_CAUSE}: could not verify changed paths (${
-          err instanceof Error ? err.message : String(err)
-        }); push refused`,
-      };
-    }
-    if (paths.length > 0) {
-      return {
-        pushed: false,
-        prUrl: null,
-        cause: UNTRUSTED_PROTECTED_CAUSE,
-        protectedPaths: paths,
-        reason: `${UNTRUSTED_PROTECTED_CAUSE}: untrusted run changed protected path(s): ${paths.join(', ')}`,
-      };
-    }
-  }
-
   // 0. AISDLC-232 — Late-rebase: fetch + rebase origin/main before pushing.
   //    This catches conflicts that accumulated while the dev ran (Steps 5-10
   //    take 20-40 min; origin/main may have moved). Mechanical conflicts are
@@ -589,13 +596,15 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
     allowFailure: true,
   });
   const preRebaseSha = preRebase.code === 0 ? preRebase.stdout.trim() : '';
-  const rebase = await landPrep({
-    worktreePath: opts.worktreePath,
-    branch: opts.branch,
-    targetBranch,
-    push: false,
-    runner,
-  });
+  const rebase = opts.untrusted
+    ? { ok: true as const, conflictingFiles: [] as string[], reason: undefined }
+    : await landPrep({
+        worktreePath: opts.worktreePath,
+        branch: opts.branch,
+        targetBranch,
+        push: false,
+        runner,
+      });
   if (!rebase.ok) {
     return {
       pushed: false,
@@ -626,6 +635,17 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   const clobber = await checkClobberSignature(opts, targetBranch, runner);
   if (clobber) return { pushed: false, prUrl: null, reason: clobber };
 
+  // AISDLC-1275 - an untrusted run is checked for protected-path changes on the exact commit about
+  //   to be pushed, after every step that runs agent-controlled code (the build) and with no
+  //   remote-derived history (the late rebase is skipped for untrusted runs: it fetches through
+  //   `origin`, whose url the agent can rewrite). The base is the SHA recorded at Step 3.
+  let pushSha: string | null = null;
+  if (opts.untrusted) {
+    const checked = await untrustedPushCheck(opts, runner);
+    if ('refusal' in checked) return checked.refusal;
+    pushSha = checked.sha;
+  }
+
   // 1. Push -u origin <branch>. NEVER a bare force. A resumed task already has
   //    commits on origin and the late rebase changed their SHAs, so it pushes
   //    with a lease on its own branch only, expecting the origin/<branch> SHA that
@@ -640,9 +660,11 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
         '-u',
         `--force-with-lease=refs/heads/${opts.branch}:${leaseSha}`,
         'origin',
-        `HEAD:refs/heads/${opts.branch}`,
+        `${pushSha ?? 'HEAD'}:refs/heads/${opts.branch}`,
       ]
-    : ['push', '-u', 'origin', opts.branch];
+    : pushSha
+      ? ['push', '-u', 'origin', `${pushSha}:refs/heads/${opts.branch}`]
+      : ['push', '-u', 'origin', opts.branch];
   let pushResult = await runTrustedPush(
     runner,
     { mainCheckout: opts.workDir, worktree: opts.worktreePath },
