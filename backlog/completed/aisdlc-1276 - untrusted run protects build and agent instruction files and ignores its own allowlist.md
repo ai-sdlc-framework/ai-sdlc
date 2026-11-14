@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1276
 title: 'Untrusted run: build and agent-instruction files are protected, and the run cannot widen its own write allowlist'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-13'
 labels:
