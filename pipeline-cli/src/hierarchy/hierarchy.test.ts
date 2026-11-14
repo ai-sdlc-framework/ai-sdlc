@@ -3038,6 +3038,10 @@ describe('reconcile scheduler ownership (AISDLC-932)', () => {
         lastTickAt: new Date(NOW.getTime() - 600_000).toISOString(),
       }),
     );
+    // an idle scheduler (empty queue) with an old last tick is healthy
+    expect(hierarchyStatus(deps).scheduler).toEqual({ state: 'up', pid: 4242 });
+    mkdirSync(path.join(boardDir, 'queue'), { recursive: true });
+    writeFileSync(path.join(boardDir, 'queue', 'AISDLC-1.dispatch.json'), '{}');
     const result = hierarchyStatus(deps);
     expect(result.scheduler).toEqual({ state: 'up', pid: 4242, stalled: { ageSec: 600 } });
     expect(formatStatus(result)).toContain('scheduler: STALLED (last tick 600s ago, pid 4242)');
@@ -3052,6 +3056,17 @@ describe('reconcile scheduler ownership (AISDLC-932)', () => {
       }),
     );
     expect(formatStatus(hierarchyStatus(deps))).toContain('scheduler: up (pid 4242)');
+    // a live tick running past the limit is stalled even with a fresh last tick or no queue
+    rmSync(path.join(boardDir, 'queue', 'AISDLC-1.dispatch.json'));
+    const sched = path.join(boardDir, 'reconcile-scheduler.json');
+    writeFileSync(
+      sched,
+      JSON.stringify({ pid: 4242, tick: { pid: 4243, startedAt: NOW.getTime() - 600_000 } }),
+    );
+    deps.isAlive = () => true;
+    expect(hierarchyStatus(deps).scheduler).toMatchObject({ state: 'up', stalled: {} });
+    deps.isAlive = (p) => p === 4242;
+    expect(hierarchyStatus(deps).scheduler).toEqual({ state: 'up', pid: 4242 });
   });
 
   it('down stops it, a role-limited down leaves it', async () => {

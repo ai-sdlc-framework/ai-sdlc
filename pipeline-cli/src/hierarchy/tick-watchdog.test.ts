@@ -83,8 +83,11 @@ describe('tick watchdog (AISDLC-1255)', () => {
     expect(t.signals).toEqual([[99, 'SIGTERM']]);
   });
 
-  it('the scheduler reaps a stalled tick and, with work queued, starts the next', () => {
+  it('the scheduler reaps a stalled tick and, with work queued, starts the next', async () => {
     const t = setup();
+    const { mkdirSync } = await import('node:fs');
+    mkdirSync(path.join(t.dir, 'queue'), { recursive: true });
+    writeFileSync(path.join(t.dir, 'queue', 'AISDLC-1.dispatch.json'), '{}');
     writeFileSync(
       path.join(t.dir, LOOP_STATE_FILENAME),
       JSON.stringify({ schemaVersion: 'v1', ingested: {}, rejected: {}, handled: [] }),
@@ -103,9 +106,8 @@ describe('tick watchdog (AISDLC-1255)', () => {
       },
     });
     expect(t.signals[0]).toEqual([99, 'SIGTERM']);
-    // empty queue: no new tick, but the stalled one is gone
-    expect(started).toBe(0);
-    expect(readTickRecord(t.dir)).toBeUndefined();
+    expect(started).toBe(1);
+    expect(readTickRecord(t.dir)).toEqual({ pid: 123, startedAt: NOW.getTime() });
   });
 
   it('a started tick is recorded and cleared on exit; a live one blocks the next', async () => {

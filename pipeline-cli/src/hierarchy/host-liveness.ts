@@ -67,6 +67,11 @@ export interface HostWatchDeps {
   stallMs?: number;
 }
 
+/** The one stall limit the watchdog and `status` share (AISDLC-1255). */
+export function hostStallMs(intervalMs?: number, env: NodeJS.ProcessEnv = process.env): number {
+  return tickStallMs(intervalMs ?? HOST_TICK_INTERVAL_MS, env);
+}
+
 const defaultWatchdog: Pick<WatchdogDeps, 'isAlive' | 'kill'> = {
   isAlive: (pid) => {
     try {
@@ -77,11 +82,9 @@ const defaultWatchdog: Pick<WatchdogDeps, 'isAlive' | 'kill'> = {
     }
   },
   kill: (pid, signal) => {
-    try {
-      process.kill(-pid, signal);
-    } catch {
-      process.kill(pid, signal);
-    }
+    // Only the negative pid (the tick is its own process-group leader): a reused pid is never
+    // signalled as a lone process.
+    process.kill(-pid, signal);
   },
 };
 
@@ -92,7 +95,7 @@ export function hostWatchCheck(deps: HostWatchDeps): boolean {
   const running = checkRunningTick({
     boardDir: deps.boardDir,
     now: deps.now,
-    stallMs: deps.stallMs ?? tickStallMs(deps.intervalMs ?? HOST_TICK_INTERVAL_MS),
+    stallMs: deps.stallMs ?? hostStallMs(deps.intervalMs),
     ...defaultWatchdog,
     ...deps.watchdog,
   });
