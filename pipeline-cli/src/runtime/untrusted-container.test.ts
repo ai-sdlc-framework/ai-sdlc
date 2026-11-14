@@ -11,6 +11,7 @@ import {
   assertDigestImage,
   assertNoCredentialEnv,
   assertNoDependencyChange,
+  assertWorktreeGitdir,
   assertProxyBindAddress,
   buildUntrustedContainerArgs,
   buildUntrustedContainerEnv,
@@ -249,7 +250,9 @@ describe('spawner in container mode (AC5, AC8, AC9)', () => {
 describe('host git hardening (AC6)', () => {
   it('overrides pin hooks, fsmonitor and ssh command', () => {
     const o = hostGitOverrides('/main');
-    expect(o).toContain('core.hooksPath=/main/.husky/_');
+    expect(o).toContain('core.hooksPath=/dev/null');
+    expect(o).toContain('commit.gpgsign=false');
+    expect(o).toContain('gpg.program=false');
     expect(o).toContain('core.fsmonitor=false');
     expect(o).toContain('core.sshCommand=ssh');
   });
@@ -264,7 +267,7 @@ describe('host git hardening (AC6)', () => {
     await r('git', ['status']);
     await r('gh', ['pr', 'view']);
     expect(seen[0].slice(-1)).toEqual(['status']);
-    expect(seen[0]).toContain('core.hooksPath=/main/.husky/_');
+    expect(seen[0]).toContain('core.hooksPath=/dev/null');
     expect(seen[1]).toEqual(['gh', 'pr', 'view']);
   });
 
@@ -288,6 +291,28 @@ describe('host git hardening (AC6)', () => {
   });
 });
 
+describe('worktree gitdir pin (AC6)', () => {
+  const mk = (content: string | null) => {
+    const wt = mkdtempSync(join(tmpdir(), 'gd-wt-'));
+    const main = mkdtempSync(join(tmpdir(), 'gd-main-'));
+    mkdirSync(join(main, '.git', 'worktrees', 'w'), { recursive: true });
+    if (content !== null) writeFileSync(join(wt, '.git'), content.replace('MAIN', main));
+    return { wt, main };
+  };
+  it('accepts a gitdir under the main checkout', () => {
+    const { wt, main } = mk('gitdir: MAIN/.git/worktrees/w\n');
+    expect(() => assertWorktreeGitdir(wt, main)).not.toThrow();
+  });
+  it('refuses a repointed or missing .git file', () => {
+    const a = mk('gitdir: /tmp/evil-gitdir\n');
+    expect(() => assertWorktreeGitdir(a.wt, a.main)).toThrow(/no longer points/);
+    const b = mk('garbage');
+    expect(() => assertWorktreeGitdir(b.wt, b.main)).toThrow(/no longer points/);
+    const c = mk(null);
+    expect(() => assertWorktreeGitdir(c.wt, c.main)).toThrow(/missing/);
+  });
+});
+
 describe('dependency manifest limit (AC7)', () => {
   it('recognises manifests and lockfiles', () => {
     for (const f of ['package.json', 'a/b/pnpm-lock.yaml', 'requirements-dev.txt', 'go.sum']) {
@@ -300,7 +325,7 @@ describe('dependency manifest limit (AC7)', () => {
     (committed: string, status: string): Runner =>
     async (_c, a) => ({
       code: 0,
-      stdout: a[0] === 'diff' ? committed : status,
+      stdout: a[0] === 'diff' ? committed : status.replace(/\n/g, '\0'),
       stderr: '',
     });
 
@@ -311,6 +336,31 @@ describe('dependency manifest limit (AC7)', () => {
     await expect(
       assertNoDependencyChange(runnerFor('', ' M pnpm-lock.yaml\n'), '/w'),
     ).rejects.toThrow(/pnpm-lock\.yaml/);
+  });
+
+  it('lists untracked files individually (-uall -z) so a new folder cannot hide a manifest', async () => {
+    const calls: string[][] = [];
+    const r: Runner = async (_c, a) => {
+      calls.push(a);
+      return {
+        code: 0,
+        stdout: a[0] === 'diff' ? '' : '?? packages/evil/package.json\0',
+        stderr: '',
+      };
+    };
+    await expect(assertNoDependencyChange(r, '/w')).rejects.toThrow(
+      /packages\/evil\/package\.json/,
+    );
+    expect(calls.find((a) => a[0] === 'status')).toEqual(['status', '--porcelain', '-uall', '-z']);
+  });
+
+  it('catches the origin of a rename', async () => {
+    const r: Runner = async (_c, a) => ({
+      code: 0,
+      stdout: a[0] === 'diff' ? '' : 'R  src/x.ts\0package.json\0',
+      stderr: '',
+    });
+    await expect(assertNoDependencyChange(r, '/w')).rejects.toThrow(/package\.json/);
   });
 
   it('passes a clean diff', async () => {
@@ -324,20 +374,46 @@ const hasDocker = spawnSync('docker', ['version'], { stdio: 'ignore' }).status =
 describe.skipIf(!hasDocker || process.env.AI_SDLC_SANDBOX_INTEGRATION_TESTS !== '1')(
   'container integration (skipped: needs a docker runtime and AI_SDLC_SANDBOX_INTEGRATION_TESTS=1)',
   () => {
-    it('cannot read host files outside the worktree or reach other hosts', () => {
-      const wt = mkdtempSync(join(tmpdir(), 'ua-wt-'));
-      const outside = mkdtempSync(join(tmpdir(), 'ua-out-'));
-      writeFileSync(join(outside, 'secret'), 's');
-      const base = ['run', '--rm', '--network=none', '-v', `${wt}:/workspace:rw`, IMAGE];
-      const read = spawnSync('docker', [...base, 'cat', join(outside, 'secret')]);
-      expect(read.status).not.toBe(0);
-      const net = spawnSync('docker', [
-        ...base,
-        'node',
-        '-e',
-        "fetch('http://example.com').catch(()=>process.exit(1))",
-      ]);
-      expect(net.status).not.toBe(0);
-    });
+    // Needs AI_SDLC_UNTRUSTED_AGENT_IMAGE (digest ref with sh and node) so the pull is real.
+    const image = process.env.AI_SDLC_UNTRUSTED_AGENT_IMAGE;
+    const runIn = async (script: string, wt: string, up: () => Promise<ProxyHandle>) => {
+      let status: number | null = -1;
+      const res = await withUntrustedContainer(
+        { image, startProxy: up },
+        { worktree: wt, optsEnv: undefined, command: ['sh', '-c', script] },
+        async (l) => {
+          status = spawnSync(l.binary, l.args, { encoding: 'utf8' }).status;
+        },
+      );
+      expect('value' in res).toBe(true);
+      return status;
+    };
+    const stubProxy = async (): Promise<ProxyHandle> => {
+      const srv = createServer((_q, r) => r.end('ok')).listen(0, '127.0.0.1');
+      await new Promise((ok) => srv.once('listening', ok));
+      const port = (srv.address() as { port: number }).port;
+      return {
+        port,
+        sessionToken: 'tok',
+        bindAddress: '127.0.0.1',
+        stop: () => new Promise<void>((ok) => srv.close(() => ok())),
+      };
+    };
+
+    it.skipIf(!process.env.AI_SDLC_UNTRUSTED_AGENT_IMAGE)(
+      'denies outside files and other hosts, allows the proxy',
+      async () => {
+        const wt = mkdtempSync(join(tmpdir(), 'ua-wt-'));
+        const outside = mkdtempSync(join(tmpdir(), 'ua-out-'));
+        writeFileSync(join(outside, 'secret'), 's');
+        expect(await runIn(`cat ${join(outside, 'secret')}`, wt, stubProxy)).not.toBe(0);
+        expect(
+          await runIn('wget -q -T 5 -O- http://example.com >/dev/null', wt, stubProxy),
+        ).not.toBe(0);
+        expect(
+          await runIn('wget -q -T 5 -O- "$ANTHROPIC_BASE_URL" | grep -q ok', wt, stubProxy),
+        ).toBe(0);
+      },
+    );
   },
 );

@@ -1066,6 +1066,11 @@ describe('integration — executePipeline (full Step 0-13)', () => {
     it('happy path: inline spec → dev → reviewers → PR opens with Closes #N', async () => {
       const worktreePath = join(tmp, '.worktrees', 'gh-issue-612');
       mkdirSync(worktreePath, { recursive: true });
+      mkdirSync(join(tmp, '.git', 'worktrees', 'gh-issue-612'), { recursive: true });
+      writeFileSync(
+        join(worktreePath, '.git'),
+        `gitdir: ${join(tmp, '.git', 'worktrees', 'gh-issue-612')}\n`,
+      );
 
       // Capture the gh pr create argv so we can assert on title + body.
       let prCreateArgs: string[] = [];

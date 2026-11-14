@@ -154,6 +154,15 @@ export const DEFAULT_MODELS: Partial<Record<SubagentType, string>> = DEFAULT_ROL
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30 min
 
+/** Minimal host env for the docker client only; it never reaches the container. */
+function dockerClientEnv(host: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const k of ['PATH', 'HOME', 'DOCKER_HOST', 'DOCKER_CONFIG', 'DOCKER_CONTEXT']) {
+    if (host[k] !== undefined) out[k] = host[k];
+  }
+  return out;
+}
+
 export class ShellClaudePSpawner implements SubagentSpawner {
   private readonly binary: string;
   private readonly processSpawner: ProcessSpawner;
@@ -263,7 +272,7 @@ export class ShellClaudePSpawner implements SubagentSpawner {
     const res = await withUntrustedContainer(
       container,
       { worktree: opts.cwd ?? '', optsEnv: opts.env, command },
-      (launch) => this.run(opts, {}, launch),
+      (launch) => this.run(opts, dockerClientEnv(process.env), launch),
     );
     if ('value' in res) return res.value;
     return {

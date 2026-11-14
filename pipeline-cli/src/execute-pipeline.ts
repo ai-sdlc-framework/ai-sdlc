@@ -48,7 +48,11 @@ import {
   withUntrustedEnv,
   writeUntrustedMarker,
 } from './runtime/untrusted-env.js';
-import { assertNoDependencyChange, hardenGitRunner } from './runtime/untrusted-container.js';
+import {
+  assertNoDependencyChange,
+  assertWorktreeGitdir,
+  hardenGitRunner,
+} from './runtime/untrusted-container.js';
 import { defaultRunner as defaultGitRunner } from './runtime/exec.js';
 import { buildJudgmentContext, getMergeBaseDiff } from './judgment/index.js';
 import { routingArtifactsDir, routingRecordable } from './routing/artifacts-dir.js';
@@ -605,7 +609,10 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     const hostRunner = untrustedReason
       ? hardenGitRunner(opts.runner ?? defaultGitRunner, opts.workDir)
       : opts.runner;
-    if (untrustedReason) await assertNoDependencyChange(hostRunner!, branch.worktreePath);
+    if (untrustedReason) {
+      assertWorktreeGitdir(branch.worktreePath, opts.workDir);
+      await assertNoDependencyChange(hostRunner!, branch.worktreePath);
+    }
 
     // Step 10 — finalize (skipped when needs-human-attention)
     await finalizeTask({

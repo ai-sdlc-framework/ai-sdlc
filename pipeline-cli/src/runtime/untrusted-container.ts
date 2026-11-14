@@ -14,7 +14,8 @@
  * @module runtime/untrusted-container
  */
 
-import { isAbsolute, join } from 'node:path';
+import { readFileSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, resolve, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import {
   InferenceProxy,
@@ -267,16 +268,52 @@ export async function withUntrustedContainer<T>(
 
 /**
  * `-c` overrides that stop the host's git calls from running code the agent chose
- * through the worktree's git config: hooks come from the main checkout, the ssh
- * command and fsmonitor are pinned, external transports are off.
+ * through the worktree's git config or tree. Hooks are off entirely: the main
+ * checkout's hooks run worktree-relative scripts the agent can edit, so the gates run
+ * in CI against the pushed tree instead. Signing programs, fsmonitor, the ssh command,
+ * attribute files and external transports are pinned.
  */
-export function hostGitOverrides(mainCheckout: string): string[] {
+export function hostGitOverrides(_mainCheckout?: string): string[] {
   return [
-    `core.hooksPath=${join(mainCheckout, '.husky', '_')}`,
+    'core.hooksPath=/dev/null',
     'core.fsmonitor=false',
     'core.sshCommand=ssh',
+    'core.attributesFile=/dev/null',
+    'commit.gpgsign=false',
+    'tag.gpgsign=false',
+    'gpg.program=false',
     'protocol.ext.allow=never',
   ].flatMap((o) => ['-c', o]);
+}
+
+/**
+ * The worktree's `.git` file sits inside the read-write mount, so the agent can repoint
+ * it at a git dir it built (with its own config, filters and helpers). Refuse to run any
+ * host git call unless it still points at `<main>/.git/worktrees/<name>`.
+ */
+export function assertWorktreeGitdir(worktree: string, mainCheckout: string): void {
+  let raw: string;
+  try {
+    raw = readFileSync(join(worktree, '.git'), 'utf8');
+  } catch {
+    throw new Error(`untrusted run: ${worktree}/.git is missing or not a worktree gitdir file`);
+  }
+  const m = /^gitdir:\s*(.+?)\s*$/m.exec(raw);
+  const expectedRoot = join(realpathOr(mainCheckout), '.git', 'worktrees') + sep;
+  const target = m ? resolve(worktree, m[1]) : '';
+  if (!m || !(realpathOr(target) + sep).startsWith(expectedRoot)) {
+    throw new Error(
+      `untrusted run: the worktree .git file no longer points under ${expectedRoot}; refusing to run git on it`,
+    );
+  }
+}
+
+function realpathOr(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
 }
 
 /** Wrap a runner so every `git` call carries `hostGitOverrides`. Other commands pass through. */
@@ -326,13 +363,18 @@ export async function assertNoDependencyChange(runner: Runner, worktree: string)
     allowFailure: true,
   });
   for (const f of committed.stdout.split('\n')) if (f.trim()) files.add(f.trim());
-  const status = await runner('git', ['status', '--porcelain'], {
+  const status = await runner('git', ['status', '--porcelain', '-uall', '-z'], {
     cwd: worktree,
     allowFailure: true,
   });
-  for (const line of status.stdout.split('\n')) {
-    const f = line.slice(3).split(' -> ').pop()?.trim();
-    if (f) files.add(f);
+  const entries = status.stdout.split('\0').filter((e) => e !== '');
+  for (let i = 0; i < entries.length; i++) {
+    files.add(entries[i].slice(3));
+    // A rename or copy entry is followed by its origin path.
+    if (/^[RC]/.test(entries[i]) || /^.[RC]/.test(entries[i])) {
+      const origin = entries[++i];
+      if (origin) files.add(origin);
+    }
   }
   const hit = [...files].find(isDependencyManifest);
   if (hit) {
