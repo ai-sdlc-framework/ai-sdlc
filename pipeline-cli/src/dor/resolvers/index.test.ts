@@ -26,6 +26,23 @@ describe('extractReferences', () => {
     expect(raws).toContain('https://example.com/b');
   });
 
+  it('ignores a URL embedded in an inline-code config key', () => {
+    const refs = extractReferences(
+      'key `credential.<scheme>://github.com.helper` (with `https` as the scheme)',
+    );
+    expect(refs.filter((r) => r.kind === 'url')).toEqual([]);
+    expect(extractReferences('x.https://example.com/a').filter((r) => r.kind === 'url')).toEqual(
+      [],
+    );
+  });
+
+  it('strips closing quotes and backticks from bare URLs', () => {
+    const refs = extractReferences('error "could not read Username for https://github.com/o/r"');
+    expect(refs.filter((r) => r.kind === 'url').map((r) => r.raw)).toEqual([
+      'https://github.com/o/r',
+    ]);
+  });
+
   it('extracts gh issue refs from intentional citations (closes/fixes/resolves verbs, gh#, owner/repo#)', () => {
     const body =
       'fixes #42 and gh#43 and ai-sdlc-framework/ai-sdlc#44 and Closes #45 and resolves #46';
