@@ -21,6 +21,14 @@ export const UNTRUSTED_PROTECTED_PATHS: readonly (readonly string[])[] = [
   ['.git', 'hooks'],
   ['.git', 'config'],
   ['.git', 'worktrees'],
+  // AISDLC-1276: files that run code or instruct an agent (lowercase: matching is case-insensitive).
+  ['package.json'],
+  ['pnpm-lock.yaml'],
+  ['pnpm-workspace.yaml'],
+  ['.npmrc'],
+  ['scripts'],
+  ['claude.md'],
+  ['.mcp.json'],
 ];
 
 export const UNTRUSTED_PROTECTED_CAUSE = 'untrusted-protected-path';
