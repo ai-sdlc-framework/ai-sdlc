@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1275
 title: 'Untrusted run: the branch is checked for protected paths before push, and is never armed'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-13'
 labels:
