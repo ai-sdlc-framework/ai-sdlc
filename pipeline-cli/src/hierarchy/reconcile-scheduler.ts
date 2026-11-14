@@ -9,13 +9,16 @@ import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } f
 import path from 'node:path';
 import process from 'node:process';
 
+import { HOST_TICK_INTERVAL_MS, lastTickInfo } from './host-liveness.js';
 import { reconcileLogPath } from './pr-rows.js';
+import { tickStallMs } from './tick-watchdog.js';
 import type { HierarchyDeps } from './types.js';
 
 const STATE_FILE = 'reconcile-scheduler.json';
 
 /** What `status` reports about the scheduler. */
-export type SchedulerStatus = { state: 'up'; pid: number } | { state: 'off' };
+export type SchedulerStatus =
+  { state: 'up'; pid: number; stalled?: { ageSec: number } } | { state: 'off' };
 
 /** Starts a detached process and returns its pid (undefined when it has none). */
 export type PidSpawner = (
@@ -63,14 +66,21 @@ function readPid(boardDir: string): number | undefined {
 /** Whether a live scheduler is recorded. */
 export function schedulerStatus(deps: HierarchyDeps): SchedulerStatus {
   const pid = readPid(deps.boardDir);
-  return pid !== undefined && (deps.isAlive ?? defaultIsAlive)(pid)
-    ? { state: 'up', pid }
-    : { state: 'off' };
+  if (pid === undefined || !(deps.isAlive ?? defaultIsAlive)(pid)) return { state: 'off' };
+  // AISDLC-1255: a live scheduler whose last tick is older than the stall limit is stuck, not up.
+  const last = lastTickInfo(deps.boardDir, deps.now());
+  if (last && last.ageSec * 1000 > tickStallMs(HOST_TICK_INTERVAL_MS, deps.env)) {
+    return { state: 'up', pid, stalled: { ageSec: last.ageSec } };
+  }
+  return { state: 'up', pid };
 }
 
 /** The status line, `scheduler: up (pid N)` or `scheduler: off`. */
 export function formatSchedulerStatus(s: SchedulerStatus): string {
-  return s.state === 'up' ? `scheduler: up (pid ${s.pid})` : 'scheduler: off';
+  if (s.state === 'off') return 'scheduler: off';
+  return s.stalled
+    ? `scheduler: STALLED (last tick ${s.stalled.ageSec}s ago, pid ${s.pid})`
+    : `scheduler: up (pid ${s.pid})`;
 }
 
 /** Start the scheduler detached and record its pid; a live one is left alone. */

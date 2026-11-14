@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1255
 title: 'The hierarchy tick bounds every tmux child with a timeout and the reconcile scheduler reports and replaces a tick older than its interval'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-09'
 labels:
