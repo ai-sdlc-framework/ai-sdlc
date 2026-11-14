@@ -501,11 +501,20 @@ describe('Step 11 — pushAndPr', () => {
     const fake = new FakeRunner().on(headOk, ok(`${SHA}\n`)).on(/^git push/, ok());
     await pushAndPr({ ...untrustedOpts(), runner: fake.toRunner() });
     expect(fake.calls.some((c) => ['rebase'].includes(c.args[0]!))).toBe(false);
+    // no prettier or other worktree-resolved binary runs on the host (AISDLC-1278)
+    expect(fake.calls.some((c) => c.command === 'pnpm')).toBe(false);
     const push = fake.calls.find((c) => c.args[0] === 'push');
     expect(push?.args).toContain(`${SHA}:refs/heads/b`);
     // the check ran on that same HEAD, after the rev-parse and before the push
     const idx = (n: string) => fake.calls.findIndex((c) => c.args[0] === n);
     expect(idx('log')).toBeLessThan(idx('push'));
+  });
+
+  it('untrusted run does not build the workspace even when node_modules exists (AISDLC-1278)', async () => {
+    mkdirSync(join(tmp, 'node_modules', '.bin'), { recursive: true });
+    const fake = new FakeRunner().on(headOk, ok(`${HEAD_SHA}\n`)).on(/^git push/, ok());
+    await pushAndPr({ ...untrustedOpts(), runner: fake.toRunner() });
+    expect(fake.calls.some((c) => c.command === 'pnpm')).toBe(false);
   });
 
   it('untrusted run refuses a protected change that appears after the build step (AISDLC-1275)', async () => {

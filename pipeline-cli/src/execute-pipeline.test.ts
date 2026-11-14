@@ -1066,6 +1066,11 @@ describe('integration — executePipeline (full Step 0-13)', () => {
     it('happy path: inline spec → dev → reviewers → PR opens with Closes #N', async () => {
       const worktreePath = join(tmp, '.worktrees', 'gh-issue-612');
       mkdirSync(worktreePath, { recursive: true });
+      mkdirSync(join(tmp, '.git', 'worktrees', 'gh-issue-612'), { recursive: true });
+      writeFileSync(
+        join(worktreePath, '.git'),
+        `gitdir: ${join(tmp, '.git', 'worktrees', 'gh-issue-612')}\n`,
+      );
 
       // Capture the gh pr create argv so we can assert on title + body.
       let prCreateArgs: string[] = [];
@@ -1152,6 +1157,11 @@ describe('integration — executePipeline (full Step 0-13)', () => {
 
     it('a protected-path change aborts with cause untrusted-protected-path (AISDLC-1275)', async () => {
       mkdirSync(join(tmp, '.worktrees', 'gh-issue-613'), { recursive: true });
+      mkdirSync(join(tmp, '.git', 'worktrees', 'gh-issue-613'), { recursive: true });
+      writeFileSync(
+        join(tmp, '.worktrees', 'gh-issue-613', '.git'),
+        `gitdir: ${join(tmp, '.git', 'worktrees', 'gh-issue-613')}\n`,
+      );
       const runner = new FakeRunner()
         .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
         .on(
@@ -1159,11 +1169,11 @@ describe('integration — executePipeline (full Step 0-13)', () => {
           ok('c'.repeat(40) + '\n'),
         )
         .on(
-          /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
+          /^git (?:-c core\.quotePath=false )?diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
           ok('--- diff content ---\n'),
         )
         .on(
-          /^git -c core\.quotePath=false diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
+          /^git (?:-c core\.quotePath=false )?diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
           ok('a.ts\0'),
         )
         .on(
@@ -1171,7 +1181,7 @@ describe('integration — executePipeline (full Step 0-13)', () => {
             cmd === 'git' &&
             args[0] === 'diff' &&
             args.includes('--no-renames') &&
-            args[1] === '--name-only',
+            args.includes('--name-only'),
           ok('.github/workflows/ci.yml\0'),
         );
       const result = await executePipeline({

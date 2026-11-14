@@ -90,7 +90,10 @@ export async function defaultSpawner(
   const readEnv = options.env ?? (() => process.env.ANTHROPIC_API_KEY);
 
   if (await which(options.shell?.binary ?? 'claude')) {
-    return new ShellClaudePSpawner(options.shell);
+    return new ShellClaudePSpawner({
+      ...options.shell,
+      untrustedContainer: options.shell?.untrustedContainer ?? true,
+    });
   }
 
   const apiKey = readEnv();

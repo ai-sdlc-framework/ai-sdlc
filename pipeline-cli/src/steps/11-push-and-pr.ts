@@ -623,7 +623,9 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
 
   // 0a. AISDLC-1111 - build the workspace from the rebased sources before anything signs or
   //     pushes; skipped when the rebase left HEAD alone and the dist entry points exist.
-  if (existsSync(join(opts.worktreePath, 'node_modules'))) {
+  //     Skipped for an untrusted run: the build resolves worktree-planted binaries
+  //     (node_modules/.bin) on the host (AISDLC-1278).
+  if (!opts.untrusted && existsSync(join(opts.worktreePath, 'node_modules'))) {
     const built = await ensureWorkspaceBuilt(opts.worktreePath, {
       runner,
       ...(preRebaseSha ? { changedSince: preRebaseSha } : {}),
