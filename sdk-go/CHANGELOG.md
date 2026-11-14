@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.9.0...sdk-go-v0.9.1) (2026-11-14)
+
+
+### Bug Fixes
+
+* **sdk-go:** move to Go 1.26 and patched OpenTelemetry 1.47.0 (AISDLC-1274) ([#2663](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2663)) ([42593d6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/42593d68e2037ca23fd968246276271cee14c576))
+
 ## [0.9.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.8.0...sdk-go-v0.9.0) (2026-11-08)
 
 

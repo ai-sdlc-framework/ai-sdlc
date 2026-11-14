@@ -5,6 +5,27 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.43.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.42.0...orchestrator-v0.43.0) (2026-11-14)
+
+
+### Features
+
+* **pipeline-cli:** per-repo verification commands override (AISDLC-1263) ([#2632](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2632)) ([7a67b6f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7a67b6f922caec19b6c067b71fbe30a4ac37c9f7))
+
+
+### Bug Fixes
+
+* **hooks:** write subagent markers to the task worktree (AISDLC-1260) ([#2628](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2628)) ([abdea96](https://github.com/ai-sdlc-framework/ai-sdlc/commit/abdea968e330eabae9f8a3d1fdb45e19e20cd562))
+* **orchestrator:** drop removed attestation-sign script from adopter pre-push hook (AISDLC-1261) ([#2633](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2633)) ([c2bf663](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c2bf6638c947662b82ec64a526e08be9f89b6930))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/pipeline-cli bumped to 0.43.0
+    * @ai-sdlc/reference bumped to 0.43.0
+
 ## [0.42.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.41.0...orchestrator-v0.42.0) (2026-11-09)
 
 

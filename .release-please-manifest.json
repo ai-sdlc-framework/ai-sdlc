@@ -1,11 +1,11 @@
 {
-  "reference": "0.42.0",
-  "conformance/runner": "0.42.0",
-  "sdk-typescript": "0.42.0",
-  "orchestrator": "0.42.0",
-  "mcp-advisor": "0.42.0",
-  "pipeline-cli": "0.42.0",
+  "reference": "0.43.0",
+  "conformance/runner": "0.43.0",
+  "sdk-typescript": "0.43.0",
+  "orchestrator": "0.43.0",
+  "mcp-advisor": "0.43.0",
+  "pipeline-cli": "0.43.0",
   "sdk-python": "0.3.0",
-  "sdk-go": "0.9.0",
-  "ai-sdlc-plugin": "0.42.0"
+  "sdk-go": "0.9.1",
+  "ai-sdlc-plugin": "0.43.0"
 }

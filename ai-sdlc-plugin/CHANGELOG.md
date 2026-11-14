@@ -5,6 +5,15 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.43.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.42.0...ai-sdlc-plugin-v0.43.0) (2026-11-14)
+
+
+### Bug Fixes
+
+* **hooks:** write subagent markers to the task worktree (AISDLC-1260) ([#2628](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2628)) ([abdea96](https://github.com/ai-sdlc-framework/ai-sdlc/commit/abdea968e330eabae9f8a3d1fdb45e19e20cd562))
+* **orchestrator:** drop removed attestation-sign script from adopter pre-push hook (AISDLC-1261) ([#2633](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2633)) ([c2bf663](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c2bf6638c947662b82ec64a526e08be9f89b6930))
+* **plugin:** check runtime dependency versions against plugin pins (AISDLC-1271) ([#2662](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2662)) ([5a0bbae](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5a0bbae30966ce905d9e1050ea7057572f5df3e6))
+
 ## [0.42.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.41.0...ai-sdlc-plugin-v0.42.0) (2026-11-09)
 
 
