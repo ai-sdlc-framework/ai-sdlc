@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1279
 title: '`ai-sdlc health` reports an invalid or missing config instead of printing `Config: valid`'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-16'
 labels:
