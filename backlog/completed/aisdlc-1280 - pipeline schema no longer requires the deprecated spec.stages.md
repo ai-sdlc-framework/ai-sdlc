@@ -25,7 +25,7 @@ references:
   - sdk-python/src/ai_sdlc/reconciler/pipeline_reconciler.py
   - sdk-python/scripts/generate_schemas.py
   - sdk-python/tests/test_conformance.py
-  - conformance/tests/v1alpha1/pipeline/invalid-missing-stages.yaml
+  - conformance/tests/v1alpha1/pipeline/valid-no-stages.yaml
   - conformance/tests/v1alpha1/pipeline/invalid-empty-stages.yaml
 priority: medium
 dispatchable: true
