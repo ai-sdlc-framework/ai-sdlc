@@ -174,7 +174,7 @@
     "@vitest/coverage-v8": "^5.1.0",
     "ajv": "^8.20.0",
     "ink-testing-library": "^4.0.0",
-    "string-width": "^8.3.0",
+    "string-width": "^9.0.0",
     "typescript": "^6.0.3",
     "vite": "^8.3.6",
     "vitest": "^5.1.0"
