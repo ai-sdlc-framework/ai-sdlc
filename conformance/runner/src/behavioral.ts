@@ -364,7 +364,7 @@ async function runPipelineFailurePolicyTest(
 
   // Build a minimal agent for each stage
   const agentMap = new Map<string, AgentRole>();
-  for (const stage of pipeline.spec.stages) {
+  for (const stage of pipeline.spec.stages ?? []) {
     if (!stage.agent) continue;
     const role: AgentRole = {
       apiVersion: 'ai-sdlc.io/v1alpha1',
@@ -382,7 +382,7 @@ async function runPipelineFailurePolicyTest(
   const reconciler = createPipelineReconciler({
     resolveAgent: (name: string) => agentMap.get(name),
     taskFn: async (agent: AgentRole) => {
-      const stage = pipeline.spec.stages.find((s) => s.agent === agent.metadata.name);
+      const stage = pipeline.spec.stages?.find((s) => s.agent === agent.metadata.name);
       if (stage) reachedStages.push(stage.name);
       if (failStage && stage?.name === failStage) {
         throw new Error(`Stage "${failStage}" failed`);

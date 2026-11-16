@@ -216,7 +216,7 @@ export async function executeFixReview(
   const autonomyPolicy = config.autonomyPolicy;
 
   // Derive max fix attempts from pipeline config (review stage onFailure.maxRetries)
-  const reviewStage = config.pipeline?.spec.stages.find((s) => s.name === 'review');
+  const reviewStage = config.pipeline?.spec.stages?.find((s) => s.name === 'review');
   const maxFixAttempts = reviewStage?.onFailure?.maxRetries ?? MAX_REVIEW_FIX_ATTEMPTS;
 
   // Notification templates

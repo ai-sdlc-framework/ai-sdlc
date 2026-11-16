@@ -28,6 +28,18 @@ function makePipeline(stages: Pipeline['spec']['stages']): Pipeline {
 }
 
 describe('createPipelineReconciler', () => {
+  it('succeeds as a no-op when stages is absent', async () => {
+    const taskFn = vi.fn();
+    const reconciler = createPipelineReconciler({
+      resolveAgent: (name) => makeAgent(name),
+      taskFn,
+    });
+    const pipeline = makePipeline(undefined);
+    const result = await reconciler(pipeline);
+    expect(result.type).toBe('success');
+    expect(taskFn).not.toHaveBeenCalled();
+  });
+
   it('succeeds with all stages completing', async () => {
     const taskFn = vi.fn().mockResolvedValue('done');
     const reconciler = createPipelineReconciler({

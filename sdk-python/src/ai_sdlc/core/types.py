@@ -242,7 +242,7 @@ class PipelineSpec(BaseModel):
     model_config = _CC
     triggers: list[Trigger]
     providers: dict[str, Provider]
-    stages: list[Stage]
+    stages: list[Stage] | None = None
     routing: Routing | None = None
     branching: BranchingConfig | None = None
     pull_request: PullRequestConfig | None = Field(None, alias="pullRequest")

@@ -22,12 +22,20 @@ def test_validate_valid_pipeline() -> None:
     assert r.data is not None
 
 
-def test_validate_invalid_pipeline_missing_stages() -> None:
+def test_validate_pipeline_without_stages_is_valid() -> None:
+    # spec.stages is deprecated and no longer required (AISDLC-1280).
     data = _minimal_pipeline()
     del data["spec"]["stages"]
     r = validate("Pipeline", data)
+    assert r.valid
+
+
+def test_validate_invalid_pipeline_missing_triggers() -> None:
+    data = _minimal_pipeline()
+    del data["spec"]["triggers"]
+    r = validate("Pipeline", data)
     assert not r.valid
-    assert any("stages" in e.message for e in r.errors)
+    assert any("triggers" in e.message for e in r.errors)
 
 
 def test_validate_resource_infers_kind() -> None:

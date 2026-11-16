@@ -159,7 +159,7 @@ A [Pipeline](glossary.md#pipeline) defines a complete SDLC workflow from trigger
 | --- | --- | --- | --- |
 | `triggers` | array[Trigger] | MUST | Events that initiate the pipeline. |
 | `providers` | map[string]Provider | MUST | Tool integrations used by the pipeline. |
-| `stages` | array[Stage] | MUST | Ordered list of execution stages. |
+| `stages` | array[Stage] | MAY | Ordered list of execution stages. Deprecated (RFC-0056); replaced by the Workflow document. |
 | `routing` | Routing | MAY | Complexity-based task routing configuration. |
 | `branching` | [BranchingConfig](#branching-config-object) | MAY | Branch naming, target, and cleanup policy. |
 | `pullRequest` | [PullRequestConfig](#pull-request-config-object) | MAY | PR creation conventions. |
