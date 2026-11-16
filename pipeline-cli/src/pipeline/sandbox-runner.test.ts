@@ -50,6 +50,10 @@ import {
   DOCKER_SECCOMP_PROFILE,
   parseDifferentialTestOutput,
   buildDifferentialTestScript,
+  buildFetchDockerArgs,
+  buildFetchScript,
+  resolvePnpmVersion,
+  SandboxFetchPhaseError,
   DIFFERENTIAL_RESULT_SENTINEL,
   type SandboxConfig,
   type ResourceBreachEvent,
@@ -3766,6 +3770,118 @@ describe('digest-pinned images and base tree staging (AISDLC-1267)', () => {
 
   it('the script copies the staged base tree into the workspace', () => {
     const script = buildDifferentialTestScript('a'.repeat(40));
-    expect(script).toContain('cp -R "/sandbox/base/." repo/');
+    expect(script).toContain('cd "/sandbox/base" && tar cf - --exclude=node_modules .');
+    expect(script).toContain('ln -s "$nm" "repo/$rel"');
+  });
+});
+
+// ── AISDLC-1291: fetch container + run container ─────────────────────────────
+
+describe('fetch container (AISDLC-1291)', () => {
+  const fetchArgs = buildFetchDockerArgs({
+    resourceLimits: DEFAULT_RESOURCE_LIMITS,
+    image: 'node:22',
+    containerName: 'ai-sdlc-fetch-x',
+    baseTreeDir: '/tmp/base-x',
+    outDir: '/tmp/out-x',
+    pnpmVersion: '10.4.1',
+  });
+
+  it('AC1: carries no diff, fixture, add-host or secret', () => {
+    const joined = fetchArgs.join(' ');
+    expect(joined).not.toContain('SANDBOX_PR_DIFF_B64');
+    expect(joined).not.toContain('SANDBOX_FIXTURE_B64');
+    expect(fetchArgs).not.toContain('-e');
+    expect(joined).not.toContain('--add-host');
+    expect(joined).not.toMatch(/TOKEN|SIGNING_KEY|API_KEY|AI_SDLC_PAT/);
+    expect(fetchArgs).not.toContain('--network=none');
+    expect(fetchArgs).toContain('/tmp/base-x:/sandbox/base:ro');
+  });
+
+  it('AC4: reads pnpm version from packageManager, with and without the field', () => {
+    const withPm = mkdtempSync(join(tmpdir(), 'fetch-pm-'));
+    writeFileSync(
+      join(withPm, 'package.json'),
+      JSON.stringify({ packageManager: 'pnpm@10.4.1+sha512.abc' }),
+    );
+    const without = mkdtempSync(join(tmpdir(), 'fetch-nopm-'));
+    writeFileSync(join(without, 'package.json'), '{}');
+    const missing = mkdtempSync(join(tmpdir(), 'fetch-nopkg-'));
+    expect(resolvePnpmVersion(withPm)).toBe('10.4.1');
+    expect(resolvePnpmVersion(without)).toBe('latest');
+    expect(resolvePnpmVersion(missing)).toBe('latest');
+    expect(buildFetchScript('10.4.1')).toContain('pnpm@10.4.1 --activate');
+    expect(buildFetchScript('latest')).toContain('pnpm@latest --activate');
+    expect(() => buildFetchScript('1.0.0; rm -rf /')).toThrow(/invalid pnpm version/);
+  });
+
+  it('AC2/AC3: run container keeps its hardening, mounts the fetch output ro, has no install', () => {
+    const run = buildDockerRunArgs({
+      resourceLimits: DEFAULT_RESOURCE_LIMITS,
+      seccompProfileJson: '/tmp/seccomp.json',
+      cidFilePath: '/tmp/c.cid',
+      image: 'node:22',
+      baseTreeDir: '/tmp/prepared-x',
+      command: ['/bin/sh', '-c', buildDifferentialTestScript('a'.repeat(40))],
+    });
+    expect(run).toContain('--network=none');
+    expect(run).toContain('--cap-drop=ALL');
+    expect(run).toContain('--read-only');
+    expect(run).toContain('no-new-privileges');
+    expect(run).toContain('/sandbox/workspace:rw,noexec,nosuid');
+    expect(run).toContain('/tmp/prepared-x:/sandbox/base:ro');
+    const script = buildDifferentialTestScript('a'.repeat(40));
+    expect(script).not.toMatch(/\binstall\b/);
+    expect(script).not.toContain('npm ci');
+    expect(script).not.toContain('|| true');
+  });
+
+  it('AC5: a failing fetch install rejects with the fetch phase error and never starts the run container', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'fetch-fail-'));
+    writeFileSync(join(base, 'package.json'), '{}');
+    const driver = new TestableDockerDriver((_cmd, args) => {
+      const proc = new FakeProcess(args);
+      setImmediate(() => {
+        proc.emitStderr('ERR_PNPM_FETCH_404');
+        proc.emitClose(1);
+      });
+      return proc;
+    });
+    await withIntegrationFlag(async () => {
+      await expect(driver.spawn({ ...LIFECYCLE_INPUT, baseTreeDir: base })).rejects.toThrow(
+        /sandbox fetch phase failed.*ERR_PNPM_FETCH_404/s,
+      );
+    })();
+    // Only the fetch container was spawned (teardown spawns nothing for rm: no run id).
+    expect(driver.spawnedArgLists.filter((a) => a.includes('--network=none'))).toHaveLength(0);
+    await driver.teardown();
+    expect(new SandboxFetchPhaseError('x').name).toBe('SandboxFetchPhaseError');
+  });
+
+  it('runs the fetch container first, then the run container on the prepared dir', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'fetch-ok-'));
+    writeFileSync(join(base, 'package.json'), '{}');
+    const driver = new TestableDockerDriver((_cmd, args) => {
+      const proc = new FakeProcess(args);
+      setImmediate(() => {
+        if (args.includes('--network=none')) {
+          proc.emitStdout(
+            `${DIFFERENTIAL_RESULT_SENTINEL}\n{"upstreamPassed":true,"upstreamOutput":"","headPassed":true,"headOutput":"","coveragePct":90}\n`,
+          );
+        }
+        proc.emitClose(0);
+      });
+      return proc;
+    });
+    await withIntegrationFlag(async () => {
+      const r = await driver.spawn({ ...LIFECYCLE_INPUT, baseTreeDir: base });
+      expect(r.outcome).toBe('success');
+    })();
+    const [fetchList, runList] = driver.spawnedArgLists;
+    expect(fetchList).not.toContain('--network=none');
+    expect(runList).toContain('--network=none');
+    const mount = runList!.find((a) => a.endsWith(':/sandbox/base:ro'))!;
+    expect(mount.startsWith(base)).toBe(false);
+    await driver.teardown();
   });
 });

@@ -370,6 +370,8 @@ async function runSandboxAndReview(args: {
       : stageBaseTree(args.prContentDir, args.baseSha);
     // A sandbox `error`/`resource-breach` outcome is a rejection, never a pass:
     // extractDifferentialTestResult sets sandboxError. A throw writes no report.
+    // AISDLC-1291: a failed fetch phase (dependency install) throws; no reviewer
+    // runs and no report is written. Cleanup runs before fail() exits the process.
     const sandboxResult = await runSandbox({
       prNumber: args.prNumber,
       prDiff,
@@ -381,6 +383,13 @@ async function runSandboxAndReview(args: {
       sandboxEnv,
       proxyHostArgs,
       baseTreeDir,
+    }).catch(async (err: unknown) => {
+      if (err instanceof Error && err.name === 'SandboxFetchPhaseError') {
+        if (baseTreeDir) rmSync(baseTreeDir, { recursive: true, force: true });
+        if (proxy !== null) await proxy.stop();
+        return fail(err.message);
+      }
+      throw err;
     });
 
     // Extract differential test result from sandbox output.

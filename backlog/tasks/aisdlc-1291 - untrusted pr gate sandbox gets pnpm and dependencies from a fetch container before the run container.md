@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1291
 title: 'Untrusted PR gate sandbox gets pnpm and dependencies from a fetch container before the no-network run container'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-16'
 labels:
