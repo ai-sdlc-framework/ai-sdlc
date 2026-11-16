@@ -42,6 +42,8 @@ export interface DownOutcome {
   requeued?: string;
   /** True when the window had to be closed because the session did not exit. */
   forced: boolean;
+  /** AISDLC-1255: how a failed or timed-out `/exit` was replaced (`exit request timed out; kill-pane`). */
+  fallback?: string;
 }
 
 /** Result of `down`. */
@@ -60,7 +62,9 @@ export interface DownResult {
 export async function stopSessionWindow(
   entry: RosterEntry,
   deps: HierarchyDeps,
-): Promise<{ forced: boolean } | { refused: string; verb: 'stopping' | 'closing' }> {
+): Promise<
+  { forced: boolean; fallback?: string } | { refused: string; verb: 'stopping' | 'closing' }
+> {
   const isOpen = () => listWindows(deps.run, entry.tmuxSession).includes(entry.tmuxWindow);
   // Ownership and pane gate: a session `up` started, reached through a pane id that
   // still belongs to it.
@@ -80,7 +84,19 @@ export async function stopSessionWindow(
   if ('reason' in first) return { refused: first.reason, verb: 'stopping' };
   // AISDLC-1217: a requested stop is not an executor exit.
   removePaneExitHook(deps.run, entry.tmuxSession);
-  sendExit(deps.run, first.target);
+  const exit = sendExit(deps.run, first.target);
+  if (exit.status !== 0) {
+    // AISDLC-1255: a timed-out or failed /exit (the pane is gone or tmux blocks) must not leave the
+    // retired session behind: close the pane, then the session.
+    const why = exit.timedOut ? 'exit request timed out' : 'exit request failed';
+    const pane = killPane(deps.run, first.target);
+    let fallback = `${why}; kill-pane`;
+    if (pane.status !== 0 && isOpen()) {
+      killSession(deps.run, entry.tmuxSession);
+      fallback += ', kill-session';
+    }
+    return { forced: true, fallback };
+  }
   for (let i = 0; i < deps.pollAttempts && isOpen(); i++) {
     await deps.sleep(deps.pollIntervalMs);
     // AISDLC-1225: a live background agent parks /exit on a confirm dialog; stop its tasks explicitly.
@@ -143,7 +159,7 @@ export async function hierarchyDown(
       deps.log(`warning: not ${stop.verb} '${entry.name}': ${stop.refused}`);
       continue;
     }
-    const { forced } = stop;
+    const { forced, fallback } = stop;
     // AISDLC-1117: an ephemeral executor's session must not outlive its roster entry.
     if (
       entry.taskId !== undefined &&
@@ -158,9 +174,15 @@ export async function hierarchyDown(
 
     roster.sessions = roster.sessions.filter((e) => e !== entry);
     writeRoster(deps.boardDir, roster);
-    stopped.push({ name: entry.name, role: entry.role, requeued, forced });
+    stopped.push({
+      name: entry.name,
+      role: entry.role,
+      requeued,
+      forced,
+      ...(fallback ? { fallback } : {}),
+    });
     deps.log(
-      `stopped ${entry.role} '${entry.name}'${forced ? ' (window closed after no exit)' : ''}${requeued ? `; returned ${requeued} to the queue` : ''}`,
+      `stopped ${entry.role} '${entry.name}'${fallback ? ` (exit fallback: ${fallback})` : forced ? ' (window closed after no exit)' : ''}${requeued ? `; returned ${requeued} to the queue` : ''}`,
     );
   }
   // Stopping the whole hierarchy also stops its reconcile scheduler (AISDLC-932).

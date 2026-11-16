@@ -30,6 +30,7 @@ import { resolveTargetBranch } from '../steps/02-compute-branch.js';
 import { decidePrDraft } from '../hierarchy/mark-ready.js';
 import { detectDraftPrForBranch } from '../steps/03-setup-worktree.js';
 import { findTaskFile } from '../steps/01-validate.js';
+import { findTaskFileRelative } from '../dor/dispatch-readiness.js';
 import { buildFinalSummary } from '../steps/10-finalize.js';
 import { composeBody, composeTitle, readTitleTemplate } from '../steps/11-push-and-pr.js';
 import { siblingPrs } from '../steps/12-sibling-prs.js';
@@ -63,6 +64,8 @@ export function leasePreflightStep(ctx: NextStepContext, state: NextStepState): 
     env: ctx.env,
   });
 }
+
+const RUNTIME_UNTRACKED = ['.active-task', '.ai-sdlc/.last-build-sha', '.ai-sdlc/review-state/'];
 
 // ── 10.5 pre-sign rebase ─────────────────────────────────────────────
 
@@ -151,13 +154,29 @@ export async function preSignRebase(
   // Empty root keeps the ledger path worktree-relative; the writer owns the
   // (lowercase) spelling, so it is never rebuilt by hand (AISDLC-1017).
   const owned = [reviewsLedgerPath(state.taskId, '')];
-  const pending = await ctx.runner('git', ['status', '--porcelain', '--', ...owned], {
+  // AISDLC-1257: step 4 rewrote the task file's status and nothing committed it, so the
+  // rebase refused. Commit that edit with the ledger; a clean or already-moved
+  // (backlog/completed/) file adds no path and no commit.
+  const taskRel = findTaskFileRelative(state.taskId, wt);
+  const taskOwned = taskRel?.startsWith('backlog/tasks/') ? taskRel : undefined;
+  const stageable = taskOwned ? [...owned, taskOwned] : owned;
+  const pending = await ctx.runner('git', ['status', '--porcelain', '--', ...stageable], {
     cwd: wt,
     allowFailure: true,
   });
   if (pending.code === 0 && pending.stdout.trim() !== '') {
-    await ctx.runner('git', ['add', '--', owned[0]!], { cwd: wt, allowFailure: true });
-    await ctx.runner('git', ['commit', '-m', `chore: commit review ledger (${state.taskId})`], {
+    // One add per path: a pathspec that matches nothing (no ledger yet) fails the whole add.
+    for (const path of stageable) {
+      await ctx.runner('git', ['add', '--', path], { cwd: wt, allowFailure: true });
+    }
+    const taskOnly =
+      taskOwned !== undefined &&
+      pending.stdout.includes(taskOwned) &&
+      !pending.stdout.includes(owned[0]!);
+    const subject = taskOnly
+      ? `chore: commit task status (${state.taskId})`
+      : `chore: commit review ledger (${state.taskId})`;
+    await ctx.runner('git', ['commit', '-m', subject], {
       cwd: wt,
       allowFailure: true,
       timeout: 300_000,
@@ -213,11 +232,21 @@ export async function preSignRebase(
           cwd: wt,
           allowFailure: true,
         });
-        const paths = dirty.stdout
+        const lines = dirty.stdout
           .split('\n')
           .map((l) => l.trim())
           .filter((l) => l !== '');
+        // AISDLC-1257: tracked paths are the cause; untracked runtime files never block
+        // a rebase, so they get their own note and other untracked paths are dropped.
+        const paths = lines.filter((l) => !l.startsWith('??'));
+        const runtime = lines
+          .filter((l) => l.startsWith('??'))
+          .map((l) => l.slice(2).trim())
+          .filter((p) => RUNTIME_UNTRACKED.some((r) => p === r || p.startsWith(r)));
         dirtyNote = paths.length > 0 ? ` Dirty paths: ${paths.join(', ')}.` : '';
+        if (runtime.length > 0) {
+          dirtyNote += ` Untracked runtime files (add to .gitignore): ${runtime.join(', ')}.`;
+        }
       }
       return {
         kind: 'failed',
@@ -488,16 +517,19 @@ async function shipInner(
   for (let attempt = 0; attempt < PUSH_ATTEMPTS; attempt += 1) {
     // RFC-0061: branch and verdict ref in one atomic push (built per attempt: a pre-push fixup
     // can change the head).
-    const verdictRef = needsHuman
-      ? { refspec: null }
-      : await buildVerdictRefspec(
-          runner,
-          wt,
-          verdict.verdictRecordDraft,
-          `origin/${resolveTargetBranch(ctx.workDir)}`,
-          undefined,
-          priorPr?.prNumber ?? 0,
-        );
+    // AISDLC-1270: a record names its PR and PR 0 is no record, so with no PR yet the ref is
+    // deferred and pushed right after `gh pr create` (Step 11b) once the number is known.
+    const verdictRef =
+      needsHuman || !priorPr
+        ? { refspec: null }
+        : await buildVerdictRefspec(
+            runner,
+            wt,
+            verdict.verdictRecordDraft,
+            `origin/${resolveTargetBranch(ctx.workDir)}`,
+            undefined,
+            priorPr.prNumber,
+          );
     if ('note' in verdictRef && verdictRef.note) verdictNotes.push(verdictRef.note);
     const pushArgs = verdictRef.refspec
       ? ['push', '-u', '--atomic', 'origin', state.branch, verdictRef.refspec]
@@ -545,7 +577,7 @@ async function shipInner(
         seenBeforeFetch,
         verdictRef.refspec,
       );
-      if (!verdictRef.refspec && !needsHuman) {
+      if (!verdictRef.refspec && !needsHuman && priorPr) {
         verdictNotes.push(
           'verdict ref not pushed on the lease fallback push: no verdict refspec could be built',
         );
@@ -627,6 +659,32 @@ async function shipInner(
     prNumber = m ? Number(m[1]) : null;
   }
   if (prUrl) recordSessionPr(ctx, state.taskIdLower, prUrl);
+
+  // AISDLC-1270: the deferred verdict ref (no PR existed at Step 11a) goes out now, naming the PR.
+  if (!needsHuman && !priorPr && prNumber !== null) {
+    const late = await buildVerdictRefspec(
+      runner,
+      wt,
+      verdict.verdictRecordDraft,
+      `origin/${resolveTargetBranch(ctx.workDir)}`,
+      undefined,
+      prNumber,
+    );
+    if (late.note) notes.push(late.note);
+    if (late.refspec) {
+      const lp = await runTrustedPush(
+        runner,
+        { mainCheckout: ctx.workDir, worktree: wt },
+        ['push', 'origin', late.refspec],
+        { allowFailure: true, timeout: PUSH_TIMEOUT_MS, env: pushEnv },
+      );
+      if (lp.code !== 0) {
+        notes.push(
+          `verdict ref not pushed after PR creation: ${(lp.stderr || lp.stdout).trim().split('\n').pop()}`,
+        );
+      }
+    }
+  }
 
   // Step 11c — incremental-review marker, only ever bound to an APPROVED state.
   if (!needsHuman && prNumber !== null && state.review?.incremental.contentHash) {

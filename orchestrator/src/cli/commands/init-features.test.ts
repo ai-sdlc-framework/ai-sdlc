@@ -342,7 +342,8 @@ describe('applyFeatureSelection', () => {
     // detects it and doesn't append twice.
     const hook = state.files.get('/proj/.husky/pre-push')!;
     expect(hook).toContain('# ai-sdlc:attestation-sign-block');
-    expect(hook).toContain('AI_SDLC_SKIP_ATTESTATION_SIGN');
+    expect(hook).not.toContain('check-attestation-sign');
+    expect(hook).toContain('GIT_INDEX_FILE');
 
     // Audit-only verifier (Q3): no commit-status posting.
     const verify = state.files.get('/proj/.github/workflows/verify-attestation.yml')!;

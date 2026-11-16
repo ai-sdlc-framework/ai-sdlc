@@ -85,6 +85,10 @@
       "types": "./dist/runtime/index.d.ts",
       "import": "./dist/runtime/index.js"
     },
+    "./verification": {
+      "types": "./dist/steps/verification-config.d.ts",
+      "import": "./dist/steps/verification-config.js"
+    },
     "./config-manifest": {
       "types": "./dist/config-manifest/manifest.d.ts",
       "import": "./dist/config-manifest/manifest.js"
@@ -153,7 +157,7 @@
   },
   "dependencies": {
     "@ai-sdlc/reference": "workspace:*",
-    "better-sqlite3": "^13.0.3",
+    "better-sqlite3": "^13.1.1",
     "ink": "^8.0.0",
     "js-yaml": "5.5.0",
     "react": "^19.3.0",
@@ -170,7 +174,7 @@
     "@vitest/coverage-v8": "^5.1.0",
     "ajv": "^8.20.0",
     "ink-testing-library": "^4.0.0",
-    "string-width": "^8.3.0",
+    "string-width": "^9.0.0",
     "typescript": "^6.0.3",
     "vite": "^8.3.6",
     "vitest": "^5.1.0"

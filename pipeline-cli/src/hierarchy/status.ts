@@ -206,7 +206,15 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     roster = { ...roster, sessions: reconciled.entries };
     if (rejected.length === 0) {
       try {
-        writeRoster(deps.boardDir, roster);
+        // AISDLC-1258: re-read just before the write. The roster in hand predates any
+        // `restart` that finished meanwhile, and writing it back would restore the old pane.
+        const fresh = readRosterChecked(deps.boardDir);
+        if (fresh.rejected.length === 0) {
+          const again = reconcileStartingEntries(fresh.roster.sessions, registry);
+          if (again.changed > 0) {
+            writeRoster(deps.boardDir, { ...fresh.roster, sessions: again.entries });
+          }
+        }
       } catch {
         /* status stays read-only on a write failure */
       }

@@ -10,7 +10,7 @@ import path from 'node:path';
 import { loadEligibilityContext } from '../dispatch/board.js';
 import { findTaskFileRelative } from '../dor/dispatch-readiness.js';
 
-export type HeldClass = 'waiting' | 'operator-gated' | 'absent' | 'circular';
+export type HeldClass = 'waiting' | 'operator-gated' | 'absent' | 'circular' | 'failed-dependency';
 
 /** What the classifier needs to know about one unmet dependency. */
 export interface HeldFacts {
@@ -19,6 +19,49 @@ export interface HeldFacts {
   onBoard: boolean;
   /** Raw text of the dependency's task file, when it has one. */
   dependencyText?: string;
+  /** The dependency sits in the board's failed directory. */
+  failed?: boolean;
+  /** The dependency's declared `dependencies` lead back to the held task. */
+  dependsOnHeld?: boolean;
+}
+
+/** Declared `dependencies` ids from a task file's frontmatter (inline or block list). */
+export function declaredDependencies(raw: string): string[] {
+  const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? '';
+  const lines = fm.split(/\r?\n/);
+  const at = lines.findIndex((l) => /^dependencies:/.test(l));
+  if (at < 0) return [];
+  const rest = lines[at]!.replace(/^dependencies:\s*/, '');
+  const items: string[] = [];
+  if (rest.startsWith('[')) {
+    items.push(...rest.replace(/^\[|\]\s*$/g, '').split(','));
+  } else {
+    for (const l of lines.slice(at + 1)) {
+      const m = l.match(/^\s+-\s*(.+)$/);
+      if (!m) break;
+      items.push(m[1]!);
+    }
+  }
+  return items.map((i) => i.trim().replace(/^["']|["']$/g, '')).filter((i) => i.length > 0);
+}
+
+/** True when `from`'s declared dependencies reach `target`, directly or through other tasks. */
+function reaches(from: string, target: string, repoDir: string): boolean {
+  const goal = target.toLowerCase();
+  const seen = new Set<string>();
+  const stack = [from];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (seen.has(id.toLowerCase())) continue;
+    seen.add(id.toLowerCase());
+    const rel = findTaskFileRelative(id, repoDir);
+    const text = rel ? readIfExists(path.join(repoDir, rel)) : undefined;
+    for (const dep of text ? declaredDependencies(text) : []) {
+      if (dep.toLowerCase() === goal) return true;
+      stack.push(dep);
+    }
+  }
+  return false;
 }
 
 /** True when the frontmatter of a task file says `dispatchable: false`. */
@@ -27,13 +70,13 @@ export function isDispatchableFalse(raw: string): boolean {
   return /^dispatchable:\s*["']?false["']?\s*$/im.test(fm);
 }
 
-/** Classify one hold. `circular` wins: the dependency can close only when the held task lands. */
+/** Classify one hold. `circular` needs a real dependency path back to the held task; a mention is not one. */
 export function classifyHold(facts: HeldFacts): HeldClass {
+  if (facts.failed) return 'failed-dependency';
   if (facts.onBoard) return 'waiting';
   const text = facts.dependencyText;
+  if (facts.dependsOnHeld) return 'circular';
   if (text !== undefined) {
-    const body = text.replace(/^---\r?\n[\s\S]*?\r?\n---/, '');
-    if (body.toLowerCase().includes(facts.heldId.toLowerCase())) return 'circular';
     if (isDispatchableFalse(text)) return 'operator-gated';
   }
   return 'absent';
@@ -79,6 +122,8 @@ export function listHeld(boardDir: string, repoDir: string): HeldRow[] {
       const cls = classifyHold({
         heldId: taskId,
         onBoard: ctx.onBoardTaskIds.has(dep),
+        failed: ctx.failedTaskIds.has(dep),
+        dependsOnHeld: reaches(dep, taskId, repoDir),
         ...(depPath ? { dependencyText: readIfExists(path.join(repoDir, depPath)) ?? '' } : {}),
       });
       rows.push({
@@ -137,8 +182,12 @@ export function triageHeld(
       notified: false,
     };
     try {
+      const waitsOn =
+        row.class === 'failed-dependency'
+          ? `${row.dependency}, a failed task (${row.class})`
+          : `${row.dependency} (${row.class})`;
       notify(
-        `Held task ${row.taskId} waits on ${row.dependency} (${row.class}): ${row.taskPath ?? row.taskId} / ${row.dependencyPath ?? row.dependency}; drop the dependency with \`cli-file task --update\`, park the task, or leave it.`,
+        `Held task ${row.taskId} waits on ${waitsOn}: ${row.taskPath ?? row.taskId} / ${row.dependencyPath ?? row.dependency}; drop the dependency with \`cli-file task --update\`, park the task, or leave it.`,
       );
       record.notified = true;
       announced.push(row.taskId);

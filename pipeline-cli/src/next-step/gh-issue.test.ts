@@ -25,7 +25,12 @@ const result = (over: Partial<PipelineResult> = {}): PipelineResult => ({
 
 const deps = (over: Partial<GhIssueDeps> = {}): GhIssueDeps => ({
   claudeOnPath: async () => true,
-  fetchSpec: async () => ({ spec: makeTask({ id: 'gh-issue-612' }), issueNumber: 612 }),
+  fetchSpec: async () => ({
+    spec: makeTask({ id: 'gh-issue-612' }),
+    issueNumber: 612,
+    authorAssociation: 'OWNER',
+    labels: [],
+  }),
   execute: async () => result(),
   ...over,
 });
@@ -125,5 +130,63 @@ describe('runGhIssue (AISDLC-393)', () => {
       }),
     );
     expect(out.action === 'stop' && out.reason).toContain('No Claude Code runtime available');
+  });
+});
+
+describe('runGhIssue trust gate (AISDLC-1269)', () => {
+  const withIssue = (extra: Record<string, unknown>, spec = {}) =>
+    deps({
+      fetchSpec: async () => ({
+        spec: makeTask({ id: 'gh-issue-612', ...spec }),
+        issueNumber: 612,
+        ...extra,
+      }),
+      execute: async () => {
+        throw new Error('must not execute');
+      },
+    });
+  const okDeps = (extra: Record<string, unknown>) =>
+    deps({
+      fetchSpec: async () => ({
+        spec: makeTask({ id: 'gh-issue-612' }),
+        issueNumber: 612,
+        ...extra,
+      }),
+    });
+
+  it('refuses an outside author without the label, naming association and label', async () => {
+    const out = await runGhIssue(h.ctx, 612, withIssue({ authorAssociation: 'NONE', labels: [] }));
+    expect(out).toMatchObject({ action: 'stop', prUrl: null });
+    expect(out.action === 'stop' && out.reason).toMatch(/NONE[\s\S]*execute-approved/);
+  });
+  it('starts an outside author with the approval label', async () => {
+    const out = await runGhIssue(
+      h.ctx,
+      612,
+      okDeps({ authorAssociation: 'CONTRIBUTOR', labels: ['execute-approved'] }),
+    );
+    expect(out.action).toBe('done');
+  });
+  it.each(['OWNER', 'MEMBER', 'COLLABORATOR'])('starts %s without the label', async (a) => {
+    const out = await runGhIssue(h.ctx, 612, okDeps({ authorAssociation: a, labels: [] }));
+    expect(out.action).toBe('done');
+  });
+  it('refuses when the association cannot be read', async () => {
+    const out = await runGhIssue(h.ctx, 612, withIssue({ labels: [] }));
+    expect(out.action === 'stop' && out.reason).toMatch(/unknown/);
+  });
+  it('refuses an oversize title or description with size and cap', async () => {
+    const t = await runGhIssue(
+      h.ctx,
+      612,
+      withIssue({ authorAssociation: 'OWNER' }, { title: 'x'.repeat(501) }),
+    );
+    expect(t.action === 'stop' && t.reason).toMatch(/501 bytes[\s\S]*500-byte cap/);
+    const d = await runGhIssue(
+      h.ctx,
+      612,
+      withIssue({ authorAssociation: 'OWNER' }, { description: 'x'.repeat(20001) }),
+    );
+    expect(d.action === 'stop' && d.reason).toMatch(/20001 bytes[\s\S]*20000-byte cap/);
   });
 });

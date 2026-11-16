@@ -191,6 +191,7 @@ import {
   webhookServe,
   webhookUp,
   webhookStatus,
+  webhookPersistence,
   webhookHealth,
   parseFeed,
   trackPrActivity,
@@ -900,10 +901,11 @@ export async function runHierarchyCli(
         else if (action === 'status') {
           const w = webhookStatus(deps);
           const h = deps.env.AI_SDLC_WEBHOOK_SECRET ? webhookHealth(deps) : undefined;
+          const persisted = webhookPersistence(deps);
           deps.log(
             flags.json === 'true'
-              ? JSON.stringify({ ...w, ...(h ? { health: h } : {}) })
-              : formatWebhookStatus(w, h),
+              ? JSON.stringify({ ...w, ...(h ? { health: h } : {}), persisted })
+              : `${formatWebhookStatus(w, h)}\n${persisted}`,
           );
         } else if (action === 'serve') await webhookServe(deps, flags.port, feed);
         else {

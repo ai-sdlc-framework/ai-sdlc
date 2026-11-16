@@ -106,7 +106,16 @@ export interface SandboxConfig {
    * Default: `ci` (hermetic ephemeral sandbox in CI).
    */
   deployment?: 'ci' | 'local';
+
+  /**
+   * AISDLC-1266: largest PR diff (bytes) that may reach a model. Larger diffs
+   * are refused before any model call.
+   */
+  maxDiffBytes?: number;
 }
+
+/** Built-in default for `maxDiffBytes`. */
+export const DEFAULT_MAX_DIFF_BYTES = 200_000;
 
 export interface ResourceLimits {
   /** Wall-clock timeout in seconds. Default 600 (10 minutes). */
@@ -127,6 +136,17 @@ export interface DifferentialTestConfig {
  * Default resource limits per OQ-3 resolution:
  * 10 min wall-clock / 2 CPU / 4 GB / deny network.
  */
+/**
+ * Default sandbox image, pinned by digest (AISDLC-1267): `node:22-bookworm`
+ * (multi-arch index) ships `git` and `node`/`npm`/`corepack`. No floating tag.
+ * Override with `AI_SDLC_SANDBOX_IMAGE` (use a digest-pinned reference).
+ */
+export const DEFAULT_SANDBOX_IMAGE =
+  'node:22-bookworm@sha256:e13726ca604184d7a91fcacab1fc09eefd642dc28e79ac34e85540dd93b78cfb';
+
+/** In-container mount point of the read-only base tree (AISDLC-1267). */
+export const SANDBOX_BASE_DIR = '/sandbox/base';
+
 export const DEFAULT_RESOURCE_LIMITS: ResourceLimits = {
   wallClockSeconds: 600,
   cpuCores: 2,
@@ -140,6 +160,7 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
   },
   complianceRegime: 'none',
   deployment: 'ci',
+  maxDiffBytes: DEFAULT_MAX_DIFF_BYTES,
 };
 
 // ── RFC-0022 regime override ──────────────────────────────────────────────────
@@ -286,6 +307,12 @@ function parseSandboxConfig(yamlText: string): SandboxConfig {
     const deployment = doc['deployment'];
     if (deployment === 'ci' || deployment === 'local') result.deployment = deployment;
 
+    // maxDiffBytes
+    const maxDiff = doc['maxDiffBytes'];
+    if (typeof maxDiff === 'number' && Number.isFinite(maxDiff) && maxDiff > 0) {
+      result.maxDiffBytes = maxDiff;
+    }
+
     // differentialTest.resourceLimits
     const dt = doc['differentialTest'];
     if (dt && typeof dt === 'object') {
@@ -373,6 +400,12 @@ export interface SandboxSpawnInput {
    * Drivers other than Docker ignore this field.
    */
   extraDockerArgs?: string[];
+  /**
+   * Host directory holding the exported BASE tree. Mounted read-only at
+   * `/sandbox/base`; the in-container script copies it into the workspace so
+   * the upstream suite runs against the base (AISDLC-1267).
+   */
+  baseTreeDir?: string;
 }
 
 /**
@@ -409,6 +442,11 @@ export interface DifferentialTestResult {
   newTestsPassed: boolean;
   newTestsOutput: string;
   newCodeCoveragePct: number;
+  /**
+   * True when the sandbox errored or breached a limit and produced no real
+   * test result. Fail-closed: consensus treats it as a rejection (AISDLC-1267).
+   */
+  sandboxError?: boolean;
 }
 
 /**
@@ -1069,7 +1107,8 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       // the inline JSON — see the seccompFilePath comment above.
       seccompProfileJson: seccompFilePath,
       cidFilePath,
-      image: process.env['AI_SDLC_SANDBOX_IMAGE'] ?? 'node:22-slim',
+      image: process.env['AI_SDLC_SANDBOX_IMAGE'] ?? DEFAULT_SANDBOX_IMAGE,
+      baseTreeDir: input.baseTreeDir,
       command: ['/bin/sh', '-c', inContainerScript],
       extraDockerArgs: input.extraDockerArgs,
     });
@@ -1520,6 +1559,13 @@ if [ -n "\${SANDBOX_FIXTURE_B64:-}" ]; then
     echo 'fixture extraction failed' >&2
     exit 1
   fi
+elif [ -d "${SANDBOX_BASE_DIR}" ]; then
+  # Staged base tree (AISDLC-1267): the host exports the base commit and mounts
+  # it read-only. Copy it into the writable workspace so the upstream suite
+  # runs against the base, then the diff is applied for the head run.
+  mkdir -p repo
+  cp -R "${SANDBOX_BASE_DIR}/." repo/
+  cd repo
 elif echo "$UPSTREAM_REF" | grep -qE '^(https?|git|ssh)://|^git@'; then
   # URL path: clone then check out the pinned base SHA (baseSha) if supplied.
   # Without baseSha, the clone lands at default-branch HEAD which may differ
@@ -1667,6 +1713,8 @@ export interface DockerRunArgsInput {
    * Built by `buildProxyHostArg` from inference-proxy.ts.
    */
   extraDockerArgs?: string[];
+  /** Host dir mounted read-only at `/sandbox/base` (the staged base tree). */
+  baseTreeDir?: string;
   /** OCI runtime (e.g. `runsc` for gVisor); emitted as `--runtime=<name>`. */
   runtime?: string;
 }
@@ -1701,6 +1749,7 @@ export function buildDockerRunArgs(opts: DockerRunArgsInput): string[] {
     command,
     extraDockerArgs,
     runtime,
+    baseTreeDir,
   } = opts;
 
   return [
@@ -1740,6 +1789,8 @@ export function buildDockerRunArgs(opts: DockerRunArgsInput): string[] {
     'SANDBOX_PR_DIFF_B64',
     '-e',
     'SANDBOX_FIXTURE_B64',
+    // Base tree, read-only (AISDLC-1267). The path comes from our own mkdtemp.
+    ...(baseTreeDir ? ['-v', `${baseTreeDir}:${SANDBOX_BASE_DIR}:ro`] : []),
     // Extra args (e.g. --add-host=inference.local:host-gateway) injected before image name.
     // These allow the container to reach the host-side inference proxy despite --network=none.
     ...(extraDockerArgs ?? []),
@@ -2061,6 +2112,8 @@ export interface RunSandboxInput {
    * Only the loopback-to-proxy path is opened; all other egress remains denied.
    */
   proxyHostArgs?: string[];
+  /** Host dir with the exported base tree (mounted read-only; AISDLC-1267). */
+  baseTreeDir?: string;
 }
 
 /**
@@ -2108,6 +2161,7 @@ export async function runSandbox(input: RunSandboxInput): Promise<SandboxResult>
     // proxyHostArgs: e.g. ['--add-host', 'inference.local:host-gateway'] — lets the
     // container reach the host-side proxy despite --network=none.
     extraDockerArgs: input.proxyHostArgs,
+    baseTreeDir: input.baseTreeDir,
   };
 
   // Hard-abort enforcement via Promise.race.

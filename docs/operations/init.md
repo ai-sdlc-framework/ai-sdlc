@@ -180,6 +180,23 @@ After scaffolding:
 2. Add an `AI_SDLC_PAT` repository secret with write access (used by `auto-enable-auto-merge.yml`).
 3. Commit and push the 4 workflow files.
 
+## Verification commands (`.ai-sdlc/verification.yaml`)
+
+The developer prompt (Step 5), the verify gate, the Step 10 summary and the Step 11 PR body read the verification commands from a `verification:` block, so a non-Node repo needs no `package.json` shim.
+
+```yaml
+verification:
+  build: "uv build"
+  test: "uv run pytest"
+  lint: "uv run ruff check ."
+  format: "uv run ruff format --check ."
+```
+
+- No file (or no `verification:` block): the pnpm defaults apply (`pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check`).
+- An omitted key is skipped; Step 10 and the PR body print `skipped (not configured)` for it.
+- `ai-sdlc init` writes the file with detected defaults: `package.json` gives the pnpm defaults, `pyproject.toml` gives the `uv` commands above. It never overwrites an existing file, and writes nothing when neither manifest exists.
+- The resolver is `resolveVerification` in `pipeline-cli/src/steps/verify-defaults.ts`.
+
 ## Verifying the install
 
 ```bash

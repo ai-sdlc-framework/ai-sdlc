@@ -24,7 +24,9 @@ import {
   type ChangedFile,
 } from './ast-gate.js';
 import { afterEach, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
@@ -736,12 +738,8 @@ describe('loadAstGateConfig', () => {
     removeFixtureDir(workDir);
   });
 
-  it('falls back to DEFAULT_AST_GATE_CONFIG when config file is absent', () => {
-    // No .ai-sdlc/untrusted-pr-gate.yaml written
-    const config = loadAstGateConfig(workDir);
-    expect(config.protectedPaths).toEqual(DEFAULT_AST_GATE_CONFIG.protectedPaths);
-    expect(config.allowedMutationGlobs).toEqual(DEFAULT_AST_GATE_CONFIG.allowedMutationGlobs);
-    expect(config.contentHeuristics).toEqual(DEFAULT_AST_GATE_CONFIG.contentHeuristics);
+  it('throws naming the file when config file is absent (fail closed)', () => {
+    expect(() => loadAstGateConfig(workDir)).toThrow(/untrusted-pr-gate\.yaml/);
   });
 
   it('merges partial override (only protectedPaths provided) with defaults', () => {
@@ -763,20 +761,13 @@ protectedPaths:
     expect(config.contentHeuristics).toEqual(DEFAULT_AST_GATE_CONFIG.contentHeuristics);
   });
 
-  it('falls back to safe defaults on malformed YAML (does NOT silently weaken protection)', () => {
+  it('throws naming the file on malformed YAML (never an empty config)', () => {
     const malformed = `
 protectedPaths: [unclosed
   - this is not valid yaml
 `;
     writeFileSync(join(workDir, '.ai-sdlc', 'untrusted-pr-gate.yaml'), malformed, 'utf8');
-    const config = loadAstGateConfig(workDir);
-
-    // Must fall back to defaults — a malformed config MUST NOT weaken protection
-    expect(config.protectedPaths).toEqual(DEFAULT_AST_GATE_CONFIG.protectedPaths);
-    expect(config.allowedMutationGlobs).toEqual(DEFAULT_AST_GATE_CONFIG.allowedMutationGlobs);
-    // Crucially, contentHeuristics must not be softened
-    expect(config.contentHeuristics.packageJsonLifecycleScripts).toBe('abort');
-    expect(config.contentHeuristics.newGithubActionUses).toBe('abort');
+    expect(() => loadAstGateConfig(workDir)).toThrow(/untrusted-pr-gate\.yaml/);
   });
 
   it('applies full override when all fields are provided', () => {
@@ -832,5 +823,53 @@ describe('runAstGate — adopter config override', () => {
     // .py is now in allowed globs
     const r = runAstGate([{ path: 'src/tool.py', status: 'added' }], config);
     expect(r.outcome).toBe('pass');
+  });
+});
+
+// ── Built CLI under plain node (AISDLC-1265): no Vitest-supplied `require` ───
+const BUILT_CLI = fileURLToPath(new URL('../../bin/cli-ucvg.mjs', import.meta.url));
+const BUILT_DIST = fileURLToPath(new URL('../../dist/cli/ucvg.js', import.meta.url));
+
+describe.skipIf(!existsSync(BUILT_DIST))('Stage 1 gate from built dist under plain node', () => {
+  it('blocks a path that only the fixture YAML protects', () => {
+    const workDir = mkdtempSync(join(tmpdir(), 'ai-sdlc-gate-plain-node-'));
+    try {
+      mkdirSync(join(workDir, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(workDir, '.ai-sdlc', 'untrusted-pr-gate.yaml'),
+        'protectedPaths:\n  - "fixture-only-protected/**"\nallowedMutationGlobs:\n  - "**"\n',
+        'utf8',
+      );
+      const run = (path: string): { outcome: string } =>
+        JSON.parse(
+          execFileSync(
+            process.execPath,
+            [BUILT_CLI, 'ast-gate', '--pr-number', '1', '--author', 'x', '--work-dir', workDir],
+            { encoding: 'utf8', input: path + '\n', stdio: ['pipe', 'pipe', 'ignore'] },
+          ),
+        ) as { outcome: string };
+      expect(run('fixture-only-protected/a.ts').outcome).toBe('abort-protected-path');
+      expect(run('other/a.ts').outcome).toBe('pass');
+
+      // A config that is not valid YAML ends Stage 1 as a block naming the file.
+      writeFileSync(join(workDir, '.ai-sdlc', 'untrusted-pr-gate.yaml'), 'a: [unclosed', 'utf8');
+      let stdout = '';
+      let stderr = '';
+      try {
+        execFileSync(
+          process.execPath,
+          [BUILT_CLI, 'ast-gate', '--pr-number', '1', '--author', 'x', '--work-dir', workDir],
+          { encoding: 'utf8', input: 'other/a.ts\n', stdio: ['pipe', 'pipe', 'pipe'] },
+        );
+      } catch (err) {
+        const e = err as { stdout: string; stderr: string };
+        stdout = e.stdout;
+        stderr = e.stderr;
+      }
+      expect((JSON.parse(stdout) as { outcome: string }).outcome).toBe('abort-protected-path');
+      expect(stderr).toMatch(/untrusted-pr-gate\.yaml/);
+    } finally {
+      removeFixtureDir(workDir);
+    }
   });
 });

@@ -8,8 +8,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeArmViaGate } from './__test-helpers/fake-arm-gate.js';
+import { armViaGate } from './governance/arm-via-gate.js';
 
-vi.mock('./governance/arm-via-gate.js', () => ({ armViaGate: fakeArmViaGate }));
+vi.mock('./governance/arm-via-gate.js', () => ({ armViaGate: vi.fn(fakeArmViaGate) }));
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +30,7 @@ beforeEach(() => {
   // explicit way to get them now that the default is derived from the diff.
   process.env.AI_SDLC_REVIEWER_SET = 'three';
   tmp = makeTmpProject();
+  vi.mocked(armViaGate).mockClear();
 });
 afterEach(() => {
   delete process.env.AI_SDLC_REVIEWER_SET;
@@ -1064,6 +1066,11 @@ describe('integration — executePipeline (full Step 0-13)', () => {
     it('happy path: inline spec → dev → reviewers → PR opens with Closes #N', async () => {
       const worktreePath = join(tmp, '.worktrees', 'gh-issue-612');
       mkdirSync(worktreePath, { recursive: true });
+      mkdirSync(join(tmp, '.git', 'worktrees', 'gh-issue-612'), { recursive: true });
+      writeFileSync(
+        join(worktreePath, '.git'),
+        `gitdir: ${join(tmp, '.git', 'worktrees', 'gh-issue-612')}\n`,
+      );
 
       // Capture the gh pr create argv so we can assert on title + body.
       let prCreateArgs: string[] = [];
@@ -1071,6 +1078,10 @@ describe('integration — executePipeline (full Step 0-13)', () => {
         .on(/^git fetch/, ok())
         .on(/^git worktree add/, ok())
         .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
+        .on(
+          (c, a) => c === 'git' && a[0] === 'rev-parse' && a[1] === 'HEAD',
+          ok('c'.repeat(40) + '\n'),
+        )
         .on(
           /^git -c core\.quotePath=false diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
           ok('--- diff content ---\n'),
@@ -1136,6 +1147,68 @@ describe('integration — executePipeline (full Step 0-13)', () => {
 
       // Sentinel was still written (Step 4) AND cleaned up (Step 13).
       expect(existsSync(join(worktreePath, '.active-task'))).toBe(false);
+
+      // AISDLC-1275: an untrusted run opens its PR but is never armed.
+      expect(vi.mocked(armViaGate)).not.toHaveBeenCalled();
+      expect(
+        runner.calls.some((c) => c.command === 'gh' && c.args[1] === ['mer', 'ge'].join('')),
+      ).toBe(false);
+    });
+
+    it('a protected-path change aborts with cause untrusted-protected-path (AISDLC-1275)', async () => {
+      mkdirSync(join(tmp, '.worktrees', 'gh-issue-613'), { recursive: true });
+      mkdirSync(join(tmp, '.git', 'worktrees', 'gh-issue-613'), { recursive: true });
+      writeFileSync(
+        join(tmp, '.worktrees', 'gh-issue-613', '.git'),
+        `gitdir: ${join(tmp, '.git', 'worktrees', 'gh-issue-613')}\n`,
+      );
+      const runner = new FakeRunner()
+        .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
+        .on(
+          (c, a) => c === 'git' && a[0] === 'rev-parse' && a[1] === 'HEAD',
+          ok('c'.repeat(40) + '\n'),
+        )
+        .on(
+          /^git (?:-c core\.quotePath=false )?diff --text --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
+          ok('--- diff content ---\n'),
+        )
+        .on(
+          /^git (?:-c core\.quotePath=false )?diff --name-only -z --no-renames --no-ext-diff --no-textconv refs\/remotes\/origin\/main\.\.\.HEAD$/,
+          ok('a.ts\0'),
+        )
+        .on(
+          (cmd, args) =>
+            cmd === 'git' &&
+            args[0] === 'diff' &&
+            args.includes('--no-renames') &&
+            args.includes('--name-only'),
+          ok('.github/workflows/ci.yml\0'),
+        );
+      const result = await executePipeline({
+        taskId: 'gh-issue-613',
+        workDir: tmp,
+        spawner: makeApprovingSpawner(),
+        runner: runner.toRunner(),
+        skipFinalizeCommit: true,
+        maxReviewIterations: 2,
+        sourceKind: 'gh-issue',
+        issueNumber: 613,
+        taskSpec: {
+          id: 'gh-issue-613',
+          title: 'demo issue from gh',
+          status: 'To Do',
+          acceptanceCriteria: ['ship the feature'],
+          acceptanceCriteriaChecked: [false],
+          description: 'd',
+          rawBody: 'd',
+          filePath: '<gh-issue:613>',
+        },
+      });
+      expect(result.outcome).toBe('aborted');
+      expect(result.cause).toBe('untrusted-protected-path');
+      expect(result.prUrl).toBeNull();
+      expect(result.notes).toContain('.github/workflows/ci.yml');
+      expect(runner.calls.some((c) => c.args[0] === 'push')).toBe(false);
     });
 
     it('refuses an inline spec with empty title', async () => {
@@ -1276,6 +1349,10 @@ describe('integration — executePipeline (full Step 0-13)', () => {
         ...process.env,
         CLAUDE_PROJECT_DIR: worktreePath,
         AI_SDLC_ACTIVE_TASK_ID: 'gh-issue-700',
+        // AISDLC-1276: an untrusted run ignores permittedExternalPaths, and CI (GITHUB_ACTIONS)
+        // reads as untrusted. This test exercises the trusted allowlist, so mark it internal.
+        AI_SDLC_INTERNAL_RUN: '1',
+        AI_SDLC_UNTRUSTED_RUN: '',
       };
 
       // POSITIVE case — Write to a path under permittedExternalPaths.

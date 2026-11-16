@@ -32,8 +32,9 @@
  * @module pipeline/ast-gate
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { load as loadYaml } from 'js-yaml';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -167,80 +168,78 @@ export const DEFAULT_AST_GATE_CONFIG: AstGateConfig = {
 
 /**
  * Load AST gate config from `.ai-sdlc/untrusted-pr-gate.yaml`.
- * Falls back to `DEFAULT_AST_GATE_CONFIG` when the file is absent.
+ * Throws (message names the file) when the file is missing, unreadable or
+ * not valid YAML; it never returns defaults for a load failure.
  *
  * Adopter overrides are applied as a full replacement, not a merge,
  * so adopters who customize must declare the complete list.
  */
 export function loadAstGateConfig(workDir: string = process.cwd()): AstGateConfig {
   const configPath = join(workDir, '.ai-sdlc', 'untrusted-pr-gate.yaml');
-  if (!existsSync(configPath)) return DEFAULT_AST_GATE_CONFIG;
-
-  const raw = readFileSync(configPath, 'utf8');
-  const parsed = parseUntrustedPrGateYaml(raw);
+  let raw: string;
+  try {
+    raw = readFileSync(configPath, 'utf8');
+  } catch (err) {
+    throw new Error(`cannot read gate config ${configPath}: ${(err as Error).message}`, {
+      cause: err,
+    });
+  }
+  const parsed = parseUntrustedPrGateYaml(raw, configPath);
   return mergeWithDefaults(parsed);
 }
 
 /**
- * Minimal hand-rolled parser for `.ai-sdlc/untrusted-pr-gate.yaml`.
- * Handles the Stage 1 section only (protectedPaths, allowedMutationGlobs,
- * contentHeuristics). Unknown keys are silently ignored (forward-compat).
+ * Parser for `.ai-sdlc/untrusted-pr-gate.yaml`. Handles the Stage 1 section
+ * only. Unknown keys are ignored (forward-compat); invalid YAML throws.
  */
-function parseUntrustedPrGateYaml(yaml: string): Partial<AstGateConfig> {
-  // Use js-yaml via the module that is already in pipeline-cli's deps.
-  // Since we cannot use dynamic require in pure ESM without top-level await,
-  // we use a minimal extraction approach consistent with how dor-config.ts
-  // handles this pattern (synchronous readFileSync + simple parse).
-  //
-  // The full js-yaml package is a pipeline-cli production dependency so we
-  // import it below with a dynamic approach that stays synchronous.
-  //
-  // For robustness: if parse fails, fall back to defaults rather than throw.
+function parseUntrustedPrGateYaml(yaml: string, sourcePath: string): Partial<AstGateConfig> {
+  if (yaml.trim() === '') return {};
+  let doc: Record<string, unknown> | null;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const yaml_lib = require('js-yaml') as typeof import('js-yaml');
-    const doc = yaml_lib.load(yaml) as Record<string, unknown> | null;
-    if (!doc || typeof doc !== 'object') return {};
-
-    const result: Partial<AstGateConfig> = {};
-
-    if (Array.isArray(doc['protectedPaths'])) {
-      result.protectedPaths = (doc['protectedPaths'] as unknown[]).filter(
-        (x): x is string => typeof x === 'string',
-      );
-    }
-
-    if (Array.isArray(doc['allowedMutationGlobs'])) {
-      result.allowedMutationGlobs = (doc['allowedMutationGlobs'] as unknown[]).filter(
-        (x): x is string => typeof x === 'string',
-      );
-    }
-
-    const ch = doc['contentHeuristics'];
-    if (ch && typeof ch === 'object') {
-      const chObj = ch as Record<string, unknown>;
-      const packageJsonLifecycleScripts = chObj['packageJsonLifecycleScripts'];
-      const newGithubActionUses = chObj['newGithubActionUses'];
-
-      if (packageJsonLifecycleScripts === 'abort' || packageJsonLifecycleScripts === 'warn') {
-        result.contentHeuristics = {
-          ...DEFAULT_CONTENT_HEURISTICS,
-          packageJsonLifecycleScripts,
-        };
-      }
-
-      if (newGithubActionUses === 'abort' || newGithubActionUses === 'warn') {
-        result.contentHeuristics = {
-          ...(result.contentHeuristics ?? DEFAULT_CONTENT_HEURISTICS),
-          newGithubActionUses,
-        };
-      }
-    }
-
-    return result;
-  } catch {
-    return {};
+    doc = loadYaml(yaml) as Record<string, unknown> | null;
+  } catch (err) {
+    throw new Error(`cannot parse gate config ${sourcePath}: ${(err as Error).message}`, {
+      cause: err,
+    });
   }
+  if (!doc || typeof doc !== 'object') return {};
+
+  const result: Partial<AstGateConfig> = {};
+
+  if (Array.isArray(doc['protectedPaths'])) {
+    result.protectedPaths = (doc['protectedPaths'] as unknown[]).filter(
+      (x): x is string => typeof x === 'string',
+    );
+  }
+
+  if (Array.isArray(doc['allowedMutationGlobs'])) {
+    result.allowedMutationGlobs = (doc['allowedMutationGlobs'] as unknown[]).filter(
+      (x): x is string => typeof x === 'string',
+    );
+  }
+
+  const ch = doc['contentHeuristics'];
+  if (ch && typeof ch === 'object') {
+    const chObj = ch as Record<string, unknown>;
+    const packageJsonLifecycleScripts = chObj['packageJsonLifecycleScripts'];
+    const newGithubActionUses = chObj['newGithubActionUses'];
+
+    if (packageJsonLifecycleScripts === 'abort' || packageJsonLifecycleScripts === 'warn') {
+      result.contentHeuristics = {
+        ...DEFAULT_CONTENT_HEURISTICS,
+        packageJsonLifecycleScripts,
+      };
+    }
+
+    if (newGithubActionUses === 'abort' || newGithubActionUses === 'warn') {
+      result.contentHeuristics = {
+        ...(result.contentHeuristics ?? DEFAULT_CONTENT_HEURISTICS),
+        newGithubActionUses,
+      };
+    }
+  }
+
+  return result;
 }
 
 function mergeWithDefaults(partial: Partial<AstGateConfig>): AstGateConfig {

@@ -18,14 +18,28 @@ import { defaultSpawner } from '../runtime/default-spawner.js';
 import type { PipelineOptions, PipelineResult, TaskSpec } from '../types.js';
 import type { DoneInstruction, NextStepContext, StopInstruction } from './types.js';
 
+export interface FetchedIssue {
+  spec: TaskSpec;
+  issueNumber: number;
+  /** Author association from the GitHub API response (never from issue text). */
+  authorAssociation?: string;
+  /** Label names on the issue. */
+  labels?: string[];
+}
+
+/** Label only a user with triage or write access can apply. */
+export const EXECUTE_APPROVED_LABEL = 'execute-approved';
+/** Associations treated as inside the project. */
+const TRUSTED_ASSOCIATIONS = ['OWNER', 'MEMBER', 'COLLABORATOR'];
+/** Byte cap for the issue title and for the description. */
+export const MAX_ISSUE_TITLE_BYTES = 500;
+export const MAX_ISSUE_DESCRIPTION_BYTES = 20000;
+
 export interface GhIssueDeps {
   /** True when `claude` resolves on PATH. */
   claudeOnPath: () => Promise<boolean>;
   /** Fetch + synthesise the inline spec (dogfood `fetchGhIssueAsTaskSpec`). */
-  fetchSpec: (
-    distFile: string,
-    issueNumber: number,
-  ) => Promise<{ spec: TaskSpec; issueNumber: number }>;
+  fetchSpec: (distFile: string, issueNumber: number) => Promise<FetchedIssue>;
   /** Run the composite with the subscription spawner. */
   execute: (opts: Omit<PipelineOptions, 'spawner'>) => Promise<PipelineResult>;
 }
@@ -37,7 +51,7 @@ export const defaultGhIssueDeps: GhIssueDeps = {
   },
   fetchSpec: async (distFile, issueNumber) => {
     const mod = (await import(pathToFileURL(distFile).href)) as {
-      fetchGhIssueAsTaskSpec: (n: number) => Promise<{ spec: TaskSpec; issueNumber: number }>;
+      fetchGhIssueAsTaskSpec: (n: number) => Promise<FetchedIssue>;
     };
     return mod.fetchGhIssueAsTaskSpec(issueNumber);
   },
@@ -74,13 +88,38 @@ export async function runGhIssue(
       `dogfood dist missing at ${dist}. Run \`pnpm --filter @ai-sdlc/dogfood build\` to fix.`,
     );
   }
-  let fetched: { spec: TaskSpec; issueNumber: number };
+  let fetched: FetchedIssue;
   try {
     fetched = await deps.fetchSpec(dist, issueNumber);
   } catch (err) {
     return failure(
       taskId,
       `failed to fetch GitHub issue #${issueNumber}: ${(err as Error).message}`,
+    );
+  }
+  const assoc = fetched.authorAssociation;
+  if (!assoc || !TRUSTED_ASSOCIATIONS.includes(assoc)) {
+    if (!(fetched.labels ?? []).includes(EXECUTE_APPROVED_LABEL)) {
+      return failure(
+        taskId,
+        `issue #${issueNumber} was written by an author with association ` +
+          `${assoc ? `"${assoc}"` : 'unknown (could not be read)'}, outside the project. ` +
+          `Refusing to execute it unless a maintainer applies the \`${EXECUTE_APPROVED_LABEL}\` label.`,
+      );
+    }
+  }
+  const titleBytes = Buffer.byteLength(fetched.spec.title, 'utf8');
+  const descBytes = Buffer.byteLength(fetched.spec.description ?? '', 'utf8');
+  if (titleBytes > MAX_ISSUE_TITLE_BYTES) {
+    return failure(
+      taskId,
+      `issue #${issueNumber} title is ${titleBytes} bytes, over the ${MAX_ISSUE_TITLE_BYTES}-byte cap.`,
+    );
+  }
+  if (descBytes > MAX_ISSUE_DESCRIPTION_BYTES) {
+    return failure(
+      taskId,
+      `issue #${issueNumber} description is ${descBytes} bytes, over the ${MAX_ISSUE_DESCRIPTION_BYTES}-byte cap.`,
     );
   }
   let result: PipelineResult;

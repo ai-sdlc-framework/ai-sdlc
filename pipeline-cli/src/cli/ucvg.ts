@@ -28,7 +28,17 @@
  * @module cli/ucvg
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { buildCleanRoomVerdict, writeVerdictArtifact } from '../attestation/verdict-untrusted.js';
 import { validateReport } from '../pipeline/report-validator.js';
 import { execFileSync } from 'node:child_process';
@@ -38,13 +48,20 @@ import { runReviewerMatrixInContainer } from '../pipeline/reviewer-container.js'
 import { classifyTrust } from '../pipeline/trust-classifier.js';
 import { runAstGate, loadAstGateConfig, buildBlockedEvent } from '../pipeline/ast-gate.js';
 import type { ChangedFile } from '../pipeline/ast-gate.js';
-import { loadSandboxConfig, runSandbox } from '../pipeline/sandbox-runner.js';
+import {
+  DEFAULT_MAX_DIFF_BYTES,
+  loadSandboxConfig,
+  runSandbox,
+} from '../pipeline/sandbox-runner.js';
 import type { DifferentialTestResult } from '../pipeline/sandbox-runner.js';
 import { runCleanRoomSigner, unsignedReportPath } from '../pipeline/clean-room-signer.js';
 import {
   runReviewerMatrix,
   FakeModelClient,
   InferenceProxyClient,
+  assertDiffWithinCap,
+  DiffTooLargeError,
+  formatUsageSummary,
   type ModelClient,
 } from '../pipeline/reviewer-runner.js';
 import {
@@ -76,6 +93,17 @@ export function isUntrustedPrGateEnabled(
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+}
+
+/** Append markdown to the GitHub job summary when running in Actions (AISDLC-1266). */
+function appendJobSummary(markdown: string): void {
+  const path = process.env['GITHUB_STEP_SUMMARY'];
+  if (!path) return;
+  try {
+    appendFileSync(path, markdown + '\n');
+  } catch {
+    // The summary is informational; never fail the run over it.
+  }
 }
 
 function fail(reason: string, code = 1): never {
@@ -112,6 +140,7 @@ function runClassify(args: { author: string; isFork: boolean; workDir: string })
         reason: result.reason,
         author: result.author,
         allowlistedAuthors: result.allowlistedAuthors,
+        ...(result.configError ? { configError: result.configError } : {}),
       }) + '\n',
     );
   } catch (err) {
@@ -158,6 +187,8 @@ async function runAstGateCli(args: {
       status: 'modified' as const,
     }));
 
+    // A config that cannot be read or parsed throws here and lands in the
+    // fail-closed catch below (block, message names the file).
     const config = loadAstGateConfig(args.workDir);
     const result = runAstGate(changedFiles, config);
 
@@ -184,7 +215,12 @@ async function runAstGateCli(args: {
     process.stderr.write(
       `[stage-1] AST gate error — failing closed to 'abort-protected-path': ${(err as Error).message}\n`,
     );
-    emit({ outcome: 'abort-protected-path', offendingPaths: [], heuristicFindings: [] });
+    emit({
+      outcome: 'abort-protected-path',
+      offendingPaths: [],
+      heuristicFindings: [],
+      configError: (err as Error).message,
+    });
     process.exit(1);
   }
 }
@@ -221,6 +257,17 @@ async function runSandboxAndReview(args: {
   const prDiff = _ucvgSeams.computePrDiffFn
     ? _ucvgSeams.computePrDiffFn(args.prContentDir, args.baseSha, args.headSha)
     : computePrDiff(args.prContentDir, args.baseSha, args.headSha);
+
+  // AISDLC-1266: refuse an oversized diff before the proxy starts or any model call.
+  try {
+    assertDiffWithinCap(prDiff, sandboxConfig.maxDiffBytes ?? DEFAULT_MAX_DIFF_BYTES);
+  } catch (err) {
+    if (err instanceof DiffTooLargeError) {
+      appendJobSummary(`### UCVG review refused\n\n${err.message}\n`);
+      fail(err.message);
+    }
+    throw err;
+  }
 
   // ── RFC-0043 AQ2 — InferenceProxy lifecycle ────────────────────────────────
   //
@@ -310,11 +357,19 @@ async function runSandboxAndReview(args: {
     }
   }
 
+  let baseTreeDir: string | undefined;
   try {
     // Run Stage 2 differential testing inside the Docker sandbox.
     // MAJOR fix #7: upstreamMainRef must be baseSha (the target-branch base), NOT headSha.
     // Differential testing compares PR head against the target-branch base, not itself.
     process.stderr.write('[stage-2] running differential tests in OpenShell sandbox...\n');
+    // AISDLC-1267: export the base commit so the container can run the upstream
+    // suite against the base. Skipped in fixture-demo mode (tarball carries it).
+    baseTreeDir = process.env['AI_SDLC_UCVG_FIXTURE_SUBDIR']
+      ? undefined
+      : stageBaseTree(args.prContentDir, args.baseSha);
+    // A sandbox `error`/`resource-breach` outcome is a rejection, never a pass:
+    // extractDifferentialTestResult sets sandboxError. A throw writes no report.
     const sandboxResult = await runSandbox({
       prNumber: args.prNumber,
       prDiff,
@@ -325,6 +380,7 @@ async function runSandboxAndReview(args: {
       // When proxy is not running, these are undefined (existing CI behaviour).
       sandboxEnv,
       proxyHostArgs,
+      baseTreeDir,
     });
 
     // Extract differential test result from sandbox output.
@@ -390,8 +446,10 @@ async function runSandboxAndReview(args: {
     }
     writeFileSync(reportPath, JSON.stringify(report, null, 2));
     process.stderr.write(`[stage-2/3] unsigned report written: ${reportPath}\n`);
+    appendJobSummary(formatUsageSummary(reviewerResult.usage));
     emit({ ok: true, reportPath });
   } finally {
+    if (baseTreeDir) rmSync(baseTreeDir, { recursive: true, force: true });
     // Always stop the proxy — credential must not linger after the run completes.
     if (proxy !== null) {
       await proxy.stop();
@@ -580,6 +638,30 @@ function computePrDiff(prContentDir: string, baseSha: string, headSha: string): 
   );
 }
 
+/**
+ * Export the base commit into a fresh temp dir (data only: `git archive` never
+ * runs fork code). Returns undefined on failure; the in-container script then
+ * fails closed because no base tree is present (AISDLC-1267).
+ */
+function stageBaseTree(prContentDir: string, baseSha: string): string | undefined {
+  if (!/^[0-9a-f]{7,64}$/i.test(baseSha)) return undefined;
+  const dir = mkdtempSync(join(tmpdir(), 'ucvg-base-'));
+  try {
+    const tarball = execFileSync('git', ['-C', prContentDir, 'archive', '--format=tar', baseSha], {
+      maxBuffer: 512 * 1024 * 1024,
+    });
+    execFileSync('tar', ['-x', '-C', dir], { input: tarball });
+    // The container runs as nobody; make the staged tree readable.
+    chmodSync(dir, 0o755);
+    execFileSync('chmod', ['-R', 'a+rX', dir]);
+    return dir;
+  } catch (err) {
+    process.stderr.write(`[stage-2] base tree staging failed: ${(err as Error).message}\n`);
+    rmSync(dir, { recursive: true, force: true });
+    return undefined;
+  }
+}
+
 function extractDifferentialTestResult(sandboxResult: unknown): DifferentialTestResult {
   // Extract differential test data from the sandbox result.
   //
@@ -600,6 +682,7 @@ function extractDifferentialTestResult(sandboxResult: unknown): DifferentialTest
     newTestsPassed: false,
     newTestsOutput: '',
     newCodeCoveragePct: 0,
+    sandboxError: true,
   };
   if (!r || typeof r !== 'object') return FAILURE_RESULT;
 

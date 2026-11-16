@@ -123,8 +123,8 @@ async function decide(
     (async (c, d, h, pr) => (await listEarlierSubjects(c.runner, d, h, pr)).map((x) => x.headSha));
   let lastHead: string | null = null;
   for (const candidate of await earlierHeads(ctx, cwd, head, pullRequest)) {
-    // Records carry pullRequest 0 (the writer does not know the PR), so a baseline must also be
-    // an ancestor of this head: a record from another PR's branch is never in this lineage.
+    // Records name their PR (PR 0 is no record, AISDLC-1270); a baseline must also be an
+    // ancestor of this head, so a record from another PR's branch is never in this lineage.
     if (
       (await git(['cat-file', '-e', `${candidate}^{commit}`])) !== null &&
       (await git(['merge-base', '--is-ancestor', candidate, head])) !== null

@@ -428,7 +428,11 @@ describe('refusals before any state exists', () => {
           ...deps(),
           ghIssue: {
             claudeOnPath: async () => true,
-            fetchSpec: async () => ({ spec: makeTask({ id: 'gh-issue-612' }), issueNumber: 612 }),
+            fetchSpec: async () => ({
+              spec: makeTask({ id: 'gh-issue-612' }),
+              issueNumber: 612,
+              authorAssociation: 'OWNER',
+            }),
             execute: async () => {
               asked += 1;
               return {

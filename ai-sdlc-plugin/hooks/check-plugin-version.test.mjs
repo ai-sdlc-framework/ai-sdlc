@@ -217,6 +217,41 @@ describe('check-plugin-version hook (AISDLC-89)', () => {
     }
   });
 
+  it('AISDLC-1271: --print and --deps show runtime deps as installed against pin; up to date only when all match', async () => {
+    try {
+      writeFileSync(
+        join(tempRoot, '.claude-plugin', 'plugin.json'),
+        JSON.stringify({
+          name: 'ai-sdlc',
+          version: '0.8.1',
+          runtimeDependencies: {
+            '@ai-sdlc/pipeline-cli': '0.8.1',
+            '@ai-sdlc/orchestrator': '^0.8.0',
+          },
+        }),
+      );
+      const pkgDir = join(tempRoot, 'node_modules', '@ai-sdlc', 'pipeline-cli');
+      mkdirSync(pkgDir, { recursive: true });
+      writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ version: '0.8.0' }));
+      let r = await runHook({ args: ['--print'] });
+      assert.match(r.stdout, /pipeline-cli: installed v0\.8\.0, pin 0\.8\.1 \(MISMATCH\)/);
+      assert.match(
+        r.stdout,
+        /orchestrator: installed none, pin \^0\.8\.0 \(range pin, not compared\)/,
+      );
+      assert.doesNotMatch(r.stdout, /up to date/);
+      r = await runHook({ args: ['--deps'] });
+      assert.equal(r.code, 1);
+      writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ version: '0.8.1' }));
+      r = await runHook({ args: ['--print'] });
+      assert.match(r.stdout, /Status: ✓ up to date/);
+      r = await runHook({ args: ['--deps'] });
+      assert.equal(r.code, 0);
+    } finally {
+      cleanup();
+    }
+  });
+
   it('--print: opt-out env var prints disabled message + does not fetch', async () => {
     try {
       let serverHits = 0;

@@ -114,8 +114,8 @@ export function extractReferences(body: string): Reference[] {
   }
 
   // 2. Bare URLs not already captured — `(?<!\()` to skip the markdown-link case.
-  for (const m of text.matchAll(/(?<!\()(https?:\/\/\S+)/g)) {
-    const url = m[1].replace(/[)),.;:]+$/g, '');
+  for (const m of text.matchAll(/(?<![(\w./])(https?:\/\/\S+)/g)) {
+    const url = m[1].replace(/[)),.;:"'`]+$/g, '');
     add(url, classifyUrl(url));
   }
 

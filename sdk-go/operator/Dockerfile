@@ -1,5 +1,5 @@
-# Digest pin (OpenSSF Scorecard PinnedDependencies): golang:1.25 multi-arch index, resolved 2026-10-22
-FROM golang:1.25@sha256:699337d620559a59b4a2bb298ad59611e535d2ee755a34cf2d2a98f37578dc80 AS builder
+# Digest pin (OpenSSF Scorecard PinnedDependencies): golang:1.26 multi-arch index, resolved 2026-11-13
+FROM golang:1.26@sha256:978e0a4e3d953662577d784471db27742f543ab09eead06839a838188c73314b AS builder
 
 WORKDIR /workspace
 

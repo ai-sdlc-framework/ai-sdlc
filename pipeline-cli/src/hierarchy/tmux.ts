@@ -3,22 +3,45 @@
  * arguments are argv entries, never shell-interpolated.
  */
 
+import process from 'node:process';
+
 import { isLegacyLayoutEntry } from './roster.js';
 import type { CommandResult, CommandRunner, RosterEntry } from './types.js';
 
+/** Default time allowed for one tmux call (AISDLC-1255). */
+export const DEFAULT_TMUX_TIMEOUT_MS = 5000;
+
+/** The per-call tmux timeout: `AI_SDLC_TMUX_TIMEOUT_MS` when a positive number, else 5 s. */
+export function tmuxTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env['AI_SDLC_TMUX_TIMEOUT_MS']);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_TMUX_TIMEOUT_MS;
+}
+
+/**
+ * Run one tmux call bounded by a timeout, so a dead pane or a blocked server can never hang
+ * the tick (AISDLC-1255). A timed-out call returns a non-zero status with `timedOut: true`.
+ */
+export function tmuxRun(
+  run: CommandRunner,
+  args: readonly string[],
+  options: { cwd?: string } = {},
+): CommandResult {
+  return run('tmux', args, { ...options, timeoutMs: tmuxTimeoutMs() });
+}
+
 /** True when the tmux session exists. */
 export function hasSession(run: CommandRunner, session: string): boolean {
-  return run('tmux', ['has-session', '-t', `=${session}`]).status === 0;
+  return tmuxRun(run, ['has-session', '-t', `=${session}`]).status === 0;
 }
 
 /** Close a whole session (AISDLC-1117: orphan reclaim, and the tail of an ephemeral executor's down). */
 export function killSession(run: CommandRunner, session: string): CommandResult {
-  return run('tmux', ['kill-session', '-t', `=${session}`]);
+  return tmuxRun(run, ['kill-session', '-t', `=${session}`]);
 }
 
 /** Names of every tmux session; empty when tmux has none or cannot be read. */
 export function listSessionNames(run: CommandRunner): string[] {
-  const r = run('tmux', ['list-sessions', '-F', '#{session_name}']);
+  const r = tmuxRun(run, ['list-sessions', '-F', '#{session_name}']);
   if (r.status !== 0) return [];
   return r.stdout
     .split('\n')
@@ -28,7 +51,7 @@ export function listSessionNames(run: CommandRunner): string[] {
 
 /** Window names in the session; empty when the session does not exist. */
 export function listWindows(run: CommandRunner, session: string): string[] {
-  const r = run('tmux', ['list-windows', '-t', `=${session}`, '-F', '#{window_name}']);
+  const r = tmuxRun(run, ['list-windows', '-t', `=${session}`, '-F', '#{window_name}']);
   if (r.status !== 0) return [];
   return r.stdout
     .split('\n')
@@ -52,7 +75,7 @@ export function startSession(
   command: string,
   cwd: string,
 ): CommandResult {
-  return run('tmux', ['new-session', '-d', '-s', name, '-n', name, '-c', cwd, command], { cwd });
+  return tmuxRun(run, ['new-session', '-d', '-s', name, '-n', name, '-c', cwd, command], { cwd });
 }
 
 /** Session environment entry naming the board that spawned a session (AISDLC-1252). */
@@ -60,12 +83,12 @@ export const BOARD_TAG = 'AI_SDLC_BOARD_DIR';
 
 /** Tag a session with the absolute dir of the board that spawned it (session environment, not process env). */
 export function tagSessionBoard(run: CommandRunner, name: string, boardDir: string): CommandResult {
-  return run('tmux', ['set-environment', '-t', `=${name}`, BOARD_TAG, boardDir]);
+  return tmuxRun(run, ['set-environment', '-t', `=${name}`, BOARD_TAG, boardDir]);
 }
 
 /** The board tag of a session; undefined when absent or when tmux fails (a failure never counts as own). */
 export function sessionBoardTag(run: CommandRunner, name: string): string | undefined {
-  const r = run('tmux', ['show-environment', '-t', `=${name}`, BOARD_TAG]);
+  const r = tmuxRun(run, ['show-environment', '-t', `=${name}`, BOARD_TAG]);
   if (r.status !== 0) return undefined;
   const line = r.stdout.trim();
   const prefix = `${BOARD_TAG}=`;
@@ -90,7 +113,7 @@ export function setSessionTitles(run: CommandRunner, name: string): CommandResul
   ];
   let last: CommandResult = { status: 0, stdout: '', stderr: '' };
   for (const [key, value] of options) {
-    last = run('tmux', ['set-option', '-t', target, key as string, value as string]);
+    last = tmuxRun(run, ['set-option', '-t', target, key as string, value as string]);
     if (last.status !== 0) return last;
   }
   return last;
@@ -98,7 +121,7 @@ export function setSessionTitles(run: CommandRunner, name: string): CommandResul
 
 /** True when at least one tmux client is attached to the session; false on any failure. */
 export function sessionAttached(run: CommandRunner, session: string): boolean {
-  const r = run('tmux', ['display-message', '-p', '-t', `=${session}`, '#{session_attached}']);
+  const r = tmuxRun(run, ['display-message', '-p', '-t', `=${session}`, '#{session_attached}']);
   if (r.status !== 0) return false;
   const n = Number.parseInt(r.stdout.trim(), 10);
   return Number.isFinite(n) && n > 0;
@@ -110,7 +133,7 @@ export function paneInfo(
   session: string,
   window: string,
 ): { paneId: string; panePid: number } {
-  const r = run('tmux', [
+  const r = tmuxRun(run, [
     'display-message',
     '-p',
     '-t',
@@ -125,7 +148,7 @@ export function paneInfo(
 
 /** The command a window's pane was started with (`#{pane_start_command}`); '' when unreadable. */
 export function paneStartCommand(run: CommandRunner, session: string, window: string): string {
-  const r = run('tmux', [
+  const r = tmuxRun(run, [
     'display-message',
     '-p',
     '-t',
@@ -137,7 +160,7 @@ export function paneStartCommand(run: CommandRunner, session: string, window: st
 
 /** Ask the session in a pane to exit gracefully. */
 export function sendExit(run: CommandRunner, target: string): CommandResult {
-  return run('tmux', ['send-keys', '-t', target, '/exit', 'Enter']);
+  return tmuxRun(run, ['send-keys', '-t', target, '/exit', 'Enter']);
 }
 
 /**
@@ -146,19 +169,19 @@ export function sendExit(run: CommandRunner, target: string): CommandResult {
  * tasks"). Returns true when the choice was sent.
  */
 export function confirmExitDialog(run: CommandRunner, target: string): boolean {
-  const r = run('tmux', ['capture-pane', '-p', '-t', target]);
+  const r = tmuxRun(run, ['capture-pane', '-p', '-t', target]);
   if (r.status !== 0 || !/Background work is running/i.test(r.stdout)) return false;
-  return run('tmux', ['send-keys', '-t', target, '1', 'Enter']).status === 0;
+  return tmuxRun(run, ['send-keys', '-t', target, '1', 'Enter']).status === 0;
 }
 
 /** Close one pane by its id; pane ids are never reused within a tmux server's lifetime. */
 export function killPane(run: CommandRunner, paneId: string): CommandResult {
-  return run('tmux', ['kill-pane', '-t', paneId]);
+  return tmuxRun(run, ['kill-pane', '-t', paneId]);
 }
 
 /** Close a window. */
 export function killWindow(run: CommandRunner, session: string, window: string): CommandResult {
-  return run('tmux', ['kill-window', '-t', `=${session}:${window}`]);
+  return tmuxRun(run, ['kill-window', '-t', `=${session}:${window}`]);
 }
 
 /**
@@ -176,7 +199,7 @@ export function resolveSendTarget(
 ): string {
   const windowTarget = `=${session}:${window}`;
   if (!paneId) return windowTarget;
-  const r = run('tmux', ['display-message', '-p', '-t', windowTarget, '#{pane_id}']);
+  const r = tmuxRun(run, ['display-message', '-p', '-t', windowTarget, '#{pane_id}']);
   if (r.status === 0 && r.stdout.trim() === paneId) return paneId;
   throw new Error(
     `the recorded pane ${paneId} does not belong to window '${window}' of tmux session '${session}' any more (the roster entry is stale); refusing to send keys to it or close it`,
@@ -192,12 +215,12 @@ export const OWNER_OPTION = '@ai-sdlc-hierarchy';
 
 /** Mark a session as started by `cli-hierarchy up` (session-scoped, never `-g`). */
 export function markSessionOwned(run: CommandRunner, name: string): CommandResult {
-  return run('tmux', ['set-option', '-t', `=${name}:`, OWNER_OPTION, '1']);
+  return tmuxRun(run, ['set-option', '-t', `=${name}:`, OWNER_OPTION, '1']);
 }
 
 /** True when the session carries the ownership marker. */
 export function sessionOwned(run: CommandRunner, session: string): boolean {
-  const r = run('tmux', ['show-options', '-v', '-t', `=${session}:`, OWNER_OPTION]);
+  const r = tmuxRun(run, ['show-options', '-v', '-t', `=${session}:`, OWNER_OPTION]);
   return r.status === 0 && r.stdout.trim() === '1';
 }
 
@@ -219,7 +242,7 @@ export function paneTail(run: CommandRunner, session: string, window: string): s
 
 /** The last lines of the pane named by a tmux target (a pane id from `resolveSendTarget`, or a window). */
 export function paneScreenAt(run: CommandRunner, target: string): string {
-  const r = run('tmux', ['capture-pane', '-p', '-t', target, '-S', '-30']);
+  const r = tmuxRun(run, ['capture-pane', '-p', '-t', target, '-S', '-30']);
   return r.status === 0 ? r.stdout : '';
 }
 
@@ -238,8 +261,8 @@ export function paneShowsPrompt(tail: string): boolean {
 
 /** Type a line into a pane and press Enter; false when either key send fails. */
 export function sendLine(run: CommandRunner, target: string, text: string): boolean {
-  const typed = run('tmux', ['send-keys', '-t', target, '-l', '--', text]);
-  return typed.status === 0 && run('tmux', ['send-keys', '-t', target, 'Enter']).status === 0;
+  const typed = tmuxRun(run, ['send-keys', '-t', target, '-l', '--', text]);
+  return typed.status === 0 && tmuxRun(run, ['send-keys', '-t', target, 'Enter']).status === 0;
 }
 
 /** True when the window's pane shows an idle input prompt right now. */

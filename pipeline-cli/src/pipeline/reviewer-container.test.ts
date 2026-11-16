@@ -30,6 +30,7 @@ import { buildReviewerProxyEnv } from './inference-proxy.js';
 import { FakeModelClient } from './reviewer-runner.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
+const PASSING_SANDBOX = { upstreamSuitePassed: true, newTestsPassed: true };
 const dt = {
   upstreamSuitePassed: true,
   upstreamSuiteOutput: '',
@@ -111,17 +112,17 @@ describe('verdict return contract', () => {
       join(d, REVIEWER_VERDICTS_FILE),
       JSON.stringify({ code: v, test: v, security: v }),
     );
-    expect(readReviewerVerdicts(d).consensus.approved).toBe(true);
+    expect(readReviewerVerdicts(d, PASSING_SANDBOX).consensus.approved).toBe(true);
     removeFixtureDir(d);
   });
 
   it('fails closed on missing, corrupt, or partial files', () => {
     const d = tmp();
-    expect(readReviewerVerdicts(d).consensus.approved).toBe(false);
+    expect(readReviewerVerdicts(d, PASSING_SANDBOX).consensus.approved).toBe(false);
     writeFileSync(join(d, REVIEWER_VERDICTS_FILE), 'not json');
-    expect(readReviewerVerdicts(d).consensus.approved).toBe(false);
+    expect(readReviewerVerdicts(d, PASSING_SANDBOX).consensus.approved).toBe(false);
     writeFileSync(join(d, REVIEWER_VERDICTS_FILE), '"str"');
-    expect(readReviewerVerdicts(d).consensus.approved).toBe(false);
+    expect(readReviewerVerdicts(d, PASSING_SANDBOX).consensus.approved).toBe(false);
     removeFixtureDir(d);
   });
 });
@@ -165,7 +166,7 @@ describe('runReviewerEntrypoint', () => {
     );
     // Port 1 refuses connections: model calls fail closed, file is still written.
     await runReviewerEntrypoint(env, { inDir, outDir });
-    expect(readReviewerVerdicts(outDir).consensus.approved).toBe(false);
+    expect(readReviewerVerdicts(outDir, PASSING_SANDBOX).consensus.approved).toBe(false);
     removeFixtureDir(inDir);
     removeFixtureDir(outDir);
   });

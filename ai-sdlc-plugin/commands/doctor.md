@@ -78,6 +78,17 @@ fi
 
 Include that `pipeline-cli build:` line in the doctor output.
 
+## Runtime dependency pins (AISDLC-1271)
+
+Also print each runtime dependency as installed version against its `plugin.json`
+pin (local files only; exit status 1 means at least one exact pin differs):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}/hooks/check-plugin-version.js" --deps || echo "runtime dependencies differ from the plugin pins"
+```
+
+Include those lines in the doctor output.
+
 ## When to run this
 
 - After `/ai-sdlc init` (`ai-sdlc-plugin/commands/init.md`), to confirm the scaffold landed cleanly.

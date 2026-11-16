@@ -76,6 +76,8 @@ const MCP_SERVER_PACKAGE = '@ai-sdlc/plugin-mcp-server';
 // ── Mode detection ──────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
 const PRINT_MODE = argv.includes('--print') || argv.includes('print');
+// AISDLC-1271: `--deps` prints only the runtime dependency lines (no network); doctor uses it.
+const DEPS_MODE = argv.includes('--deps');
 
 // ── Opt-out short-circuit ───────────────────────────────────────────────
 if (process.env.AI_SDLC_DISABLE_VERSION_CHECK === '1') {
@@ -97,7 +99,7 @@ let _ran = false;
 // still need to drain so the parent doesn't block on an unread pipe. In
 // PRINT_MODE we skip stdin entirely — slash-command bash invocations don't
 // pass any payload.
-if (!PRINT_MODE && process.stdin.isTTY === false) {
+if (!PRINT_MODE && !DEPS_MODE && process.stdin.isTTY === false) {
   let _drained = '';
   process.stdin.on('data', (chunk) => {
     _drained += chunk;
@@ -116,6 +118,12 @@ if (!PRINT_MODE && process.stdin.isTTY === false) {
 function main() {
   if (_ran) return;
   _ran = true;
+
+  if (DEPS_MODE) {
+    const { lines, allMatch } = runtimeDependencyStatus();
+    process.stdout.write(lines.join('\n') + (lines.length ? '\n' : ''));
+    process.exit(allMatch ? 0 : 1);
+  }
 
   const installed = readInstalledVersion();
   if (!installed && !PRINT_MODE) {
@@ -652,8 +660,49 @@ function maybeNag(installed, latest) {
   );
 }
 
+// AISDLC-1271: installed version of each runtimeDependencies entry against its pin.
+// Local files only. A pin that is not an exact version is shown but never counts as
+// a mismatch; a missing install counts as a mismatch for an exact pin.
+function runtimeDependencyStatus() {
+  const exactPin = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+  const root = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..');
+  let deps = null;
+  for (const rel of [path.join('.claude-plugin', 'plugin.json'), 'plugin.json']) {
+    try {
+      deps = JSON.parse(fs.readFileSync(path.join(root, rel), 'utf-8')).runtimeDependencies;
+      break;
+    } catch {
+      // try the next location
+    }
+  }
+  const lines = [];
+  let allMatch = true;
+  if (!deps || typeof deps !== 'object') return { lines, allMatch };
+  for (const [name, pin] of Object.entries(deps)) {
+    let installed = null;
+    try {
+      const v = JSON.parse(
+        fs.readFileSync(path.join(root, 'node_modules', name, 'package.json'), 'utf-8'),
+      ).version;
+      if (typeof v === 'string') installed = v;
+    } catch {
+      // not installed
+    }
+    const exact = exactPin.test(String(pin));
+    const ok = !exact || installed === pin;
+    if (!ok) allMatch = false;
+    const status = !exact ? 'range pin, not compared' : ok ? 'match' : 'MISMATCH';
+    lines.push(
+      `- ${name}: installed ${installed ? 'v' + installed : 'none'}, pin ${pin} (${status})`,
+    );
+  }
+  return { lines, allMatch };
+}
+
 function printStatus({ installed, latest, checkedAt }) {
   const lines = ['ai-sdlc plugin', `- Installed: v${installed}`];
+  const deps = runtimeDependencyStatus();
+  lines.push('- Runtime dependencies:', ...deps.lines.map((l) => '  ' + l));
   if (latest) {
     lines.push(`- Latest: v${latest}`);
     lines.push(`- Last checked: ${checkedAt ? formatRelative(checkedAt) : 'just now'}`);
@@ -661,6 +710,10 @@ function printStatus({ installed, latest, checkedAt }) {
       lines.push('- Status: ? installed version unknown');
     } else if (compareSemver(latest, installed) > 0) {
       lines.push('- Status: ⚠ stale — run /plugin update ai-sdlc && /reload-plugins');
+    } else if (!deps.allMatch) {
+      lines.push(
+        '- Status: ⚠ runtime dependencies differ from the plugin pins — run: bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" "$CLAUDE_PLUGIN_ROOT"',
+      );
     } else {
       lines.push('- Status: ✓ up to date');
     }

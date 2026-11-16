@@ -152,7 +152,7 @@
  * `node -e ...` or `jq`.
  */
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
   readdirSync,
@@ -610,8 +610,9 @@ export async function runDispatchCli(
         startHostWatch({
           boardDir,
           now: clockNow,
-          runTick: () => {
-            createSystemRunner()(
+          // AISDLC-1255: async and in its own process group, so the watchdog can kill a hung tick.
+          runTick: (onExit) => {
+            const child = spawn(
               process.execPath,
               [
                 path.join(cliBin, 'cli-hierarchy.mjs'),
@@ -621,8 +622,11 @@ export async function runDispatchCli(
                 '--board-dir',
                 boardDir,
               ],
-              { cwd },
+              { cwd, stdio: 'ignore', detached: true },
             );
+            child.on('exit', onExit);
+            child.on('error', onExit);
+            return child.pid;
           },
         });
         startScheduler({

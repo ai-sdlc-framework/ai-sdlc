@@ -12,7 +12,7 @@
 import path from 'node:path';
 
 import { unsafeEntryReason } from './roster.js';
-import { listWindows, ownershipRefusal, resolveSendTarget } from './tmux.js';
+import { listWindows, ownershipRefusal, resolveSendTarget, tmuxTimeoutMs } from './tmux.js';
 import type { CommandRunner, RosterEntry } from './types.js';
 
 /** Delivers one line to a roster session. Injected in tests. */
@@ -61,10 +61,12 @@ export function createTmuxBriefSender(run: CommandRunner): BriefSender {
         cause: err,
       });
     }
-    const typed = run('tmux', ['send-keys', '-t', target, '-l', '--', message]);
+    const typed = run('tmux', ['send-keys', '-t', target, '-l', '--', message], {
+      timeoutMs: tmuxTimeoutMs(),
+    });
     if (typed.status !== 0) throw new Error(`could not type into '${entry.name}': ${typed.stderr}`);
     pause(SUBMIT_DELAY_MS);
-    const sent = run('tmux', ['send-keys', '-t', target, 'Enter']);
+    const sent = run('tmux', ['send-keys', '-t', target, 'Enter'], { timeoutMs: tmuxTimeoutMs() });
     if (sent.status !== 0) throw new Error(`could not submit to '${entry.name}': ${sent.stderr}`);
   };
 }

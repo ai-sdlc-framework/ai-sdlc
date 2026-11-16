@@ -46,19 +46,19 @@ import {
   parsePipelineBacklogKey,
   resolveTargetBranch,
 } from './02-compute-branch.js';
+import {
+  findProtectedPathChanges,
+  UNTRUSTED_PROTECTED_CAUSE,
+  NO_REPLACE_ENV,
+} from './untrusted-protected-paths.js';
 import { landPrep } from './land-prep.js';
 import { ensureWorkspaceBuilt } from './ensure-workspace-built.js';
+import { loadVerification } from './verification-config.js';
+import { VERIFICATION_KEYS } from './verify-defaults.js';
 import { decidePrDraft } from '../hierarchy/mark-ready.js';
 import { detectDraftPrForBranch } from './03-setup-worktree.js';
 import { composeJudgmentNotes } from '../judgment/agent-output-checks.js';
 import { writeEvent, type WriteEventOpts } from '../orchestrator/events.js';
-
-const VERIFY_KEYS = [
-  ['build', 'pnpm build'],
-  ['test', 'pnpm test'],
-  ['lint', 'pnpm lint'],
-  ['format', 'pnpm format:check'],
-] as const;
 
 export interface PushAndPrStepOptions extends PushAndPrOptions {
   runner?: Runner;
@@ -188,12 +188,14 @@ export function composeBody(opts: PushAndPrOptions): string {
   const notesBlock = judgmentNotes ? `\n${judgmentNotes}` : '';
 
   const summaries = opts.developerReturn.verificationSummaries;
+  const verification = loadVerification(opts.workDir);
   const verificationBlock = summaries
-    ? `\n## Verification\n\n${VERIFY_KEYS.map(
-        ([key, command]) =>
-          `- \`${command}\` - ${opts.developerReturn.verifications[key]}${
-            summaries[key] ? ` (${summaries[key]})` : ''
-          }`,
+    ? `\n## Verification\n\n${VERIFICATION_KEYS.map((key) =>
+        verification[key]
+          ? `- \`${verification[key]}\` - ${opts.developerReturn.verifications[key]}${
+              summaries[key] ? ` (${summaries[key]})` : ''
+            }`
+          : `- \`${key}\` - skipped (not configured)`,
       ).join('\n')}${
         opts.developerReturn.verificationScope
           ? `\nScope of the last verify run: ${opts.developerReturn.verificationScope}.`
@@ -470,6 +472,54 @@ async function firstPushLease(
   return { sha, policyNever: false };
 }
 
+/** AISDLC-1275: check the exact HEAD about to be pushed; returns its SHA or the refusal result. */
+async function untrustedPushCheck(
+  opts: PushAndPrStepOptions,
+  runner: Runner,
+): Promise<{ sha: string } | { refusal: PushAndPrResult }> {
+  const refuse = (reason: string, extra: Partial<PushAndPrResult> = {}) => ({
+    refusal: {
+      pushed: false,
+      prUrl: null,
+      cause: UNTRUSTED_PROTECTED_CAUSE,
+      reason: `${UNTRUSTED_PROTECTED_CAUSE}: ${reason}`,
+      ...extra,
+    } as PushAndPrResult,
+  });
+  let paths: string[];
+  let sha: string;
+  try {
+    // Limitation: on a resumed worktree the base recorded at Step 3 may predate earlier rounds.
+    const baseSha = opts.untrustedBaseSha ?? '';
+    if (!/^[0-9a-f]{40,64}$/i.test(baseSha)) {
+      throw new Error('no base sha was recorded at Step 3');
+    }
+    const head = await runner('git', ['rev-parse', 'HEAD'], {
+      cwd: opts.worktreePath,
+      allowFailure: true,
+      env: NO_REPLACE_ENV,
+    });
+    sha = head.code === 0 ? head.stdout.trim() : '';
+    if (!/^[0-9a-f]{40,64}$/i.test(sha)) throw new Error('could not resolve HEAD');
+    paths = await findProtectedPathChanges({
+      worktreePath: opts.worktreePath,
+      baseRef: baseSha,
+      headRef: sha,
+      runner,
+    });
+  } catch (err) {
+    return refuse(
+      `could not verify changed paths (${err instanceof Error ? err.message : String(err)}); push refused`,
+    );
+  }
+  if (paths.length > 0) {
+    return refuse(`untrusted run changed protected path(s): ${paths.join(', ')}`, {
+      protectedPaths: paths,
+    });
+  }
+  return { sha };
+}
+
 /** AISDLC-1054: append "Fixed by <task id>" to the body of the PR this task fixes; creates no PR. */
 async function noteFixedBy(opts: PushAndPrStepOptions, runner: Runner): Promise<PushAndPrResult> {
   const pr = String(opts.fixesPr);
@@ -550,13 +600,15 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
     allowFailure: true,
   });
   const preRebaseSha = preRebase.code === 0 ? preRebase.stdout.trim() : '';
-  const rebase = await landPrep({
-    worktreePath: opts.worktreePath,
-    branch: opts.branch,
-    targetBranch,
-    push: false,
-    runner,
-  });
+  const rebase = opts.untrusted
+    ? { ok: true as const, conflictingFiles: [] as string[], reason: undefined }
+    : await landPrep({
+        worktreePath: opts.worktreePath,
+        branch: opts.branch,
+        targetBranch,
+        push: false,
+        runner,
+      });
   if (!rebase.ok) {
     return {
       pushed: false,
@@ -571,7 +623,9 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
 
   // 0a. AISDLC-1111 - build the workspace from the rebased sources before anything signs or
   //     pushes; skipped when the rebase left HEAD alone and the dist entry points exist.
-  if (existsSync(join(opts.worktreePath, 'node_modules'))) {
+  //     Skipped for an untrusted run: the build resolves worktree-planted binaries
+  //     (node_modules/.bin) on the host (AISDLC-1278).
+  if (!opts.untrusted && existsSync(join(opts.worktreePath, 'node_modules'))) {
     const built = await ensureWorkspaceBuilt(opts.worktreePath, {
       runner,
       ...(preRebaseSha ? { changedSince: preRebaseSha } : {}),
@@ -587,6 +641,17 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   const clobber = await checkClobberSignature(opts, targetBranch, runner);
   if (clobber) return { pushed: false, prUrl: null, reason: clobber };
 
+  // AISDLC-1275 - an untrusted run is checked for protected-path changes on the exact commit about
+  //   to be pushed, after every step that runs agent-controlled code (the build) and with no
+  //   remote-derived history (the late rebase is skipped for untrusted runs: it fetches through
+  //   `origin`, whose url the agent can rewrite). The base is the SHA recorded at Step 3.
+  let pushSha: string | null = null;
+  if (opts.untrusted) {
+    const checked = await untrustedPushCheck(opts, runner);
+    if ('refusal' in checked) return checked.refusal;
+    pushSha = checked.sha;
+  }
+
   // 1. Push -u origin <branch>. NEVER a bare force. A resumed task already has
   //    commits on origin and the late rebase changed their SHAs, so it pushes
   //    with a lease on its own branch only, expecting the origin/<branch> SHA that
@@ -601,9 +666,11 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
         '-u',
         `--force-with-lease=refs/heads/${opts.branch}:${leaseSha}`,
         'origin',
-        `HEAD:refs/heads/${opts.branch}`,
+        `${pushSha ?? 'HEAD'}:refs/heads/${opts.branch}`,
       ]
-    : ['push', '-u', 'origin', opts.branch];
+    : pushSha
+      ? ['push', '-u', 'origin', `${pushSha}:refs/heads/${opts.branch}`]
+      : ['push', '-u', 'origin', opts.branch];
   let pushResult = await runTrustedPush(
     runner,
     { mainCheckout: opts.workDir, worktree: opts.worktreePath },
@@ -611,7 +678,12 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
     { allowFailure: true },
   );
   let diverged: { remote: string; head: string | null } | null = null;
-  if (pushResult.code !== 0 && /non-fast-forward|rejected|stale info/i.test(pushResult.stderr)) {
+  // Untrusted runs skip the retries: they would push a SHA other than the one that was checked.
+  if (
+    !opts.untrusted &&
+    pushResult.code !== 0 &&
+    /non-fast-forward|rejected|stale info/i.test(pushResult.stderr)
+  ) {
     // AISDLC-1016: the remote may hold only the pre-rebase copy of this very branch.
     const retry = await leasePushOwnRebase(opts, runner, preRebaseSha);
     if (retry) pushResult = retry;

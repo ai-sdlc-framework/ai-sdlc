@@ -14,6 +14,10 @@
  *    command line, which outranks every config file.
  *  - `-c credential.helper=` resets the (multi-valued) helper list so a worktree-planted
  *    helper never runs; the operator's GLOBAL helpers are re-added after the reset.
+ *    URL-scoped helpers (`credential.<url>.helper`, as written by `gh auth setup-git` for
+ *    the GitHub HTTPS origin) are handled the same way (AISDLC-1262): each global key is
+ *    reset and re-added under its own key, so it still applies; a URL-scoped helper set
+ *    only in local or worktree config is never re-added.
  *    `-c core.askPass=<operator global value or empty>` pins the askpass program likewise.
  *  - `url.*.insteadOf` / `pushInsteadOf` are multi-valued, so they cannot be unset by
  *    `-c`. Instead the raw remote URL is pinned with a rewrite of itself, which wins
@@ -42,8 +46,24 @@ export interface TrustedPushInputs {
   sshCommand?: string;
   /** Operator's global `credential.helper` values, re-added after the reset. */
   credentialHelpers?: string[];
+  /** Operator's global URL-scoped helpers (`credential.<url>.helper`), re-added under the same key. */
+  urlCredentialHelpers?: Array<{ key: string; value: string }>;
   /** Operator's global `core.askPass`, default empty. */
   askPass?: string;
+}
+
+/**
+ * Parse `git config --get-regexp '^credential\..*\.helper$'` output (`<key> <value>` per
+ * line) into URL-scoped entries. Plain `credential.helper` never matches that regexp, but is
+ * skipped defensively.
+ */
+export function parseUrlCredentialHelpers(out: string): Array<{ key: string; value: string }> {
+  const res: Array<{ key: string; value: string }> = [];
+  for (const line of out.split('\n')) {
+    const m = /^(credential\..+\.helper)(?:\s+(.*))?$/.exec(line.trim());
+    if (m?.[1]) res.push({ key: m[1], value: m[2] ?? '' });
+  }
+  return res;
 }
 
 export interface TrustedPush {
@@ -51,6 +71,11 @@ export interface TrustedPush {
   args: string[];
   /** Env overrides: the scrubbed `GIT_*` keys set to undefined. */
   env: NodeJS.ProcessEnv;
+}
+
+function urlHelperOverrides(entries: Array<{ key: string; value: string }>): string[] {
+  const keys = [...new Set(entries.map((e) => e.key))];
+  return [...keys.map((k) => `${k}=`), ...entries.map((e) => `${e.key}=${e.value}`)];
 }
 
 /** Pure builder: the single place the push-time config overrides are listed. */
@@ -62,6 +87,7 @@ export function buildTrustedPush(inputs: TrustedPushInputs, pushArgs: string[]):
     'protocol.ext.allow=never',
     'credential.helper=',
     ...(inputs.credentialHelpers ?? []).map((h) => `credential.helper=${h}`),
+    ...urlHelperOverrides(inputs.urlCredentialHelpers ?? []),
     `core.askPass=${inputs.askPass ?? ''}`,
   ];
   if (inputs.remoteUrl) {
@@ -107,9 +133,13 @@ export function resolveTrustedPushInputs(
   const ssh = git(worktree, ['config', '--global', '--get', 'core.sshCommand']);
   const helpers = git(worktree, ['config', '--global', '--get-all', 'credential.helper']);
   const askPass = git(worktree, ['config', '--global', '--get', 'core.askPass']);
+  const urlHelpers = parseUrlCredentialHelpers(
+    git(worktree, ['config', '--global', '--get-regexp', '^credential\\..*\\.helper$']) ?? '',
+  );
   const inputs: TrustedPushInputs = {
     mainCheckout,
     ...(helpers ? { credentialHelpers: helpers.split('\n').filter(Boolean) } : {}),
+    ...(urlHelpers.length ? { urlCredentialHelpers: urlHelpers } : {}),
     ...(askPass ? { askPass } : {}),
     remoteUrl: raw || null,
     ...(ssh ? { sshCommand: ssh } : {}),

@@ -41,6 +41,8 @@ import {
   CLASSIFIER_TEMPLATES,
   DOR_TEMPLATES,
   HUSKY_PREPUSH_SIGN_SNIPPET,
+  hasStaleAttestationSignReference,
+  stripStaleAttestationSignBlock,
   SIGNAL_INGESTION_TEMPLATES,
   WORKFLOWS_TEMPLATES,
   type FeatureTemplateSet,
@@ -1748,7 +1750,14 @@ export async function applyFeatureSelection(
       // shape — makes our block permanently unreachable while init happily
       // reports "appended sign block". Warn rather than silently succeed;
       // rewriting someone else's hook is not ours to do.
-      const existing = adapters.readTextFile(hookPath) ?? '';
+      let existing = adapters.readTextFile(hookPath) ?? '';
+      // AISDLC-1261: rewrite a pre-1261 block that still names the removed
+      // signer script; the append below then installs the current no-op block.
+      if (hasStaleAttestationSignReference(existing)) {
+        existing = stripStaleAttestationSignBlock(existing);
+        adapters.writeFile(hookPath, existing);
+        adapters.log(`  rewrote ${hookRelPath} (removed stale attestation-sign block)`);
+      }
       if (!existing.includes('# ai-sdlc:attestation-sign-block')) {
         const hasTopLevelExit = existing
           .split('\n')

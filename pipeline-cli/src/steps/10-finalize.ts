@@ -23,6 +23,8 @@ import { ATTESTATION_ARTIFACT_PATHS } from '../attestation-artifacts.js';
 import { patchFrontmatterStatus } from './04-flip-status.js';
 import { checkFollowups, formatFollowupViolations } from '../backlog/followup-rule.js';
 import { completeTaskAtomically } from '../cli/complete-task.js';
+import { loadVerification } from './verification-config.js';
+import { VERIFICATION_KEYS, type VerificationKey } from './verify-defaults.js';
 import type { DeveloperReturn, FinalizeTaskOptions, FinalizeTaskResult } from '../types.js';
 
 export interface FinalizeStepOptions extends FinalizeTaskOptions {
@@ -60,6 +62,20 @@ export interface FinalizeStepOptions extends FinalizeTaskOptions {
   resume?: boolean;
 }
 
+/** One bullet per verification key; an unconfigured key prints `skipped (not configured)`. */
+export function verificationLines(
+  projectRoot: string,
+  developerReturn: DeveloperReturn,
+  summaryOf: (k: VerificationKey) => string,
+): string {
+  const cmds = loadVerification(projectRoot);
+  return VERIFICATION_KEYS.map((k) =>
+    cmds[k]
+      ? `- \`${cmds[k]}\` — ${developerReturn.verifications[k]}${summaryOf(k)}`
+      : `- \`${k}\` — skipped (not configured)`,
+  ).join('\n');
+}
+
 /**
  * Build the `finalSummary` markdown block per CLAUDE.md template + the
  * `acceptanceCriteriaCheck` index list (defaults to all ACs unless the
@@ -83,8 +99,7 @@ export function buildFinalSummary(opts: FinalizeTaskOptions): {
       : '- (none)';
 
   const summaries = opts.developerReturn.verificationSummaries;
-  const summaryOf = (k: 'build' | 'test' | 'lint' | 'format'): string =>
-    summaries?.[k] ? ` (${summaries[k]})` : '';
+  const summaryOf = (k: VerificationKey): string => (summaries?.[k] ? ` (${summaries[k]})` : '');
 
   const harnessLine = opts.verdict.harnessNote ? ` (${opts.verdict.harnessNote})` : '';
 
@@ -93,10 +108,7 @@ export function buildFinalSummary(opts: FinalizeTaskOptions): {
     `## Changes\n${filesBlock}\n\n` +
     `## Design decisions\n${notesText(opts.developerReturn.notes)}\n\n` +
     `## Verification\n` +
-    `- \`pnpm build\` — ${opts.developerReturn.verifications.build}${summaryOf('build')}\n` +
-    `- \`pnpm test\` — ${opts.developerReturn.verifications.test}${summaryOf('test')}\n` +
-    `- \`pnpm lint\` — ${opts.developerReturn.verifications.lint}${summaryOf('lint')}\n` +
-    `- \`pnpm format:check\` — ${opts.developerReturn.verifications.format}${summaryOf('format')}\n` +
+    `${verificationLines(opts.workDir, opts.developerReturn, summaryOf)}\n` +
     `- 3 parallel reviews approved${harnessLine}\n\n` +
     `## Follow-up\n${followupsText(opts.developerReturn.followups)}\n`;
 

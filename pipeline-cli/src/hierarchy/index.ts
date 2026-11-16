@@ -324,6 +324,7 @@ export {
   trackPrActivity,
   webhookDown,
   webhookHealth,
+  webhookPersistence,
   webhookServe,
   webhookStatus,
   webhookUp,

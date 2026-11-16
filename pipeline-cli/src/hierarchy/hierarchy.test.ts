@@ -71,6 +71,7 @@ import {
 import { executorStart } from './executor-start.js';
 import { isNodeInstalled, paneNodeVersion, readNvmrc } from './node-pin.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
+import { resolveSendTarget } from './tmux.js';
 
 const NOW = new Date('2026-09-30T12:00:00.000Z');
 
@@ -606,6 +607,35 @@ describe('hierarchy up', () => {
     // '-s' only appears as new-session's session-name flag, never with set-option.
     expect(globals.every((c) => c.args[0] === 'new-session')).toBe(true);
     expect(fake.calls.some((c) => c.args[0] === 'set-option' && c.args.includes('-g'))).toBe(false);
+  });
+
+  it('a timed-out /exit falls back to kill-pane and the outcome names it (AISDLC-1255)', async () => {
+    await hierarchyUp(baseOpts, deps);
+    const inner = deps.run;
+    const seen: (number | undefined)[] = [];
+    deps.run = (f, a, o) => {
+      if (f === 'tmux') seen.push(o?.timeoutMs);
+      if (a[0] === 'send-keys' && a.includes('/exit')) {
+        return { status: 124, stdout: '', stderr: '', timedOut: true };
+      }
+      return inner(f, a, o);
+    };
+    const result = await hierarchyDown({ role: 'executor-beta' }, deps);
+    expect(result.stopped[0]?.fallback).toBe('exit request timed out; kill-pane');
+    expect(result.stopped[0]?.forced).toBe(true);
+    expect(fake.calls.some((c) => c.args[0] === 'kill-pane')).toBe(true);
+    expect(seen.every((t) => t === 5000)).toBe(true);
+  });
+
+  it('a failed /exit (pane gone) also falls back', async () => {
+    await hierarchyUp(baseOpts, deps);
+    const inner = deps.run;
+    deps.run = (f, a, o) =>
+      a[0] === 'send-keys' && a.includes('/exit')
+        ? { status: 1, stdout: '', stderr: "can't find pane" }
+        : inner(f, a, o);
+    const result = await hierarchyDown({ role: 'executor-beta' }, deps);
+    expect(result.stopped[0]?.fallback).toBe('exit request failed; kill-pane');
   });
 
   it('honours an explicit planner permission mode and --no-planner', async () => {
@@ -2536,6 +2566,41 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(validateHierarchyRoster(after).valid).toBe(true);
   });
 
+  it('records the new pane, pid and startedAt, and send reaches the restarted session at once (AISDLC-1258)', async () => {
+    const old = entryOf(alpha) as RosterEntry;
+    fake.startedAtMs = later;
+    deps.now = () => new Date(later);
+    await hierarchyRestart({ session: 'executor-alpha' }, deps);
+    const fresh = entryOf(alpha) as RosterEntry;
+    expect(fresh.paneId).toMatch(/^%/);
+    expect(fresh.paneId).not.toBe(old.paneId);
+    expect(fresh.pid).not.toBe(old.pid);
+    expect(fresh.startedAt).toBe(new Date(later).toISOString());
+    expect(resolveSendTarget(fake.run, fresh.tmuxSession, fresh.tmuxWindow, fresh.paneId)).toBe(
+      fresh.paneId,
+    );
+    expect(() => resolveSendTarget(fake.run, old.tmuxSession, old.tmuxWindow, old.paneId)).toThrow(
+      /stale/,
+    );
+  });
+
+  it('fails loudly when the roster disagrees with the new tmux window (AISDLC-1258)', async () => {
+    const inner = fake.run;
+    let started = false;
+    let paneReads = 0;
+    deps.run = (file, args, options) => {
+      if (args[0] === 'new-session') started = true;
+      if (started && args[0] === 'display-message' && args.at(-1) === '#{pane_id} #{pane_pid}') {
+        paneReads += 1;
+        if (paneReads > 1) return { status: 0, stdout: '%999 1\n', stderr: '' };
+      }
+      return inner(file, args, options);
+    };
+    await expect(hierarchyRestart({ session: 'executor-alpha' }, deps)).rejects.toThrow(
+      /inconsistent with its tmux window: paneId %\d+ but the new window is %999/,
+    );
+  });
+
   it('a planner-role caller restarts an executor; a second caller inside the lock window is refused naming the holder (AISDLC-1110)', async () => {
     const planner = Q('planner');
     const first = await hierarchyRestart({ session: alpha, callerName: planner }, deps);
@@ -2705,6 +2770,65 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     await hierarchyRestart({ session: 'planner' }, deps);
     expect(entryOf(planner)).toMatchObject({ permissionMode: old.permissionMode });
     expect(entryOf(planner)?.pid).not.toBe(old.pid);
+  });
+
+  it('restart --all stops then starts the scheduler and records the new pid', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    const events: string[] = [];
+    deps.isAlive = (p) => p === 4242;
+    deps.killProcess = (pid) => events.push(`kill ${pid}`);
+    deps.spawnScheduler = () => {
+      events.push('spawn');
+      return 5151;
+    };
+    await hierarchyRestartAll({}, deps);
+    expect(events.slice(0, 2)).toEqual(['kill 4242', 'spawn']);
+    const rec = JSON.parse(readFileSync(path.join(boardDir, 'reconcile-scheduler.json'), 'utf8'));
+    expect(rec.pid).toBe(5151);
+  });
+
+  it('restart --all leaves the webhook alone without a secret, restarts it with one', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    await hierarchyRestartAll({}, deps);
+    expect(logs.some((l) => l.includes('webhook stopped'))).toBe(false);
+    deps.env = { AI_SDLC_WEBHOOK_SECRET: 's' };
+    await hierarchyRestartAll({}, deps);
+    expect(logs.some((l) => l.includes('webhook starting'))).toBe(true);
+  });
+
+  it('restart --all keeps the recorded webhook port and forwarder feed', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    deps.env = { AI_SDLC_WEBHOOK_SECRET: 's', HOME: path.join(boardDir, 'home') };
+    const baseRun = deps.run;
+    deps.run = (f, a, o) =>
+      f === 'gh' || f === 'launchctl'
+        ? { status: 0, stdout: 'o/r\n', stderr: '' }
+        : baseRun(f, a, o);
+    const stateFile = path.join(boardDir, 'webhook.json');
+    writeFileSync(
+      stateFile,
+      JSON.stringify({ pid: 7777, port: 4567, feed: { kind: 'gh-forward', agent: 'fwd' } }) + '\n',
+    );
+    const events: string[] = [];
+    deps.isAlive = (p) => p === 7777;
+    deps.killProcess = (pid) => events.push(`kill ${pid}`);
+    logs.length = 0;
+    await hierarchyRestartAll({}, deps);
+    expect(events).toContain('kill 7777');
+    expect(logs.some((l) => l.includes('webhook stopped (port 4567)'))).toBe(true);
+    expect(logs.some((l) => l.includes('webhook starting on 127.0.0.1:4567'))).toBe(true);
+    expect(logs.filter((l) => l.includes('warning: webhook receiver'))).toEqual([]);
+  });
+
+  it('restart <name> leaves the scheduler alone; a scheduler failure warns only', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    const n = schedulerSpawns.length;
+    await hierarchyRestart({ session: Q('executor-alpha') }, deps);
+    expect(schedulerSpawns).toHaveLength(n);
+    deps.spawnScheduler = () => undefined;
+    const res = await hierarchyRestartAll({}, deps);
+    expect(logs.some((l) => l.includes('warning: reconcile scheduler not restarted'))).toBe(true);
+    expect(res.failed).toEqual([]);
   });
 
   it('restart --all restarts dispatch and idle executors now and defers busy ones', async () => {
@@ -2898,6 +3022,51 @@ describe('reconcile scheduler ownership (AISDLC-932)', () => {
     const result = hierarchyStatus(deps);
     expect(result.scheduler).toEqual({ state: 'up', pid: 4242 });
     expect(formatStatus(result)).toContain('scheduler: up (pid 4242)');
+  });
+
+  it('status prints STALLED when the last tick is older than the stall limit (AISDLC-1255)', async () => {
+    await hierarchyUp(opts, deps);
+    deps.isAlive = (p) => p === 4242;
+    const state = path.join(boardDir, 'operator-dispatch.state.json');
+    writeFileSync(
+      state,
+      JSON.stringify({
+        schemaVersion: 'v1',
+        ingested: {},
+        rejected: {},
+        handled: [],
+        lastTickAt: new Date(NOW.getTime() - 600_000).toISOString(),
+      }),
+    );
+    // an idle scheduler (empty queue) with an old last tick is healthy
+    expect(hierarchyStatus(deps).scheduler).toEqual({ state: 'up', pid: 4242 });
+    mkdirSync(path.join(boardDir, 'queue'), { recursive: true });
+    writeFileSync(path.join(boardDir, 'queue', 'AISDLC-1.dispatch.json'), '{}');
+    const result = hierarchyStatus(deps);
+    expect(result.scheduler).toEqual({ state: 'up', pid: 4242, stalled: { ageSec: 600 } });
+    expect(formatStatus(result)).toContain('scheduler: STALLED (last tick 600s ago, pid 4242)');
+    writeFileSync(
+      state,
+      JSON.stringify({
+        schemaVersion: 'v1',
+        ingested: {},
+        rejected: {},
+        handled: [],
+        lastTickAt: new Date(NOW.getTime() - 5_000).toISOString(),
+      }),
+    );
+    expect(formatStatus(hierarchyStatus(deps))).toContain('scheduler: up (pid 4242)');
+    // a live tick running past the limit is stalled even with a fresh last tick or no queue
+    rmSync(path.join(boardDir, 'queue', 'AISDLC-1.dispatch.json'));
+    const sched = path.join(boardDir, 'reconcile-scheduler.json');
+    writeFileSync(
+      sched,
+      JSON.stringify({ pid: 4242, tick: { pid: 4243, startedAt: NOW.getTime() - 600_000 } }),
+    );
+    deps.isAlive = () => true;
+    expect(hierarchyStatus(deps).scheduler).toMatchObject({ state: 'up', stalled: {} });
+    deps.isAlive = (p) => p === 4242;
+    expect(hierarchyStatus(deps).scheduler).toEqual({ state: 'up', pid: 4242 });
   });
 
   it('down stops it, a role-limited down leaves it', async () => {

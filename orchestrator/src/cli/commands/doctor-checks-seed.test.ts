@@ -173,8 +173,28 @@ describe('check 8: husky pre-push gate', () => {
   });
   it('passes for a non-husky .git/hooks/pre-push', () => {
     put('.github/workflows/verify-attestation.yml', 'name: v\n');
-    put('.git/hooks/pre-push', 'bash check-attestation-sign.sh\n');
+    put('.git/hooks/pre-push', '# ai-sdlc:attestation-sign-block\n');
     expect(checkHuskyPrePushGate(ctxOf()).severity).toBe('pass');
+  });
+  it('reports a stale attestation-sign reference and --fix rewrites it (AISDLC-1261)', () => {
+    put('.github/workflows/verify-attestation.yml', 'name: v\n');
+    put(
+      '.husky/pre-push',
+      'echo keep\n# ai-sdlc:attestation-sign-block\nbash "$H/scripts/check-attestation-sign.sh"\n# end ai-sdlc:attestation-sign-block\n',
+    );
+    const r = checkHuskyPrePushGate(ctxOf());
+    expect(r.severity).toBe('fail');
+    expect(r.title).toBe('pre-push: stale attestation-sign reference');
+    expect(fixHuskyPrePushGate(ctxOf()).applied).toBe(true);
+    const text = readFileSync(join(tmpDir, '.husky/pre-push'), 'utf-8');
+    expect(text).toContain('echo keep');
+    expect(text).not.toContain('check-attestation-sign');
+    expect(checkHuskyPrePushGate(ctxOf()).severity).toBe('pass');
+  });
+  it('--fix refuses when the stale reference sits outside the ai-sdlc block', () => {
+    put('.github/workflows/verify-attestation.yml', 'name: v\n');
+    put('.husky/pre-push', 'bash scripts/check-attestation-sign.sh\n');
+    expect(fixHuskyPrePushGate(ctxOf()).applied).toBe(false);
   });
   it('fix appends the snippet to an existing hook, idempotently', () => {
     put('.github/workflows/verify-attestation.yml', 'name: v\n');

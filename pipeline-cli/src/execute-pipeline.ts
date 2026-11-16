@@ -48,6 +48,13 @@ import {
   withUntrustedEnv,
   writeUntrustedMarker,
 } from './runtime/untrusted-env.js';
+import {
+  assertNoDependencyChange,
+  assertWorktreeGitdir,
+  withGitdirCheck,
+  hardenGitRunner,
+} from './runtime/untrusted-container.js';
+import { defaultRunner as defaultGitRunner } from './runtime/exec.js';
 import { buildJudgmentContext, getMergeBaseDiff } from './judgment/index.js';
 import { routingArtifactsDir, routingRecordable } from './routing/artifacts-dir.js';
 import { recordReviewerSetOutcome } from './steps/reviewer-set-comparison.js';
@@ -97,7 +104,20 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       : opts.taskSpec && opts.sourceKind === undefined
         ? 'inline taskSpec source'
         : null;
-  const spawner = untrustedReason ? withUntrustedEnv(opts.spawner, untrustedReason) : opts.spawner;
+  // AISDLC-1278: the agent can rewrite the worktree `.git` file from inside the container, so
+  // the gitdir is re-checked after every untrusted spawn returns, before any host git call.
+  // `hostRunner` carries the git hardening for every host git call from Step 6 on.
+  let untrustedWorktree: string | null = null;
+  const spawner = untrustedReason
+    ? withGitdirCheck(
+        withUntrustedEnv(opts.spawner, untrustedReason),
+        () => untrustedWorktree,
+        opts.workDir,
+      )
+    : opts.spawner;
+  const hostRunner = untrustedReason
+    ? hardenGitRunner(opts.runner ?? defaultGitRunner)
+    : opts.runner;
   // Review depth may only be relaxed for work the caller says is trusted backlog work.
   // An inline taskSpec with no sourceKind came from outside the backlog: untrusted.
   const reviewSourceKind: 'backlog' | 'gh-issue' | undefined =
@@ -192,6 +212,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     ...(fixesPr !== undefined ? { fixesPr } : {}),
     ...(fixesPr !== undefined && claimed?.prHeadRef ? { prHeadRef: claimed.prHeadRef } : {}),
   });
+  untrustedWorktree = branch.worktreePath;
 
   // AISDLC-200 — Wrap Steps 3-13 (NOT just 5-13) in a try/finally so that
   // any throw from Step 4 (status flip + sentinel write) AFTER Step 3
@@ -210,6 +231,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
   let iterationsTotal = 0;
   let finalAggregated: AggregatedVerdict | null = null;
   let aborted: string | null = null;
+  let cause: PipelineResult['cause'];
   let worktreeCreated = false;
   // AISDLC-200 — `setupCompleted` flips true once Steps 3-4 BOTH succeed.
   // The best-effort worktree removal in the `finally` only fires when this
@@ -230,6 +252,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
   let syntheticTaskFile: string | undefined;
   // AISDLC-730: set once an untrusted marker may exist, so `finally` removes it.
   let untrustedMarkerWritten = false;
+  let untrustedBaseSha = '';
 
   try {
     // Step 3
@@ -297,6 +320,13 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     // TRUSTED run first clears any stale marker left in this reused worktree, so a
     // previous untrusted run can never lock a trusted session out.
     if (untrustedReason) {
+      // AISDLC-1275 - record the base before the developer runs; agent-writable git state
+      // (remotes, refs, branches) can never move it.
+      const head = await (opts.runner ?? defaultRunner)('git', ['rev-parse', 'HEAD'], {
+        cwd: branch.worktreePath,
+        allowFailure: true,
+      });
+      untrustedBaseSha = head.code === 0 ? head.stdout.trim() : '';
       untrustedMarkerWritten = true;
       const marker = writeUntrustedMarker(branch.worktreePath, untrustedReason);
       if (!marker) {
@@ -373,7 +403,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
           getMergeBaseDiff({
             workDir: opts.workDir,
             worktreePath: branch.worktreePath,
-            runner: opts.runner,
+            runner: hostRunner,
           }),
       },
       initialResult: devSpawn,
@@ -442,7 +472,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
           cwd: branch.worktreePath,
           developerClaimed: initialDev.verifications,
           boardDir: dispatchBoardDir(opts.workDir),
-          ...(opts.runner ? { runner: opts.runner } : {}),
+          ...(hostRunner ? { runner: hostRunner } : {}),
           ...(opts.verifyTimeoutMs !== undefined ? { timeoutMs: opts.verifyTimeoutMs } : {}),
         });
         firstVerify = false;
@@ -500,7 +530,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       branch: branch.branch,
       worktreePath: branch.worktreePath,
       workDir: opts.workDir,
-      runner: opts.runner,
+      runner: hostRunner,
       sourceKind: reviewSourceKind,
     });
     // Reviewers must never run on an empty or partial diff.
@@ -542,7 +572,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       grounding: {
         ctx: judgmentCtx,
         worktreePath: branch.worktreePath,
-        ...(opts.runner ? { runner: opts.runner } : {}),
+        ...(hostRunner ? { runner: hostRunner } : {}),
       },
       verdicts: initialVerdicts,
       harnessNote: reviewBuild.harnessNote,
@@ -566,7 +596,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       sourceKind,
       reviewSourceKind,
       spawner: spawner,
-      ...(opts.runner ? { runner: opts.runner } : {}),
+      ...(hostRunner ? { runner: hostRunner } : {}),
       onIteration: opts.onProgress,
       ...(opts.onDeveloperContractRetry
         ? { onDeveloperContractRetry: opts.onDeveloperContractRetry }
@@ -589,6 +619,13 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       });
     }
 
+    // AISDLC-1278: an untrusted run may not change dependencies, and every host git call
+    // from here on ignores worktree config that would run agent-chosen code.
+    if (untrustedReason) {
+      assertWorktreeGitdir(branch.worktreePath, opts.workDir);
+      await assertNoDependencyChange(hostRunner!, branch.worktreePath);
+    }
+
     // Step 10 — finalize (skipped when needs-human-attention)
     await finalizeTask({
       taskId: opts.taskId,
@@ -598,7 +635,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       developerReturn: loop.finalDeveloperReturn,
       verdict: loop.finalVerdict,
       iterations: loop.iterations,
-      runner: opts.runner,
+      runner: hostRunner,
       skipCommit: opts.skipFinalizeCommit,
       // AISDLC-393 — `'gh-issue'` skips the backlog file move/patch but still
       // signs the attestation envelope + commits it as a chore so push lands
@@ -649,7 +686,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       ...(loop.iterations <= 1 && initialVerdict.groundingAnnotations
         ? { groundingAnnotations: initialVerdict.groundingAnnotations }
         : {}),
-      runner: opts.runner,
+      runner: hostRunner,
       ...(resume || fixesPr !== undefined ? { resume: true } : {}),
       ...(fixesPr !== undefined ? { fixesPr } : {}),
       ...((resume || fixesPr !== undefined) && setup.remoteSha
@@ -661,10 +698,16 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       // AISDLC-393 — `'gh-issue'` formats the PR title with `(closes #N)` and
       // prepends `Closes #N` to the body so the issue auto-closes on merge.
       sourceKind,
+      ...(untrustedReason ? { untrusted: true, untrustedBaseSha } : {}),
       ...(opts.issueNumber !== undefined ? { issueNumber: opts.issueNumber } : {}),
     });
     if (!push.pushed) {
-      if (push.rebaseConflict) {
+      if (push.cause) {
+        // AISDLC-1275 - the branch changes a protected path; nothing was pushed.
+        outcome = 'aborted'; // PipelineOutcome equivalent of the AC's `failed`
+        cause = push.cause;
+        aborted = push.reason ?? push.cause;
+      } else if (push.rebaseConflict) {
         // AISDLC-232 — late-rebase hit semantic conflicts. Surface as a
         // dedicated outcome so the orchestrator tick can continue to the next
         // task without rolling back the dev's commits (the branch is intact
@@ -705,7 +748,10 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
               `${readyResult.stderr.trim() || readyResult.stdout.trim() || 'unknown error'}`,
           );
         }
-        const armResult = await armViaGate({ prNumber: prNum, runner, cwd: opts.workDir });
+        // AISDLC-1275 - an untrusted run is never armed; a human merges it.
+        const armResult = untrustedReason
+          ? { ok: true as const }
+          : await armViaGate({ prNumber: prNum, runner, cwd: opts.workDir });
         if (!armResult.ok) {
           logger.warn(
             `[ai-sdlc] Step 11 auto-promote: auto-merge arm refused (non-fatal): ${armResult.reason}`,
@@ -837,6 +883,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     iterations: iterationsTotal,
     finalVerdict: finalAggregated,
     notes: finalNotes,
+    ...(cause ? { cause } : {}),
   };
 }
 

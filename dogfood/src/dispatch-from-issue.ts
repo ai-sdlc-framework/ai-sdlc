@@ -79,6 +79,7 @@ export interface GhIssueShape {
   body: string;
   state: string;
   labels?: Array<{ name: string }>;
+  authorAssociation?: string;
 }
 
 /**
@@ -92,6 +93,9 @@ export interface FetchGhIssueResult {
   spec: TaskSpec;
   issueNumber: number;
   issueState: string;
+  /** From the GitHub API response, never from issue text (AISDLC-1269). */
+  authorAssociation?: string;
+  labels: string[];
 }
 
 export interface FetchGhIssueOptions {
@@ -263,7 +267,7 @@ export async function fetchGhIssueAsTaskSpec(
     'view',
     String(issueNumber),
     '--json',
-    'number,title,body,state,labels',
+    'number,title,body,state,labels,authorAssociation',
   ]);
 
   let issue: GhIssueShape;
@@ -329,5 +333,12 @@ export async function fetchGhIssueAsTaskSpec(
     filePath: `<gh-issue:${issueNumber}>`,
   };
 
-  return { spec, issueNumber, issueState: issue.state };
+  return {
+    spec,
+    issueNumber,
+    issueState: issue.state,
+    authorAssociation:
+      typeof issue.authorAssociation === 'string' ? issue.authorAssociation : undefined,
+    labels: labels.map((l) => l.name),
+  };
 }

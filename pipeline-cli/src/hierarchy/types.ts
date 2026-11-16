@@ -51,6 +51,8 @@ export interface CommandResult {
   status: number | null;
   stdout: string;
   stderr: string;
+  /** True when the runner killed the process for exceeding `timeoutMs` (AISDLC-1255). */
+  timedOut?: boolean;
 }
 
 /**
@@ -61,7 +63,7 @@ export interface CommandResult {
 export type CommandRunner = (
   file: string,
   args: readonly string[],
-  options?: { cwd?: string },
+  options?: { cwd?: string; timeoutMs?: number },
 ) => CommandResult;
 
 /**
@@ -71,7 +73,7 @@ export type CommandRunner = (
 export type AsyncCommandRunner = (
   file: string,
   args: readonly string[],
-  options?: { cwd?: string },
+  options?: { cwd?: string; timeoutMs?: number },
 ) => Promise<CommandResult>;
 
 /** Entry of the harness session registry (one JSON file per live session). */
@@ -135,6 +137,8 @@ export interface HierarchyDeps {
   /** Absolute path of the running `cli-hierarchy.mjs`, written into generated VS Code tasks. Absent: `process.argv[1]`. */
   binPath?: string;
   /** Liveness probe for a pid, used by the cross-project collision check. Absent: `process.kill(pid, 0)`. */
+  /** Whether 127.0.0.1:<port> can be bound (webhook port selection); default probes with node. */
+  isPortFree?: (port: number) => boolean;
   isAlive?: (pid: number) => boolean;
   /** Whether nvm has the given node version installed. Absent: looks under `$NVM_DIR/versions/node`. */
   nodeInstalled?: (version: string) => boolean;
@@ -142,6 +146,8 @@ export interface HierarchyDeps {
   parentPid?: (pid: number) => number | null;
   /** Starts the detached reconcile scheduler and returns its pid. Absent: a real detached spawn. */
   spawnScheduler?: (file: string, args: readonly string[]) => number | undefined;
+  /** Sends SIGTERM to a pid when `restart --all` stops the scheduler or receiver. Absent: the default SIGTERM via `process.kill`. */
+  killProcess?: (pid: number) => void;
   /** Records orchestrator events (session started, context cleared). Absent: nothing is recorded. */
   emit?: EventEmitter;
   /** Resolves a launch profile by name (AISDLC-1151). Absent: read from `.ai-sdlc/model-routing.yaml` on the base ref. */

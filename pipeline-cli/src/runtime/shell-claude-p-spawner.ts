@@ -75,8 +75,19 @@ import {
   type SubagentType,
   type SubprocessDiagnostics,
 } from '../types.js';
+import { now as clockNow } from '../clock.js';
 import { DEFAULT_ROLE_MODELS } from '../routing/default-table.js';
 import { resolveModel } from '../routing/resolve-model.js';
+import {
+  UNTRUSTED_ALLOWED_TOOLS,
+  UNTRUSTED_PERMISSION_MODE,
+  buildUntrustedChildEnv,
+  isUntrustedSpawnEnv,
+} from './untrusted-env.js';
+import { withUntrustedContainer, type UntrustedContainerOptions } from './untrusted-container.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 /**
  * Subset of `child_process.spawn` we depend on. Tests inject a fake to assert
@@ -124,6 +135,12 @@ export interface ShellClaudePSpawnerOptions {
    * the intended tier instead of inheriting the session default.
    */
   models?: Partial<Record<SubagentType, string>>;
+  /**
+   * AISDLC-1278: run untrusted spawns in a container (one worktree mount, proxy-only
+   * network). `true` uses the defaults. When unset, untrusted spawns keep the
+   * AISDLC-1277 host path (env isolation only).
+   */
+  untrustedContainer?: boolean | UntrustedContainerOptions;
 }
 
 /**
@@ -137,6 +154,15 @@ export const DEFAULT_MODELS: Partial<Record<SubagentType, string>> = DEFAULT_ROL
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30 min
 
+/** Minimal host env for the docker client only; it never reaches the container. */
+function dockerClientEnv(host: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const k of ['PATH', 'HOME', 'DOCKER_HOST', 'DOCKER_CONFIG', 'DOCKER_CONTEXT']) {
+    if (host[k] !== undefined) out[k] = host[k];
+  }
+  return out;
+}
+
 export class ShellClaudePSpawner implements SubagentSpawner {
   private readonly binary: string;
   private readonly processSpawner: ProcessSpawner;
@@ -144,6 +170,7 @@ export class ShellClaudePSpawner implements SubagentSpawner {
   private readonly extraArgs: readonly string[];
   private readonly permissionMode: string;
   private readonly pinnedModels: Partial<Record<SubagentType, string>>;
+  private readonly untrustedContainer: UntrustedContainerOptions | null;
 
   constructor(options: ShellClaudePSpawnerOptions = {}) {
     this.binary = options.binary ?? 'claude';
@@ -155,6 +182,12 @@ export class ShellClaudePSpawner implements SubagentSpawner {
     this.extraArgs = options.extraArgs ?? [];
     this.permissionMode = options.permissionMode ?? 'bypassPermissions';
     this.pinnedModels = { ...(options.models ?? {}) };
+    this.untrustedContainer =
+      options.untrustedContainer === true
+        ? {}
+        : options.untrustedContainer
+          ? options.untrustedContainer
+          : null;
   }
 
   async spawnParallel(opts: SpawnOpts[]): Promise<SubagentResult[]> {
@@ -189,31 +222,87 @@ export class ShellClaudePSpawner implements SubagentSpawner {
   buildArgv(opts: SpawnOpts): string[] {
     const model = this.modelFor(opts);
     const modelArgv = model ? ['--model', model] : [];
+    const untrusted = isUntrustedSpawnEnv(opts.env);
+    // AISDLC-1277: an untrusted spawn never runs in bypass mode and names its tools.
+    const mode =
+      untrusted && this.permissionMode === 'bypassPermissions'
+        ? UNTRUSTED_PERMISSION_MODE
+        : this.permissionMode;
+    const toolsArgv = untrusted ? [`--allowedTools=${UNTRUSTED_ALLOWED_TOOLS.join(',')}`] : [];
     return [
       '--print',
       '--output-format',
       'json',
       '--permission-mode',
-      this.permissionMode,
+      mode,
       '--agent',
       opts.type,
       ...modelArgv,
       ...this.extraArgs,
+      ...toolsArgv,
       opts.prompt,
     ];
   }
 
-  private spawn1(opts: SpawnOpts): Promise<SubagentResult> {
+  /**
+   * AISDLC-1277: an untrusted spawn gets an allowlisted env and a throwaway
+   * HOME that is removed when the run ends, on success and on failure.
+   */
+  private async spawn1(opts: SpawnOpts): Promise<SubagentResult> {
+    if (!isUntrustedSpawnEnv(opts.env)) return this.run(opts, undefined);
+    if (this.untrustedContainer) return this.runInContainer(opts, this.untrustedContainer);
+    const home = mkdtempSync(join(tmpdir(), 'ai-sdlc-untrusted-home-'));
+    try {
+      return await this.run(opts, buildUntrustedChildEnv(process.env, opts.env, home));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  /**
+   * AISDLC-1278: run the agent inside a container. With no runtime the spawn stops
+   * here and nothing starts on the host; the container is removed on every exit.
+   */
+  private async runInContainer(
+    opts: SpawnOpts,
+    container: UntrustedContainerOptions,
+  ): Promise<SubagentResult> {
+    const start = clockNow().getTime();
+    const command = [this.binary, ...this.buildArgv(opts)];
+    const res = await withUntrustedContainer(
+      container,
+      { worktree: opts.cwd ?? '', optsEnv: opts.env, command },
+      (launch) => this.run(opts, dockerClientEnv(process.env), launch),
+    );
+    if ('value' in res) return res.value;
+    return {
+      type: opts.type,
+      output: '',
+      status: 'error',
+      error: res.error,
+      durationMs: clockNow().getTime() - start,
+    };
+  }
+
+  private run(
+    opts: SpawnOpts,
+    isolatedEnv: NodeJS.ProcessEnv | undefined,
+    launch?: { binary: string; args: string[] },
+  ): Promise<SubagentResult> {
     const start = Date.now();
-    const argv = this.buildArgv(opts);
+    const argv = launch ? launch.args : this.buildArgv(opts);
     const timeoutMs = opts.timeout ?? this.defaultTimeoutMs;
 
     return new Promise<SubagentResult>((resolve) => {
       let child: ChildProcess;
       try {
-        child = this.processSpawner(this.binary, argv, {
+        child = this.processSpawner(launch ? launch.binary : this.binary, argv, {
           cwd: opts.cwd,
-          ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
+          ...(isolatedEnv
+            ? { env: isolatedEnv }
+            : opts.env
+              ? { env: { ...process.env, ...opts.env } }
+              : {}),
         });
       } catch (err) {
         const wallClockMs = Date.now() - start;
