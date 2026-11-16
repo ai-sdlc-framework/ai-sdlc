@@ -713,6 +713,68 @@ describe('fixManifestsAgree outside the repository (AISDLC-1240)', () => {
 
 // ── checkAttestationGovernanceCheck (check 7, reuse of AISDLC-560) ────
 
+describe('checkAttestationGovernanceCheck target branch (AISDLC-1283)', () => {
+  const protectionBody = JSON.stringify({
+    required_pull_request_reviews: { required_approving_review_count: 1 },
+    required_status_checks: { contexts: ['ai-sdlc/pr-ready'] },
+  });
+  const run = (view: string) => {
+    const apiPaths: string[] = [];
+    const result = checkAttestationGovernanceCheck(
+      makeCtx(
+        makeAdapters({
+          exists: (p) =>
+            p.includes('trusted-reviewers.yaml') || p.includes('.ai-sdlc/attestations'),
+          runCommand: (cmd, args) => {
+            if (args[0] === 'repo') return { stdout: view, exitCode: 0 };
+            if (args[0] === 'api') {
+              apiPaths.push(args[1]);
+              return { stdout: protectionBody, exitCode: 0 };
+            }
+            return { stdout: '', exitCode: 1 };
+          },
+        }),
+      ),
+    );
+    return { result, apiPaths };
+  };
+
+  it('reads protection from the default branch (master), same verdict as main', () => {
+    const { result, apiPaths } = run('acme/widgets master');
+    expect(apiPaths).toEqual(['repos/acme/widgets/branches/master/protection']);
+    expect(result.severity).toBe('pass');
+  });
+
+  it('uses spec.branching.targetBranch over the default branch', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'doctor-target-'));
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(dir, '.ai-sdlc', 'pipeline.yaml'),
+      'spec:\n  branching:\n    targetBranch: develop\n',
+    );
+    const apiPaths: string[] = [];
+    checkAttestationGovernanceCheck(
+      makeCtx(
+        makeAdapters({
+          runCommand: (cmd, args) => {
+            if (args[0] === 'repo') return { stdout: 'acme/widgets main', exitCode: 0 };
+            apiPaths.push(args[1]);
+            return { stdout: protectionBody, exitCode: 0 };
+          },
+        }),
+        dir,
+      ),
+    );
+    rmSync(dir, { recursive: true, force: true });
+    expect(apiPaths).toEqual(['repos/acme/widgets/branches/develop/protection']);
+  });
+
+  it('falls back to main when gh reports no default branch', () => {
+    const { apiPaths } = run('acme/widgets');
+    expect(apiPaths).toEqual(['repos/acme/widgets/branches/main/protection']);
+  });
+});
+
 describe('checkAttestationGovernanceCheck', () => {
   it('passes when checkAttestationGovernance reports fully-configured', () => {
     const result = checkAttestationGovernanceCheck(

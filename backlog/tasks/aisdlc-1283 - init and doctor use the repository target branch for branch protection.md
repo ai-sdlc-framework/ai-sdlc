@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1283
 title: '`ai-sdlc init` and `ai-sdlc doctor` use the repository target branch for branch protection, not a literal `main`'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-16'
 labels:

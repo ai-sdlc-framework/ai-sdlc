@@ -16,6 +16,10 @@
  * importers.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
+
 export interface RunCommandAdapter {
   runCommand: (
     cmd: string,
@@ -26,12 +30,15 @@ export interface RunCommandAdapter {
 export interface OwnerRepoResolution {
   /** The resolved `owner/repo` slug. Present iff `error` is absent. */
   slug?: string;
+  /** Default branch of the repository, when `gh` reported one. */
+  defaultBranch?: string;
   /** Explains why resolution failed (gh missing, unauthenticated, empty output, etc). */
   error?: string;
 }
 
 /**
- * Resolve `owner/repo` via `gh repo view --json nameWithOwner`. Never
+ * Resolve `owner/repo` and the default branch via one
+ * `gh repo view --json nameWithOwner,defaultBranchRef` call. Never
  * throws — failure collapses to `{ error }`.
  */
 export function resolveOwnerRepoSlug(adapters: RunCommandAdapter): OwnerRepoResolution {
@@ -39,18 +46,48 @@ export function resolveOwnerRepoSlug(adapters: RunCommandAdapter): OwnerRepoReso
     'repo',
     'view',
     '--json',
-    'nameWithOwner',
+    'nameWithOwner,defaultBranchRef',
     '-q',
-    '.nameWithOwner',
+    '.nameWithOwner + " " + (.defaultBranchRef.name // "")',
   ]);
   if (ownerRepo.exitCode !== 0) {
     return { error: `gh repo view failed: ${ownerRepo.stdout.trim() || 'unknown error'}` };
   }
-  const slug = ownerRepo.stdout.trim();
+  const [slug, defaultBranch] = ownerRepo.stdout.trim().split(/\s+/);
   if (!slug) {
     return { error: 'gh repo view returned empty owner/repo' };
   }
-  return { slug };
+  return defaultBranch ? { slug, defaultBranch } : { slug };
+}
+
+/**
+ * Read `spec.branching.targetBranch` from `.ai-sdlc/pipeline.yaml`, or
+ * undefined when unset (unlike pipeline-cli's `resolveTargetBranch`, which
+ * collapses "unset" to `main`).
+ */
+export function readConfiguredTargetBranch(projectDir: string): string | undefined {
+  const path = join(projectDir, '.ai-sdlc', 'pipeline.yaml');
+  try {
+    if (!existsSync(path)) return undefined;
+    const doc = parseYaml(readFileSync(path, 'utf-8')) as {
+      spec?: { branching?: { targetBranch?: unknown } };
+    } | null;
+    const value = doc?.spec?.branching?.targetBranch;
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Branch to protect: configured target branch, else the repository default
+ * branch, else `main`.
+ */
+export function resolveProtectedBranch(
+  configured: string | undefined,
+  defaultBranch: string | undefined,
+): string {
+  return configured || defaultBranch || 'main';
 }
 
 /**
@@ -113,17 +150,22 @@ export interface BranchProtectionCheck {
    * the server cannot enforce, only the client-side merge gate applies.
    */
   apiUnavailable?: boolean;
+  /** Branch whose protection was read. */
+  branch?: string;
   /** Reason the check could not run, or that the API call failed. */
   error?: string;
 }
 
 /**
- * Best-effort read of the live branch-protection ruleset on `main`, via
+ * Best-effort read of the live branch-protection ruleset on the target branch, via
  * `gh api`. Never throws — absence of `gh`, missing auth, or an
  * unresolvable remote all collapse to `checked: false` with an
  * explanatory `error` rather than crashing the caller.
  */
-export function fetchBranchProtectionStatus(adapters: RunCommandAdapter): BranchProtectionCheck {
+export function fetchBranchProtectionStatus(
+  adapters: RunCommandAdapter,
+  projectDir?: string,
+): BranchProtectionCheck {
   const resolved = resolveOwnerRepoSlug(adapters);
   if (!resolved.slug) {
     return {
@@ -136,9 +178,13 @@ export function fetchBranchProtectionStatus(adapters: RunCommandAdapter): Branch
     };
   }
 
+  const branch = resolveProtectedBranch(
+    projectDir ? readConfiguredTargetBranch(projectDir) : undefined,
+    resolved.defaultBranch,
+  );
   const protection = adapters.runCommand('gh', [
     'api',
-    `repos/${resolved.slug}/branches/main/protection`,
+    `repos/${resolved.slug}/branches/${branch}/protection`,
   ]);
   if (protection.exitCode !== 0) {
     return {
@@ -148,7 +194,8 @@ export function fetchBranchProtectionStatus(adapters: RunCommandAdapter): Branch
       requiresAttestationDirectly: false,
       requiresBacklogDrift: false,
       apiUnavailable: isBranchProtectionUnavailable(protection.stdout, protection.stderr),
-      error: `gh api repos/${resolved.slug}/branches/main/protection failed (branch protection likely not configured)`,
+      error: `gh api repos/${resolved.slug}/branches/${branch}/protection failed (branch protection likely not configured)`,
+      branch,
     };
   }
 
@@ -169,6 +216,7 @@ export function fetchBranchProtectionStatus(adapters: RunCommandAdapter): Branch
       requiresPrReady,
       requiresAttestationDirectly,
       requiresBacklogDrift,
+      branch,
     };
   } catch {
     return {
