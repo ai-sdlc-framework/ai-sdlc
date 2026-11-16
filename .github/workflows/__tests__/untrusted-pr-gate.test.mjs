@@ -906,6 +906,38 @@ describe('Permissions — minimum needed; no contents:write (fork-PR safety guar
   });
 });
 
+describe('AISDLC-1292 — label/comment calls require pull-requests: write', () => {
+  it('every job calling issues.addLabels / issues.createComment holds pull-requests: write', () => {
+    // Known gap out of scope for AISDLC-1292 (AC3 forbids touching other jobs'
+    // permissions): sandbox-and-review calls addLabels with pull-requests: read.
+    // Remove this entry when that job is fixed.
+    const KNOWN_GAPS = new Set(['sandbox-and-review']);
+    let checked = 0;
+    for (const [jobId, job] of Object.entries(wf.jobs ?? {})) {
+      if (KNOWN_GAPS.has(jobId)) continue;
+      const uses = (job.steps ?? []).some((s) =>
+        /github\.rest\.issues\.(addLabels|createComment)/.test(s.with?.script ?? ''),
+      );
+      if (!uses) continue;
+      checked++;
+      assert.equal(
+        job.permissions?.['pull-requests'],
+        'write',
+        `${jobId} calls issues.addLabels/createComment on a PR and needs pull-requests: write`,
+      );
+    }
+    assert.ok(checked >= 2, 'expected classify-and-gate and gate-failure-watchdog to be checked');
+  });
+
+  it('gate-failure-watchdog permissions are exactly pull-requests, issues, statuses (write)', () => {
+    assert.deepEqual(wf.jobs['gate-failure-watchdog'].permissions, {
+      statuses: 'write',
+      'pull-requests': 'write',
+      issues: 'write',
+    });
+  });
+});
+
 // ── Bug A fix: full history in pr-content (AISDLC-704.6: via fetch, not checkout) ──
 
 describe('Bug A fix — pr-content has base + head history without a checkout', () => {
