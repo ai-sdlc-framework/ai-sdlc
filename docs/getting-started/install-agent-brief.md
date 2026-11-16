@@ -24,4 +24,4 @@ Recovery for known failures:
 - Keyring never initialised (doctor or signing reports no signing key, or `~/.ai-sdlc/signing-key.pem` is missing): run step 5. In a scripted environment generate it manually: `openssl genpkey -algorithm ed25519 -out ~/.ai-sdlc/signing-key.pem`, `chmod 600 ~/.ai-sdlc/signing-key.pem`, `openssl pkey -in ~/.ai-sdlc/signing-key.pem -pubout -out ~/.ai-sdlc/signing-key.pub.pem`, and register the public key in `.ai-sdlc/trusted-reviewers.yaml`.
 - Doctor warnings: read each warning, fix the cause it names (usually one of the three failures above, a missing `gh` login, or an uncommitted scaffold), and re-run `/ai-sdlc doctor` until it is clean. Do not suppress or ignore a warning without telling me why.
 
-When doctor passes, commit the scaffold (`git add .ai-sdlc .github .gitignore .mcp.json CLAUDE.md package.json pnpm-lock.yaml`, never the private key) and report what you installed and the doctor output.
+When doctor passes, commit the scaffold (the `git add` command init prints under "Next steps", which lists only paths that exist, never the private key) and report what you installed and the doctor output.

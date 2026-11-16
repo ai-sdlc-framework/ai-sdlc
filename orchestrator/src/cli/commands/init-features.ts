@@ -1987,10 +1987,29 @@ export async function applyBranchProtection(
  * Returns the rendered summary as a string in addition to logging it,
  * so tests can assert on it without re-stringifying console output.
  */
+/**
+ * Paths init may have written that exist on disk, for the printed `git add`.
+ * Without a project dir, falls back to the always-written baseline.
+ */
+function stageablePaths(projectDir?: string): string[] {
+  const candidates = [
+    '.ai-sdlc',
+    '.github/workflows',
+    '.husky',
+    'CLAUDE.md',
+    '.gitignore',
+    'package.json',
+  ];
+  if (!projectDir) return candidates.slice(0, 2);
+  const found = candidates.filter((c) => existsSync(join(projectDir, c)));
+  return found.length > 0 ? found : ['.'];
+}
+
 export function renderNextSteps(
   selection: FeatureSelection,
   result: ApplyResult,
   adapters: Pick<FeatureAdapters, 'log'>,
+  projectDir?: string,
 ): string {
   const lines: string[] = [];
   lines.push('');
@@ -1999,7 +2018,7 @@ export function renderNextSteps(
 
   // Always present (baseline gate)
   lines.push('1. Commit the scaffolded files:');
-  lines.push('     git add .ai-sdlc .github/workflows package.json');
+  lines.push(`     git add ${stageablePaths(projectDir).join(' ')}`);
   lines.push('     git commit -m "chore: bootstrap AI-SDLC config"');
   lines.push('');
 
@@ -2090,7 +2109,11 @@ export function renderNextSteps(
       lines.push('     After resolving (gh auth login, repo permissions, etc.) re-run:');
       lines.push('     ai-sdlc init --add branch-protection');
     } else {
-      lines.push(`${stepN}. Branch protection (dry-run) — see JSON above; apply with:`);
+      if (result.branchProtection) {
+        lines.push(`${stepN}. Branch protection (dry-run) — see JSON above; apply with:`);
+      } else {
+        lines.push(`${stepN}. Branch protection was skipped (not applied); apply with:`);
+      }
       lines.push('     ai-sdlc init --add branch-protection');
     }
     lines.push('');

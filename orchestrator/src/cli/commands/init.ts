@@ -740,7 +740,7 @@ export const initCommand = new Command('init')
       console.log(`Extending AI-SDLC config with --add ${flags.add}:`);
       console.log('');
       const result = await applyFeatureSelection(projectDir, selection, flags, adapters);
-      renderNextSteps(selection, result, adapters);
+      renderNextSteps(selection, result, adapters, projectDir);
       // Reviewer feedback (round 2, suggestion #5): when the operator
       // explicitly requested branch-protection via a non-interactive flag
       // (--add branch-protection here; --yes / --with-branch-protection
@@ -898,7 +898,7 @@ async function runWizardStage(projectDir: string, flags: WizardFlags): Promise<v
   console.log('Scaffolding selected features:');
   const result = await applyFeatureSelection(projectDir, selection, flags, adapters);
   ensureClaudeMdPointer(projectDir, adapters, flags.dryRun);
-  renderNextSteps(selection, result, adapters);
+  renderNextSteps(selection, result, adapters, projectDir);
 
   // Reviewer feedback (round 2, suggestion #5): when branch-protection
   // was non-interactively requested (--with-branch-protection or --yes,

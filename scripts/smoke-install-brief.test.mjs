@@ -132,7 +132,7 @@ describe('keyring block key names (AISDLC-1239)', () => {
       assert.ok(!text.includes('signingKeys'), f);
     }
   });
-  it('the brief commit step lists .gitignore', () => {
-    assert.match(readFileSync(DEFAULT_BRIEF, 'utf8'), /git add [^`]*\.gitignore/);
+  it('the brief commit step uses the git add command init prints (existing paths only)', () => {
+    assert.match(readFileSync(DEFAULT_BRIEF, 'utf8'), /`git add` command init prints/);
   });
 });
