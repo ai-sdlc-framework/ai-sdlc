@@ -143,7 +143,7 @@ export function renderClarificationComment(
   }
 
   sections.push(
-    "Edit the issue to address these, then comment `/dor-recheck` (or just edit and wait — I'll re-check on the next edit).",
+    'Edit the issue to address these. Editing the issue reruns the readiness check; no comment is needed.',
   );
   return sections.join('\n');
 }

@@ -107,6 +107,12 @@ describe('renderClarificationComment', () => {
     expect(body).toContain('- [ ] Which search surface — site search, admin, or API?');
   });
 
+  it('tells the author that editing reruns the check and names no comment command', () => {
+    const body = renderClarificationComment(blockedVerdict());
+    expect(body).not.toContain('/dor-recheck');
+    expect(body).toContain('Editing the issue reruns the readiness check');
+  });
+
   it('redacts secrets in findings', () => {
     const verdict = blockedVerdict();
     verdict.gates[0]!.finding =

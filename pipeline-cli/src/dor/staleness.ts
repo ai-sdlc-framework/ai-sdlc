@@ -127,7 +127,7 @@ export function renderStalenessWarning(
     '',
     `This issue has been in **Needs Clarification** for ${warnAfterDays} days with no author activity. If no edits land in the next ${remaining} days it will be **auto-closed** with the \`closed-as-stale-dor\` label.`,
     '',
-    'To keep it open: edit the issue body to address the clarifying questions, then comment `/dor-recheck`.',
+    'To keep it open: edit the issue body to address the clarifying questions. Editing the issue reruns the readiness check; no comment is needed.',
   ].join('\n');
 }
 
