@@ -231,6 +231,7 @@ describe('KiroRunner', () => {
         '--trust-all-tools',
         '--output-format',
         'stream-json',
+        '--',
         'do the thing',
       ]);
     });
@@ -238,8 +239,14 @@ describe('KiroRunner', () => {
     it('adds --model <id> before the prompt when a model is set, never -m', () => {
       const args = buildKiroArgs('do the thing', 'some-model');
 
-      expect(args.slice(-3)).toEqual(['--model', 'some-model', 'do the thing']);
+      expect(args.slice(-4)).toEqual(['--model', 'some-model', '--', 'do the thing']);
       expect(args).not.toContain('-m');
+    });
+
+    it('ends options with -- so a prompt starting with a dash stays the positional', () => {
+      const args = buildKiroArgs('--trust-tools= do the thing', undefined);
+
+      expect(args.slice(-2)).toEqual(['--', '--trust-tools= do the thing']);
     });
 
     it('omits --model when the model is an empty string', () => {
@@ -275,6 +282,34 @@ describe('KiroRunner', () => {
       expect(result.failure).toBe(`auth error: ${NOT_LOGGED_IN}`);
     });
 
+    it('reports a runError without a stage as its message alone', () => {
+      const result = parseKiroStream(jsonl(event('runError', { message: 'boom' })));
+
+      expect(result.succeeded).toBe(false);
+      expect(result.failure).toBe('boom');
+    });
+
+    it('gives a fallback message for a runError with a stage but no message', () => {
+      const result = parseKiroStream(jsonl(event('runError', { sessionId: null, stage: 'auth' })));
+
+      expect(result.succeeded).toBe(false);
+      expect(result.failure).toBe('auth error: no message given');
+      expect(result.failure).not.toContain('undefined');
+    });
+
+    it('gives a fallback message for a runError with neither stage nor message', () => {
+      const result = parseKiroStream(jsonl(event('runError', { sessionId: null })));
+
+      expect(result.succeeded).toBe(false);
+      expect(result.failure).toBe('runError with no message');
+    });
+
+    it('treats a non-string runError message as missing', () => {
+      const result = parseKiroStream(jsonl(event('runError', { stage: 'prompt', message: {} })));
+
+      expect(result.failure).toBe('prompt error: no message given');
+    });
+
     it('treats a runFinished with a non-success status as a failure', () => {
       const result = parseKiroStream(
         jsonl(
@@ -286,6 +321,28 @@ describe('KiroRunner', () => {
 
       expect(result.succeeded).toBe(false);
       expect(result.failure).toContain('cancelled');
+    });
+
+    it('names a missing runFinished status instead of printing undefined', () => {
+      const result = parseKiroStream(jsonl(event('runFinished', { sessionId: SESSION_ID })));
+
+      expect(result.succeeded).toBe(false);
+      expect(result.failure).toBe('run finished with no status');
+      expect(result.failure).not.toContain('undefined');
+    });
+
+    it('leaves out a missing stopReason from a runFinished failure', () => {
+      const result = parseKiroStream(
+        jsonl(event('runFinished', { sessionId: SESSION_ID, status: 'cancelled' })),
+      );
+
+      expect(result.failure).toBe('run finished with status cancelled');
+    });
+
+    it('keeps the stopReason when a failed runFinished has one', () => {
+      const result = parseKiroStream(jsonl(runFinished('', 'cancelled', 'max_turns')));
+
+      expect(result.failure).toBe('run finished with status cancelled (stopReason: max_turns)');
     });
 
     it('is not successful when the stream has no terminal event', () => {
@@ -354,6 +411,7 @@ describe('KiroRunner', () => {
         '--output-format',
         'stream-json',
       ]);
+      expect((args as string[]).at(-2)).toBe('--');
       expect((args as string[]).at(-1)).toContain('You are fixing issue #7: Refactor auth module');
       expect((opts as Record<string, unknown>).cwd).toBe('/tmp/kiro-repo');
       expect((opts as Record<string, unknown>).stdio).toEqual(['ignore', 'pipe', 'pipe']);
@@ -669,8 +727,7 @@ describe('KiroRunner', () => {
     });
 
     it('spawns argv without --model when AI_SDLC_KIRO_MODEL is unset', async () => {
-      // DEFAULT_KIRO_MODEL is read once at module import time in defaults.ts.
-      expect(process.env.AI_SDLC_KIRO_MODEL).toBeUndefined();
+      vi.stubEnv('AI_SDLC_KIRO_MODEL', undefined);
 
       setupSpawn({ stdout: successStream() });
       setupGitExec(['f.ts']);
@@ -681,6 +738,30 @@ describe('KiroRunner', () => {
       const [, args] = spawnMock.mock.calls[0];
       expect(args).not.toContain('--model');
       expect(args).not.toContain('-m');
+    });
+
+    it('passes --model from AI_SDLC_KIRO_MODEL, read when run() runs', async () => {
+      vi.stubEnv('AI_SDLC_KIRO_MODEL', 'kiro-test-model');
+      setupSpawn({ stdout: successStream() });
+      setupGitExec(['f.ts']);
+
+      const runner = new KiroRunner();
+      await runner.run(makeCtx());
+
+      const [, args] = spawnMock.mock.calls[0];
+      expect((args as string[]).slice(-4, -1)).toEqual(['--model', 'kiro-test-model', '--']);
+    });
+
+    it('spawns argv without --model when AI_SDLC_KIRO_MODEL is empty', async () => {
+      vi.stubEnv('AI_SDLC_KIRO_MODEL', '');
+      setupSpawn({ stdout: successStream() });
+      setupGitExec(['f.ts']);
+
+      const runner = new KiroRunner();
+      await runner.run(makeCtx());
+
+      const [, args] = spawnMock.mock.calls[0];
+      expect(args).not.toContain('--model');
     });
   });
 });

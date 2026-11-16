@@ -90,11 +90,13 @@ Invokes the [Kiro CLI](https://kiro.dev/docs/cli/) in headless mode with JSON Li
 
 | Property | Value |
 |---|---|
-| CLI command | `kiro-cli chat --no-interactive --v3 --trust-workspace --trust-all-tools --output-format stream-json [--model <model>] <prompt>` |
+| CLI command | `kiro-cli chat --no-interactive --v3 --trust-workspace --trust-all-tools --output-format stream-json [--model <model>] -- <prompt>` |
 | stdin | None (prompt is a CLI argument) |
 | Auth | `KIRO_API_KEY` (inherited from environment; no browser login needed) |
 | Model override | `AI_SDLC_KIRO_MODEL` env var |
 | Registration | Available when `KIRO_API_KEY` is set |
+
+The runner always passes `--trust-all-tools` and `--trust-workspace` (headless, like Cursor's `--force`), and the child process inherits the full environment, so run it only in a sandbox you trust.
 
 The runner needs the standalone `kiro-cli` binary on `PATH`; the `kiro` command opens the Kiro IDE by default and is not used. If `kiro-cli` is missing, the run fails with a setup error naming the install page.
 

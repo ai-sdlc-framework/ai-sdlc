@@ -8,7 +8,6 @@ import { promisify } from 'node:util';
 import type { AgentRunner, AgentContext, AgentResult } from './types.js';
 import {
   DEFAULT_RUNNER_TIMEOUT_MS,
-  DEFAULT_KIRO_MODEL,
   DEFAULT_COMMIT_MESSAGE_TEMPLATE,
   DEFAULT_COMMIT_CO_AUTHOR,
 } from '../defaults.js';
@@ -38,7 +37,8 @@ async function gitExec(workDir: string, args: string[]): Promise<string> {
  * Build the kiro-cli argv. `--trust-workspace` skips the V3 "trust this
  * workspace?" prompt and `--trust-all-tools` lets the agent edit files
  * without approval (as `--force` does for Cursor). `--model` is emitted only
- * when set. Auth comes from `KIRO_API_KEY` in the environment, never argv.
+ * when set. `--` ends the options so the prompt is always the positional.
+ * Auth comes from `KIRO_API_KEY` in the environment, never argv.
  */
 export function buildKiroArgs(prompt: string, model: string | undefined): string[] {
   const args = [
@@ -53,7 +53,7 @@ export function buildKiroArgs(prompt: string, model: string | undefined): string
   if (model) {
     args.push('--model', model);
   }
-  args.push(prompt);
+  args.push('--', prompt);
   return args;
 }
 
@@ -96,12 +96,21 @@ export function parseKiroStream(stdout: string): KiroStreamResult {
       } else if (event?.type === 'runFinished') {
         succeeded = data?.status === 'success';
         finalText = typeof data?.finalText === 'string' ? data.finalText : '';
+        const status = typeof data?.status === 'string' && data.status ? data.status : undefined;
+        const stopReason =
+          typeof data?.stopReason === 'string' && data.stopReason ? data.stopReason : undefined;
         failure = succeeded
           ? undefined
-          : `run finished with status ${data?.status} (stopReason: ${data?.stopReason})`;
+          : status
+            ? `run finished with status ${status}${stopReason ? ` (stopReason: ${stopReason})` : ''}`
+            : 'run finished with no status';
       } else if (event?.type === 'runError') {
         succeeded = false;
-        failure = data?.stage ? `${data.stage} error: ${data.message}` : String(data?.message);
+        const message =
+          typeof data?.message === 'string' && data.message ? data.message : undefined;
+        failure = data?.stage
+          ? `${data.stage} error: ${message ?? 'no message given'}`
+          : (message ?? 'runError with no message');
       }
     } catch {
       // Skip malformed lines
@@ -117,7 +126,8 @@ export class KiroRunner implements AgentRunner {
     const timeoutMs = ctx.timeoutMs ?? DEFAULT_RUNNER_TIMEOUT_MS;
 
     try {
-      const kiroArgs = buildKiroArgs(prompt, DEFAULT_KIRO_MODEL);
+      // Read at call time, not import time, so a changed env applies.
+      const kiroArgs = buildKiroArgs(prompt, process.env.AI_SDLC_KIRO_MODEL);
 
       // When running inside an OpenShell sandbox, prefix with sandbox connect
       let cmd: string;
