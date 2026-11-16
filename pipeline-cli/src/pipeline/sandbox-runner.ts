@@ -68,6 +68,7 @@ import { spawn, execFileSync, type ChildProcess, type SpawnOptions } from 'node:
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import { globToRegex } from './ast-gate.js';
 
 // ── Sandbox driver types ──────────────────────────────────────────────────────
 
@@ -113,6 +114,114 @@ export interface SandboxConfig {
    * are refused before any model call.
    */
   maxDiffBytes?: number;
+
+  /**
+   * AISDLC-1293: extra test suites (other languages) the gate runs next to the
+   * root Node suite. Absent or empty: only the Node suite runs, as before.
+   */
+  sandboxSuites?: SandboxSuite[];
+}
+
+/**
+ * One extra suite. It starts (fetch container included) only when the PR
+ * changes a file matching `paths`; the Node suite starts only when the PR
+ * changes a file that belongs to no suite.
+ */
+export interface SandboxSuite {
+  /** Unique, lowercase; named in the report when the suite fails. */
+  name: string;
+  /** Globs (same syntax as `protectedPaths`) of the files this suite covers. */
+  paths: string[];
+  /** Stock image, pinned by digest (`repo:tag@sha256:<64 hex>`). */
+  image: string;
+  /** Runs in the fetch container (network, base tree only), cwd = prepared tree. */
+  fetchCommand: string;
+  /** Runs in the run container (no network), cwd = the patched repo root. */
+  testCommand: string;
+}
+
+/** Thrown when `sandboxSuites` is invalid; the config load refuses to continue. */
+export class SandboxSuiteConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SandboxSuiteConfigError';
+  }
+}
+
+const IMAGE_DIGEST_RE = /@sha256:[0-9a-f]{64}$/;
+
+/** Validate the raw `sandboxSuites` value. Throws `SandboxSuiteConfigError`. */
+export function parseSandboxSuites(raw: unknown): SandboxSuite[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new SandboxSuiteConfigError('sandboxSuites must be a list');
+  const seen = new Set<string>();
+  return raw.map((entry: unknown, i) => {
+    const e = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+    const name = typeof e['name'] === 'string' ? e['name'] : '';
+    const label = name ? `sandboxSuites entry "${name}"` : `sandboxSuites entry #${String(i)}`;
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+      throw new SandboxSuiteConfigError(`${label}: name must match [a-z0-9][a-z0-9-]*`);
+    }
+    if (seen.has(name)) throw new SandboxSuiteConfigError(`${label}: duplicate name`);
+    seen.add(name);
+    const image = e['image'];
+    if (typeof image !== 'string' || !IMAGE_DIGEST_RE.test(image)) {
+      throw new SandboxSuiteConfigError(
+        `${label}: image must be pinned by digest (<repo>:<tag>@sha256:<64 hex>)`,
+      );
+    }
+    const paths = e['paths'];
+    if (
+      !Array.isArray(paths) ||
+      paths.length === 0 ||
+      !paths.every((p) => typeof p === 'string' && p.length > 0)
+    ) {
+      throw new SandboxSuiteConfigError(`${label}: paths must be a non-empty list of globs`);
+    }
+    for (const key of ['fetchCommand', 'testCommand'] as const) {
+      const v = e[key];
+      if (typeof v !== 'string' || v.trim().length === 0) {
+        throw new SandboxSuiteConfigError(`${label}: ${key} must be a non-empty string`);
+      }
+    }
+    return {
+      name,
+      paths: paths as string[],
+      image,
+      fetchCommand: e['fetchCommand'] as string,
+      testCommand: e['testCommand'] as string,
+    };
+  });
+}
+
+/** File paths a unified diff touches (both sides of a rename). */
+export function changedPathsFromDiff(diff: string): string[] {
+  const out = new Set<string>();
+  for (const line of diff.split('\n')) {
+    const m = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+    if (m) {
+      out.add(m[1]!);
+      out.add(m[2]!);
+    }
+  }
+  return [...out];
+}
+
+/** The suites a diff needs: extra suites by path, and whether Node runs. */
+export function selectSuites(
+  suites: readonly SandboxSuite[],
+  paths: readonly string[],
+): { node: boolean; suites: SandboxSuite[] } {
+  const matchers = suites.map((s) => ({ suite: s, res: s.paths.map((g) => globToRegex(g)) }));
+  const selected = new Set<SandboxSuite>();
+  let node = false;
+  for (const p of paths) {
+    const owners = matchers.filter((m) => m.res.some((re) => re.test(p)));
+    if (owners.length === 0) node = true;
+    for (const o of owners) selected.add(o.suite);
+  }
+  if (!node && selected.size === 0) node = true;
+  return { node, suites: suites.filter((s) => selected.has(s)) };
 }
 
 /** Built-in default for `maxDiffBytes`. */
@@ -314,6 +423,10 @@ function parseSandboxConfig(yamlText: string): SandboxConfig {
       result.maxDiffBytes = maxDiff;
     }
 
+    // sandboxSuites (AISDLC-1293): invalid entries throw out of the loader.
+    const suites = parseSandboxSuites(doc['sandboxSuites']);
+    if (suites.length > 0) result.sandboxSuites = suites;
+
     // differentialTest.resourceLimits
     const dt = doc['differentialTest'];
     if (dt && typeof dt === 'object') {
@@ -344,7 +457,8 @@ function parseSandboxConfig(yamlText: string): SandboxConfig {
     }
 
     return result;
-  } catch {
+  } catch (err) {
+    if (err instanceof SandboxSuiteConfigError) throw err;
     return DEFAULT_SANDBOX_CONFIG;
   }
 }
@@ -407,6 +521,11 @@ export interface SandboxSpawnInput {
    * the upstream suite runs against the base (AISDLC-1267).
    */
   baseTreeDir?: string;
+  /**
+   * AISDLC-1293: run this extra suite instead of the Node suite (its image,
+   * fetch command and test command). Absent: the Node suite, as before.
+   */
+  suite?: SandboxSuite;
 }
 
 /**
@@ -1114,12 +1233,15 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
     const inContainerScript = buildDifferentialTestScript(
       input.upstreamMainRef,
       resourceLimits.perTestTimeoutSeconds,
+      undefined,
+      input.suite?.testCommand,
     );
 
     // Fetch phase (AISDLC-1291): install the base tree's dependencies in a
     // networked container that sees only the base tree, then mount the result
     // read-only into the no-network run container below.
-    const image = process.env['AI_SDLC_SANDBOX_IMAGE'] ?? DEFAULT_SANDBOX_IMAGE;
+    const image =
+      input.suite?.image ?? process.env['AI_SDLC_SANDBOX_IMAGE'] ?? DEFAULT_SANDBOX_IMAGE;
     let runTreeDir = input.baseTreeDir;
     if (input.baseTreeDir) {
       runTreeDir = await this.runFetchContainer(input, image);
@@ -1279,7 +1401,8 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       containerName,
       baseTreeDir,
       outDir,
-      pnpmVersion: resolvePnpmVersion(baseTreeDir),
+      pnpmVersion: input.suite ? undefined : resolvePnpmVersion(baseTreeDir),
+      script: input.suite ? buildSuiteFetchScript(input.suite.fetchCommand) : undefined,
       user:
         typeof process.getuid === 'function' &&
         typeof process.getgid === 'function' &&
@@ -1622,6 +1745,7 @@ export function buildDifferentialTestScript(
   upstreamMainRef: string,
   perTestTimeoutSeconds?: number,
   baseSha?: string,
+  suiteTestCommand?: string,
 ): string {
   // Validate the ref before interpolating into the shell script.
   // Throws if the ref is not a valid SHA or URL — prevents shell injection.
@@ -1637,16 +1761,24 @@ export function buildDifferentialTestScript(
 
   // The test runner command for the upstream (base) suite — no coverage needed.
   // Tries pnpm first, falls back to npm test.
-  const baseTestCmd = timeoutPrefix
-    ? `${timeoutPrefix} sh -c 'pnpm test 2>&1 || npm test 2>&1'`
-    : "sh -c 'pnpm test 2>&1 || npm test 2>&1'";
+  // An extra suite (AISDLC-1293) replaces the pnpm/npm command with its own.
+  const suiteSh = suiteTestCommand
+    ? `sh -c '${suiteTestCommand.replace(/'/g, "'\\''")} 2>&1'`
+    : undefined;
+  const baseTestCmd = suiteSh
+    ? `${timeoutPrefix} ${suiteSh}`.trim()
+    : timeoutPrefix
+      ? `${timeoutPrefix} sh -c 'pnpm test 2>&1 || npm test 2>&1'`
+      : "sh -c 'pnpm test 2>&1 || npm test 2>&1'";
 
   // The test runner command for the head (PR) suite WITH coverage.
   // Coverage is passed as a direct flag to pnpm/npm, not after `--` (which
   // would be consumed by the shell, not forwarded to the test runner).
-  const headTestCmd = timeoutPrefix
-    ? `${timeoutPrefix} sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'`
-    : "sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'";
+  const headTestCmd = suiteSh
+    ? baseTestCmd
+    : timeoutPrefix
+      ? `${timeoutPrefix} sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'`
+      : "sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'";
 
   // Single-quote-escape the ref for safe interpolation into the sh script.
   // `validateUpstreamMainRef` already rejects any ref that isn't a hex SHA
@@ -1880,7 +2012,9 @@ export interface FetchDockerArgsInput {
   baseTreeDir: string;
   /** Host dir receiving the prepared tree; mounted read-write. */
   outDir: string;
-  pnpmVersion: string;
+  pnpmVersion?: string;
+  /** In-container script of an extra suite (AISDLC-1293); replaces the pnpm one. */
+  script?: string;
   /**
    * `uid:gid` the fetch container runs as. Defaults to 65534:65534; the driver
    * passes the host user so it can chmod and remove the files the install wrote.
@@ -1894,7 +2028,8 @@ export interface FetchDockerArgsInput {
  * base tree: no PR diff, no fixture, no proxy host entry, no secret.
  */
 export function buildFetchDockerArgs(opts: FetchDockerArgsInput): string[] {
-  const { resourceLimits, image, containerName, baseTreeDir, outDir, pnpmVersion, user } = opts;
+  const { resourceLimits, image, containerName, baseTreeDir, outDir, pnpmVersion, script, user } =
+    opts;
   return [
     'run',
     '--rm',
@@ -1921,8 +2056,23 @@ export function buildFetchDockerArgs(opts: FetchDockerArgsInput): string[] {
     image,
     '/bin/sh',
     '-c',
-    buildFetchScript(pnpmVersion),
+    script ?? buildFetchScript(pnpmVersion ?? DEFAULT_PNPM_VERSION),
   ];
+}
+
+/**
+ * Fetch script of an extra suite (AISDLC-1293): copy the base tree into the
+ * output mount, then run the configured command there with network access.
+ * The command is operator configuration, never contributor input.
+ */
+export function buildSuiteFetchScript(fetchCommand: string): string {
+  return `set -e
+export HOME=/tmp/home CI=true
+mkdir -p "$HOME"
+cp -R "${FETCH_BASE_DIR}/." "${FETCH_OUT_DIR}/"
+cd "${FETCH_OUT_DIR}"
+${fetchCommand}
+`;
 }
 
 // ── Docker argument builder (exported for unit-test assertions) ───────────────
@@ -2444,7 +2594,11 @@ export async function runSandbox(input: RunSandboxInput): Promise<SandboxResult>
 
   let result: SandboxResult;
   try {
-    const driverPromise = driver.spawn(spawnInputWithSignal as SandboxSpawnInput);
+    const driverPromise = runSelectedSuites(
+      driver,
+      spawnInputWithSignal as SandboxSpawnInput,
+      input.config.sandboxSuites,
+    );
     result = wallClockTimeoutPromise
       ? await Promise.race([driverPromise, wallClockTimeoutPromise])
       : await driverPromise;
@@ -2455,4 +2609,58 @@ export async function runSandbox(input: RunSandboxInput): Promise<SandboxResult>
   }
 
   return result;
+}
+
+/**
+ * AISDLC-1293: run what the diff needs. With no `sandboxSuites` this is one
+ * Node spawn, exactly as before. Otherwise suites run one after another (each
+ * with its own fetch and run container, torn down in between); any `error` or
+ * `resource-breach` ends the run, and the report passes only when every suite
+ * that ran passed on base and on head.
+ */
+async function runSelectedSuites(
+  driver: SandboxDriver,
+  spawnInput: SandboxSpawnInput,
+  suites: readonly SandboxSuite[] | undefined,
+): Promise<SandboxResult> {
+  if (!suites || suites.length === 0) return driver.spawn(spawnInput);
+
+  const plan = selectSuites(suites, changedPathsFromDiff(spawnInput.prDiff));
+  const runs: Array<{ name: string; suite?: SandboxSuite }> = [
+    ...(plan.node ? [{ name: 'node' }] : []),
+    ...plan.suites.map((suite) => ({ name: suite.name, suite })),
+  ];
+
+  const results: Array<{ name: string; dt: DifferentialTestResult; durationMs: number }> = [];
+  for (const run of runs) {
+    const r = await driver.spawn({ ...spawnInput, suite: run.suite });
+    await driver.teardown();
+    if (r.outcome !== 'success') return r;
+    results.push({ name: run.name, dt: r.differentialTest, durationMs: r.durationMs });
+  }
+
+  const failed = (pick: (d: DifferentialTestResult) => boolean) =>
+    results.filter((x) => !pick(x.dt)).map((x) => x.name);
+  const upstreamFailed = failed((d) => d.upstreamSuitePassed);
+  const headFailed = failed((d) => d.newTestsPassed);
+  const describeRun = (verdict: string[], key: 'upstreamSuiteOutput' | 'newTestsOutput') =>
+    (verdict.length > 0
+      ? [`failed suite(s): ${verdict.join(', ')}`]
+      : [`all suites passed: ${results.map((x) => x.name).join(', ')}`]
+    )
+      .concat(results.map((x) => `[${x.name}] ${x.dt[key]}`))
+      .join('\n')
+      .slice(0, 2000);
+
+  return {
+    outcome: 'success',
+    durationMs: results.reduce((n, x) => n + x.durationMs, 0),
+    differentialTest: {
+      upstreamSuitePassed: upstreamFailed.length === 0,
+      upstreamSuiteOutput: describeRun(upstreamFailed, 'upstreamSuiteOutput'),
+      newTestsPassed: headFailed.length === 0,
+      newTestsOutput: describeRun(headFailed, 'newTestsOutput'),
+      newCodeCoveragePct: Math.min(...results.map((x) => x.dt.newCodeCoveragePct)),
+    },
+  };
 }

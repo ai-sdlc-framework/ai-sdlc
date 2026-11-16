@@ -77,3 +77,38 @@ differentialTest:
     cpuCores: 2
     memoryGb: 4
     networkDeny: true
+
+# AISDLC-1293: extra test suites. A suite (fetch container included) starts only
+# when the PR changes a file under its `paths`; the root Node suite starts only
+# when the PR changes a file that belongs to no suite. Each suite uses one stock
+# image pinned by digest. `fetchCommand` runs in the fetch container (network,
+# base tree only, cwd = prepared copy of the base tree at /sandbox/prepared);
+# `testCommand` runs in the hardened no-network run container (cwd = patched
+# repo root). Dependencies are written under `node_modules/` because the run
+# container links every `node_modules` from its read-only, exec-capable mount.
+sandboxSuites:
+  - name: python
+    paths:
+      - 'sdk-python/**'
+    image: 'python:3.13-bookworm@sha256:cc55e4ded9c95f6ce2133b3d096db43f214d280c2a8af65d83e246c8fa7d168c'
+    fetchCommand: >-
+      cd sdk-python &&
+      pip install --no-cache-dir --target /sandbox/prepared/node_modules/pydeps '.[dev]' &&
+      rm -rf /sandbox/prepared/node_modules/pydeps/ai_sdlc
+    testCommand: >-
+      cd sdk-python &&
+      PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/sandbox/workspace/repo/node_modules/pydeps:src
+      python -m pytest -p no:cacheprovider
+  - name: go
+    paths:
+      - 'sdk-go/**'
+    image: 'golang:1.26-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0'
+    fetchCommand: >-
+      export GOMODCACHE=/sandbox/prepared/node_modules/gomod GOFLAGS=-modcacherw &&
+      (cd sdk-go && go mod download) &&
+      (cd sdk-go/operator && go mod download)
+    testCommand: >-
+      export GOMODCACHE=/sandbox/workspace/repo/node_modules/gomod GOPROXY=off
+      GOCACHE=/tmp/gocache &&
+      (cd sdk-go && go test ./... -count=1) &&
+      (cd sdk-go/operator && go test ./... -count=1)

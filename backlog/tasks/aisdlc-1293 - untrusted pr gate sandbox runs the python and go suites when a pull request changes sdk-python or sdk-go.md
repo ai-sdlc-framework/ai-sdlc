@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1293
 title: 'Untrusted PR gate sandbox runs the Python and Go suites when a pull request changes sdk-python or sdk-go'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-16'
 labels:
