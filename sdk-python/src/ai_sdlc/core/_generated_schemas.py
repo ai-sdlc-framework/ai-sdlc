@@ -1463,7 +1463,7 @@ pipeline_schema: dict[str, Any] = {
                     "type": "array",
                 },
             },
-            "required": ["triggers", "providers", "stages"],
+            "required": ["triggers", "providers"],
             "type": "object",
         },
         "status": {

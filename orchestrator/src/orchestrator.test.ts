@@ -39,6 +39,10 @@ vi.mock('./config.js', () => ({
   })),
 }));
 
+vi.mock('./validate-config.js', () => ({
+  validateConfigFiles: vi.fn(() => []),
+}));
+
 // Mock StateStore
 vi.mock('./state/index.js', () => ({
   StateStore: {

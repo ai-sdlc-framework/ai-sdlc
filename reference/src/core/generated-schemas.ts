@@ -6688,7 +6688,7 @@ export const pipelineSchema = {
     },
     spec: {
       type: 'object',
-      required: ['triggers', 'providers', 'stages'],
+      required: ['triggers', 'providers'],
       properties: {
         triggers: {
           type: 'array',

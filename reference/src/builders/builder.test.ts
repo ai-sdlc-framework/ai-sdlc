@@ -38,7 +38,7 @@ describe('PipelineBuilder', () => {
     expect(pipeline.spec.triggers).toHaveLength(1);
     expect(pipeline.spec.providers['github'].type).toBe('github');
     expect(pipeline.spec.stages).toHaveLength(2);
-    expect(pipeline.spec.stages[1].qualityGates).toEqual(['coverage-gate']);
+    expect(pipeline.spec.stages?.[1].qualityGates).toEqual(['coverage-gate']);
     expect(pipeline.spec.routing?.complexityThresholds?.['simple'].strategy).toBe(
       'fully-autonomous',
     );
@@ -94,7 +94,7 @@ describe('PipelineBuilder', () => {
         onFailure: { strategy: 'retry', maxRetries: 3, retryDelay: 'PT1M' },
       })
       .build();
-    expect(pipeline.spec.stages[0].onFailure).toEqual({
+    expect(pipeline.spec.stages?.[0].onFailure).toEqual({
       strategy: 'retry',
       maxRetries: 3,
       retryDelay: 'PT1M',
@@ -108,7 +108,7 @@ describe('PipelineBuilder', () => {
         credentials: { scope: ['repo:read', 'repo:write'], ttl: 'PT15M', revokeOnComplete: true },
       })
       .build();
-    expect(pipeline.spec.stages[0].credentials?.scope).toEqual(['repo:read', 'repo:write']);
+    expect(pipeline.spec.stages?.[0].credentials?.scope).toEqual(['repo:read', 'repo:write']);
   });
 
   it('builds stage with approval policy', () => {
@@ -118,7 +118,7 @@ describe('PipelineBuilder', () => {
         approval: { required: true, blocking: true, timeout: 'PT24H', onTimeout: 'abort' },
       })
       .build();
-    expect(pipeline.spec.stages[0].approval).toEqual({
+    expect(pipeline.spec.stages?.[0].approval).toEqual({
       required: true,
       blocking: true,
       timeout: 'PT24H',

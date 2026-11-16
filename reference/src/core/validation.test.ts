@@ -138,7 +138,7 @@ describe('validate()', () => {
     expect(result.valid).toBe(false);
   });
 
-  it('rejects a Pipeline missing stages', () => {
+  it('accepts a Pipeline without the deprecated stages', () => {
     const doc = {
       apiVersion: 'ai-sdlc.io/v1alpha1',
       kind: 'Pipeline',
@@ -149,9 +149,7 @@ describe('validate()', () => {
       },
     };
     const result = validate('Pipeline', doc);
-    expect(result.valid).toBe(false);
-    expect(result.errors).toBeDefined();
-    expect(result.errors!.length).toBeGreaterThan(0);
+    expect(result.valid).toBe(true);
   });
 
   it('rejects a Pipeline with empty stages', () => {
