@@ -642,6 +642,10 @@ describe('buildBlockedEvent', () => {
     const gateResult = {
       outcome: 'abort-protected-path' as const,
       offendingPaths: ['.github/workflows/ci.yml', 'pnpm-lock.yaml'],
+      offendingPathReasons: [
+        { path: '.github/workflows/ci.yml', reason: 'protected-path' as const },
+        { path: 'pnpm-lock.yaml', reason: 'protected-path' as const },
+      ],
       heuristicFindings: [],
     };
     const event = buildBlockedEvent(42, 'attacker', gateResult, new Date('2026-06-02T10:00:00Z'));

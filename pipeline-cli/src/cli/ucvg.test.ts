@@ -624,6 +624,7 @@ describe('runAstGateCli — ast-gate subcommand', () => {
     vi.mocked(astGateMod.runAstGate).mockReturnValue({
       outcome: 'pass',
       offendingPaths: [],
+      offendingPathReasons: [],
       heuristicFindings: [],
     });
 
@@ -673,6 +674,7 @@ describe('runAstGateCli — ast-gate subcommand', () => {
     vi.mocked(astGateMod.runAstGate).mockReturnValue({
       outcome: 'abort-protected-path',
       offendingPaths: ['.github/workflows/main.yml'],
+      offendingPathReasons: [{ path: '.github/workflows/main.yml', reason: 'protected-path' }],
       heuristicFindings: [],
     });
     vi.mocked(astGateMod.buildBlockedEvent).mockReturnValue({
