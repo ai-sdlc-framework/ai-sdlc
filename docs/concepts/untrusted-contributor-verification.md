@@ -106,10 +106,15 @@ If a PR modifies protected paths (`.github/workflows/**`, `package.json`, lockfi
 
 For PRs that pass Stage 1, the UCVG sandbox:
 
-1. Clones the clean upstream `main`.
-2. Applies the PR diff (to files that passed the Stage 1 gate).
+1. Exports the base commit (`git archive`, data only) and prepares its dependencies in the **fetch container** (below).
+2. Applies the PR diff (to files that passed the Stage 1 gate) inside the **run container**.
 3. Runs the existing test suite to verify functional parity.
 4. Runs the contributor's new tests with coverage.
+
+**Two containers per gate run.**
+
+- **Fetch container.** Has network access. It sees only the exported base tree (mounted read-only) and an output directory. It receives no PR diff, no fixture, no proxy host entry and no secret. It installs the base tree's dependencies with the pnpm version read from `packageManager` in the base `package.json` (falling back to the latest pnpm when the field is absent), or `npm ci` for an npm lockfile. This is safe because `package.json` and lockfiles are protected paths: the head tree's dependencies are always those of the base commit on `main`. If this install exits non-zero, the gate stops with an error naming the fetch phase: no reviewer runs and no unsigned report is written.
+- **Run container.** The hardened container described above: `--network=none`, `--cap-drop=ALL`, read-only root, seccomp, `no-new-privileges`, user `65534:65534` and `noexec` tmpfs. It mounts the fetch output read-only. Sources are copied into the writable workspace, while every `node_modules` stays on the read-only mount (linked in), so native binaries run from a mount that is not `noexec`. Its script runs no install command.
 
 The contributor does not see this directly — the result is reflected in the `ai-sdlc/untrusted-pr-gate` status check.
 

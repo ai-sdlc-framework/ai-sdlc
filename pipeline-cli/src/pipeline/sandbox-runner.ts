@@ -63,10 +63,11 @@
  * @module pipeline/sandbox-runner
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync, chmodSync } from 'node:fs';
 import { spawn, execFileSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 
 // ── Sandbox driver types ──────────────────────────────────────────────────────
 
@@ -937,6 +938,17 @@ export const DOCKER_SECCOMP_PROFILE: Record<string, unknown> = {
  *   - `--security-opt seccomp=<json>`      syscall allowlist
  *   - `--security-opt no-new-privileges`   prevent privilege escalation
  */
+/**
+ * Thrown when the fetch container (dependency install) fails. It propagates out
+ * of the driver so the caller writes no report and runs no reviewer.
+ */
+export class SandboxFetchPhaseError extends Error {
+  constructor(message: string) {
+    super(`sandbox fetch phase failed: ${message}`);
+    this.name = 'SandboxFetchPhaseError';
+  }
+}
+
 export class DockerSandboxDriver extends BaseSandboxDriver {
   readonly kind: SandboxDriverKind = 'docker';
 
@@ -955,6 +967,12 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
    * Lives in an isolated mkdtemp directory; cleaned up in `teardown()`.
    */
   private cidFilePath: string | null = null;
+
+  /** Host dir holding the fetch container output (removed in `teardown()`). */
+  private preparedDir: string | null = null;
+
+  /** Name of the running fetch container, for abort-time `docker rm -f`. */
+  private fetchContainerName: string | null = null;
 
   /**
    * Thin spawn seam — wraps `child_process.spawn` so tests can override it
@@ -1004,6 +1022,7 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       const durationMs = Date.now() - start;
       return { outcome: 'success', differentialTest: result, durationMs };
     } catch (err) {
+      if (err instanceof SandboxFetchPhaseError && !input.abortSignal?.aborted) throw err;
       // Distinguish abort-triggered kills from genuine errors
       if (input.abortSignal?.aborted) {
         return {
@@ -1097,6 +1116,15 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       resourceLimits.perTestTimeoutSeconds,
     );
 
+    // Fetch phase (AISDLC-1291): install the base tree's dependencies in a
+    // networked container that sees only the base tree, then mount the result
+    // read-only into the no-network run container below.
+    const image = process.env['AI_SDLC_SANDBOX_IMAGE'] ?? DEFAULT_SANDBOX_IMAGE;
+    let runTreeDir = input.baseTreeDir;
+    if (input.baseTreeDir) {
+      runTreeDir = await this.runFetchContainer(input, image);
+    }
+
     // Build the docker run arguments.
     // extraDockerArgs carries AQ2 proxy host entries (e.g. --add-host=inference.local:<ip>)
     // so the container can reach the host-side inference proxy despite --network=none.
@@ -1107,8 +1135,8 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       // the inline JSON — see the seccompFilePath comment above.
       seccompProfileJson: seccompFilePath,
       cidFilePath,
-      image: process.env['AI_SDLC_SANDBOX_IMAGE'] ?? DEFAULT_SANDBOX_IMAGE,
-      baseTreeDir: input.baseTreeDir,
+      image,
+      baseTreeDir: runTreeDir,
       command: ['/bin/sh', '-c', inContainerScript],
       extraDockerArgs: input.extraDockerArgs,
     });
@@ -1229,6 +1257,101 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
   }
 
   /**
+   * Run the fetch container: network on, base tree read-only, prepared tree
+   * read-write. Returns the host dir holding the prepared tree. Rejects with
+   * `SandboxFetchPhaseError` on a non-zero exit or spawn error. The spawn env
+   * carries only PATH: no diff, fixture or credential reaches this container.
+   */
+  private async runFetchContainer(
+    input: SandboxSpawnInput & { abortSignal?: AbortSignal },
+    image: string,
+  ): Promise<string> {
+    const baseTreeDir = input.baseTreeDir as string;
+    const outDir = mkdtempSync(join(tmpdir(), 'ai-sdlc-prepared-'));
+    this.preparedDir = outDir;
+    // The container runs as nobody and must write here.
+    chmodSync(outDir, 0o777);
+    const containerName = `ai-sdlc-fetch-${randomBytes(6).toString('hex')}`;
+    this.fetchContainerName = containerName;
+    const args = buildFetchDockerArgs({
+      resourceLimits: input.resourceLimits,
+      image,
+      containerName,
+      baseTreeDir,
+      outDir,
+      pnpmVersion: resolvePnpmVersion(baseTreeDir),
+      user:
+        typeof process.getuid === 'function' &&
+        typeof process.getgid === 'function' &&
+        process.getuid() !== 0
+          ? `${process.getuid()}:${process.getgid()}`
+          : undefined,
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const proc = this._spawnProcess('docker', args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin' },
+      });
+      let output = '';
+      const collect = (chunk: Buffer) => {
+        output += chunk.toString();
+      };
+      proc.stdout?.on('data', collect);
+      proc.stderr?.on('data', collect);
+
+      const onAbort = () => {
+        this.removeFetchContainer().catch(() => {});
+        proc.kill('SIGKILL');
+        reject(new Error('Docker fetch container aborted by wall-clock timeout'));
+      };
+      if (input.abortSignal) {
+        if (input.abortSignal.aborted) {
+          onAbort();
+          return;
+        }
+        input.abortSignal.addEventListener('abort', onAbort, { once: true });
+      }
+      proc.on('close', (exitCode) => {
+        input.abortSignal?.removeEventListener('abort', onAbort);
+        if (input.abortSignal?.aborted) {
+          reject(new Error('Docker fetch container aborted by wall-clock timeout'));
+        } else if (exitCode !== 0) {
+          reject(
+            new SandboxFetchPhaseError(
+              `dependency install exited with code ${exitCode}: ${output.slice(-4000)}`,
+            ),
+          );
+        } else {
+          resolve();
+        }
+      });
+      proc.on('error', (err) => {
+        input.abortSignal?.removeEventListener('abort', onAbort);
+        reject(new SandboxFetchPhaseError(err.message));
+      });
+    });
+
+    // The run container runs as nobody too; make the result readable.
+    try {
+      execFileSync('chmod', ['-R', 'a+rX', outDir]);
+    } catch {
+      // best-effort: a failure surfaces as a run-container error
+    }
+    return outDir;
+  }
+
+  private async removeFetchContainer(): Promise<void> {
+    const name = this.fetchContainerName;
+    if (!name) return;
+    await new Promise<void>((resolve) => {
+      const proc = this._spawnProcess('docker', ['rm', '-f', name], { stdio: 'ignore' });
+      proc.on('close', () => resolve());
+      proc.on('error', () => resolve());
+    });
+  }
+
+  /**
    * Kill the container by ID (used on abort signal).
    * Idempotent — errors are swallowed so teardown() can also attempt rm -f.
    */
@@ -1251,8 +1374,22 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
   async teardown(): Promise<void> {
     const id = this.containerId;
     const cidFilePath = this.cidFilePath;
+    const preparedDir = this.preparedDir;
     this.containerId = null;
     this.cidFilePath = null;
+    this.preparedDir = null;
+
+    if (this.fetchContainerName) {
+      await this.removeFetchContainer();
+      this.fetchContainerName = null;
+    }
+    if (preparedDir) {
+      try {
+        rmSync(preparedDir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
 
     if (id) {
       await new Promise<void>((resolve) => {
@@ -1549,7 +1686,7 @@ if [ -n "\${SANDBOX_FIXTURE_B64:-}" ]; then
   # Fixture-demo mode (RFC-0043 AQ2 live demo — option B). The trusted base
   # tree is a tiny zero-dependency repo supplied as a base64 gzip tarball via
   # the SANDBOX_FIXTURE_B64 env var. This is offline-safe under --network=none
-  # (no clone, no dependency install). We materialize it into repo/ and let the
+  # (no clone, no dependency fetch). We materialize it into repo/ and let the
   # existing base-test → git-apply → head-test sequence run against it.
   # NOTE: 'git apply' applies to plain working files and does NOT require a git
   # repository, so no 'git init' is needed (keeps the image footprint minimal).
@@ -1560,11 +1697,18 @@ if [ -n "\${SANDBOX_FIXTURE_B64:-}" ]; then
     exit 1
   fi
 elif [ -d "${SANDBOX_BASE_DIR}" ]; then
-  # Staged base tree (AISDLC-1267): the host exports the base commit and mounts
-  # it read-only. Copy it into the writable workspace so the upstream suite
-  # runs against the base, then the diff is applied for the head run.
+  # Staged base tree (AISDLC-1267): the host exports the base commit, the fetch
+  # container prepares its dependencies (AISDLC-1291), and the result is mounted
+  # read-only. Copy the sources into the writable workspace so the diff can be
+  # applied; every node_modules directory stays on the read-only mount (the
+  # workspace is noexec, so native binaries must run from there) and is linked in.
   mkdir -p repo
-  cp -R "${SANDBOX_BASE_DIR}/." repo/
+  (cd "${SANDBOX_BASE_DIR}" && tar cf - --exclude=node_modules .) | (cd repo && tar xf -)
+  find "${SANDBOX_BASE_DIR}" -name node_modules -type d -prune | while IFS= read -r nm; do
+    rel="\${nm#${SANDBOX_BASE_DIR}/}"
+    mkdir -p "repo/$(dirname "$rel")"
+    ln -s "$nm" "repo/$rel"
+  done
   cd repo
 elif echo "$UPSTREAM_REF" | grep -qE '^(https?|git|ssh)://|^git@'; then
   # URL path: clone then check out the pinned base SHA (baseSha) if supplied.
@@ -1589,16 +1733,6 @@ else
     printf '{"upstreamPassed":false,"upstreamOutput":"base repo not available","headPassed":false,"headOutput":"","coveragePct":0}\\n'
     exit 1
   fi
-fi
-
-# ── 2. Install dependencies for the BASE tree (offline where possible) ──────────
-if [ -f "pnpm-lock.yaml" ]; then
-  pnpm install --frozen-lockfile --offline 2>&1 || \
-  pnpm install --frozen-lockfile 2>&1 || true
-elif [ -f "package-lock.json" ]; then
-  npm ci --prefer-offline 2>&1 || true
-elif [ -f "yarn.lock" ]; then
-  yarn install --frozen-lockfile --offline 2>&1 || true
 fi
 
 # ── 3. Run the upstream (base) test suite BEFORE applying the diff ───────────────
@@ -1647,16 +1781,9 @@ if ! git apply --reject --ignore-whitespace "$DIFF_FILE" 2>&1; then
   exit 1
 fi
 
-# ── 5. Install dependencies for the HEAD tree (after diff applied) ───────────────
-# Re-run install in case the PR modified lock files or package.json.
-if [ -f "pnpm-lock.yaml" ]; then
-  pnpm install --frozen-lockfile --offline 2>&1 || \
-  pnpm install --frozen-lockfile 2>&1 || true
-elif [ -f "package-lock.json" ]; then
-  npm ci --prefer-offline 2>&1 || true
-elif [ -f "yarn.lock" ]; then
-  yarn install --frozen-lockfile --offline 2>&1 || true
-fi
+# Dependencies come from the fetch container (AISDLC-1291); the head tree's
+# dependencies are always those of the base tree because package.json and
+# lockfiles are protected paths. This no-network container fetches nothing.
 
 # ── 6. Run the head (PR) test suite with coverage ──────────────────────────────
 # headPassed reflects the PATCHED tree (post-apply). Coverage is forwarded as a
@@ -1690,6 +1817,112 @@ echo "${DIFFERENTIAL_RESULT_SENTINEL}"
 printf '{"upstreamPassed":%s,"upstreamOutput":"%s","headPassed":%s,"headOutput":"%s","coveragePct":%s}\\n' \\
   "$UPSTREAM_PASSED" "$safe_upstream" "$HEAD_PASSED" "$safe_head" "$COVERAGE_PCT"
 `;
+}
+
+// ── Fetch container (AISDLC-1291) ─────────────────────────────────────────────
+
+/** Mount points inside the fetch container. */
+export const FETCH_BASE_DIR = '/sandbox/base';
+export const FETCH_OUT_DIR = '/sandbox/prepared';
+
+/** pnpm version used when the base tree declares no `packageManager`. */
+export const DEFAULT_PNPM_VERSION = 'latest';
+
+/**
+ * Read the pnpm version from `packageManager` of the base tree's package.json
+ * (`pnpm@10.4.1+sha512...` -> `10.4.1`). Falls back to `DEFAULT_PNPM_VERSION`
+ * when the field is absent, not pnpm, or malformed.
+ */
+export function resolvePnpmVersion(baseTreeDir: string): string {
+  try {
+    const pkg = JSON.parse(readFileSync(join(baseTreeDir, 'package.json'), 'utf8')) as {
+      packageManager?: unknown;
+    };
+    if (typeof pkg.packageManager === 'string') {
+      const m = /^pnpm@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\+.*)?$/.exec(pkg.packageManager);
+      if (m) return m[1]!;
+    }
+  } catch {
+    // no package.json or unparseable: fall through to the default
+  }
+  return DEFAULT_PNPM_VERSION;
+}
+
+/**
+ * In-container script for the fetch container: copy the base tree into the
+ * output mount and install its dependencies with network access. The pnpm
+ * version is validated by `resolvePnpmVersion` before interpolation.
+ */
+export function buildFetchScript(pnpmVersion: string): string {
+  if (!/^(latest|\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)$/.test(pnpmVersion)) {
+    throw new Error(`buildFetchScript: invalid pnpm version '${pnpmVersion}'`);
+  }
+  return `set -e
+export HOME=/tmp/home COREPACK_HOME=/tmp/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=true
+mkdir -p "$HOME" "$COREPACK_HOME"
+cp -R "${FETCH_BASE_DIR}/." "${FETCH_OUT_DIR}/"
+cd "${FETCH_OUT_DIR}"
+if [ -f pnpm-lock.yaml ]; then
+  corepack prepare pnpm@${pnpmVersion} --activate
+  corepack pnpm install --frozen-lockfile
+elif [ -f package-lock.json ]; then
+  npm ci
+fi
+`;
+}
+
+export interface FetchDockerArgsInput {
+  resourceLimits: ResourceLimits;
+  image: string;
+  /** Unique container name so the driver can `docker rm -f` it on abort. */
+  containerName: string;
+  /** Host dir holding the exported base tree; mounted read-only. */
+  baseTreeDir: string;
+  /** Host dir receiving the prepared tree; mounted read-write. */
+  outDir: string;
+  pnpmVersion: string;
+  /**
+   * `uid:gid` the fetch container runs as. Defaults to 65534:65534; the driver
+   * passes the host user so it can chmod and remove the files the install wrote.
+   */
+  user?: string;
+}
+
+/**
+ * Docker arguments for the fetch container. It has network access (to install
+ * dependencies of the base tree, which is a commit of main) but sees ONLY the
+ * base tree: no PR diff, no fixture, no proxy host entry, no secret.
+ */
+export function buildFetchDockerArgs(opts: FetchDockerArgsInput): string[] {
+  const { resourceLimits, image, containerName, baseTreeDir, outDir, pnpmVersion, user } = opts;
+  return [
+    'run',
+    '--rm',
+    '--name',
+    containerName,
+    '--cap-drop=ALL',
+    '--read-only',
+    '--tmpfs',
+    '/tmp:rw,nosuid,size=1g',
+    '--pids-limit',
+    '512',
+    '--memory',
+    `${resourceLimits.memoryMb}m`,
+    '--cpus',
+    String(resourceLimits.cpuCores),
+    '--user',
+    user ?? '65534:65534',
+    '--security-opt',
+    'no-new-privileges',
+    '-v',
+    `${baseTreeDir}:${FETCH_BASE_DIR}:ro`,
+    '-v',
+    `${outDir}:${FETCH_OUT_DIR}:rw`,
+    image,
+    '/bin/sh',
+    '-c',
+    buildFetchScript(pnpmVersion),
+  ];
 }
 
 // ── Docker argument builder (exported for unit-test assertions) ───────────────
