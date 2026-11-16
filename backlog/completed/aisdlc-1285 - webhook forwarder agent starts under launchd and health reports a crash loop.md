@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1285
 title: 'Webhook forwarder agent starts under launchd, and health stops calling a crash-looping forwarder healthy'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-16'
 labels:
