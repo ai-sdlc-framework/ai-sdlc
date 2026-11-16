@@ -87,16 +87,32 @@ From the contributor's perspective, UCVG is largely invisible for normal PRs. Th
 If a PR modifies protected paths (`.github/workflows/**`, `package.json`, lockfiles, `.ai-sdlc/**`), it is automatically blocked **before any LLM or sandbox runs**. The contributor sees:
 
 - A `needs-maintainer-review` label applied to the PR.
-- A comment listing the protected paths:
+- A comment that lists each blocked path under the reason it was blocked. The reason is one of three:
+  - `protected-path`: the path matches a protected pattern (CI config, dependency manifests and lockfiles, `.ai-sdlc/**`).
+  - `file-type-not-allowed`: the path is not protected, but its file type is not one untrusted contributors may change (for example a `.py` file). A maintainer reviews it by hand.
+  - `invalid-path`: the path could not be read as a normal repository path (for example it escapes the repository root). A maintainer reviews it by hand.
+
+  A comment for a PR that touches one of each:
 
   > **Protected-path gate blocked this PR**
   >
   > @contributor — this PR modifies files that require maintainer review.
   >
   > The following paths are protected and may not be changed by untrusted contributors:
+  >
   > - `.github/workflows/ci.yml`
   >
+  > The following files are not a file type untrusted contributors may change. They are not protected paths; a maintainer reviews them by hand:
+  >
+  > - `scripts/run.py`
+  >
+  > The following paths could not be read as a normal repository path, so a maintainer reviews them by hand:
+  >
+  > - `../escape.ts`
+  >
   > This PR has been labeled `needs-maintainer-review`. A maintainer will review this PR before any automated processing proceeds.
+
+  Only the sections that apply appear. Paths are printed whole, including any spaces. The comment text is produced by `cli-ucvg ast-gate`; the workflow posts it unchanged.
 
 **For contributors:** If you need to change a protected path (e.g., update a CI workflow), open a discussion with the maintainers. They can apply the change in a separate trusted PR.
 

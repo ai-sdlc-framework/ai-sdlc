@@ -40,10 +40,20 @@ import { load as loadYaml } from 'js-yaml';
 
 export type AstGateOutcome = 'pass' | 'abort-protected-path';
 
+/** Why a path was blocked by Stage 1. */
+export type OffendingPathReason = 'protected-path' | 'file-type-not-allowed' | 'invalid-path';
+
+export interface OffendingPathDetail {
+  path: string;
+  reason: OffendingPathReason;
+}
+
 export interface AstGateResult {
   outcome: AstGateOutcome;
   /** Paths that triggered the abort (empty on pass). */
   offendingPaths: string[];
+  /** The same paths, in the same order, each with the reason it was blocked. */
+  offendingPathReasons: OffendingPathDetail[];
   /** Content heuristic findings that triggered an abort (empty on pass). */
   heuristicFindings: HeuristicFinding[];
 }
@@ -620,26 +630,31 @@ export function runAstGate(
   config: AstGateConfig = DEFAULT_AST_GATE_CONFIG,
 ): AstGateResult {
   const offendingPaths: string[] = [];
+  const offendingPathReasons: OffendingPathDetail[] = [];
   const heuristicFindings: HeuristicFinding[] = [];
+  const block = (path: string, reason: OffendingPathReason): void => {
+    offendingPaths.push(path);
+    offendingPathReasons.push({ path, reason });
+  };
 
   for (const file of changedFiles) {
     // Step 0: Normalize the path — ambiguous/unresolvable paths are DENIED
     const normalizedPath = normalizePath(file.path);
     if (normalizedPath === null) {
-      offendingPaths.push(file.path);
+      block(file.path, 'invalid-path');
       continue;
     }
 
     // Step 1: Protected-path check (deny wins)
     if (matchesAnyGlob(normalizedPath, config.protectedPaths)) {
-      offendingPaths.push(file.path);
+      block(file.path, 'protected-path');
       // Continue to collect ALL offending paths (don't abort early)
       continue;
     }
 
     // Step 2: Allowed-mutation check
     if (!matchesAnyGlob(normalizedPath, config.allowedMutationGlobs)) {
-      offendingPaths.push(file.path);
+      block(file.path, 'file-type-not-allowed');
       continue;
     }
 
@@ -676,12 +691,13 @@ export function runAstGate(
   const hasViolations = offendingPaths.length > 0 || heuristicFindings.length > 0;
 
   if (!hasViolations) {
-    return { outcome: 'pass', offendingPaths: [], heuristicFindings: [] };
+    return { outcome: 'pass', offendingPaths: [], offendingPathReasons: [], heuristicFindings: [] };
   }
 
   return {
     outcome: 'abort-protected-path',
     offendingPaths,
+    offendingPathReasons,
     heuristicFindings,
   };
 }
@@ -739,18 +755,35 @@ export function buildBlockedComment(gateResult: AstGateResult, author: string): 
     '',
   ];
 
-  if (gateResult.offendingPaths.length > 0) {
-    lines.push(
+  const byReason = (reason: OffendingPathReason): string[] =>
+    gateResult.offendingPathReasons.filter((d) => d.reason === reason).map((d) => d.path);
+  const sections: Array<[OffendingPathReason, string]> = [
+    [
+      'protected-path',
       'The following paths are protected and may not be changed by untrusted contributors:',
-    );
+    ],
+    [
+      'file-type-not-allowed',
+      'The following files are not a file type untrusted contributors may change. They are not protected paths; a maintainer reviews them by hand:',
+    ],
+    [
+      'invalid-path',
+      'The following paths could not be read as a normal repository path, so a maintainer reviews them by hand:',
+    ],
+  ];
+  for (const [reason, heading] of sections) {
+    const paths = byReason(reason);
+    if (paths.length === 0) continue;
+    lines.push(heading, '');
+    for (const path of paths) lines.push(`- \`${path}\``);
     lines.push('');
-    for (const path of gateResult.offendingPaths) {
-      lines.push(`- \`${path}\``);
-    }
+  }
+  if (gateResult.offendingPathReasons.length === 0 && gateResult.heuristicFindings.length === 0) {
+    lines.push('- (see workflow logs for details)', '');
   }
 
   if (gateResult.heuristicFindings.length > 0) {
-    lines.push('', 'The following content heuristics also triggered:');
+    lines.push('The following content heuristics also triggered:');
     for (const finding of gateResult.heuristicFindings) {
       lines.push(`- \`${finding.path}\`: ${finding.detail}`);
     }

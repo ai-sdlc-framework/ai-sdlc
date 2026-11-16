@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1288
 title: 'Untrusted PR gate comment says why each file was blocked: protected path or file type not allowed'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-16'
 labels:

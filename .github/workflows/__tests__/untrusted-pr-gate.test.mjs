@@ -553,6 +553,20 @@ describe('AC#11 — Stage 1 blocks protected-path mutations (zero LLM, zero sand
     );
   });
 
+  it('Stage 1 block step posts the comment produced by cli-ucvg, with no copy of its sentences', () => {
+    const postStep = allSteps(wf).find(
+      ({ step }) => step.name === 'Stage 1 — Post block comment + label (protected-path abort)',
+    );
+    assert.ok(postStep, 'Stage 1 post-comment step must exist');
+    const script = String(postStep.step.with?.script ?? '');
+    assert.match(script, /readFileSync\(process\.env\.COMMENT_FILE/);
+    assert.doesNotMatch(script, /are protected and may not be changed/);
+    assert.doesNotMatch(script, /require maintainer review/);
+    assert.doesNotMatch(script, /open a discussion/);
+    const gateStep = allSteps(wf).find(({ step }) => step.id === 'ast-gate');
+    assert.match(String(gateStep.step.run), /d\.get\('comment'/);
+  });
+
   it('Stage 1 guard condition prevents sandbox-and-review from running on abort', () => {
     const sandboxJob = wf.jobs?.['sandbox-and-review'];
     const cond = String(sandboxJob?.if ?? '');
