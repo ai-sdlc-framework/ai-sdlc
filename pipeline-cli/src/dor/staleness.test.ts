@@ -110,6 +110,16 @@ describe('renderStalenessWarning', () => {
     expect(body).toContain('next 14 days');
   });
 
+  it('tells the author that editing reruns the check and names no comment command', () => {
+    const body = renderStalenessWarning(
+      { issueId: 'AISDLC-1', lastAuthorActivityAt: daysAgo(15) },
+      28,
+      14,
+    );
+    expect(body).not.toContain('/dor-recheck');
+    expect(body).toContain('Editing the issue reruns the readiness check');
+  });
+
   it('floors the remaining days at 1 even when warn≈close', () => {
     const body = renderStalenessWarning(
       { issueId: 'AISDLC-1', lastAuthorActivityAt: daysAgo(15) },

@@ -33,6 +33,17 @@ task-breakdown PR (the AISDLC-377 phase files) shipped with Gate-3
 unresolved-reference violations on every task and the merge state was
 CLEAN — auto-merge armed against the violations.
 
+## Issue rerun on edit and the bug form default (AISDLC-1287)
+
+`dor-ingress.yml` runs on `issues` with types `opened` and `edited` only; no
+workflow listens for issue comments. Editing the issue is what reruns the
+readiness check, and both the clarification comment and the stale warning say
+so. Gate 1 needs at least one checklist line (`- [ ] ...`), so the bug report
+form (`.github/ISSUE_TEMPLATE/bug-report.yml`) carries a required
+`Acceptance Criteria` field whose default is a two-line checklist: "The
+reported behavior no longer occurs" and "A test covers the fix". A bug filed
+with the defaults passes gate 1.
+
 ## Issue path and Stage B call graph (AISDLC-979)
 
 External GitHub issues enter only through `/ai-sdlc execute gh:<n>` run by a local agent; no CI trigger fires on an issue label (the `ai-eligible` label is removed).
