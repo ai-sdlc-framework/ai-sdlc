@@ -116,7 +116,7 @@ cd my-new-repo
 git init                          # required for org/repo detection
 git remote add origin git@github.com:my-org/my-new-repo.git
 ai-sdlc init                      # walk the wizard
-git add .ai-sdlc .github .husky CLAUDE.md
+git add <paths>   # copy the exact `git add` command init prints under "Next steps"
 git commit -m "chore: bootstrap AI-SDLC config"
 ```
 
@@ -130,7 +130,7 @@ git commit -m "chore: bootstrap AI-SDLC config"
 
 ```bash
 ai-sdlc init --yes --skip-mcp
-git add .ai-sdlc .github .husky CLAUDE.md
+git add <paths>   # copy the exact `git add` command init prints under "Next steps"
 git commit -m "chore: bootstrap AI-SDLC config"
 ```
 

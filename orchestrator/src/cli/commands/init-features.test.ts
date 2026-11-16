@@ -23,7 +23,7 @@ import {
 import { buildWizardFlags } from './init.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -1062,6 +1062,56 @@ describe('renderNextSteps', () => {
 
     // Logged via adapter, not just returned
     expect(state.log.length).toBeGreaterThan(0);
+  });
+
+  describe('AISDLC-1282 next steps accuracy', () => {
+    const sel = { ...NO_FEATURES, branchProtection: true };
+    const empty = { created: [], skipped: [], wouldCreate: [] };
+
+    it('git add names only existing paths (no package.json, no .husky)', () => {
+      const { adapters } = makeStub();
+      const dir = mkdtempSync(join(tmpdir(), 'init-1282-'));
+      try {
+        mkdirSync(join(dir, '.ai-sdlc'));
+        mkdirSync(join(dir, '.github/workflows'), { recursive: true });
+        writeFileSync(join(dir, 'CLAUDE.md'), 'x');
+        const out = renderNextSteps(sel, empty, adapters, dir);
+        const line = out.split('\n').find((l) => l.includes('git add '))!;
+        const paths = line.trim().replace('git add ', '').split(' ');
+        expect(paths).toEqual(['.ai-sdlc', '.github/workflows', 'CLAUDE.md']);
+        for (const p of paths) expect(existsSync(join(dir, p))).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('falls back to "." when nothing exists', () => {
+      const { adapters } = makeStub();
+      const dir = mkdtempSync(join(tmpdir(), 'init-1282-'));
+      try {
+        expect(renderNextSteps(sel, empty, adapters, dir)).toContain('git add .\n');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('skipped branch protection is reported as skipped, not dry-run', () => {
+      const { adapters } = makeStub();
+      const out = renderNextSteps(sel, empty, adapters);
+      expect(out).toContain('skipped');
+      expect(out).not.toContain('dry-run');
+      expect(out).not.toContain('see JSON above');
+    });
+
+    it('a real dry-run keeps the dry-run step', () => {
+      const { adapters } = makeStub();
+      const out = renderNextSteps(
+        sel,
+        { ...empty, branchProtection: { applied: false, bodyJson: '{}' } },
+        adapters,
+      );
+      expect(out).toContain('dry-run');
+    });
   });
 
   it('AC #5: omits feature-specific steps when the feature was not chosen', () => {
