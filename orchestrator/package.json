@@ -56,10 +56,10 @@
   "dependencies": {
     "@ai-sdlc/pipeline-cli": "workspace:*",
     "@ai-sdlc/reference": "workspace:*",
-    "@inquirer/prompts": "^8.7.5",
+    "@inquirer/prompts": "^8.8.0",
     "ajv": "^8.20.0",
-    "better-sqlite3": "^13.0.3",
-    "commander": "^15.0.0",
+    "better-sqlite3": "^13.1.1",
+    "commander": "^15.1.0",
     "franc": "^6.2.0",
     "yaml": "^2.9.1"
   },
