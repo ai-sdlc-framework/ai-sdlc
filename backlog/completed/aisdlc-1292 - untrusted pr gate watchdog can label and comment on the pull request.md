@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1292
 title: 'Untrusted PR gate watchdog can label and comment on the pull request when a later stage fails'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-16'
 labels:
