@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1280
 title: 'Pipeline schema no longer requires the deprecated `spec.stages`'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-16'
 labels:
