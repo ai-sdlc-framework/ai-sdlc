@@ -139,6 +139,10 @@ export interface HierarchyDeps {
   /** Liveness probe for a pid, used by the cross-project collision check. Absent: `process.kill(pid, 0)`. */
   /** Whether 127.0.0.1:<port> can be bound (webhook port selection); default probes with node. */
   isPortFree?: (port: number) => boolean;
+  /** Whether a file is an executable regular file (forwarder `gh` lookup). Absent: `fs.accessSync(X_OK)`. */
+  isExecutable?: (file: string) => boolean;
+  /** Blocks for `ms` (forwarder start settle). Absent: `Atomics.wait`. */
+  sleepMs?: (ms: number) => void;
   isAlive?: (pid: number) => boolean;
   /** Whether nvm has the given node version installed. Absent: looks under `$NVM_DIR/versions/node`. */
   nodeInstalled?: (version: string) => boolean;
