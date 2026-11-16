@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1281
 title: '`ai-sdlc init` scaffolds a pipeline without the deprecated `spec.stages`, so a fresh config loads without a warning'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-16'
 labels:
