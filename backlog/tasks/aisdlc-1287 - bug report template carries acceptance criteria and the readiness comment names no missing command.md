@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1287
 title: 'Bug report template carries acceptance criteria, and the readiness comment stops naming a command that does not exist'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-16'
 labels:
