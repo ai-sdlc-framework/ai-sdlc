@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1289
 title: 'Dependabot covers the Go modules of sdk-go with grouped weekly updates and the bot label'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-16'
 labels:
