@@ -555,3 +555,42 @@ describe('executeFixCI()', () => {
     ).rejects.toThrow('does not match ai-sdlc/issue-<id> pattern');
   });
 });
+
+describe('AISDLC-1281 — Pipeline without spec.stages', () => {
+  it('executeFixCI runs without throwing', async () => {
+    vi.clearAllMocks();
+    process.env.GITHUB_TOKEN = '';
+    const { execFile } = await import('node:child_process');
+    vi.mocked(execFile).mockImplementation(((
+      _cmd: unknown,
+      args: string[],
+      _opts: unknown,
+      cb?: (err: null, stdout: string, stderr: string) => void,
+    ) => {
+      cb?.(null, args?.[0] === 'branch' ? 'ai-sdlc/issue-42\n' : '', '');
+      return { stdout: '', stderr: '' };
+    }) as unknown as typeof execFile);
+    const { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { parse, stringify } = await import('yaml');
+    const tmp = mkdtempSync(resolve(tmpdir(), 'no-stages-'));
+    try {
+      cpSync(CONFIG_DIR, tmp, { recursive: true });
+      const file = resolve(tmp, 'pipeline.yaml');
+      const doc = parse(readFileSync(file, 'utf-8'));
+      delete doc.spec.stages;
+      writeFileSync(file, stringify(doc));
+      await executeFixCI(100, 5555, {
+        configDir: tmp,
+        workDir: '/tmp/test-repo',
+        runner: makeMockRunner(),
+        logger: makeSilentLogger(),
+        _prComments: [],
+        _ciLogs: 'Error: lint failed',
+        auditLog: makeMockAuditLog(),
+      });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});

@@ -172,3 +172,14 @@ describe('verifier and classifier agree on the reviewer set (AC5)', () => {
     expect(checkReviewerKindCoverage(c.reviewers, 'three').ok).toBe(true);
   });
 });
+
+describe('cli-init pipeline template (AISDLC-1281)', () => {
+  it('has no deprecated stages block and validates against the Pipeline schema', async () => {
+    const entry = REQUIRED_CONFIG_MANIFEST.find((e) => e.path === '.ai-sdlc/pipeline.yaml')!;
+    const text = entry.render({ org: 'acme', repo: 'widgets' });
+    expect(text).not.toMatch(/^\s*stages:/m);
+    const { load: parse } = await import('js-yaml');
+    const { validate } = await import('@ai-sdlc/reference');
+    expect(validate('Pipeline', parse(text)).valid).toBe(true);
+  });
+});

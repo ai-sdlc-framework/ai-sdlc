@@ -569,3 +569,29 @@ describe('executeFixReview()', () => {
     );
   });
 });
+
+describe('AISDLC-1281 — Pipeline without spec.stages', () => {
+  it('executeFixReview runs without throwing', async () => {
+    const { cpSync, mkdtempSync, readFileSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { parse, stringify } = await import('yaml');
+    const tmp = mkdtempSync(resolve(tmpdir(), 'no-stages-'));
+    try {
+      cpSync(CONFIG_DIR, tmp, { recursive: true });
+      const file = resolve(tmp, 'pipeline.yaml');
+      const doc = parse(readFileSync(file, 'utf-8'));
+      delete doc.spec.stages;
+      writeFileSync(file, stringify(doc));
+      await executeFixReview(42, {
+        configDir: tmp,
+        runner: makeMockRunner(),
+        logger: makeSilentLogger(),
+        auditLog: makeMockAuditLog(),
+        _prComments: [],
+        _reviewFindings: '### Review\n\nPlease add tests.',
+      });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});

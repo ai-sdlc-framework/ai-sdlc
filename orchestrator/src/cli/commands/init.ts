@@ -74,19 +74,6 @@ spec:
       type: github
       config:
         org: your-org
-  stages:
-    - name: validate
-      qualityGates:
-        - default-gates
-    - name: code
-      agent: default-agent
-      timeout: PT30M
-      onFailure:
-        strategy: retry
-        maxRetries: 2
-    - name: review
-      qualityGates:
-        - default-gates
   # backlog: holds settings specific to the backlog-task (/ai-sdlc execute)
   # workflow. These were formerly in a separate pipeline-backlog.yaml file
   # (deprecated by AISDLC-245.5). Slash commands + pipeline-cli readers
