@@ -788,6 +788,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       statuses: write
+      pull-requests: write
       issues: write
 
     steps:
