@@ -464,7 +464,8 @@ export interface EmbeddingSpec {
 export interface PipelineSpec {
   triggers: Trigger[];
   providers: Record<string, Provider>;
-  stages: Stage[];
+  /** @deprecated RFC-0056: optional; replaced by the Workflow document. */
+  stages?: Stage[];
   routing?: Routing;
   branching?: BranchingConfig;
   /** Backlog-workflow overrides. Canonical successor to pipeline-backlog.yaml (AISDLC-245.5). */

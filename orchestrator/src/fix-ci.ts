@@ -193,7 +193,7 @@ export async function executeFixCI(
   const autonomyPolicy = config.autonomyPolicy;
 
   // Derive max fix attempts from pipeline config (code stage onFailure.maxRetries)
-  const codeStage = config.pipeline?.spec.stages.find((s) => s.name === 'code');
+  const codeStage = config.pipeline?.spec.stages?.find((s) => s.name === 'code');
   const maxFixAttempts = codeStage?.onFailure?.maxRetries ?? MAX_FIX_ATTEMPTS;
 
   // Notification templates

@@ -27,9 +27,7 @@ def _agent(name: str) -> AgentRole:
     )
 
 
-def _pipeline(
-    stages: list[Stage] | None = None, name: str = "test"
-) -> Pipeline:
+def _pipeline(stages: list[Stage] | None = None, name: str = "test") -> Pipeline:
     return Pipeline(
         metadata=Metadata(name=name),
         spec=PipelineSpec(
@@ -48,6 +46,25 @@ async def test_empty_stages() -> None:
     )
     reconcile = create_pipeline_reconciler(deps)
     result = await reconcile(_pipeline(stages=[]))
+    assert result.type == "success"
+
+
+@pytest.mark.asyncio
+async def test_absent_stages() -> None:
+    deps = PipelineReconcilerDeps(
+        resolve_agent=lambda n: None,
+        task_fn=lambda a, i: None,
+    )
+    reconcile = create_pipeline_reconciler(deps)
+    pipeline = Pipeline(
+        metadata=Metadata(name="no-stages"),
+        spec=PipelineSpec(
+            triggers=[Trigger(event="push")],
+            providers={"gh": Provider(type="github")},
+        ),
+    )
+    assert pipeline.spec.stages is None
+    result = await reconcile(pipeline)
     assert result.type == "success"
 
 

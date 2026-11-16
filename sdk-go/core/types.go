@@ -204,7 +204,7 @@ type ApprovalStatus struct {
 type PipelineSpec struct {
 	Triggers      []Trigger            `json:"triggers" yaml:"triggers"`
 	Providers     map[string]Provider  `json:"providers" yaml:"providers"`
-	Stages        []Stage              `json:"stages" yaml:"stages"`
+	Stages        []Stage              `json:"stages,omitempty" yaml:"stages,omitempty"`
 	Routing       *RoutingConfig       `json:"routing,omitempty" yaml:"routing,omitempty"`
 	Branching     *BranchingConfig     `json:"branching,omitempty" yaml:"branching,omitempty"`
 	PullRequest   *PullRequestConfig   `json:"pullRequest,omitempty" yaml:"pullRequest,omitempty"`

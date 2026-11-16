@@ -15,7 +15,7 @@ describe('expectedValidity()', () => {
   });
 
   it('returns false for invalid-* files', () => {
-    expect(expectedValidity('invalid-missing-stages.yaml')).toBe(false);
+    expect(expectedValidity('invalid-empty-stages.yaml')).toBe(false);
   });
 
   it('throws for unrecognized naming', () => {

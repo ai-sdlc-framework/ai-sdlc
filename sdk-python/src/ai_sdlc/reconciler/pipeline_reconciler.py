@@ -49,7 +49,7 @@ def create_pipeline_reconciler(
     """Create a reconciler function for Pipeline resources."""
 
     async def reconcile(pipeline: Pipeline) -> ReconcileResult:
-        stages = pipeline.spec.stages
+        stages = pipeline.spec.stages or []
         if not stages:
             return ReconcileSuccess()
 
@@ -62,10 +62,14 @@ def create_pipeline_reconciler(
         for stage in stages:
             # Approval check
             if (
-                stage.approval
-                and stage.approval.required
-                and stage.approval.blocking is not False
-            ) and deps.is_approved and not deps.is_approved(stage.name):
+                (
+                    stage.approval
+                    and stage.approval.required
+                    and stage.approval.blocking is not False
+                )
+                and deps.is_approved
+                and not deps.is_approved(stage.name)
+            ):
                 pipeline.status.phase = "Suspended"
                 pipeline.status.pending_approval = PipelineApprovalStatus(
                     stage=stage.name,
@@ -81,9 +85,7 @@ def create_pipeline_reconciler(
             role = deps.resolve_agent(stage.agent)
             if not role:
                 return ReconcileError(
-                    error=Exception(
-                        f'Agent "{stage.agent}" not found for stage "{stage.name}"'
-                    )
+                    error=Exception(f'Agent "{stage.agent}" not found for stage "{stage.name}"')
                 )
 
             result = await _execute_stage_with_policy(
@@ -113,9 +115,7 @@ async def _execute_stage_with_policy(
     """
     strategy = stage.on_failure.strategy if stage.on_failure else "abort"
     max_retries = (
-        stage.on_failure.max_retries
-        if stage.on_failure and stage.on_failure.max_retries
-        else 1
+        stage.on_failure.max_retries if stage.on_failure and stage.on_failure.max_retries else 1
     )
 
     assert pipeline.status is not None
@@ -132,17 +132,13 @@ async def _execute_stage_with_policy(
 
         try:
             agents = {role.metadata.name: role}
-            result = await execute_orchestration(
-                plan, agents, task_fn, execution_options
-            )
+            result = await execute_orchestration(plan, agents, task_fn, execution_options)
 
             if result.success:
                 return None  # Continue to next stage
 
             # Stage failed
-            failed_step = next(
-                (s for s in result.step_results if s.state == "failed"), None
-            )
+            failed_step = next((s for s in result.step_results if s.state == "failed"), None)
             error_msg = failed_step.error if failed_step else "Unknown error"
 
             if strategy == "continue":
@@ -180,9 +176,9 @@ async def _execute_stage_with_policy(
             )
             return ReconcileError(
                 error=Exception(
-                    f'Pipeline step '
+                    f"Pipeline step "
                     f'"{failed_step.agent if failed_step else "?"}" '
-                    f'failed: {error_msg}'
+                    f"failed: {error_msg}"
                 )
             )
 
@@ -217,15 +213,11 @@ async def _execute_stage_with_policy(
         f'Retry limit reached for stage "{stage.name}"',
     )
     return ReconcileError(
-        error=Exception(
-            f'Stage "{stage.name}" failed after {max_retries} retries'
-        )
+        error=Exception(f'Stage "{stage.name}" failed after {max_retries} retries')
     )
 
 
-def _add_condition(
-    pipeline: Pipeline, ctype: str, reason: str, message: str
-) -> None:
+def _add_condition(pipeline: Pipeline, ctype: str, reason: str, message: str) -> None:
     assert pipeline.status is not None
     if pipeline.status.conditions is None:
         pipeline.status.conditions = []
