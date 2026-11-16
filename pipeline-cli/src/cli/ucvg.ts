@@ -46,7 +46,12 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runReviewerMatrixInContainer } from '../pipeline/reviewer-container.js';
 import { classifyTrust } from '../pipeline/trust-classifier.js';
-import { runAstGate, loadAstGateConfig, buildBlockedEvent } from '../pipeline/ast-gate.js';
+import {
+  runAstGate,
+  loadAstGateConfig,
+  buildBlockedEvent,
+  buildBlockedComment,
+} from '../pipeline/ast-gate.js';
 import type { ChangedFile } from '../pipeline/ast-gate.js';
 import {
   DEFAULT_MAX_DIFF_BYTES,
@@ -178,7 +183,12 @@ async function runAstGateCli(args: {
 
     if (paths.length === 0) {
       // No changed files → trivially pass
-      emit({ outcome: 'pass', offendingPaths: [], heuristicFindings: [] });
+      emit({
+        outcome: 'pass',
+        offendingPaths: [],
+        offendingPathReasons: [],
+        heuristicFindings: [],
+      });
       return;
     }
 
@@ -196,7 +206,9 @@ async function runAstGateCli(args: {
     emit({
       outcome: result.outcome,
       offendingPaths: result.offendingPaths,
+      offendingPathReasons: result.offendingPathReasons,
       heuristicFindings: result.heuristicFindings,
+      comment: buildBlockedComment(result, args.author),
     });
 
     if (result.outcome === 'abort-protected-path') {
@@ -218,7 +230,17 @@ async function runAstGateCli(args: {
     emit({
       outcome: 'abort-protected-path',
       offendingPaths: [],
+      offendingPathReasons: [],
       heuristicFindings: [],
+      comment: buildBlockedComment(
+        {
+          outcome: 'abort-protected-path',
+          offendingPaths: [],
+          offendingPathReasons: [],
+          heuristicFindings: [],
+        },
+        args.author,
+      ),
       configError: (err as Error).message,
     });
     process.exit(1);
