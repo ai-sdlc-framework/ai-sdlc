@@ -109,6 +109,7 @@ allowedMutationGlobs:
 contentHeuristics:
   packageJsonLifecycleScripts: abort  # preinstall/postinstall/prepare added → abort
   newGithubActionUses: abort          # any new `uses:` reference → abort
+maxDiffBytes: 200000                  # default; size cap on the PR diff
 ```
 
 **Deny wins.** A protected-path match takes priority over an
