@@ -116,7 +116,7 @@ cd my-new-repo
 git init                          # required for org/repo detection
 git remote add origin git@github.com:my-org/my-new-repo.git
 ai-sdlc init                      # walk the wizard
-git add .ai-sdlc .github .husky CLAUDE.md
+git add <paths>   # copy the exact `git add` command init prints under "Next steps"
 git commit -m "chore: bootstrap AI-SDLC config"
 ```
 
@@ -130,7 +130,7 @@ git commit -m "chore: bootstrap AI-SDLC config"
 
 ```bash
 ai-sdlc init --yes --skip-mcp
-git add .ai-sdlc .github .husky CLAUDE.md
+git add <paths>   # copy the exact `git add` command init prints under "Next steps"
 git commit -m "chore: bootstrap AI-SDLC config"
 ```
 
@@ -179,6 +179,12 @@ After scaffolding:
 1. Enable "Allow auto-merge" in GitHub Settings → General.
 2. Add an `AI_SDLC_PAT` repository secret with write access (used by `auto-enable-auto-merge.yml`).
 3. Commit and push the 4 workflow files.
+
+## Scaffolded workflows assume Node/pnpm
+
+The scaffolded `ai-sdlc-gate.yml` has `lint`, `build-test` and `coverage` jobs that run `pnpm install --frozen-lockfile` and pnpm scripts, and the `ai-sdlc/pr-ready` rollup needs all three. `dor-ingress.yml` has the same setup and install steps. The templates are the same for every project type.
+
+A repository without `package.json` (for example a Python project) must replace the pnpm setup, install and script steps in those jobs with its own commands (for example the `uv` commands in `.ai-sdlc/verification.yaml`), or the jobs fail and `ai-sdlc/pr-ready` never goes green. When init scaffolds these workflows into a repository without `package.json`, it prints a note naming each affected workflow.
 
 ## Verification commands (`.ai-sdlc/verification.yaml`)
 

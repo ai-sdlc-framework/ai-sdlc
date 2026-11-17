@@ -34,6 +34,17 @@ body:
       label: Actual Behavior
       description: What actually happened.
 
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Define what "fixed" looks like. Keep at least one checklist line; the readiness check needs it.
+      value: |
+        - [ ] The reported behavior no longer occurs
+        - [ ] A test covers the fix
+    validations:
+      required: true
+
   - type: dropdown
     id: complexity
     attributes:

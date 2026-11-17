@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1282
 title: '`ai-sdlc init` next steps: the printed `git add` works in the repository, and a skipped branch protection is reported as skipped'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-16'
 labels:

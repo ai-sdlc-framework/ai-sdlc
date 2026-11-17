@@ -256,8 +256,14 @@ jobs:
           GATE_OUTCOME=$(echo "$AST_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('outcome','abort-protected-path'))" 2>/dev/null || echo "abort-protected-path")
           OFFENDING=$(echo "$AST_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(' '.join(d.get('offendingPaths',[])))" 2>/dev/null || echo "")
 
+          # The comment text is rendered by cli-ucvg (one function, one wording);
+          # the next step posts the file untouched.
+          COMMENT_FILE="${RUNNER_TEMP:-/tmp}/stage1-block-comment.md"
+          echo "$AST_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); sys.stdout.write(d.get('comment',''))" > "$COMMENT_FILE" 2>/dev/null || : > "$COMMENT_FILE"
+
           echo "outcome=$GATE_OUTCOME" >> "$GITHUB_OUTPUT"
           echo "offending_paths=$OFFENDING" >> "$GITHUB_OUTPUT"
+          echo "comment_file=$COMMENT_FILE" >> "$GITHUB_OUTPUT"
           echo "[stage-1] outcome=$GATE_OUTCOME offending_paths=$OFFENDING"
 
           if [[ "$GATE_OUTCOME" == "abort-protected-path" || $AST_CODE -ne 0 ]]; then
@@ -272,33 +278,22 @@ jobs:
           steps.ast-gate.outputs.outcome == 'abort-protected-path'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          OFFENDING_PATHS: ${{ steps.ast-gate.outputs.offending_paths }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          COMMENT_FILE: ${{ steps.ast-gate.outputs.comment_file }}
         with:
           github-token: ${{ github.token }}
           script: |
-            // Post block comment and apply needs-maintainer-review label.
-            // The comment names the offending paths so the contributor knows what to change.
-            // No internal tracker IDs in this comment — adopter-facing string.
-            const paths = (process.env.OFFENDING_PATHS || '').split(' ').filter(Boolean);
-            const author = process.env.PR_AUTHOR;
-
-            const pathList = paths.map(p => `- \`${p}\``).join('\n');
-            const body = [
-              '## Protected-path gate blocked this PR',
-              '',
-              `@${author} — this PR modifies files that require maintainer review.`,
-              '',
-              'The following paths are protected and may not be changed by untrusted contributors:',
-              '',
-              pathList || '- (see workflow logs for details)',
-              '',
-              'This PR has been labeled `needs-maintainer-review`. A maintainer will',
-              'review this PR before any automated processing proceeds.',
-              '',
-              'If you believe this change is legitimate, please open a discussion',
-              'with the maintainers.',
-            ].join('\n');
+            // Post the comment text rendered by cli-ucvg and apply the
+            // needs-maintainer-review label. No comment wording lives here.
+            const fs = require('fs');
+            let body = '';
+            try {
+              body = fs.readFileSync(process.env.COMMENT_FILE, 'utf8');
+            } catch (e) {
+              console.log(`Warning: could not read block comment file: ${e.message}`);
+            }
+            if (!body.trim()) {
+              body = 'This PR was blocked by the untrusted PR gate. See the workflow logs.';
+            }
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,

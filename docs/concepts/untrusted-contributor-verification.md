@@ -87,16 +87,32 @@ From the contributor's perspective, UCVG is largely invisible for normal PRs. Th
 If a PR modifies protected paths (`.github/workflows/**`, `package.json`, lockfiles, `.ai-sdlc/**`), it is automatically blocked **before any LLM or sandbox runs**. The contributor sees:
 
 - A `needs-maintainer-review` label applied to the PR.
-- A comment listing the protected paths:
+- A comment that lists each blocked path under the reason it was blocked. The reason is one of three:
+  - `protected-path`: the path matches a protected pattern (CI config, dependency manifests and lockfiles, `.ai-sdlc/**`).
+  - `file-type-not-allowed`: the path is not protected, but its file type is not one untrusted contributors may change (for example a `.py` file). A maintainer reviews it by hand.
+  - `invalid-path`: the path could not be read as a normal repository path (for example it escapes the repository root). A maintainer reviews it by hand.
+
+  A comment for a PR that touches one of each:
 
   > **Protected-path gate blocked this PR**
   >
   > @contributor — this PR modifies files that require maintainer review.
   >
   > The following paths are protected and may not be changed by untrusted contributors:
+  >
   > - `.github/workflows/ci.yml`
   >
+  > The following files are not a file type untrusted contributors may change. They are not protected paths; a maintainer reviews them by hand:
+  >
+  > - `scripts/run.py`
+  >
+  > The following paths could not be read as a normal repository path, so a maintainer reviews them by hand:
+  >
+  > - `../escape.ts`
+  >
   > This PR has been labeled `needs-maintainer-review`. A maintainer will review this PR before any automated processing proceeds.
+
+  Only the sections that apply appear. Paths are printed whole, including any spaces. The comment text is produced by `cli-ucvg ast-gate`; the workflow posts it unchanged.
 
 **For contributors:** If you need to change a protected path (e.g., update a CI workflow), open a discussion with the maintainers. They can apply the change in a separate trusted PR.
 
@@ -115,6 +131,16 @@ For PRs that pass Stage 1, the UCVG sandbox:
 
 - **Fetch container.** Has network access. It sees only the exported base tree (mounted read-only) and an output directory. It receives no PR diff, no fixture, no proxy host entry and no secret. It installs the base tree's dependencies with the pnpm version read from `packageManager` in the base `package.json` (falling back to the latest pnpm when the field is absent), or `npm ci` for an npm lockfile. This is safe because `package.json` and lockfiles are protected paths: the head tree's dependencies are always those of the base commit on `main`. If this install exits non-zero, the gate stops with an error naming the fetch phase: no reviewer runs and no unsigned report is written.
 - **Run container.** The hardened container described above: `--network=none`, `--cap-drop=ALL`, read-only root, seccomp, `no-new-privileges`, user `65534:65534` and `noexec` tmpfs. It mounts the fetch output read-only. Sources are copied into the writable workspace, while every `node_modules` stays on the read-only mount (linked in), so native binaries run from a mount that is not `noexec`. Its script runs no install command.
+
+**Extra suites (`sandboxSuites`).** By default the sandbox runs one command: the Node suite of the repository root. `untrusted-pr-gate.yaml` may list extra suites for other languages under `sandboxSuites`. Each entry has:
+
+- `name`: unique, lowercase; named in the report when the suite fails.
+- `paths`: globs (same syntax as `protectedPaths`) of the files the suite covers.
+- `image`: one stock image pinned by digest (`<repo>:<tag>@sha256:<64 hex>`). An entry whose image has no digest is refused when the configuration is loaded, with a message naming the entry. There is no custom image.
+- `fetchCommand`: runs in the fetch container (network, base tree only), in the prepared copy of the base tree at `/sandbox/prepared`.
+- `testCommand`: runs in the hardened run container (no network), at the root of the patched repository.
+
+The gate runs only what the PR needs. A suite starts, its fetch container included, only when the PR changes a file under its `paths`. The root Node suite starts only when the PR changes a file that belongs to no extra suite. A PR that changes only `sdk-python/**` therefore starts the `python` suite alone; a PR that changes `orchestrator/**` and `sdk-go/**` starts Node and `go`. Every extra-suite run container carries the same hardening as the Node one, and every fetch container receives no diff and no secret. The report passes only when every suite that ran passed on base and on head; when one fails on head, the report output names it. Without a `sandboxSuites` key the gate behaves exactly as before. Dependency manifests such as `pyproject.toml`, `go.mod` and `go.sum` still match no `allowedMutationGlobs` entry, so an outside PR cannot change Python or Go dependencies.
 
 The contributor does not see this directly — the result is reflected in the `ai-sdlc/untrusted-pr-gate` status check.
 

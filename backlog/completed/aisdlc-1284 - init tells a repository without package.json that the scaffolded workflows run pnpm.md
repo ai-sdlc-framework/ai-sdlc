@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1284
 title: '`ai-sdlc init` tells a repository without `package.json` that the scaffolded gate and DoR ingress workflows run pnpm'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-16'
 labels:

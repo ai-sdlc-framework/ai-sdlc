@@ -3798,6 +3798,23 @@ describe('fetch container (AISDLC-1291)', () => {
     expect(fetchArgs).toContain('/tmp/base-x:/sandbox/base:ro');
   });
 
+  it('AISDLC-1294 AC1: fetch /tmp is executable so install scripts can run', () => {
+    const i = fetchArgs.indexOf('--tmpfs');
+    expect(fetchArgs.slice(i, i + 2)).toEqual(['--tmpfs', '/tmp:rw,exec,nosuid,size=1g']);
+  });
+
+  it('AISDLC-1294 AC2: run container keeps noexec on /tmp and the workspace', () => {
+    const runArgs = buildDockerRunArgs({
+      resourceLimits: DEFAULT_RESOURCE_LIMITS,
+      seccompProfileJson: '{}',
+      cidFilePath: '/tmp/cid-x',
+      image: 'node:22',
+      command: ['true'],
+    });
+    expect(runArgs).toContain('/tmp:rw,noexec,nosuid,size=256m');
+    expect(runArgs).toContain('/sandbox/workspace:rw,noexec,nosuid');
+  });
+
   it('AC4: reads pnpm version from packageManager, with and without the field', () => {
     const withPm = mkdtempSync(join(tmpdir(), 'fetch-pm-'));
     writeFileSync(

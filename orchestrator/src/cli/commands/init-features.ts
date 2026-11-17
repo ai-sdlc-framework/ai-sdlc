@@ -52,6 +52,8 @@ import {
   RECOMMENDED_BRANCH_PROTECTION_BODY,
   isBranchProtectionUnavailable,
   resolveOwnerRepoSlug,
+  readConfiguredTargetBranch,
+  resolveProtectedBranch,
 } from './branch-protection-shared.js';
 
 // ── Compliance wizard types (RFC-0022 §7 / AISDLC-324) ───────────────────
@@ -1533,6 +1535,29 @@ export async function applyFeatureSelection(
     }
   }
 
+  // AISDLC-1284: the scaffolded workflows are the Node/pnpm baseline. Tell an
+  // adopter without package.json which ones will fail until edited.
+  if (!flags.dryRun && !adapters.exists(join(projectDir, 'package.json'))) {
+    const pnpmWorkflows: string[] = [];
+    for (const set of templateSets) {
+      for (const [relPath, contents] of Object.entries(set.files)) {
+        if (
+          relPath.startsWith('.github/workflows/') &&
+          result.created.includes(relPath) &&
+          contents.includes('pnpm') &&
+          !pnpmWorkflows.includes(relPath)
+        ) {
+          pnpmWorkflows.push(relPath);
+        }
+      }
+    }
+    if (pnpmWorkflows.length > 0) {
+      adapters.log(
+        `  note: no package.json found; ${pnpmWorkflows.join(', ')} run pnpm install and pnpm scripts. Replace those steps with your project's commands or the jobs will fail.`,
+      );
+    }
+  }
+
   // Pre-push sign hook is a separate concern from the FeatureTemplateSet
   // because it's an APPEND (not a write-from-empty) — adopters often
   // already have a pre-push hook from their existing tooling and we don't
@@ -1847,6 +1872,8 @@ export interface BranchProtectionResult {
    * is the only enforcement. Absent in dry-run or on non-403 errors.
    */
   mode?: 'server' | 'client-side';
+  /** Branch the protection was applied to. */
+  branch?: string;
 }
 
 /**
@@ -1862,7 +1889,7 @@ export { RECOMMENDED_BRANCH_PROTECTION_BODY };
 
 /**
  * Apply (or print, in dry-run) the recommended branch protection rule
- * to the `main` branch of the repo at `projectDir`. AC #6 explicitly
+ * to the target branch of the repo at `projectDir`. AC #6 explicitly
  * requires that `--dry-run` print the JSON without applying.
  *
  * The repo identity (`owner/repo`) is resolved by shelling out to
@@ -1884,8 +1911,11 @@ export async function applyBranchProtection(
     adapters.log('Branch-protection dry-run — would PUT the following body:');
     adapters.log(bodyJson);
     adapters.log('');
-    adapters.log('  endpoint: PUT /repos/{owner}/{repo}/branches/main/protection');
-    adapters.log('  apply with: gh api -X PUT repos/{owner}/{repo}/branches/main/protection ...');
+    const dryBranch = readConfiguredTargetBranch(projectDir) ?? '{branch}';
+    adapters.log(`  endpoint: PUT /repos/{owner}/{repo}/branches/${dryBranch}/protection`);
+    adapters.log(
+      `  apply with: gh api -X PUT repos/{owner}/{repo}/branches/${dryBranch}/protection ...`,
+    );
     return { applied: false, bodyJson };
   }
 
@@ -1900,6 +1930,10 @@ export async function applyBranchProtection(
     };
   }
   const slug = ownerRepo.slug;
+  const branch = resolveProtectedBranch(
+    readConfiguredTargetBranch(projectDir),
+    ownerRepo.defaultBranch,
+  );
 
   // Use the file-based input form so we don't have to thread quoted JSON
   // through a shell. We write to a tmpfile, point gh at it, and let the
@@ -1925,7 +1959,7 @@ export async function applyBranchProtection(
     'api',
     '-X',
     'PUT',
-    `repos/${slug}/branches/main/protection`,
+    `repos/${slug}/branches/${branch}/protection`,
     '--input',
     tmpPath,
   ]);
@@ -1955,7 +1989,7 @@ export async function applyBranchProtection(
     };
   }
 
-  adapters.log(`  applied branch protection to ${slug}:main (server-side enforcement)`);
+  adapters.log(`  applied branch protection to ${slug}:${branch} (server-side enforcement)`);
   adapters.log(
     '  installed: required checks ai-sdlc/pr-ready, codecov/patch + 1 approving review (DEC-0014).',
   );
@@ -1973,7 +2007,7 @@ export async function applyBranchProtection(
     adapters.log('             template ships the approve job.');
   }
   adapters.log('  opt out with: --no-branch-protection');
-  return { applied: true, bodyJson, mode: 'server' };
+  return { applied: true, bodyJson, mode: 'server', branch };
 }
 
 // ── Next-steps summary ───────────────────────────────────────────────────
@@ -1987,10 +2021,29 @@ export async function applyBranchProtection(
  * Returns the rendered summary as a string in addition to logging it,
  * so tests can assert on it without re-stringifying console output.
  */
+/**
+ * Paths init may have written that exist on disk, for the printed `git add`.
+ * Without a project dir, falls back to the always-written baseline.
+ */
+function stageablePaths(projectDir?: string): string[] {
+  const candidates = [
+    '.ai-sdlc',
+    '.github/workflows',
+    '.husky',
+    'CLAUDE.md',
+    '.gitignore',
+    'package.json',
+  ];
+  if (!projectDir) return candidates.slice(0, 2);
+  const found = candidates.filter((c) => existsSync(join(projectDir, c)));
+  return found.length > 0 ? found : ['.'];
+}
+
 export function renderNextSteps(
   selection: FeatureSelection,
   result: ApplyResult,
   adapters: Pick<FeatureAdapters, 'log'>,
+  projectDir?: string,
 ): string {
   const lines: string[] = [];
   lines.push('');
@@ -1999,7 +2052,7 @@ export function renderNextSteps(
 
   // Always present (baseline gate)
   lines.push('1. Commit the scaffolded files:');
-  lines.push('     git add .ai-sdlc .github/workflows package.json');
+  lines.push(`     git add ${stageablePaths(projectDir).join(' ')}`);
   lines.push('     git commit -m "chore: bootstrap AI-SDLC config"');
   lines.push('');
 
@@ -2070,7 +2123,9 @@ export function renderNextSteps(
 
   if (selection.branchProtection) {
     if (result.branchProtection?.applied) {
-      lines.push(`${stepN}. Branch protection on \`main\` was updated (server-side enforcement).`);
+      lines.push(
+        `${stepN}. Branch protection on \`${result.branchProtection.branch ?? 'main'}\` was updated (server-side enforcement).`,
+      );
       lines.push('     Required checks: ai-sdlc/pr-ready, codecov/patch');
       lines.push('     Opt out with: --no-branch-protection');
     } else if (result.branchProtection?.mode === 'client-side') {
@@ -2090,7 +2145,11 @@ export function renderNextSteps(
       lines.push('     After resolving (gh auth login, repo permissions, etc.) re-run:');
       lines.push('     ai-sdlc init --add branch-protection');
     } else {
-      lines.push(`${stepN}. Branch protection (dry-run) — see JSON above; apply with:`);
+      if (result.branchProtection) {
+        lines.push(`${stepN}. Branch protection (dry-run) — see JSON above; apply with:`);
+      } else {
+        lines.push(`${stepN}. Branch protection was skipped (not applied); apply with:`);
+      }
       lines.push('     ai-sdlc init --add branch-protection');
     }
     lines.push('');

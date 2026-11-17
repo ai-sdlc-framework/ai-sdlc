@@ -356,7 +356,7 @@ Operator action: default setup must be disabled or both setups upload duplicate 
 
 ## Adopter scaffolding (sub-5)
 
-The `ai-sdlc init` interactive wizard (planned in AISDLC-140 sub-5) will scaffold this workflow into adopter repos and walk through the cutover procedure interactively. Until that ships, copy `.github/workflows/ai-sdlc-gate.yml` from this repo and adjust the job bodies (especially `Build & Test`, `Coverage`, `Integration Tests`) to match your project's commands.
+`ai-sdlc init` scaffolds this workflow into adopter repos. The scaffolded jobs are the Node/pnpm baseline; adjust the job bodies (especially `Build & Test`, `Coverage`, `Integration Tests`) to match your project's commands. See [`init.md`](init.md#scaffolded-workflows-assume-nodepnpm).
 
 ## References
 

@@ -111,20 +111,6 @@ spec:
       config:
         org: ${org}
         repo: ${repo}
-  stages:
-    - name: code
-      agent: coding-agent
-      timeout: PT10M
-      onFailure:
-        strategy: retry
-        maxRetries: 2
-        retryDelay: PT1M
-    - name: review
-      approval:
-        required: true
-        blocking: true
-        timeout: PT24H
-        onTimeout: abort
 `;
 }
 
@@ -155,7 +141,7 @@ export const REQUIRED_CONFIG_MANIFEST: readonly ConfigEntry[] = [
     id: 'pipeline',
     path: '.ai-sdlc/pipeline.yaml',
     since: '0.1.0',
-    description: 'pipeline definition (provider, stages) the orchestrator runs',
+    description: 'pipeline definition (triggers, providers) the orchestrator runs',
     operatorInput: true,
     prompts: [
       { key: 'org', question: 'GitHub organization or user' },

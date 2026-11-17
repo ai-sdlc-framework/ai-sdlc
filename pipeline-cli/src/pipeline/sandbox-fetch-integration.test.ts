@@ -36,13 +36,24 @@ describe.skipIf(!ENABLED)('fetch container + run container (AISDLC-1291 AC-6)', 
             version: '1.0.0',
             private: true,
             scripts: { test: 'node --test test/' },
-            devDependencies: { esbuild: '0.24.2' },
+            devDependencies: { esbuild: '0.24.2', 'gyp-fixture': 'file:./gyp-fixture' },
+            pnpm: { onlyBuiltDependencies: ['gyp-fixture'] },
           },
           null,
           2,
         ),
       );
       mkdirSync(join(dir, 'test'));
+      // AISDLC-1294: an install script that runs node-gyp needs an executable /tmp in the fetch container.
+      mkdirSync(join(dir, 'gyp-fixture'));
+      writeFileSync(
+        join(dir, 'gyp-fixture', 'package.json'),
+        JSON.stringify({
+          name: 'gyp-fixture',
+          version: '1.0.0',
+          scripts: { install: 'node-gyp --version' },
+        }),
+      );
       // Executes the native esbuild binary: fails if the prepared tree is not runnable.
       writeFileSync(
         join(dir, 'test', 'a.test.js'),

@@ -23,7 +23,7 @@ import {
 import { buildWizardFlags } from './init.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -314,6 +314,24 @@ describe('applyFeatureSelection', () => {
     const gate = state.files.get('/proj/.github/workflows/ai-sdlc-gate.yml');
     expect(gate).toContain('ai-sdlc/pr-ready');
     expect(gate).toContain('re-actors/alls-green');
+  });
+
+  it('AISDLC-1284: warns about pnpm workflows when package.json is absent', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/pyproject.toml', '[project]\n');
+    await applyFeatureSelection('/proj', { ...NO_FEATURES, dor: true }, baseFlags, adapters);
+    const note = state.log.find((l) => l.includes('no package.json found'));
+    expect(note).toBeDefined();
+    expect(note).toContain('.github/workflows/ai-sdlc-gate.yml');
+    expect(note).toContain('.github/workflows/dor-ingress.yml');
+    expect(note).toContain('Replace those steps');
+  });
+
+  it('AISDLC-1284: no pnpm warning when package.json exists', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/package.json', '{}');
+    await applyFeatureSelection('/proj', { ...NO_FEATURES, dor: true }, baseFlags, adapters);
+    expect(state.log.some((l) => l.includes('no package.json found'))).toBe(false);
   });
 
   it('AC #1 (DoR branch): writes dor-config.yaml + dor-ingress.yml when dor=true', async () => {
@@ -742,7 +760,71 @@ describe('applyBranchProtection', () => {
     // The JSON must have been logged.
     const joined = state.log.join('\n');
     expect(joined).toContain('Branch-protection dry-run');
-    expect(joined).toContain('PUT /repos/{owner}/{repo}/branches/main/protection');
+    expect(joined).toContain('PUT /repos/{owner}/{repo}/branches/{branch}/protection');
+  });
+
+  describe('target branch resolution (AISDLC-1283)', () => {
+    const putPath = (state: { runCommandCalls: { cmd: string; args: string[] }[] }) =>
+      state.runCommandCalls
+        .find((c) => c.args.includes('PUT'))
+        ?.args.find((a) => a.startsWith('repos/'));
+
+    const run = async (view: string, pipelineYaml?: string) => {
+      const { state, adapters } = makeStub({
+        runResponses: new Map([
+          ['gh repo view', { stdout: view, exitCode: 0 }],
+          ['gh api', { stdout: '{}', exitCode: 0 }],
+        ]),
+      });
+      const projectDir = mkdtempSync(join(tmpdir(), 'init-bpbranch-'));
+      try {
+        if (pipelineYaml) {
+          mkdirSync(join(projectDir, '.ai-sdlc'), { recursive: true });
+          writeFileSync(join(projectDir, '.ai-sdlc', 'pipeline.yaml'), pipelineYaml);
+        }
+        const result = await applyBranchProtection(projectDir, baseFlags, adapters);
+        return { state, result };
+      } finally {
+        rmSync(projectDir, { recursive: true, force: true });
+      }
+    };
+
+    it('uses the repository default branch (master) when targetBranch is unset', async () => {
+      const { state, result } = await run('owner/repo master\n');
+      expect(putPath(state)).toBe('repos/owner/repo/branches/master/protection');
+      expect(result.branch).toBe('master');
+      expect(state.log.join('\n')).toContain('owner/repo:master');
+    });
+
+    it('prefers spec.branching.targetBranch over the default branch', async () => {
+      const { state } = await run(
+        'owner/repo main\n',
+        'spec:\n  branching:\n    targetBranch: develop\n',
+      );
+      expect(putPath(state)).toBe('repos/owner/repo/branches/develop/protection');
+    });
+
+    it('falls back to main when gh reports no default branch', async () => {
+      const { state } = await run('owner/repo\n');
+      expect(putPath(state)).toBe('repos/owner/repo/branches/main/protection');
+    });
+
+    it('dry-run names the configured target branch and makes no gh call', async () => {
+      const { state, adapters } = makeStub();
+      const projectDir = mkdtempSync(join(tmpdir(), 'init-bpdry-'));
+      try {
+        mkdirSync(join(projectDir, '.ai-sdlc'), { recursive: true });
+        writeFileSync(
+          join(projectDir, '.ai-sdlc', 'pipeline.yaml'),
+          'spec:\n  branching:\n    targetBranch: develop\n',
+        );
+        await applyBranchProtection(projectDir, { ...baseFlags, dryRun: true }, adapters);
+        expect(state.log.join('\n')).toContain('branches/develop/protection');
+        expect(state.runCommandCalls.length).toBe(0);
+      } finally {
+        rmSync(projectDir, { recursive: true, force: true });
+      }
+    });
   });
 
   it('AC #1 (branch-protection branch): the recommended body has the two required checks', () => {
@@ -1062,6 +1144,56 @@ describe('renderNextSteps', () => {
 
     // Logged via adapter, not just returned
     expect(state.log.length).toBeGreaterThan(0);
+  });
+
+  describe('AISDLC-1282 next steps accuracy', () => {
+    const sel = { ...NO_FEATURES, branchProtection: true };
+    const empty = { created: [], skipped: [], wouldCreate: [] };
+
+    it('git add names only existing paths (no package.json, no .husky)', () => {
+      const { adapters } = makeStub();
+      const dir = mkdtempSync(join(tmpdir(), 'init-1282-'));
+      try {
+        mkdirSync(join(dir, '.ai-sdlc'));
+        mkdirSync(join(dir, '.github/workflows'), { recursive: true });
+        writeFileSync(join(dir, 'CLAUDE.md'), 'x');
+        const out = renderNextSteps(sel, empty, adapters, dir);
+        const line = out.split('\n').find((l) => l.includes('git add '))!;
+        const paths = line.trim().replace('git add ', '').split(' ');
+        expect(paths).toEqual(['.ai-sdlc', '.github/workflows', 'CLAUDE.md']);
+        for (const p of paths) expect(existsSync(join(dir, p))).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('falls back to "." when nothing exists', () => {
+      const { adapters } = makeStub();
+      const dir = mkdtempSync(join(tmpdir(), 'init-1282-'));
+      try {
+        expect(renderNextSteps(sel, empty, adapters, dir)).toContain('git add .\n');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('skipped branch protection is reported as skipped, not dry-run', () => {
+      const { adapters } = makeStub();
+      const out = renderNextSteps(sel, empty, adapters);
+      expect(out).toContain('skipped');
+      expect(out).not.toContain('dry-run');
+      expect(out).not.toContain('see JSON above');
+    });
+
+    it('a real dry-run keeps the dry-run step', () => {
+      const { adapters } = makeStub();
+      const out = renderNextSteps(
+        sel,
+        { ...empty, branchProtection: { applied: false, bodyJson: '{}' } },
+        adapters,
+      );
+      expect(out).toContain('dry-run');
+    });
   });
 
   it('AC #5: omits feature-specific steps when the feature was not chosen', () => {
