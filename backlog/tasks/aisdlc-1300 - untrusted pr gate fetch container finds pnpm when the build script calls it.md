@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1300
 title: 'Untrusted PR gate fetch container finds pnpm when the build script calls it'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-17'
 labels:
