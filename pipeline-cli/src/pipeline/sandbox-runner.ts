@@ -2096,6 +2096,8 @@ if [ -f pnpm-lock.yaml ]; then
   corepack pnpm install --frozen-lockfile
   # AISDLC-1296: the run container has no corepack home, so keep pnpm itself in the prepared tree.
   npm install -g --prefix "${FETCH_OUT_DIR}/${SANDBOX_TOOLS_DIR}" pnpm@${pnpmVersion}
+  # AISDLC-1300: a build script that calls pnpm by name needs the launcher on PATH.
+  export PATH="${FETCH_OUT_DIR}/${SANDBOX_TOOLS_DIR}/bin:$PATH"
   if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
     corepack pnpm run build
   fi

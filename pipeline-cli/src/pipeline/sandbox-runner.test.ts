@@ -3916,6 +3916,16 @@ describe('AISDLC-1296: prepared pnpm, build and package scope', () => {
     expect(script).toContain('scripts?.build');
   });
 
+  it('AISDLC-1300: fetch script puts .sandbox-tools/bin on PATH before the build', () => {
+    const script = buildFetchScript('10.4.1');
+    const pathIdx = script.indexOf(
+      'export PATH="/sandbox/prepared/node_modules/.sandbox-tools/bin:$PATH"',
+    );
+    expect(pathIdx).toBeGreaterThan(-1);
+    expect(pathIdx).toBeGreaterThan(script.indexOf('npm install -g'));
+    expect(pathIdx).toBeLessThan(script.indexOf('corepack pnpm run build'));
+  });
+
   it('AC2: run script puts the prepared pnpm first on PATH; docker run args are unchanged', () => {
     const script = buildDifferentialTestScript('a'.repeat(40));
     expect(script).toContain('export PATH="$WORK_DIR/repo/node_modules/.sandbox-tools/bin:$PATH"');
