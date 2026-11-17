@@ -20,7 +20,8 @@ import {
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { TASK_ID_RE } from './board.js';
-import { DOCS_BRANCH_PREFIXES, listLanding } from '../hierarchy/reconcile.js';
+import { listLanding } from '../hierarchy/reconcile.js';
+import { isFilingBranch } from '../hierarchy/filing-branches.js';
 import { UNLAND_LOG } from './unland.js';
 
 const VERDICT_SUFFIX = '.verdict.json';
@@ -37,6 +38,18 @@ export interface RetireLandedInput {
   headBranch?: string;
   /** Landing-record kind of the landed PR, when known; anything but `task` is not a code PR. */
   kind?: string;
+}
+
+/**
+ * True when a landed PR is the task's own code PR (AISDLC-1297). A verdict that names its PR is
+ * retired only by that PR; otherwise the landing must be of kind `task` (or unstated) and not
+ * from a filing/docs branch. Shared by every retire path.
+ */
+export function isOwnCodePr(input: RetireLandedInput, verdictPr?: unknown): boolean {
+  if (typeof verdictPr === 'number') {
+    return input.prNumber === undefined || input.prNumber === verdictPr;
+  }
+  return (input.kind === undefined || input.kind === 'task') && !isFilingBranch(input.headBranch);
 }
 
 /**
@@ -57,15 +70,7 @@ export function retireFailedVerdict(boardDir: string, input: RetireLandedInput):
   }
   if (original['outcome'] === 'success') return false;
   // AISDLC-1177: only the task's own code PR retires its verdict.
-  const verdictPr = original['prNumber'];
-  if (typeof verdictPr === 'number') {
-    if (input.prNumber !== undefined && input.prNumber !== verdictPr) return false;
-  } else if (
-    (input.kind !== undefined && input.kind !== 'task') ||
-    DOCS_BRANCH_PREFIXES.some((p) => (input.headBranch ?? '').startsWith(p))
-  ) {
-    return false;
-  }
+  if (!isOwnCodePr(input, original['prNumber'])) return false;
   const record: Record<string, unknown> = {
     ...original,
     outcome: 'success',
@@ -108,12 +113,7 @@ export function retireBlockedManifest(boardDir: string, input: RetireLandedInput
   const blocked = path.join(boardDir, 'blocked', `${input.taskId}${MANIFEST_SUFFIX}`);
   const doneVerdict = path.join(boardDir, 'done', `${input.taskId}${VERDICT_SUFFIX}`);
   if (!existsSync(blocked) || existsSync(doneVerdict)) return false;
-  if (
-    (input.kind !== undefined && input.kind !== 'task') ||
-    DOCS_BRANCH_PREFIXES.some((p) => (input.headBranch ?? '').startsWith(p))
-  ) {
-    return false;
-  }
+  if (!isOwnCodePr(input)) return false;
   const record: Record<string, unknown> = {
     schemaVersion: 'v1',
     taskId: input.taskId,
@@ -210,22 +210,26 @@ export function retireFailedLanded(boardDir: string, deps: RetireFailedLandedDep
   }
   if (names.length === 0) return [];
   const completed = deps.completedOnMain() ?? new Map<string, string>();
-  const merged = new Map<string, string>();
+  const merged = new Map<
+    string,
+    { pr: number; sha: string; kind?: string; headBranch?: string }[]
+  >();
   for (const r of listLanding(boardDir)) {
-    if (r.landed && r.taskId && (r.kind === undefined || r.kind === 'task')) {
-      merged.set(r.taskId, r.landedSha ?? r.headSha ?? r.landed);
+    if (r.landed && r.taskId) {
+      const list = merged.get(r.taskId) ?? [];
+      list.push({
+        pr: r.pr,
+        sha: r.landedSha ?? r.headSha ?? r.landed,
+        ...(r.kind ? { kind: r.kind } : {}),
+        ...(r.headBranch ? { headBranch: r.headBranch } : {}),
+      });
+      merged.set(r.taskId, list);
     }
   }
   const retired: string[] = [];
   for (const n of names) {
     const taskId = n.slice(0, -VERDICT_SUFFIX.length);
     if (!TASK_ID_RE.test(taskId)) continue;
-    const sha = completed.get(taskId) ?? merged.get(taskId);
-    if (sha === undefined) continue;
-    const at = deps.now().toISOString();
-    const reason = `task landed ${sha}`;
-    const retiredDir = path.join(boardDir, 'retired');
-    mkdirSync(retiredDir, { recursive: true });
     let original: Record<string, unknown>;
     try {
       original = JSON.parse(readFileSync(path.join(failedDir, n), 'utf-8')) as Record<
@@ -235,6 +239,26 @@ export function retireFailedLanded(boardDir: string, deps: RetireFailedLandedDep
     } catch {
       continue;
     }
+    // AISDLC-1297: only the task's own code PR retires a verdict; a filing PR never does.
+    const sha =
+      completed.get(taskId) ??
+      (merged.get(taskId) ?? []).find((m) =>
+        isOwnCodePr(
+          {
+            taskId,
+            landedAt: '',
+            prNumber: m.pr,
+            ...(m.kind ? { kind: m.kind } : {}),
+            ...(m.headBranch ? { headBranch: m.headBranch } : {}),
+          },
+          original['prNumber'],
+        ),
+      )?.sha;
+    if (sha === undefined) continue;
+    const at = deps.now().toISOString();
+    const reason = `task landed ${sha}`;
+    const retiredDir = path.join(boardDir, 'retired');
+    mkdirSync(retiredDir, { recursive: true });
     const dst = path.join(retiredDir, n);
     const tmp = `${dst}.tmp-${process.pid}`;
     writeFileSync(

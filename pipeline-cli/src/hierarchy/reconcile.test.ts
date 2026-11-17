@@ -438,6 +438,25 @@ describe('ownership (AC4)', () => {
     expect(summariseLanding(board)).toBe('');
   });
 
+  it('a merged filing PR naming a task id lands as docs and stores its head branch (AISDLC-1297)', () => {
+    reconcile(
+      [
+        taskPr({
+          prNumber: 2693,
+          taskId: 'AISDLC-1285',
+          title: 'chore(docs): file backlog task AISDLC-1285 (AISDLC-1285)',
+          headBranch: 'ai-sdlc/file-aisdlc-1285',
+          merged: true,
+        }),
+      ],
+      { boardDir: board, execute: () => ({ ran: true }), now: fixedNow },
+    );
+    expect(readLanding(board, 2693)).toMatchObject({
+      kind: 'docs',
+      headBranch: 'ai-sdlc/file-aisdlc-1285',
+    });
+  });
+
   it('completes an inflight iterate-needed task whose PR merged and names it', () => {
     writeManifest(board, {
       schemaVersion: 'v1',
