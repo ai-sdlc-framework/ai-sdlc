@@ -1,0 +1,44 @@
+{
+  "schema": "ai-sdlc/review-verdict/v1",
+  "subject": {
+    "headSha": "47a877f5b47772569f43debeec156ea9735f426d",
+    "treeSha": "fda77e86863ec5d5b0e6fc0f9a85fe939565f75c",
+    "baseSha": "026ed4b304e01ed684f54abfbab65d4976557d21",
+    "repository": "ai-sdlc-framework/ai-sdlc",
+    "pullRequest": 2759
+  },
+  "verdict": "approved",
+  "reviewers": [
+    {
+      "name": "correctness-reviewer",
+      "harness": "claude-code",
+      "model": "",
+      "independenceTier": "none",
+      "verdict": "approved"
+    },
+    {
+      "name": "security-reviewer",
+      "harness": "claude-code",
+      "model": "",
+      "independenceTier": "attested",
+      "verdict": "approved"
+    }
+  ],
+  "coverage": {
+    "policy": "review-policy@builtin",
+    "required": [
+      "correctness-reviewer",
+      "security-reviewer"
+    ],
+    "satisfied": true
+  },
+  "evidence": {
+    "leaves": "leaves.jsonl",
+    "digest": "sha256:c1aee29437a80602d89b3ba5de5ade88b8b7622c5d000ee9324cdfd0d9aa003d"
+  },
+  "issuedBy": {
+    "principal": "pipeline-step-11",
+    "at": "2026-11-17T19:32:39Z"
+  },
+  "carriedForwardFrom": null
+}
