@@ -1235,6 +1235,7 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       resourceLimits.perTestTimeoutSeconds,
       undefined,
       input.suite?.testCommand,
+      workspacePackagesFor(input.baseTreeDir, input.prDiff),
     );
 
     // Fetch phase (AISDLC-1291): install the base tree's dependencies in a
@@ -1746,6 +1747,7 @@ export function buildDifferentialTestScript(
   perTestTimeoutSeconds?: number,
   baseSha?: string,
   suiteTestCommand?: string,
+  changedPackages?: readonly string[],
 ): string {
   // Validate the ref before interpolating into the shell script.
   // Throws if the ref is not a valid SHA or URL — prevents shell injection.
@@ -1765,7 +1767,7 @@ export function buildDifferentialTestScript(
   const suiteSh = suiteTestCommand
     ? `sh -c '${suiteTestCommand.replace(/'/g, "'\\''")} 2>&1'`
     : undefined;
-  const baseTestCmd = suiteSh
+  let baseTestCmd = suiteSh
     ? `${timeoutPrefix} ${suiteSh}`.trim()
     : timeoutPrefix
       ? `${timeoutPrefix} sh -c 'pnpm test 2>&1 || npm test 2>&1'`
@@ -1774,11 +1776,27 @@ export function buildDifferentialTestScript(
   // The test runner command for the head (PR) suite WITH coverage.
   // Coverage is passed as a direct flag to pnpm/npm, not after `--` (which
   // would be consumed by the shell, not forwarded to the test runner).
-  const headTestCmd = suiteSh
+  let headTestCmd = suiteSh
     ? baseTestCmd
     : timeoutPrefix
       ? `${timeoutPrefix} sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'`
       : "sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'";
+
+  // Workspace tree (AISDLC-1296): test only the packages the diff touches.
+  if (!suiteSh && changedPackages) {
+    if (changedPackages.length === 0) {
+      baseTestCmd = `echo '${NO_PACKAGE_CHANGED_OUTPUT}'`;
+    } else {
+      const cmds = changedPackages.map((dir) => {
+        if (!/^[A-Za-z0-9._/-]+$/.test(dir)) {
+          throw new Error(`buildDifferentialTestScript: invalid package directory '${dir}'`);
+        }
+        return `pnpm --filter ./${dir} test`;
+      });
+      baseTestCmd = `${timeoutPrefix} sh -c '${cmds.join(' && ')} 2>&1'`.trim();
+    }
+    headTestCmd = baseTestCmd;
+  }
 
   // Single-quote-escape the ref for safe interpolation into the sh script.
   // `validateUpstreamMainRef` already rejects any ref that isn't a hex SHA
@@ -1866,6 +1884,9 @@ else
     exit 1
   fi
 fi
+
+# pnpm of the prepared tree (AISDLC-1296): the fetch container installed it here.
+export PATH="$WORK_DIR/repo/${SANDBOX_TOOLS_DIR}/bin:$PATH"
 
 # ── 3. Run the upstream (base) test suite BEFORE applying the diff ───────────────
 # This is the differential invariant: upstreamPassed reflects the BASE tree,
@@ -1957,6 +1978,82 @@ printf '{"upstreamPassed":%s,"upstreamOutput":"%s","headPassed":%s,"headOutput":
 export const FETCH_BASE_DIR = '/sandbox/base';
 export const FETCH_OUT_DIR = '/sandbox/prepared';
 
+/** Directory of the prepared tree that holds pnpm itself (AISDLC-1296). */
+export const SANDBOX_TOOLS_DIR = 'node_modules/.sandbox-tools';
+
+/** Output of a differential run whose diff touches no workspace package. */
+export const NO_PACKAGE_CHANGED_OUTPUT = 'no workspace package changed; nothing to run';
+
+/**
+ * Map diff paths to workspace package directories (AISDLC-1296). The longest
+ * matching directory wins, so `ai-sdlc-plugin/mcp-server/x.ts` gives
+ * `ai-sdlc-plugin/mcp-server`, not `ai-sdlc-plugin`; a path outside every
+ * package gives none. A directory with a character outside `[A-Za-z0-9._/-]`
+ * is refused because it is interpolated into a shell command.
+ */
+export function mapPathsToWorkspacePackages(
+  paths: readonly string[],
+  workspaceDirs: readonly string[],
+): string[] {
+  const dirs = workspaceDirs.map((d) => d.replace(/^\.\//, '').replace(/\/+$/, ''));
+  const out = new Set<string>();
+  for (const p of paths) {
+    let best: string | undefined;
+    for (const d of dirs) {
+      if (d.endsWith('/*')) {
+        const parent = d.slice(0, -2);
+        const m = p.startsWith(`${parent}/`) ? p.slice(parent.length + 1).split('/') : [];
+        if (m.length > 1 && m[0]) {
+          const cand = `${parent}/${m[0]}`;
+          if (!best || cand.length > best.length) best = cand;
+        }
+      } else if (p.startsWith(`${d}/`) && (!best || d.length > best.length)) {
+        best = d;
+      }
+    }
+    if (best !== undefined) {
+      if (!/^[A-Za-z0-9._/-]+$/.test(best)) {
+        throw new Error(`workspace package directory '${best}' has a disallowed character`);
+      }
+      out.add(best);
+    }
+  }
+  return [...out].sort();
+}
+
+/** `packages:` entries of a pnpm-workspace.yaml (the simple list form). */
+export function parseWorkspacePackages(yamlText: string): string[] {
+  const out: string[] = [];
+  let inPackages = false;
+  for (const line of yamlText.split('\n')) {
+    if (/^packages:\s*$/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (inPackages) {
+      const m = /^\s+-\s+['"]?([^'"#\s]+)['"]?\s*(#.*)?$/.exec(line);
+      if (m) {
+        if (!m[1]!.startsWith('!')) out.push(m[1]!);
+      } else if (/^\S/.test(line)) inPackages = false;
+    }
+  }
+  return out;
+}
+
+/** Changed workspace packages, or undefined when the base tree has no workspace file. */
+function workspacePackagesFor(
+  baseTreeDir: string | undefined,
+  prDiff: string,
+): string[] | undefined {
+  if (!baseTreeDir) return undefined;
+  const file = join(baseTreeDir, 'pnpm-workspace.yaml');
+  if (!existsSync(file)) return undefined;
+  return mapPathsToWorkspacePackages(
+    changedPathsFromDiff(prDiff),
+    parseWorkspacePackages(readFileSync(file, 'utf8')),
+  );
+}
+
 /** pnpm version used when the base tree declares no `packageManager`. */
 export const DEFAULT_PNPM_VERSION = 'latest';
 
@@ -1997,6 +2094,11 @@ cd "${FETCH_OUT_DIR}"
 if [ -f pnpm-lock.yaml ]; then
   corepack prepare pnpm@${pnpmVersion} --activate
   corepack pnpm install --frozen-lockfile
+  # AISDLC-1296: the run container has no corepack home, so keep pnpm itself in the prepared tree.
+  npm install -g --prefix "${FETCH_OUT_DIR}/${SANDBOX_TOOLS_DIR}" pnpm@${pnpmVersion}
+  if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
+    corepack pnpm run build
+  fi
 elif [ -f package-lock.json ]; then
   npm ci
 fi

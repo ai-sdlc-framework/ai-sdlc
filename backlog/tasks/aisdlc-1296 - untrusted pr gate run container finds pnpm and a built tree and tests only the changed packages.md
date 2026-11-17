@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1296
 title: 'Untrusted PR gate run container finds pnpm and a built tree, and tests only the changed packages'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-17'
 labels:
