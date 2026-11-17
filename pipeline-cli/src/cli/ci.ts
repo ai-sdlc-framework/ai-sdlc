@@ -246,6 +246,10 @@ export interface SweepOptions {
   dryRun: boolean;
   cwd?: string;
   write: (line: string) => void;
+  /** Run ids whose cancel GitHub refused as already completed; never asked again. */
+  refusedIds?: ReadonlySet<number>;
+  /** Called with a run id whose cancel was refused as already completed. */
+  onRefused?: (id: number) => void;
 }
 
 /** Plan and (unless dry-run) execute a sweep. Returns the decisions. */
@@ -255,8 +259,13 @@ export async function runSweep(opts: SweepOptions): Promise<SweepDecision[]> {
   const openPrs = await listOpenPrHeads(opts.runner, opts.cwd);
   const decisions = planSweep(queued, openPrs);
   let cancelled = 0;
+  let skipped = 0;
   for (const d of decisions) {
     if (d.action !== 'cancel') continue;
+    if (!opts.dryRun && opts.refusedIds?.has(d.run.databaseId)) {
+      skipped++;
+      continue;
+    }
     const label = `${d.run.workflowName} #${d.run.databaseId} (${d.run.event}, ${d.run.headBranch}@${d.run.headSha.slice(0, 7)})`;
     if (opts.dryRun) {
       opts.write(`would cancel ${label}: ${d.reason}`);
@@ -271,8 +280,12 @@ export async function runSweep(opts: SweepOptions): Promise<SweepDecision[]> {
       opts.write(`cancelled ${label}: ${d.reason}`);
       cancelled++;
     } else {
+      if (res.stderr.includes(ALREADY_COMPLETED)) opts.onRefused?.(d.run.databaseId);
       opts.write(`failed to cancel ${label}: ${res.stderr.trim() || `exit ${res.code}`}`);
     }
+  }
+  if (skipped > 0) {
+    opts.write(`skipped ${skipped} run(s) GitHub refused to cancel as already completed`);
   }
   opts.write(
     `${opts.dryRun ? 'dry-run: ' : ''}${cancelled} of ${queued.length} queued run(s) ${opts.dryRun ? 'would be ' : ''}cancelled`,
@@ -283,34 +296,64 @@ export async function runSweep(opts: SweepOptions): Promise<SweepDecision[]> {
 /** The sweep runs at most once per this long per board (AISDLC-960). */
 export const SWEEP_INTERVAL_MS = 15 * 60 * 1000;
 const SWEEP_STAMP = '.ci-sweep.json';
+const ALREADY_COMPLETED = 'Cannot cancel a workflow run that is completed';
+/** The refused-run list keeps only the newest this many ids (AISDLC-1298). */
+export const REFUSED_CAP = 200;
 
-/** True when the board's last sweep is younger than the interval. */
-export function sweepIsFresh(boardDir: string, now: Date): boolean {
+interface SweepStamp {
+  at?: string;
+  refused?: number[];
+}
+
+function readStamp(boardDir: string): SweepStamp {
   try {
-    const at = Date.parse(
-      (JSON.parse(readFileSync(path.join(boardDir, SWEEP_STAMP), 'utf-8')) as { at?: string }).at ??
-        '',
-    );
-    return Number.isFinite(at) && now.getTime() - at < SWEEP_INTERVAL_MS;
+    return JSON.parse(readFileSync(path.join(boardDir, SWEEP_STAMP), 'utf-8')) as SweepStamp;
   } catch {
-    return false;
+    return {};
   }
 }
 
-/** Sweep unless the board's last sweep is fresh; records the time on the board. */
+/** The board dir: the named one, else the default `<cwd>/.ai-sdlc/dispatch`. */
+function resolveBoardDir(boardDir: string | undefined, cwd: string | undefined): string {
+  return (
+    boardDir ??
+    process.env.AI_SDLC_DISPATCH_BOARD_DIR ??
+    path.join(cwd ?? process.cwd(), '.ai-sdlc', 'dispatch')
+  );
+}
+
+/** True when the board's last sweep is younger than the interval. */
+export function sweepIsFresh(boardDir: string, now: Date): boolean {
+  const at = Date.parse(readStamp(boardDir).at ?? '');
+  return Number.isFinite(at) && now.getTime() - at < SWEEP_INTERVAL_MS;
+}
+
+/**
+ * Sweep unless the board's last sweep is fresh; records the time and the runs whose
+ * cancel was refused as completed. Dry-run neither reads the throttle nor writes.
+ */
 export async function runThrottledSweep(
   opts: SweepOptions & { boardDir?: string; now: Date },
 ): Promise<SweepDecision[] | undefined> {
-  const { boardDir } = opts;
-  if (boardDir && !opts.dryRun && sweepIsFresh(boardDir, opts.now)) {
+  if (opts.dryRun) return runSweep(opts);
+  const boardDir = resolveBoardDir(opts.boardDir, opts.cwd);
+  if (sweepIsFresh(boardDir, opts.now)) {
     opts.write('sweep skipped: last sweep is under 15 minutes old');
     return undefined;
   }
-  const decisions = await runSweep(opts);
-  if (boardDir && !opts.dryRun) {
-    mkdirSync(boardDir, { recursive: true });
-    writeFileSync(path.join(boardDir, SWEEP_STAMP), JSON.stringify({ at: opts.now.toISOString() }));
-  }
+  const refused = (readStamp(boardDir).refused ?? []).filter((n) => Number.isInteger(n));
+  const newlyRefused: number[] = [];
+  const decisions = await runSweep({
+    ...opts,
+    refusedIds: new Set(refused),
+    onRefused: (id) => void newlyRefused.push(id),
+  });
+  mkdirSync(boardDir, { recursive: true });
+  const merged = [...new Set([...refused, ...newlyRefused])].slice(-REFUSED_CAP);
+  writeFileSync(
+    path.join(boardDir, SWEEP_STAMP),
+    JSON.stringify({ at: opts.now.toISOString(), refused: merged }),
+  );
   return decisions;
 }
 
@@ -361,7 +404,8 @@ export function buildCiCli(argv: string[] = hideBin(process.argv), deps: CiCliDe
           })
           .option('board-dir', {
             type: 'string',
-            describe: 'Dispatch board; the sweep runs at most once per 15 minutes per board.',
+            describe:
+              'Dispatch board (default .ai-sdlc/dispatch); the sweep runs at most once per 15 minutes per board.',
           }),
       async (args) => {
         await runThrottledSweep({
