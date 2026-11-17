@@ -85,7 +85,6 @@ notification:
     enabled: false # append pending-email record to notifications.jsonl
     recipients: [] # empty list disables email even if enabled: true
 
-
 # ── Pillar owners (RFC-0029 / Stage B / Phase 3) ────────────────────────────
 # Maps pillar roles to operator identifiers (email or login). Used by the
 # actor-routing rubric to surface decisions to the right pillar lead. Omit
