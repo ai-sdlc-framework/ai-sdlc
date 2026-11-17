@@ -391,6 +391,26 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm --filter @ai-sdlc/reference test
+      # AISDLC-1296: run the sandbox against this repository's own tree when
+      # the sandbox code or its configuration changes.
+      - name: Detect sandbox changes
+        id: sandbox_changes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if gh pr view "$PR_NUMBER" --json files --jq '.files[].path' |
+            grep -qE '^(pipeline-cli/src/pipeline/sandbox-|\.ai-sdlc/untrusted-pr-gate\.yaml$|pnpm-lock\.yaml$|package\.json$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Sandbox self-test (this repository)
+        if: steps.sandbox_changes.outputs.run == 'true'
+        env:
+          AI_SDLC_SANDBOX_INTEGRATION_TESTS: '1'
+        run: |
+          start=$(date +%s)
+          pnpm --filter @ai-sdlc/pipeline-cli exec vitest run src/pipeline/sandbox-self-integration.test.ts
+          echo "sandbox self-test duration: $(( $(date +%s) - start ))s"
       # AISDLC-515.1: gVisor needs no /dev/kvm, so it runs on a hosted runner.
       # Install runsc and run the gated differential test through
       # GVisorSandboxDriver. Best-effort: when runsc cannot be installed the
