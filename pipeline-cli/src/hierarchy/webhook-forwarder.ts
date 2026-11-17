@@ -34,7 +34,7 @@ export function forwarderLabel(deps: HierarchyDeps): string {
   return `${FORWARDER_LABEL_PREFIX}.${name ? `${name}-` : ''}${hash}`;
 }
 
-const domain = (label: string): string => `gui/${uid()}/${label}`;
+export const agentDomain = (label: string): string => `gui/${uid()}/${label}`;
 
 export function forwarderPlistPath(deps: HierarchyDeps, label = forwarderLabel(deps)): string {
   const home = deps.env.HOME || os.homedir();
@@ -171,7 +171,7 @@ export interface AgentState {
 /** Read `launchctl print`: loaded is not running (a crash-looping job is loaded, AISDLC-1285). */
 export function forwarderAgentState(deps: HierarchyDeps, label = forwarderLabel(deps)): AgentState {
   try {
-    const r = deps.run('launchctl', ['print', domain(label)], { cwd: deps.cwd });
+    const r = deps.run('launchctl', ['print', agentDomain(label)], { cwd: deps.cwd });
     if (r?.status !== 0) return { loaded: false, running: false, stderr: r?.stderr ?? '' };
     const out = r.stdout ?? '';
     const state = /^\s*state = (.+)$/m.exec(out)?.[1]?.trim();
@@ -195,6 +195,10 @@ export function forwarderAgentAlive(deps: HierarchyDeps, label = forwarderLabel(
 const describeNotRunning = (a: AgentState): string =>
   `state = ${a.state ?? 'unknown'}${a.lastExit ? `, last exit code = ${a.lastExit}` : ''}`;
 
+/** `loaded, not running (last exit 126)`: the status reading of a crash-looping job (AISDLC-1299). */
+export const describeLoadedNotRunning = (a: AgentState): string =>
+  `loaded, not running (${a.lastExit ? `last exit ${a.lastExit}` : `state ${a.state ?? 'unknown'}`})`;
+
 /** `persisted: launchd <label>` or `persisted: no (<reason>)`, from `launchctl print`. */
 export function forwarderPersistence(
   deps: HierarchyDeps,
@@ -205,8 +209,7 @@ export function forwarderPersistence(
   try {
     const a = forwarderAgentState(deps, label);
     if (a.loaded && a.running) return `persisted: launchd ${label}`;
-    if (a.loaded)
-      return `persisted: no (${label} loaded but not running: ${describeNotRunning(a)})`;
+    if (a.loaded) return `persisted: no (${label} ${describeLoadedNotRunning(a)})`;
     const why = (a.stderr ?? '').trim().split('\n')[0];
     return `persisted: no (${label} not loaded${why ? `: ${why}` : ''})`;
   } catch {
@@ -248,7 +251,7 @@ export function installForwarder(
     renderPlist(args, path.join(deps.boardDir, 'webhook-forward.log'), agentPath(deps), label),
     { mode: 0o600 },
   );
-  const dom = domain(label);
+  const dom = agentDomain(label);
   deps.run('launchctl', ['bootout', dom], { cwd: deps.cwd });
   const boot = (): ReturnType<HierarchyDeps['run']> =>
     deps.run('launchctl', ['bootstrap', `gui/${uid()}`, plist], { cwd: deps.cwd });
@@ -287,7 +290,7 @@ export function installForwarder(
 
 /** Unload the agent, delete its plist and any leftover `cli` hook. Best effort. */
 export function removeForwarder(deps: HierarchyDeps, label = forwarderLabel(deps)): void {
-  deps.run('launchctl', ['bootout', domain(label)], { cwd: deps.cwd });
+  deps.run('launchctl', ['bootout', agentDomain(label)], { cwd: deps.cwd });
   rmSync(forwarderPlistPath(deps, label), { force: true });
   try {
     const n = deleteStaleCliHooks(deps, resolveRepo(deps));
