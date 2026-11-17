@@ -180,6 +180,12 @@ After scaffolding:
 2. Add an `AI_SDLC_PAT` repository secret with write access (used by `auto-enable-auto-merge.yml`).
 3. Commit and push the 4 workflow files.
 
+## Scaffolded workflows assume Node/pnpm
+
+The scaffolded `ai-sdlc-gate.yml` has `lint`, `build-test` and `coverage` jobs that run `pnpm install --frozen-lockfile` and pnpm scripts, and the `ai-sdlc/pr-ready` rollup needs all three. `dor-ingress.yml` has the same setup and install steps. The templates are the same for every project type.
+
+A repository without `package.json` (for example a Python project) must replace the pnpm setup, install and script steps in those jobs with its own commands (for example the `uv` commands in `.ai-sdlc/verification.yaml`), or the jobs fail and `ai-sdlc/pr-ready` never goes green. When init scaffolds these workflows into a repository without `package.json`, it prints a note naming each affected workflow.
+
 ## Verification commands (`.ai-sdlc/verification.yaml`)
 
 The developer prompt (Step 5), the verify gate, the Step 10 summary and the Step 11 PR body read the verification commands from a `verification:` block, so a non-Node repo needs no `package.json` shim.

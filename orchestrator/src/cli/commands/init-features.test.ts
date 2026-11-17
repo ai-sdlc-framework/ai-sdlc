@@ -316,6 +316,24 @@ describe('applyFeatureSelection', () => {
     expect(gate).toContain('re-actors/alls-green');
   });
 
+  it('AISDLC-1284: warns about pnpm workflows when package.json is absent', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/pyproject.toml', '[project]\n');
+    await applyFeatureSelection('/proj', { ...NO_FEATURES, dor: true }, baseFlags, adapters);
+    const note = state.log.find((l) => l.includes('no package.json found'));
+    expect(note).toBeDefined();
+    expect(note).toContain('.github/workflows/ai-sdlc-gate.yml');
+    expect(note).toContain('.github/workflows/dor-ingress.yml');
+    expect(note).toContain('Replace those steps');
+  });
+
+  it('AISDLC-1284: no pnpm warning when package.json exists', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/package.json', '{}');
+    await applyFeatureSelection('/proj', { ...NO_FEATURES, dor: true }, baseFlags, adapters);
+    expect(state.log.some((l) => l.includes('no package.json found'))).toBe(false);
+  });
+
   it('AC #1 (DoR branch): writes dor-config.yaml + dor-ingress.yml when dor=true', async () => {
     const { state, adapters } = makeStub();
     await applyFeatureSelection('/proj', { ...NO_FEATURES, dor: true }, baseFlags, adapters);

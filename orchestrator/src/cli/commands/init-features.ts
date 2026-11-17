@@ -1535,6 +1535,29 @@ export async function applyFeatureSelection(
     }
   }
 
+  // AISDLC-1284: the scaffolded workflows are the Node/pnpm baseline. Tell an
+  // adopter without package.json which ones will fail until edited.
+  if (!flags.dryRun && !adapters.exists(join(projectDir, 'package.json'))) {
+    const pnpmWorkflows: string[] = [];
+    for (const set of templateSets) {
+      for (const [relPath, contents] of Object.entries(set.files)) {
+        if (
+          relPath.startsWith('.github/workflows/') &&
+          result.created.includes(relPath) &&
+          contents.includes('pnpm') &&
+          !pnpmWorkflows.includes(relPath)
+        ) {
+          pnpmWorkflows.push(relPath);
+        }
+      }
+    }
+    if (pnpmWorkflows.length > 0) {
+      adapters.log(
+        `  note: no package.json found; ${pnpmWorkflows.join(', ')} run pnpm install and pnpm scripts. Replace those steps with your project's commands or the jobs will fail.`,
+      );
+    }
+  }
+
   // Pre-push sign hook is a separate concern from the FeatureTemplateSet
   // because it's an APPEND (not a write-from-empty) — adopters often
   // already have a pre-push hook from their existing tooling and we don't
