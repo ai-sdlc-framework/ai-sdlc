@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1301
 title: 'PR ready gate runs its checks when a stale draft event arrives for a ready pull request'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-17'
 labels:
