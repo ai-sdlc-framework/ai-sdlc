@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1295
 title: 'Untrusted PR gate allows Python and Go source files of the two SDKs'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-17'
 labels:
