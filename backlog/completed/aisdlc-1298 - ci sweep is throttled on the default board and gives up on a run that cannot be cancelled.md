@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1298
 title: 'CI sweep is throttled on the default board and gives up on a run that cannot be cancelled'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-17'
 labels:
