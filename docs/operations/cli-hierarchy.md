@@ -1244,8 +1244,12 @@ reissues from local files and makes no GitHub call. Its GitHub reads (human-atte
 mark-ready, landing) run at most once per 5 minutes (`GITHUB_READ_INTERVAL_MS`, stamped as
 `lastGithubReadAt` in `operator-dispatch.state.json`), earlier only when the webhook receiver
 touched `<board>/.reconcile-wake` after the last read. The CI sweep runs on its own timer:
-`cli-ci sweep --board-dir "$BOARD_DIR"` runs at most once per 15 minutes per board (stamp
-`<board>/.ci-sweep.json`) and lists runs with `--limit 500`.
+`cli-ci sweep` runs at most once per 15 minutes per board, whether or not `--board-dir` is named
+(the default board is `<cwd>/.ai-sdlc/dispatch`; stamp `<board>/.ci-sweep.json`), and lists runs with
+`--limit 500`. `--dry-run` neither reads nor writes the stamp. A run whose cancel GitHub refuses with
+`Cannot cancel a workflow run that is completed` is recorded in the stamp (newest 200 ids) and is not
+cancelled again; the sweep prints one `skipped` line for them. Any other cancel failure is not recorded
+and is retried on the next sweep (AISDLC-1298).
 
 **Rejected briefs (AISDLC-952).** A brief the board refuses is recorded in
 `operator-dispatch.state.json` as `rejected[<file>] = { mtime, error, parentHead }` (the older

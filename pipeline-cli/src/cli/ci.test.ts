@@ -3,7 +3,7 @@
  * touches the network.
  */
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -362,5 +362,80 @@ describe('throttled sweep (AISDLC-960)', () => {
     const t2 = new Date(t0.getTime() + SWEEP_INTERVAL_MS);
     expect(await runThrottledSweep({ ...base, now: t2 })).toBeDefined();
     expect(calls).toBe(first * 2);
+  });
+});
+
+describe('sweep throttle on the default board and refused runs (AISDLC-1298)', () => {
+  const stale = () => run({ headSha: 'old0000' });
+  function setup(cancelStderr: string) {
+    const cwd = mkdtempSync(path.join(tmpdir(), 'ci-sweep-def-'));
+    const r = stale();
+    const calls: string[][] = [];
+    const runner: Runner = async (_c, args) => {
+      calls.push(args);
+      if (args[0] === 'run' && args[1] === 'list') return ok(JSON.stringify([r]));
+      if (args[0] === 'pr') return ok(JSON.stringify(prJson));
+      return { stdout: '', stderr: cancelStderr, code: 1 };
+    };
+    const lines: string[] = [];
+    const go = (now: Date, dryRun = false) =>
+      runThrottledSweep({ runner, dryRun, cwd, now, write: (l) => void lines.push(l) });
+    const cancels = () => calls.filter((c) => c[1] === 'cancel').length;
+    return { cwd, r, calls, lines, go, cancels };
+  }
+  const ok = (stdout: string): ExecResult => ({ stdout, stderr: '', code: 0 });
+  const t0 = new Date('2026-11-11T12:00:00Z');
+  const later = new Date(t0.getTime() + SWEEP_INTERVAL_MS + 1000);
+
+  it('throttles with no board dir', async () => {
+    const t = setup('x');
+    await t.go(t0);
+    const n = t.calls.length;
+    expect(await t.go(new Date(t0.getTime() + 1000))).toBeUndefined();
+    expect(t.calls.length).toBe(n);
+    expect(t.lines.at(-1)).toBe('sweep skipped: last sweep is under 15 minutes old');
+  });
+
+  it('does not ask again for a run refused as completed', async () => {
+    const t = setup('Cannot cancel a workflow run that is completed');
+    await t.go(t0);
+    expect(t.cancels()).toBe(1);
+    t.lines.length = 0;
+    await t.go(later);
+    expect(t.cancels()).toBe(1);
+    expect(t.lines.filter((l) => l.startsWith('skipped'))).toHaveLength(1);
+  });
+
+  it('retries a run refused for another reason', async () => {
+    const t = setup('HTTP 502 Bad Gateway');
+    await t.go(t0);
+    await t.go(later);
+    expect(t.cancels()).toBe(2);
+  });
+
+  it('dry-run writes no stamp and is never throttled', async () => {
+    const t = setup('x');
+    await t.go(t0, true);
+    expect(existsSync(path.join(t.cwd, '.ai-sdlc', 'dispatch', '.ci-sweep.json'))).toBe(false);
+    await t.go(t0);
+    const n = t.calls.length;
+    await t.go(new Date(t0.getTime() + 1000), true);
+    expect(t.calls.length).toBeGreaterThan(n);
+  });
+
+  it('keeps at most 200 refused ids, dropping the oldest', async () => {
+    const t = setup('Cannot cancel a workflow run that is completed');
+    const dir = path.join(t.cwd, '.ai-sdlc', 'dispatch');
+    mkdirSync(dir, { recursive: true });
+    const old = Array.from({ length: 200 }, (_, i) => 900000 + i);
+    writeFileSync(
+      path.join(dir, '.ci-sweep.json'),
+      JSON.stringify({ at: '2020-01-01T00:00:00Z', refused: old }),
+    );
+    await t.go(t0);
+    const { refused } = JSON.parse(readFileSync(path.join(dir, '.ci-sweep.json'), 'utf-8'));
+    expect(refused).toHaveLength(200);
+    expect(refused).not.toContain(900000);
+    expect(refused.at(-1)).toBe(t.r.databaseId);
   });
 });
