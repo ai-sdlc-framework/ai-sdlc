@@ -742,7 +742,71 @@ describe('applyBranchProtection', () => {
     // The JSON must have been logged.
     const joined = state.log.join('\n');
     expect(joined).toContain('Branch-protection dry-run');
-    expect(joined).toContain('PUT /repos/{owner}/{repo}/branches/main/protection');
+    expect(joined).toContain('PUT /repos/{owner}/{repo}/branches/{branch}/protection');
+  });
+
+  describe('target branch resolution (AISDLC-1283)', () => {
+    const putPath = (state: { runCommandCalls: { cmd: string; args: string[] }[] }) =>
+      state.runCommandCalls
+        .find((c) => c.args.includes('PUT'))
+        ?.args.find((a) => a.startsWith('repos/'));
+
+    const run = async (view: string, pipelineYaml?: string) => {
+      const { state, adapters } = makeStub({
+        runResponses: new Map([
+          ['gh repo view', { stdout: view, exitCode: 0 }],
+          ['gh api', { stdout: '{}', exitCode: 0 }],
+        ]),
+      });
+      const projectDir = mkdtempSync(join(tmpdir(), 'init-bpbranch-'));
+      try {
+        if (pipelineYaml) {
+          mkdirSync(join(projectDir, '.ai-sdlc'), { recursive: true });
+          writeFileSync(join(projectDir, '.ai-sdlc', 'pipeline.yaml'), pipelineYaml);
+        }
+        const result = await applyBranchProtection(projectDir, baseFlags, adapters);
+        return { state, result };
+      } finally {
+        rmSync(projectDir, { recursive: true, force: true });
+      }
+    };
+
+    it('uses the repository default branch (master) when targetBranch is unset', async () => {
+      const { state, result } = await run('owner/repo master\n');
+      expect(putPath(state)).toBe('repos/owner/repo/branches/master/protection');
+      expect(result.branch).toBe('master');
+      expect(state.log.join('\n')).toContain('owner/repo:master');
+    });
+
+    it('prefers spec.branching.targetBranch over the default branch', async () => {
+      const { state } = await run(
+        'owner/repo main\n',
+        'spec:\n  branching:\n    targetBranch: develop\n',
+      );
+      expect(putPath(state)).toBe('repos/owner/repo/branches/develop/protection');
+    });
+
+    it('falls back to main when gh reports no default branch', async () => {
+      const { state } = await run('owner/repo\n');
+      expect(putPath(state)).toBe('repos/owner/repo/branches/main/protection');
+    });
+
+    it('dry-run names the configured target branch and makes no gh call', async () => {
+      const { state, adapters } = makeStub();
+      const projectDir = mkdtempSync(join(tmpdir(), 'init-bpdry-'));
+      try {
+        mkdirSync(join(projectDir, '.ai-sdlc'), { recursive: true });
+        writeFileSync(
+          join(projectDir, '.ai-sdlc', 'pipeline.yaml'),
+          'spec:\n  branching:\n    targetBranch: develop\n',
+        );
+        await applyBranchProtection(projectDir, { ...baseFlags, dryRun: true }, adapters);
+        expect(state.log.join('\n')).toContain('branches/develop/protection');
+        expect(state.runCommandCalls.length).toBe(0);
+      } finally {
+        rmSync(projectDir, { recursive: true, force: true });
+      }
+    });
   });
 
   it('AC #1 (branch-protection branch): the recommended body has the two required checks', () => {

@@ -52,6 +52,8 @@ import {
   RECOMMENDED_BRANCH_PROTECTION_BODY,
   isBranchProtectionUnavailable,
   resolveOwnerRepoSlug,
+  readConfiguredTargetBranch,
+  resolveProtectedBranch,
 } from './branch-protection-shared.js';
 
 // ── Compliance wizard types (RFC-0022 §7 / AISDLC-324) ───────────────────
@@ -1847,6 +1849,8 @@ export interface BranchProtectionResult {
    * is the only enforcement. Absent in dry-run or on non-403 errors.
    */
   mode?: 'server' | 'client-side';
+  /** Branch the protection was applied to. */
+  branch?: string;
 }
 
 /**
@@ -1862,7 +1866,7 @@ export { RECOMMENDED_BRANCH_PROTECTION_BODY };
 
 /**
  * Apply (or print, in dry-run) the recommended branch protection rule
- * to the `main` branch of the repo at `projectDir`. AC #6 explicitly
+ * to the target branch of the repo at `projectDir`. AC #6 explicitly
  * requires that `--dry-run` print the JSON without applying.
  *
  * The repo identity (`owner/repo`) is resolved by shelling out to
@@ -1884,8 +1888,11 @@ export async function applyBranchProtection(
     adapters.log('Branch-protection dry-run — would PUT the following body:');
     adapters.log(bodyJson);
     adapters.log('');
-    adapters.log('  endpoint: PUT /repos/{owner}/{repo}/branches/main/protection');
-    adapters.log('  apply with: gh api -X PUT repos/{owner}/{repo}/branches/main/protection ...');
+    const dryBranch = readConfiguredTargetBranch(projectDir) ?? '{branch}';
+    adapters.log(`  endpoint: PUT /repos/{owner}/{repo}/branches/${dryBranch}/protection`);
+    adapters.log(
+      `  apply with: gh api -X PUT repos/{owner}/{repo}/branches/${dryBranch}/protection ...`,
+    );
     return { applied: false, bodyJson };
   }
 
@@ -1900,6 +1907,10 @@ export async function applyBranchProtection(
     };
   }
   const slug = ownerRepo.slug;
+  const branch = resolveProtectedBranch(
+    readConfiguredTargetBranch(projectDir),
+    ownerRepo.defaultBranch,
+  );
 
   // Use the file-based input form so we don't have to thread quoted JSON
   // through a shell. We write to a tmpfile, point gh at it, and let the
@@ -1925,7 +1936,7 @@ export async function applyBranchProtection(
     'api',
     '-X',
     'PUT',
-    `repos/${slug}/branches/main/protection`,
+    `repos/${slug}/branches/${branch}/protection`,
     '--input',
     tmpPath,
   ]);
@@ -1955,7 +1966,7 @@ export async function applyBranchProtection(
     };
   }
 
-  adapters.log(`  applied branch protection to ${slug}:main (server-side enforcement)`);
+  adapters.log(`  applied branch protection to ${slug}:${branch} (server-side enforcement)`);
   adapters.log(
     '  installed: required checks ai-sdlc/pr-ready, codecov/patch + 1 approving review (DEC-0014).',
   );
@@ -1973,7 +1984,7 @@ export async function applyBranchProtection(
     adapters.log('             template ships the approve job.');
   }
   adapters.log('  opt out with: --no-branch-protection');
-  return { applied: true, bodyJson, mode: 'server' };
+  return { applied: true, bodyJson, mode: 'server', branch };
 }
 
 // ── Next-steps summary ───────────────────────────────────────────────────
@@ -2089,7 +2100,9 @@ export function renderNextSteps(
 
   if (selection.branchProtection) {
     if (result.branchProtection?.applied) {
-      lines.push(`${stepN}. Branch protection on \`main\` was updated (server-side enforcement).`);
+      lines.push(
+        `${stepN}. Branch protection on \`${result.branchProtection.branch ?? 'main'}\` was updated (server-side enforcement).`,
+      );
       lines.push('     Required checks: ai-sdlc/pr-ready, codecov/patch');
       lines.push('     Opt out with: --no-branch-protection');
     } else if (result.branchProtection?.mode === 'client-side') {

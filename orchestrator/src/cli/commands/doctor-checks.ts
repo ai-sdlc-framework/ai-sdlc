@@ -624,7 +624,7 @@ export function checkAttestationGovernanceCheck(ctx: DoctorRunContext): DoctorCh
       title:
         'branch protection requires `ai-sdlc/pr-ready` but not the `Backlog Drift` context — the AISDLC-388 contract needs both',
       remediation:
-        'Add `Backlog Drift` to the required status checks on main (Settings > Branches), or re-run `ai-sdlc init --add branch-protection`',
+        'Add `Backlog Drift` to the required status checks on the protected branch (Settings > Branches), or re-run `ai-sdlc init --add branch-protection`',
       anonymizableEvidence: { state: gov.state, requiresBacklogDrift: false },
     };
   }
