@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1297
 title: "Failed verdict is retired only when the task's own code landed"
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-17'
 labels:
