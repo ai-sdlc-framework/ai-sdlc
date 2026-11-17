@@ -260,6 +260,8 @@ When the board directory holds no manifest or verdict but `backlog/completed/` d
 
 ### `status`
 
+Held-task triage (AISDLC-1244): a queued task held on a dependency is printed as `held: <task> (waits on <dep>) [<class>]`. The class is `waiting` (the dependency is on the board and will run), `operator-gated`, `absent` (the dependency is not on the board), `circular` (the dependency's own dependencies lead back to the held task) or `failed-dependency` (`pipeline-cli/src/hierarchy/held-triage.ts`). A hold that cannot clear on its own (any class but `waiting`) is recorded once in `held/<id>--<dependency>.json` and routed to the planner once.
+
 Verify slots (AISDLC-1087): the machine verify run takes one of two slots under `<board>/verify-slots/` (a dead holder's slot is reclaimed), so at most two executors run a suite at once; the second concurrent run gets `AI_SDLC_VITEST_MAX_WORKERS=2`, a lone run 4. `status` prints a `verify slot <n>: held by pid <p>` line per held slot and nothing when none are held. Pre-push runs share these slots (AISDLC-1186): the hook's `test:coverage` run holds a slot and gets the slot's worker cap, waits at most five minutes, then runs with the shared cap of 2; with no board directory or no built `pipeline-cli`, it runs unslotted and prints one line saying so.
 
 Show the roster with each session's live state (`busy`, `idle`, `starting`, `gone`,
@@ -466,6 +468,13 @@ prints the launchctl stderr, the plist path and the two manual commands (`launch
 the feed works until logout but is not persisted. `webhook status` prints `persisted: launchd <label>` or
 `persisted: no (<reason>)`, read from `launchctl print gui/<uid>/<label>`. A named tunnel (for example Cloudflare Tunnel) pointing at
 `127.0.0.1:8765` is the alternative for daily use (`--feed tunnel`).
+
+**Forwarder agent hardening (AISDLC-1285).** Four rules keep a crash-looping agent from reading as healthy:
+
+1. The plist runs the real `gh` by absolute path as its first program argument (no `/usr/bin/env`), and its `PATH` is the session `PATH` without the board's `bin/` directory, which holds the `gh` call-counting wrapper that launchd cannot read inside a repository under `~/Documents` (`Operation not permitted`, exit 126). When the only `gh` is that wrapper, or none is installed, `webhook up --feed gh-forward` exits non-zero naming the missing `gh`.
+2. "Alive" means launchd has the job running (`state = running` in `launchctl print`), not merely loaded. A job in `state = spawn scheduled` is not alive: the forwarder signal is `dead`, the health class is `degraded`, and a health episode stays open (no `operator-answered` event is written).
+3. After the bootstrap `webhook up` checks the job is running. If not, it exits non-zero, prints the tail of `webhook-forward.log` and the last exit code, and does not print `forwarder agent <label> loaded`. `webhook status` prints `persisted: no (<label> loaded but not running: state = ..., last exit code = ...)`, never `persisted: launchd`, for such a job.
+4. The receiver records deliveries refused for a bad signature in `<board-dir>/webhook-refused.json`. While one is newer than the newest accepted event the health class is `degraded` and the reason names the secret mismatch; an accepted event clears it.
 
 **Health (AISDLC-1157).** A live receiver pid does not prove events arrive: the forwarder is a separate
 process on the operator's account. `webhook up --feed <kind>` records the feed (and optional `--feed-pid`)

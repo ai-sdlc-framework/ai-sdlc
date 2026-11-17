@@ -168,3 +168,16 @@ describe('webhook receiver (AISDLC-880)', () => {
     expect(readdirSync(dir)).toContain('.reconcile-wake');
   });
 });
+
+describe('refused deliveries (AISDLC-1285)', () => {
+  it('records a bad signature and clears the record on a verified delivery', async () => {
+    const body = checkRun();
+    const bad = { ...good(body, 'd-bad'), 'x-hub-signature-256': sign(body, 'wrong') };
+    expect((await post(body, bad)).status).toBe(401);
+    expect((await post(body, bad)).status).toBe(401);
+    const file = path.join(dir, 'webhook-refused.json');
+    expect(JSON.parse(readFileSync(file, 'utf-8')).count).toBe(2);
+    expect((await post(body, good(body, 'd-ok'))).status).toBeLessThan(300);
+    expect(() => readFileSync(file, 'utf-8')).toThrow();
+  });
+});

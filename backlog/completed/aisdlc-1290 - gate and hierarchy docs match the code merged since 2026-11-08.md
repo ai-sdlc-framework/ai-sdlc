@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1290
 title: 'Gate and hierarchy docs match the code merged since 2026-11-08'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-16'
 labels:

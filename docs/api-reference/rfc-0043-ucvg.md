@@ -669,8 +669,10 @@ Layout: `<repoRoot>/.ai-sdlc/ucvg/reports/<prNumber>.unsigned.json`. Both the sa
 | `ai-sdlc/untrusted-pr-gate` | Stage 4 success + `consensus.approved: true` | `success` |
 | `ai-sdlc/untrusted-pr-gate` | Stage 4 failure | `failure` |
 | `ai-sdlc/untrusted-pr-gate` | Pipeline error (watchdog job) | `failure` |
-| `ai-sdlc/untrusted-pr-gate` | Flag off | `success` (skipped, neutral) |
-| `ai-sdlc/untrusted-pr-gate` | Trusted author | `success` (skipped, neutral) |
+| `ai-sdlc/untrusted-pr-gate-skipped` | Flag off | `success` ("No review ran: ...") |
+| `ai-sdlc/untrusted-pr-gate-skipped` | Trusted author | `success` ("No review ran: ...") |
+
+The context `ai-sdlc/untrusted-pr-gate` is never `success` when the flag is off or the author is trusted (AISDLC-1268).
 
 ### Security properties
 
@@ -789,6 +791,8 @@ differentialTest:
     cpuCores: 2
     memoryMb: 4096            # 4 GB default
     perTestTimeoutSeconds: 60 # optional per-test cap
+
+maxDiffBytes: 200000          # default; size cap on the PR diff
 ```
 
 ### `.ai-sdlc/untrusted-pr.openshell.yaml`

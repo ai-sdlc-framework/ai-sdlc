@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import path from 'node:path';
 import process from 'node:process';
 
-import { createReceiver } from '../dispatch/webhook-receiver.js';
+import { createReceiver, REFUSED_FILE } from '../dispatch/webhook-receiver.js';
 import { DEFAULT_WEBHOOK_PORT, loadPrLifecycleConfig } from './pr-lifecycle-config.js';
 import { eventEntries } from './pr-snapshot.js';
 import type { HierarchyDeps } from './types.js';
@@ -211,6 +211,8 @@ export interface WebhookSignals {
   feed: WebhookFeed['kind'];
   /** Hook delivery status from GitHub, when one `gh api` call reached it. */
   hookDelivery?: 'ok' | 'failing';
+  /** Deliveries refused for a bad signature since the last accepted event (AISDLC-1285). */
+  refusedDeliveries?: number;
 }
 
 export interface WebhookHealth {
@@ -280,6 +282,15 @@ function defaultProbePort(deps: HierarchyDeps, port: number): boolean {
     return deps.run(process.execPath, ['-e', script], { cwd: deps.cwd })?.status === 0;
   } catch {
     return false;
+  }
+}
+
+function readRefused(boardDir: string): { at: string; count: number } | undefined {
+  try {
+    const r = JSON.parse(readFileSync(path.join(boardDir, REFUSED_FILE), 'utf-8'));
+    return typeof r.at === 'string' && typeof r.count === 'number' ? r : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -367,7 +378,15 @@ export function webhookHealth(deps: HierarchyDeps, opts: WebhookHealthOptions = 
   }
   if (cls === 'healthy' && forwarder === 'dead') {
     cls = 'degraded';
-    reasons.push('the forwarder process is gone while the receiver is up');
+    reasons.push('the forwarder is not running while the receiver is up');
+  }
+  const refused = readRefused(deps.boardDir);
+  if (refused && Date.parse(refused.at) > newest) {
+    signals.refusedDeliveries = refused.count;
+    if (cls === 'healthy') cls = 'degraded';
+    reasons.push(
+      `${refused.count} delivery(ies) refused for a bad signature since ${refused.at}: the forwarder secret does not match AI_SDLC_WEBHOOK_SECRET (secret mismatch)`,
+    );
   }
   return { class: cls, signals, since: deps.now().toISOString(), reasons };
 }

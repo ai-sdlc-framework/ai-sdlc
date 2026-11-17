@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1286
 title: 'Dev dependency group moves to prettier 3.10.1 with the one affected file reformatted (replaces dependabot #2684)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-16'
 labels:

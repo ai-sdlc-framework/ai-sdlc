@@ -64,7 +64,7 @@ Checks currently implemented (see `DOCTOR_CHECKS` in `doctor-checks.ts`):
 
 | id | What it audits | Reuses |
 |---|---|---|
-| `plugin-version` | Installed plugin version vs. latest published | `ai-sdlc-plugin/hooks/check-plugin-version.js --print` |
+| `plugin-version` | Installed plugin version vs. latest published | `ai-sdlc-plugin/hooks/check-plugin-version.js --print` (`--deps` prints only the runtime dependency lines, with no network call, AISDLC-1271) |
 | `runtime-deps-pins` | `runtimeDependencies` pins resolve to what's installed; flags `^0.x` caret traps (AISDLC-574) | `ai-sdlc-plugin/scripts/check-stale-runtime-deps.mjs` (AISDLC-580) |
 | `manifests-agree` | `plugin.json` and `.claude-plugin/plugin.json` agree on version + pins (AISDLC-558) | — |
 | `attestation-governance` | Attestation required-but-unconfigured; branch protection requiring `ai-sdlc/attestation` directly (AISDLC-388 misconfiguration) | `checkAttestationGovernance` (AISDLC-560) |

@@ -53,6 +53,9 @@ import {
   buildFetchDockerArgs,
   buildFetchScript,
   resolvePnpmVersion,
+  mapPathsToWorkspacePackages,
+  parseWorkspacePackages,
+  NO_PACKAGE_CHANGED_OUTPUT,
   SandboxFetchPhaseError,
   DIFFERENTIAL_RESULT_SENTINEL,
   type SandboxConfig,
@@ -3900,5 +3903,102 @@ describe('fetch container (AISDLC-1291)', () => {
     const mount = runList!.find((a) => a.endsWith(':/sandbox/base:ro'))!;
     expect(mount.startsWith(base)).toBe(false);
     await driver.teardown();
+  });
+});
+
+describe('AISDLC-1296: prepared pnpm, build and package scope', () => {
+  it('AC1: fetch script installs pnpm under .sandbox-tools and runs the root build', () => {
+    const script = buildFetchScript('10.4.1');
+    expect(script).toContain(
+      'npm install -g --prefix "/sandbox/prepared/node_modules/.sandbox-tools" pnpm@10.4.1',
+    );
+    expect(script).toContain('corepack pnpm run build');
+    expect(script).toContain('scripts?.build');
+  });
+
+  it('AC2: run script puts the prepared pnpm first on PATH; docker run args are unchanged', () => {
+    const script = buildDifferentialTestScript('a'.repeat(40));
+    expect(script).toContain('export PATH="$WORK_DIR/repo/node_modules/.sandbox-tools/bin:$PATH"');
+    const args = buildDockerRunArgs({
+      resourceLimits: DEFAULT_RESOURCE_LIMITS,
+      seccompProfileJson: '/tmp/s.json',
+      cidFilePath: '/tmp/c.cid',
+      image: 'img',
+      baseTreeDir: '/tmp/p',
+      command: ['/bin/sh', '-c', 'x'],
+    });
+    expect(args).toEqual([
+      'run',
+      '--rm',
+      '--cidfile',
+      '/tmp/c.cid',
+      '--network=none',
+      '--cap-drop=ALL',
+      '--read-only',
+      '--tmpfs',
+      '/tmp:rw,noexec,nosuid,size=256m',
+      '--tmpfs',
+      '/sandbox/workspace:rw,noexec,nosuid',
+      '--pids-limit',
+      '512',
+      '--memory',
+      `${DEFAULT_RESOURCE_LIMITS.memoryMb}m`,
+      '--cpus',
+      String(DEFAULT_RESOURCE_LIMITS.cpuCores),
+      '--user',
+      '65534:65534',
+      '--security-opt',
+      'seccomp=/tmp/s.json',
+      '--security-opt',
+      'no-new-privileges',
+      '-e',
+      'SANDBOX_PR_DIFF_B64',
+      '-e',
+      'SANDBOX_FIXTURE_B64',
+      '-v',
+      '/tmp/p:/sandbox/base:ro',
+      'img',
+      '/bin/sh',
+      '-c',
+      'x',
+    ]);
+  });
+
+  it('AC3: maps diff paths to workspace package directories', () => {
+    const dirs = ['orchestrator', 'ai-sdlc-plugin/mcp-server', 'ai-sdlc-plugin/mods'];
+    expect(mapPathsToWorkspacePackages(['orchestrator/src/a.ts'], dirs)).toEqual(['orchestrator']);
+    expect(mapPathsToWorkspacePackages(['ai-sdlc-plugin/mcp-server/x.ts'], dirs)).toEqual([
+      'ai-sdlc-plugin/mcp-server',
+    ]);
+    expect(mapPathsToWorkspacePackages(['docs/a.md', 'ai-sdlc-plugin/README.md'], dirs)).toEqual(
+      [],
+    );
+    expect(
+      mapPathsToWorkspacePackages(['pkgs/a/x.ts', 'pkgs/a/y.ts', 'pkgs/z'], ['pkgs/*']),
+    ).toEqual(['pkgs/a']);
+    expect(() => mapPathsToWorkspacePackages(['we ird/x.ts'], ['we ird'])).toThrow(
+      /disallowed character/,
+    );
+    expect(parseWorkspacePackages("packages:\n  - a\n  - 'b/c' # x\n  - '!d'\nother: 1\n")).toEqual(
+      ['a', 'b/c'],
+    );
+  });
+
+  it('AC4: workspace commands filter per package, with no npm test', () => {
+    const script = buildDifferentialTestScript('a'.repeat(40), 60, undefined, undefined, [
+      'a',
+      'ai-sdlc-plugin/mcp-server',
+    ]);
+    expect(script).toContain(
+      "timeout 60 sh -c 'pnpm --filter ./a test && pnpm --filter ./ai-sdlc-plugin/mcp-server test 2>&1'",
+    );
+    expect(script).not.toContain('npm test');
+    expect(() =>
+      buildDifferentialTestScript('a'.repeat(40), undefined, undefined, undefined, ['a b']),
+    ).toThrow(/invalid package directory/);
+    const none = buildDifferentialTestScript('a'.repeat(40), undefined, undefined, undefined, []);
+    expect(none).toContain(`echo '${NO_PACKAGE_CHANGED_OUTPUT}'`);
+    expect(none).not.toContain('npm test');
+    expect(buildDifferentialTestScript('a'.repeat(40))).toContain('npm test');
   });
 });
