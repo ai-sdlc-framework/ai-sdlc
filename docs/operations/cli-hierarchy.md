@@ -467,6 +467,13 @@ the feed works until logout but is not persisted. `webhook status` prints `persi
 `persisted: no (<reason>)`, read from `launchctl print gui/<uid>/<label>`. A named tunnel (for example Cloudflare Tunnel) pointing at
 `127.0.0.1:8765` is the alternative for daily use (`--feed tunnel`).
 
+**Forwarder agent hardening (AISDLC-1285).** Four rules keep a crash-looping agent from reading as healthy:
+
+1. The plist runs the real `gh` by absolute path as its first program argument (no `/usr/bin/env`), and its `PATH` is the session `PATH` without the board's `bin/` directory, which holds the `gh` call-counting wrapper that launchd cannot read inside a repository under `~/Documents` (`Operation not permitted`, exit 126). When the only `gh` is that wrapper, or none is installed, `webhook up --feed gh-forward` exits non-zero naming the missing `gh`.
+2. "Alive" means launchd has the job running (`state = running` in `launchctl print`), not merely loaded. A job in `state = spawn scheduled` is not alive: the forwarder signal is `dead`, the health class is `degraded`, and a health episode stays open (no `operator-answered` event is written).
+3. After the bootstrap `webhook up` checks the job is running. If not, it exits non-zero, prints the tail of `webhook-forward.log` and the last exit code, and does not print `forwarder agent <label> loaded`. `webhook status` prints `persisted: no (<label> loaded but not running: state = ..., last exit code = ...)`, never `persisted: launchd`, for such a job.
+4. The receiver records deliveries refused for a bad signature in `<board-dir>/webhook-refused.json`. While one is newer than the newest accepted event the health class is `degraded` and the reason names the secret mismatch; an accepted event clears it.
+
 **Health (AISDLC-1157).** A live receiver pid does not prove events arrive: the forwarder is a separate
 process on the operator's account. `webhook up --feed <kind>` records the feed (and optional `--feed-pid`)
 in `.ai-sdlc/dispatch/webhook.json`; without a record the forwarder is found by a process match

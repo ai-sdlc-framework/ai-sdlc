@@ -12,7 +12,13 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { HierarchyDeps } from './types.js';
-import { forwarderLabel, forwarderPersistence, forwarderPlistPath } from './webhook-forwarder.js';
+import {
+  forwarderAgentAlive,
+  forwarderLabel,
+  forwarderPersistence,
+  forwarderPlistPath,
+  installForwarder,
+} from './webhook-forwarder.js';
 import {
   formatWebhookStatus,
   parseFeed,
@@ -24,6 +30,7 @@ import {
   webhookStatus,
   webhookUp,
 } from './webhook.js';
+import { runWebhookHealthTick } from './webhook-health.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
@@ -149,6 +156,41 @@ describe('webhook health (AISDLC-1157)', () => {
     ).toMatch(/^webhook: down/);
   });
 
+  it('a loaded, not running agent keeps an open episode open (AC-7)', () => {
+    receiver({ kind: 'gh-forward', agent: 'x.y' });
+    const run = () => ({
+      status: 0,
+      stdout: 'state = spawn scheduled\n last exit code = 126\n',
+      stderr: '',
+    });
+    const closeEpisode = vi.fn();
+    writeFileSync(
+      path.join(dir, 'webhook-health.json'),
+      JSON.stringify({ class: 'degraded', since: 's' }),
+    );
+    const r = runWebhookHealthTick({
+      boardDir: dir,
+      now: () => new Date(NOW),
+      health: () => webhookHealth(hd({ run }), up),
+      closeEpisode,
+    });
+    expect(r.health?.class).toBe('degraded');
+    expect(closeEpisode).not.toHaveBeenCalled();
+  });
+
+  it('a refused delivery degrades health naming the secret; an accepted event clears it (AC-8)', () => {
+    receiver({ kind: 'none' });
+    write('webhook-refused.json', { at: minsAgo(2).toISOString(), count: 3 });
+    const h = webhookHealth(hd(), up);
+    expect(h.class).toBe('degraded');
+    expect(h.reasons.join(' ')).toMatch(/secret mismatch/);
+    expect(h.signals.refusedDeliveries).toBe(3);
+    event(1, 1);
+    const after = webhookHealth(hd(), up);
+    expect(after.class).toBe('healthy');
+    expect(after.signals.refusedDeliveries).toBeUndefined();
+  });
+
   it('is healthy and quiet with no PR activity, even with no events', () => {
     receiver({ kind: 'none' });
     const h = webhookHealth(hd(), up);
@@ -248,11 +290,17 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
       if (file === 'gh' && args[0] === 'api' && args[1] === 'repos/o/r/hooks')
         return { status: 0, stdout: JSON.stringify(hooks), stderr: '' };
       if (file === 'launchctl' && args[0] === 'print')
-        return { status: launchAlive ? 0 : 1, stdout: '', stderr: '' };
+        return { status: launchAlive ? 0 : 1, stdout: 'state = running\n', stderr: '' };
       return { status: 0, stdout: '', stderr: '' };
     };
   const mkd = (env: NodeJS.ProcessEnv, launchAlive = true): HierarchyDeps =>
-    ({ ...mk(env), now: () => new Date(), run: mkRun(launchAlive) }) as unknown as HierarchyDeps;
+    ({
+      ...mk({ PATH: '/opt/bin:/usr/bin', ...env }),
+      now: () => new Date(),
+      run: mkRun(launchAlive),
+      isExecutable: (f: string) => f === '/opt/bin/gh',
+      sleepMs: () => undefined,
+    }) as unknown as HierarchyDeps;
 
   beforeEach(() => {
     calls.length = 0;
@@ -283,6 +331,83 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
       process.execPath,
       expect.arrayContaining(['--feed-agent', label]),
     );
+  });
+
+  it('plist runs the absolute real gh, no env, and no board bin on PATH (AC-1, AC-2)', () => {
+    const base = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' });
+    const deps = {
+      ...base,
+      env: { ...base.env, PATH: `${dir}/bin:/opt/bin:/usr/bin` },
+    } as HierarchyDeps;
+    webhookUp(deps, undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin');
+    const plist = readFileSync(
+      path.join(home, `Library/LaunchAgents/${forwarderLabel(deps)}.plist`),
+      'utf-8',
+    );
+    expect(plist).toContain('<array>\n    <string>/opt/bin/gh</string>');
+    expect(plist).not.toContain('/usr/bin/env');
+    expect(plist).toContain('<key>PATH</key><string>/opt/bin:/usr/bin</string>');
+    expect(plist).not.toContain(`${dir}/bin`);
+  });
+
+  it('fails naming gh when only the board wrapper exists (AC-3)', () => {
+    const base = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' });
+    const deps = {
+      ...base,
+      env: { ...base.env, PATH: `${dir}/bin:/usr/bin` },
+      isExecutable: (f: string) => f === `${dir}/bin/gh`,
+    } as HierarchyDeps;
+    expect(() => webhookUp(deps, undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin')).toThrow(
+      /real gh/,
+    );
+    expect(calls.some((c) => c[0] === 'launchctl')).toBe(false);
+  });
+
+  const crashLoop = {
+    status: 0,
+    stdout: 'state = spawn scheduled\n\tlast exit code = 126\n',
+    stderr: '',
+  };
+  const crashing = (extra: Record<string, string> = {}): HierarchyDeps => {
+    const base = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3', ...extra });
+    const run = base.run;
+    return {
+      ...base,
+      run: (f: string, a: readonly string[]) =>
+        f === 'launchctl' && a[0] === 'print' ? crashLoop : run(f, a),
+    } as HierarchyDeps;
+  };
+
+  it('a loaded crash-looping agent is not alive, dead, not healthy, not persisted (AC-4, AC-5)', () => {
+    const deps = crashing();
+    expect(forwarderAgentAlive(deps)).toBe(false);
+    writeFileSync(
+      path.join(dir, 'webhook.json'),
+      JSON.stringify({ pid: 99, port: 1, feed: { kind: 'gh-forward', agent: 'x.y' } }),
+    );
+    const h = webhookHealth(deps, { probePort: () => true });
+    expect(h.signals.forwarder).toBe('dead');
+    expect(h.class).not.toBe('healthy');
+    const line = webhookPersistence(deps, 'darwin');
+    expect(line).toMatch(/^persisted: no \(.*last exit code = 126/);
+    expect(line).not.toContain('persisted: launchd');
+  });
+
+  it('webhook up fails with the log tail and exit code when not running (AC-6)', () => {
+    const deps = crashing();
+    writeFileSync(path.join(dir, 'webhook-forward.log'), 'sh: gh: Operation not permitted\n');
+    expect(() => webhookUp(deps, undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin')).toThrow(
+      /not running/,
+    );
+    let msg = '';
+    try {
+      installForwarder(deps, 's3', 9001, 'darwin');
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toContain('last exit code = 126');
+    expect(msg).toContain('Operation not permitted');
+    expect(lines.join('\n')).not.toContain('loaded for');
   });
 
   it('prints the command off macOS and loads nothing', () => {

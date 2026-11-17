@@ -6,7 +6,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -64,13 +64,45 @@ export function forwarderArgs(repo: string, port: number, secret: string): strin
   ];
 }
 
+const defaultExecutable = (file: string): boolean => {
+  try {
+    accessSync(file, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const sameDir = (a: string, b: string): boolean => path.resolve(a) === path.resolve(b);
+
+/** The session PATH without the board's `bin/` directory (it holds the `gh` call-counting wrapper). */
+export function agentPath(deps: HierarchyDeps): string {
+  const bin = path.join(deps.boardDir, 'bin');
+  const entries = (deps.env.PATH ?? '').split(path.delimiter).filter((d) => d && !sameDir(d, bin));
+  return entries.length > 0
+    ? entries.join(path.delimiter)
+    : '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin';
+}
+
+/** Absolute path of the real `gh` (never the board's wrapper); throws when there is none. */
+export function resolveRealGh(deps: HierarchyDeps): string {
+  const exec = deps.isExecutable ?? defaultExecutable;
+  for (const d of agentPath(deps).split(path.delimiter)) {
+    const candidate = path.join(d, 'gh');
+    if (exec(candidate)) return candidate;
+  }
+  throw new Error(
+    `cannot find the real gh: the only gh on PATH is the board's wrapper (${path.join(deps.boardDir, 'bin')}) or none is installed; install gh (https://cli.github.com) in a directory outside the repository`,
+  );
+}
+
 export function renderPlist(
   args: string[],
   logPath: string,
   envPath: string,
   label: string,
 ): string {
-  const argv = ['/usr/bin/env', ...args].map((a) => `    <string>${xml(a)}</string>`).join('\n');
+  const argv = args.map((a) => `    <string>${xml(a)}</string>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -127,14 +159,41 @@ export function deleteStaleCliHooks(deps: HierarchyDeps, repo: string): number {
   return n;
 }
 
-/** Whether launchd has the agent loaded. */
-export function forwarderAgentAlive(deps: HierarchyDeps, label = forwarderLabel(deps)): boolean {
+export interface AgentState {
+  loaded: boolean;
+  /** launchd has the job running (`state = running`). */
+  running: boolean;
+  state?: string;
+  lastExit?: string;
+  stderr?: string;
+}
+
+/** Read `launchctl print`: loaded is not running (a crash-looping job is loaded, AISDLC-1285). */
+export function forwarderAgentState(deps: HierarchyDeps, label = forwarderLabel(deps)): AgentState {
   try {
-    return deps.run('launchctl', ['print', domain(label)], { cwd: deps.cwd })?.status === 0;
+    const r = deps.run('launchctl', ['print', domain(label)], { cwd: deps.cwd });
+    if (r?.status !== 0) return { loaded: false, running: false, stderr: r?.stderr ?? '' };
+    const out = r.stdout ?? '';
+    const state = /^\s*state = (.+)$/m.exec(out)?.[1]?.trim();
+    const lastExit = /^\s*last exit code = (.+)$/m.exec(out)?.[1]?.trim();
+    return {
+      loaded: true,
+      running: state === undefined || state === 'running',
+      ...(state ? { state } : {}),
+      ...(lastExit ? { lastExit } : {}),
+    };
   } catch {
-    return false;
+    return { loaded: false, running: false };
   }
 }
+
+/** Whether launchd has the agent running, not merely loaded. */
+export function forwarderAgentAlive(deps: HierarchyDeps, label = forwarderLabel(deps)): boolean {
+  return forwarderAgentState(deps, label).running;
+}
+
+const describeNotRunning = (a: AgentState): string =>
+  `state = ${a.state ?? 'unknown'}${a.lastExit ? `, last exit code = ${a.lastExit}` : ''}`;
 
 /** `persisted: launchd <label>` or `persisted: no (<reason>)`, from `launchctl print`. */
 export function forwarderPersistence(
@@ -144,9 +203,11 @@ export function forwarderPersistence(
 ): string {
   if (platform !== 'darwin') return 'persisted: no (no launchd on this platform)';
   try {
-    const r = deps.run('launchctl', ['print', domain(label)], { cwd: deps.cwd });
-    if (r?.status === 0) return `persisted: launchd ${label}`;
-    const why = (r?.stderr ?? '').trim().split('\n')[0];
+    const a = forwarderAgentState(deps, label);
+    if (a.loaded && a.running) return `persisted: launchd ${label}`;
+    if (a.loaded)
+      return `persisted: no (${label} loaded but not running: ${describeNotRunning(a)})`;
+    const why = (a.stderr ?? '').trim().split('\n')[0];
     return `persisted: no (${label} not loaded${why ? `: ${why}` : ''})`;
   } catch {
     return `persisted: no (launchctl unavailable)`;
@@ -175,6 +236,7 @@ export function installForwarder(
     );
     return false;
   }
+  args[0] = resolveRealGh(deps);
   const removed = deleteStaleCliHooks(deps, repo);
   if (removed > 0) deps.log(`removed ${removed} stale cli hook(s) on ${repo}`);
   const label = forwarderLabel(deps);
@@ -183,12 +245,7 @@ export function installForwarder(
   mkdirSync(deps.boardDir, { recursive: true });
   writeFileSync(
     plist,
-    renderPlist(
-      args,
-      path.join(deps.boardDir, 'webhook-forward.log'),
-      deps.env.PATH ?? '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin',
-      label,
-    ),
+    renderPlist(args, path.join(deps.boardDir, 'webhook-forward.log'), agentPath(deps), label),
     { mode: 0o600 },
   );
   const dom = domain(label);
@@ -205,6 +262,23 @@ export function installForwarder(
     throw new ForwarderPersistError(
       `launchctl bootstrap failed, the forwarder is NOT persisted:\n${(r?.stderr ?? '').trim()}\n` +
         `plist: ${plist}\nrecover manually:\n  launchctl bootout ${dom}\n  launchctl bootstrap gui/${uid()} ${plist}`,
+    );
+  }
+  // Loaded is not alive: give the job a moment, then require launchd to have it running.
+  if (deps.sleepMs) deps.sleepMs(2000);
+  else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
+  const st = forwarderAgentState(deps, label);
+  if (!st.running) {
+    const logFile = path.join(deps.boardDir, 'webhook-forward.log');
+    let tail = '';
+    try {
+      tail = readFileSync(logFile, 'utf-8').trimEnd().split('\n').slice(-10).join('\n');
+    } catch {
+      /* no log yet */
+    }
+    throw new ForwarderPersistError(
+      `forwarder agent ${label} is loaded but not running (${describeNotRunning(st)}), the forwarder is NOT persisted.\n` +
+        `tail of ${logFile}:\n${tail || '(empty)'}\nplist: ${plist}`,
     );
   }
   deps.log(`forwarder agent ${label} loaded for ${repo}`);
