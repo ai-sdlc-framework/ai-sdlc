@@ -86,7 +86,7 @@ Value: 1
 ```
 
 This enables the gate. Without this variable, the gate is in `off` mode and posts
-a neutral success status (skipped).
+no review and posts the `ai-sdlc/untrusted-pr-gate-skipped` status ("No review ran: ..."); the `ai-sdlc/untrusted-pr-gate` context is never `success` in that case.
 
 ## Security considerations
 

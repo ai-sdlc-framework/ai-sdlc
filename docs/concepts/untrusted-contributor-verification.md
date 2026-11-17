@@ -65,13 +65,12 @@ Per RFC-0043 §OQ-2: the UCVG sandbox runs in CI by default (`deployment: ci` in
 
 ### What you see in CI
 
-For each untrusted PR, the `ai-sdlc/untrusted-pr-gate` commit status shows one of:
+For each untrusted PR, the `ai-sdlc/untrusted-pr-gate` commit status (or, when no review ran, the `ai-sdlc/untrusted-pr-gate-skipped` status) shows one of:
 
 | Status | Meaning |
 |--------|---------|
 | `success` — "Passed: all verification stages completed" | All four stages passed; the PR is safe to review for merge. |
-| `success` — "Skipped: author is trusted" | Author is in the maintainer allowlist; UCVG did not engage. |
-| `success` — "Skipped: untrusted-pr gate is disabled" | Feature flag is off. |
+| `ai-sdlc/untrusted-pr-gate-skipped` — "No review ran: ..." | Author is in the maintainer allowlist, or the feature flag is off; UCVG did not engage. The context `ai-sdlc/untrusted-pr-gate` is never `success` in these cases (AISDLC-1268). |
 | `failure` — "Blocked: protected-path mutation by untrusted contributor" | Stage 1 caught a dangerous path change. A maintainer must review before any automated processing. |
 | `failure` — "Blocked: OpenShell sandbox unavailable — maintainer review required" | Stage 2 cannot run (sandbox not configured). |
 | `failure` — "Failed: UCVG pipeline error — maintainer review required" | A pipeline error occurred. Re-run or review manually. |

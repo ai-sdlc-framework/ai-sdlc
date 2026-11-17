@@ -104,7 +104,7 @@ This hand-written job must run under `pull_request_target` with the base sha che
 1. Fetches `refs/ai-sdlc/verdicts/<head>` from `origin` and reads `record.json`.
 2. Checks the record's subject against the head, the coverage rule against the changed paths, and the independence tier against `--required-tier`.
 3. When there is no record for this head, looks for an earlier approved record of the same PR and carries it forward only if the reviewed diff replays cleanly onto the current base.
-4. Prints `<code> <detail>` and exits 0 on `ok` or `ok-carried:<sha>`, 1 otherwise. Codes: `no-record`, `subject-mismatch`, `coverage-short`, `replay-dirty`, `tier-short`.
+4. Prints `<code> <detail>` and exits 0 on `ok` or `ok-carried:<sha>`, 1 otherwise. Codes: `no-record`, `subject-mismatch`, `coverage-short`, `replay-dirty`, `tier-short`, `pr-mismatch`, `not-clean-room`. `--require-clean-room` accepts only a clean-room record (`not-clean-room` otherwise); `--pull-request` is required and `pr-mismatch` means the record names another PR.
 
 ## Local dry run
 
@@ -112,5 +112,6 @@ This hand-written job must run under `pull_request_target` with the base sha che
 node pipeline-cli/bin/cli-attestation.mjs verdict-check \
   --head "$(git rev-parse HEAD)" \
   --base "$(git merge-base origin/main HEAD)" \
-  --repository <org>/<repo>
+  --repository <org>/<repo> \
+  --pull-request <number>
 ```

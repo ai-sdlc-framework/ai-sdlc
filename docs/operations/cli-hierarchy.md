@@ -260,6 +260,8 @@ When the board directory holds no manifest or verdict but `backlog/completed/` d
 
 ### `status`
 
+Held-task triage (AISDLC-1244): a queued task held on a dependency is printed as `held: <task> (waits on <dep>) [<class>]`. The class is `waiting` (the dependency is on the board and will run), `operator-gated`, `absent` (the dependency is not on the board), `circular` (the dependency's own dependencies lead back to the held task) or `failed-dependency` (`pipeline-cli/src/hierarchy/held-triage.ts`). A hold that cannot clear on its own (any class but `waiting`) is recorded once in `held/<id>--<dependency>.json` and routed to the planner once.
+
 Verify slots (AISDLC-1087): the machine verify run takes one of two slots under `<board>/verify-slots/` (a dead holder's slot is reclaimed), so at most two executors run a suite at once; the second concurrent run gets `AI_SDLC_VITEST_MAX_WORKERS=2`, a lone run 4. `status` prints a `verify slot <n>: held by pid <p>` line per held slot and nothing when none are held. Pre-push runs share these slots (AISDLC-1186): the hook's `test:coverage` run holds a slot and gets the slot's worker cap, waits at most five minutes, then runs with the shared cap of 2; with no board directory or no built `pipeline-cli`, it runs unslotted and prints one line saying so.
 
 Show the roster with each session's live state (`busy`, `idle`, `starting`, `gone`,
