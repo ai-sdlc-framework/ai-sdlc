@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1294
 title: 'Untrusted PR gate fetch container can run the install scripts of the base tree'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-17'
 labels:
