@@ -466,7 +466,19 @@ the label. `webhook up` runs `launchctl bootout gui/<uid>/<label>` and retries b
 prints the launchctl stderr, the plist path and the two manual commands (`launchctl bootout gui/<uid>/<label>`,
 `launchctl bootstrap gui/<uid> <plist>`), starts the receiver in the foreground session anyway and exits non-zero:
 the feed works until logout but is not persisted. `webhook status` prints `persisted: launchd <label>` or
-`persisted: no (<reason>)`, read from `launchctl print gui/<uid>/<label>`. A named tunnel (for example Cloudflare Tunnel) pointing at
+`persisted: no (<reason>)`, read from `launchctl print gui/<uid>/<label>`. A job that is loaded but not running reads
+`persisted: no (<label> loaded, not running (last exit 126))`.
+
+**Self-repair (AISDLC-1299).** When the feed is `down` or `degraded` because the forwarder is dead (including a
+loaded job that is not running) or no event has arrived while a pull request changed, the dispatch tick repairs it
+before any decision is opened. It applies only to a launchd-supervised `gh-forward` feed on macOS; with a `tunnel` or
+`none` feed, or without launchd, it makes no `launchctl` call. The step runs `launchctl kickstart -k
+gui/<uid>/<label>`, or, when the installed agent file differs from the current shape (or a different secret) and
+`AI_SDLC_WEBHOOK_SECRET` is set, rewrites and reloads it as `webhook up` does. At most 3 attempts in 60 minutes, at
+least 5 minutes apart; each is recorded in `<board-dir>/webhook-health.json`. A decision is opened only when the
+attempts are used up or the agent file is out of date with the secret unset; its body lists the attempts and the tail
+of `webhook-forward.log` with the secret redacted (the secret is never written to the state file either). An arriving
+event returns the class to `healthy`, resets the attempt count and answers the open decision. A named tunnel (for example Cloudflare Tunnel) pointing at
 `127.0.0.1:8765` is the alternative for daily use (`--feed tunnel`).
 
 **Forwarder agent hardening (AISDLC-1285).** Four rules keep a crash-looping agent from reading as healthy:

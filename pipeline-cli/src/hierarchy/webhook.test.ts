@@ -389,7 +389,7 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
     expect(h.signals.forwarder).toBe('dead');
     expect(h.class).not.toBe('healthy');
     const line = webhookPersistence(deps, 'darwin');
-    expect(line).toMatch(/^persisted: no \(.*last exit code = 126/);
+    expect(line).toMatch(/^persisted: no \(.*last exit 126/);
     expect(line).not.toContain('persisted: launchd');
   });
 

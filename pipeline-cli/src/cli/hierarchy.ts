@@ -196,6 +196,7 @@ import {
   parseFeed,
   trackPrActivity,
   catalogWebhookEscalation,
+  makeWebhookRepair,
   stallChannelNotifier,
   formatWebhookStatus,
   recallTranscript,
@@ -1545,6 +1546,7 @@ export async function runHierarchyCli(
               return webhookHealth(deps);
             },
             notify: stallChannelNotifier(deps.boardDir, deps.run, deps.now),
+            repair: makeWebhookRepair(deps),
             ...(isDecisionCatalogEnabled() ? catalogWebhookEscalation(repoRoot) : {}),
           },
           ...(isDecisionCatalogEnabled()
