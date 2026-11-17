@@ -2038,7 +2038,7 @@ export function buildFetchDockerArgs(opts: FetchDockerArgsInput): string[] {
     '--cap-drop=ALL',
     '--read-only',
     '--tmpfs',
-    '/tmp:rw,nosuid,size=1g',
+    '/tmp:rw,exec,nosuid,size=1g',
     '--pids-limit',
     '512',
     '--memory',
