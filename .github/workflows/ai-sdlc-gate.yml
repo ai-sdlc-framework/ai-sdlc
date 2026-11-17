@@ -1,9 +1,9 @@
 name: AI-SDLC PR Ready Gate
 
-# AISDLC-927: run-name carries a skip marker for draft and dependabot PRs (no verdict check
-# runs for them). It is built only from trusted context, never from the PR title.
+# AISDLC-927: run-name carries a skip marker for dependabot PRs (no verdict check
+# runs for them; AISDLC-1301: draft is never read from the event payload). It is built only from trusted context, never from the PR title.
 run-name: >-
-  AI-SDLC PR Ready Gate${{ (github.event.pull_request.draft == true || github.event.pull_request.user.login == 'dependabot[bot]') && ' [no-attestation]' || '' }}
+  AI-SDLC PR Ready Gate${{ github.event.pull_request.user.login == 'dependabot[bot]' && ' [no-attestation]' || '' }}
 
 # AISDLC-140 sub-1 — single rollup status check `ai-sdlc/pr-ready` that
 # aggregates every PR signal AI-SDLC adopters need into ONE branch-protection
@@ -94,8 +94,8 @@ jobs:
     runs-on: ubuntu-latest
     # AISDLC-218: skip on draft PRs. Subsequent jobs `needs: detect` so this
     # cascades — a draft event causes no jobs to run at all.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     outputs:
+      draft: ${{ steps.live.outputs.draft }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
       records_only: ${{ steps.classify.outputs.records_only }}
       deps: ${{ steps.deps-filter.outputs.deps }}
@@ -107,18 +107,44 @@ jobs:
       pipeline_cli: ${{ steps.pipeline-cli-filter.outputs.pipeline_cli }}
       plugin: ${{ steps.plugin-filter.outputs.plugin }}
     steps:
+      # AISDLC-1301: the single live draft read. The event payload is a snapshot and
+      # goes stale when a machine pushes then flips the PR to ready seconds apart; the
+      # API is read at run start instead. A failed read fails this job and so the rollup.
+      - name: Read live draft state
+        id: live
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          DRAFT="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.draft')"
+          case "$DRAFT" in
+            true|false) ;;
+            *) echo "unexpected draft state: '$DRAFT'" >&2; exit 1 ;;
+          esac
+          echo "Live draft state: $DRAFT"
+          echo "draft=$DRAFT" >> "$GITHUB_OUTPUT"
       # AISDLC-963: Actions bucket remaining at the start of the run (end: pr-ready).
       - name: Report API quota remaining (start of run)
+        if: steps.live.outputs.draft != 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api rate_limit --jq '.resources.core | "Actions quota remaining at start: \(.remaining)/\(.limit), resets at \(.reset | todate)"' | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.live.outputs.draft != 'true'
         with:
           # Full history so the PR base SHA is present for `git diff`.
           fetch-depth: 0
       - name: Classify changeset
+        if: steps.live.outputs.draft != 'true'
         id: classify
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -173,6 +199,7 @@ jobs:
       # Drives the dependency-review-gate job — covers npm + github-actions
       # bumps (incl. Dependabot) against the GitHub Advisory DB.
       - id: deps-filter
+        if: steps.live.outputs.draft != 'true'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           # AISDLC-955: empty token makes dorny diff with git (fetch-depth: 0),
@@ -191,6 +218,7 @@ jobs:
       # output is true if and only if the "Evaluate backlog tasks changed by PR"
       # check is going to run. Drives the dor-readiness-gate job.
       - id: tasks-filter
+        if: steps.live.outputs.draft != 'true'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           # AISDLC-955: empty token makes dorny diff with git (fetch-depth: 0),
@@ -202,6 +230,7 @@ jobs:
       # Fifth filter (AISDLC-934): true when the PR touches an RFC file. Drives the
       # rfc-lifecycle job (folded in from the removed rfc-lifecycle-check.yml).
       - id: rfcs-filter
+        if: steps.live.outputs.draft != 'true'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           token: ''
@@ -210,6 +239,7 @@ jobs:
               - 'spec/rfcs/*.md'
       # AISDLC-1021: drives the pipeline-cli-macos job (executors run macOS).
       - id: pipeline-cli-filter
+        if: steps.live.outputs.draft != 'true'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           token: ''
@@ -218,6 +248,7 @@ jobs:
               - 'pipeline-cli/**'
       # AISDLC-1060: drives the plugin-validate job.
       - id: plugin-filter
+        if: steps.live.outputs.draft != 'true'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           token: ''
@@ -228,6 +259,7 @@ jobs:
       # here from ci.yml so this workflow is the only one that runs the suite
       # on pull_request events.
       - id: sdk-filter
+        if: steps.live.outputs.draft != 'true'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           # AISDLC-955: empty token makes dorny diff with git (fetch-depth: 0),
@@ -255,7 +287,7 @@ jobs:
   lint:
     name: Lint & Format
     needs: detect
-    if: needs.detect.outputs.docs_only != 'true'
+    if: needs.detect.outputs.draft != 'true' && needs.detect.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -275,7 +307,7 @@ jobs:
   typecheck:
     name: Typecheck
     needs: detect
-    if: needs.detect.outputs.docs_only != 'true' && needs.detect.outputs.records_only != 'true'
+    if: needs.detect.outputs.draft != 'true' && needs.detect.outputs.docs_only != 'true' && needs.detect.outputs.records_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -296,7 +328,7 @@ jobs:
   build-test:
     name: Build & Test (Node ${{ matrix.node-version }})
     needs: detect
-    if: needs.detect.outputs.docs_only != 'true' && needs.detect.outputs.records_only != 'true'
+    if: needs.detect.outputs.draft != 'true' && needs.detect.outputs.docs_only != 'true' && needs.detect.outputs.records_only != 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -347,7 +379,7 @@ jobs:
   pipeline-cli-macos:
     name: pipeline-cli tests (macOS)
     needs: detect
-    if: needs.detect.outputs.pipeline_cli == 'true' && needs.detect.outputs.docs_only != 'true' && needs.detect.outputs.records_only != 'true'
+    if: needs.detect.outputs.draft != 'true' && needs.detect.outputs.pipeline_cli == 'true' && needs.detect.outputs.docs_only != 'true' && needs.detect.outputs.records_only != 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -369,6 +401,7 @@ jobs:
     # `ci.yml`'s `integration` job — kept in sync deliberately.
     # AISDLC-400: merge_group branch removed (no queue); only skip forks.
     if: |
+      needs.detect.outputs.draft != 'true' &&
       needs.detect.outputs.docs_only != 'true' &&
       needs.detect.outputs.records_only != 'true' &&
       github.event.pull_request.head.repo.full_name == github.repository
@@ -440,8 +473,9 @@ jobs:
   # branch-protection context.
   backlog-drift:
     name: Backlog Drift
+    needs: detect
+    if: needs.detect.outputs.draft != 'true'
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
@@ -493,7 +527,7 @@ jobs:
   plugin-validate:
     name: Claude plugin validate
     needs: detect
-    if: needs.detect.outputs.plugin == 'true'
+    if: needs.detect.outputs.draft != 'true' && needs.detect.outputs.plugin == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -513,7 +547,7 @@ jobs:
   first-run-smoke:
     name: First-run smoke (fresh repo)
     needs: detect
-    if: needs.detect.outputs.first_run == 'true'
+    if: needs.detect.outputs.draft != 'true' && needs.detect.outputs.first_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -535,7 +569,7 @@ jobs:
   test-python:
     name: Test Python SDK (${{ matrix.python-version }})
     needs: detect
-    if: needs.detect.outputs.python == 'true'
+    if: needs.detect.outputs.draft != 'true' && needs.detect.outputs.python == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -556,7 +590,7 @@ jobs:
   test-go:
     name: Test Go SDK
     needs: detect
-    if: needs.detect.outputs.go == 'true'
+    if: needs.detect.outputs.draft != 'true' && needs.detect.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -601,12 +635,12 @@ jobs:
     name: Review verdict (code PRs)
     needs: detect
     if: >-
+      needs.detect.outputs.draft != 'true' &&
       needs.detect.outputs.docs_only != 'true' &&
       needs.detect.outputs.records_only != 'true' &&
       github.event.pull_request.user.login != 'dependabot[bot]' &&
       (github.event.pull_request.head.ref != 'release-please--branches--main' ||
-        github.event.pull_request.head.repo.full_name != github.repository) &&
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+        github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -663,9 +697,11 @@ jobs:
   release-content:
     name: Release content allowlist
     if: >-
+      needs.detect.outputs.draft != 'true' &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.ref == 'release-please--branches--main' &&
       github.event.pull_request.head.repo.full_name == github.repository
+    needs: detect
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -706,8 +742,8 @@ jobs:
     name: Dependency review (deps/actions PRs)
     needs: detect
     if: >-
-      needs.detect.outputs.deps == 'true' &&
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+      needs.detect.outputs.draft != 'true' &&
+      needs.detect.outputs.deps == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -731,9 +767,9 @@ jobs:
     name: DoR readiness (task-file PRs)
     needs: detect
     if: >-
+      needs.detect.outputs.draft != 'true' &&
       needs.detect.outputs.tasks == 'true' &&
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.draft == false
+      github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -1006,8 +1042,8 @@ jobs:
     name: Governance gate
     needs: detect
     if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.draft == false
+      needs.detect.outputs.draft != 'true' &&
+      github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1099,7 +1135,7 @@ jobs:
     name: ai-sdlc/issue-link
     needs: detect
     # AISDLC-1013: runs only on PRs that change code; docs and records PRs are the traceability artifacts.
-    if: github.event_name == 'pull_request' && needs.detect.outputs.docs_only != 'true' && needs.detect.outputs.records_only != 'true'
+    if: needs.detect.outputs.draft != 'true' && github.event_name == 'pull_request' && needs.detect.outputs.docs_only != 'true' && needs.detect.outputs.records_only != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1167,6 +1203,7 @@ jobs:
     name: RFC Lifecycle Gate
     needs: detect
     if: >-
+      needs.detect.outputs.draft != 'true' &&
       github.event_name == 'pull_request' &&
       needs.detect.outputs.rfcs == 'true'
     runs-on: ubuntu-latest
@@ -1434,7 +1471,7 @@ jobs:
     # workflow fires fresh and pr-ready posts correctly.
     if: >-
       always() &&
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+      needs.detect.outputs.draft != 'true'
     runs-on: ubuntu-latest
     permissions:
       checks: write

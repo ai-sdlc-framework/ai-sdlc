@@ -49,6 +49,7 @@ AISDLC-398 changed the content hash to be base-independent (`headBlobSha` only).
 ```
 1. Developer pushes branch + opens DRAFT PR
 2. /ai-sdlc execute: reviewers run, attestation signed, draft flipped → ready
+   (the gate decides "draft" from the live pull request state read through the API at run start, never from the event payload, so a stale draft event cannot leave `ai-sdlc/pr-ready` skipped on a ready pull request; AISDLC-1301)
 3. auto-enable-auto-merge.yml fires on ready_for_review
    → gh pr merge --auto --squash <PR>
 4. GitHub waits for required checks:
