@@ -78,6 +78,56 @@ describe('retireFailedLanded', () => {
     expect(out).toEqual(['AISDLC-1121']);
   });
 
+  describe('own code PR only (AISDLC-1297)', () => {
+    const land = (rec: Record<string, unknown>) => {
+      mkdirSync(landingDir(board), { recursive: true });
+      writeFileSync(
+        landingPath(board, rec['pr'] as number),
+        JSON.stringify({ taskId: 'AISDLC-1285', landed: '2026-11-16T21:00:00Z', ...rec }),
+      );
+    };
+    const seedPr = (prNumber?: number) =>
+      writeFileSync(
+        path.join(board, 'failed', 'AISDLC-1285.verdict.json'),
+        JSON.stringify({
+          schemaVersion: 'v1',
+          taskId: 'AISDLC-1285',
+          outcome: 'failed',
+          ...(prNumber === undefined ? {} : { prNumber }),
+        }),
+      );
+    const run = () => retireFailedLanded(board, { completedOnMain: () => new Map(), now });
+
+    it('a landed record of another PR does not retire a verdict with a prNumber', () => {
+      seedPr(2706);
+      land({ pr: 2693, kind: 'task' });
+      expect(run()).toEqual([]);
+      expect(existsSync(path.join(board, 'failed', 'AISDLC-1285.verdict.json'))).toBe(true);
+    });
+
+    it('the verdict own PR retires it', () => {
+      seedPr(2706);
+      land({ pr: 2706, kind: 'task' });
+      expect(run()).toEqual(['AISDLC-1285']);
+    });
+
+    it('completedOnMain retires with no landing record', () => {
+      seedPr(2706);
+      expect(
+        retireFailedLanded(board, {
+          completedOnMain: () => new Map([['AISDLC-1285', 'abc']]),
+          now,
+        }),
+      ).toEqual(['AISDLC-1285']);
+    });
+
+    it('a filing-branch record does not retire a verdict without a prNumber', () => {
+      seedPr();
+      land({ pr: 2693, kind: 'task', headBranch: 'ai-sdlc/file-aisdlc-1285' });
+      expect(run()).toEqual([]);
+    });
+  });
+
   it('AC-3: the 2026-11-08 board shows no failed entries after one tick', () => {
     const ids = ['AISDLC-1086', 'AISDLC-1121', 'AISDLC-1122', 'AISDLC-1147', 'AISDLC-1225'];
     for (const id of ids) seed(id);
