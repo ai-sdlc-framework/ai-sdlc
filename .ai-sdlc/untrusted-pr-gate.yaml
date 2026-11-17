@@ -45,6 +45,8 @@ allowedMutationGlobs:
   - '**/*.js'
   - '**/*.jsx'
   - '**/*.md'
+  - 'sdk-python/**/*.py'
+  - 'sdk-go/**/*.go'
 
 # Content-based heuristics run on files that passed path checks.
 # Per OQ-6 boundary principle: only patterns with <1% false-positive AND
