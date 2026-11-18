@@ -3776,7 +3776,10 @@ describe('digest-pinned images and base tree staging (AISDLC-1267)', () => {
   it('the script copies the staged base tree into the workspace', () => {
     const script = buildDifferentialTestScript('a'.repeat(40));
     expect(script).toContain('cd "/sandbox/base" && tar cf - --exclude=node_modules .');
-    expect(script).toContain('ln -s "$nm" "repo/$rel"');
+    expect(script).toContain('mkdir -p "repo/$rel"');
+    expect(script).toContain('ln -s "$entry" "repo/$rel/$(basename "$entry")"');
+    // AISDLC-1312: node_modules itself must not be a symlink to the read-only mount.
+    expect(script).not.toContain('ln -s "$nm"');
   });
 });
 

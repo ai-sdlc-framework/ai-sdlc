@@ -1866,13 +1866,19 @@ elif [ -d "${SANDBOX_BASE_DIR}" ]; then
   # container prepares its dependencies (AISDLC-1291), and the result is mounted
   # read-only. Copy the sources into the writable workspace so the diff can be
   # applied; every node_modules directory stays on the read-only mount (the
-  # workspace is noexec, so native binaries must run from there) and is linked in.
+  # workspace is noexec, so native binaries must run from there). The
+  # node_modules directory itself is created in the writable workspace and each
+  # entry is linked in, so tools can write a cache dir (vite's .vite-temp) there
+  # (AISDLC-1312: a symlinked read-only directory made vitest fail to start).
   mkdir -p repo
   (cd "${SANDBOX_BASE_DIR}" && tar cf - --exclude=node_modules .) | (cd repo && tar xf -)
   find "${SANDBOX_BASE_DIR}" -name node_modules -type d -prune | while IFS= read -r nm; do
     rel="\${nm#${SANDBOX_BASE_DIR}/}"
-    mkdir -p "repo/$(dirname "$rel")"
-    ln -s "$nm" "repo/$rel"
+    mkdir -p "repo/$rel"
+    for entry in "$nm"/* "$nm"/.[!.]*; do
+      [ -e "$entry" ] || [ -L "$entry" ] || continue
+      ln -s "$entry" "repo/$rel/$(basename "$entry")"
+    done
   done
   cd repo
 elif echo "$UPSTREAM_REF" | grep -qE '^(https?|git|ssh)://|^git@'; then
