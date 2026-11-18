@@ -12,6 +12,8 @@ class _SpanNames:
     GATE_EVALUATION: str = "ai_sdlc.gate.evaluation"
     RECONCILIATION_CYCLE: str = "ai_sdlc.reconciliation.cycle"
     HANDOFF: str = "ai_sdlc.handoff"
+    PIPELINE_RUN: str = "ai_sdlc.pipeline.run"
+    COST_TRACKING: str = "ai_sdlc.cost.tracking"
 
 
 @dataclass(frozen=True)
@@ -37,6 +39,11 @@ class _MetricNames:
     LLM_EVAL_DURATION_MS: str = "ai_sdlc.llm_eval.duration_ms"
     LLM_EVAL_SCORE: str = "ai_sdlc.llm_eval.score"
     EXPRESSION_EVAL_DURATION_MS: str = "ai_sdlc.expression_eval.duration_ms"
+    COST_USD_TOTAL: str = "ai_sdlc.cost.usd.total"
+    INPUT_TOKENS_TOTAL: str = "ai_sdlc.tokens.input.total"
+    OUTPUT_TOKENS_TOTAL: str = "ai_sdlc.tokens.output.total"
+    TOKENS_TOTAL: str = "ai_sdlc.tokens.total"
+    COST_PER_TASK_USD: str = "ai_sdlc.cost.per_task_usd"
 
 
 @dataclass(frozen=True)
@@ -49,6 +56,11 @@ class _AttributeKeys:
     RESULT: str = "ai_sdlc.result"
     RESOURCE_KIND: str = "ai_sdlc.resource.kind"
     RESOURCE_NAME: str = "ai_sdlc.resource.name"
+    MODEL: str = "ai_sdlc.model"
+    COST_USD: str = "ai_sdlc.cost_usd"
+    TOKENS: str = "ai_sdlc.tokens"
+    COMPLEXITY_BAND: str = "ai_sdlc.complexity_band"
+    RUN_ID: str = "ai_sdlc.run_id"
 
 
 SPAN_NAMES = _SpanNames()
