@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1307
 title: 'Go SDK metric names and telemetry names are those of the reference'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-17'
 labels:
