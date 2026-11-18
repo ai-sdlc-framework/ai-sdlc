@@ -3,7 +3,6 @@
   "pages": [
     "index",
     "dor-gate",
-    "autonomous-orchestrator",
     "session-hierarchy",
     "two-tier-pipeline",
     "cross-harness-review",
@@ -13,7 +12,6 @@
     "reviewer-independence",
     "zero-trust-untrusted-pr-verification",
     "per-repo-governance",
-    "usage-ledger-model-routing",
-    "operator-tui"
+    "usage-ledger-model-routing"
   ]
 }

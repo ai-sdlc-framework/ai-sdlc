@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1313
 title: 'Public docs no longer describe retired or replaced behaviour'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-18'
 labels:
