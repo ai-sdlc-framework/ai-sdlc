@@ -17,28 +17,26 @@ It runs init, registers the MCP advisor for the detected clients and runs doctor
 
 ## Quick install: paste this into Claude Code
 
-Open Claude Code in the repository you want to adopt AI-SDLC in and paste the brief below. The agent runs each step, verifies it, and recovers from the known failures (partial plugin cache install, missing `@ai-sdlc/reference`, uninitialised keyring, doctor warnings). The same brief is kept as a standalone file at [`install-agent-brief.md`](install-agent-brief.md). The step-by-step commands follow in [Raw install commands](#raw-install-commands).
+Open Claude Code in the repository you want to adopt AI-SDLC in and paste the brief below. The agent runs each step, verifies it, and recovers from the known failures (partial plugin cache install, missing `@ai-sdlc/reference`, doctor warnings). The same brief is kept as a standalone file at [`install-agent-brief.md`](install-agent-brief.md). The step-by-step commands follow in [Raw install commands](#raw-install-commands).
 
 ````text
 You are installing AI-SDLC into the git repository in your current directory. Run the steps in order. After each step run its verification; if it fails, apply the recovery listed for it, re-run the verification, and only then continue. Stop and report to me only if a recovery does not work twice.
 
-Prerequisites to check first: `node --version` (20 or newer), `pnpm --version` (9 or newer), `git --version`, `gh auth status` (logged in), `openssl version` (3.x), `claude --version`. Install or ask me about anything missing. If `~/.ai-sdlc/` already exists, tell me before touching it.
+Prerequisites to check first: `node --version` (20 or newer), `pnpm --version` (9 or newer), `git --version`, `gh auth status` (logged in), `claude --version`. Install or ask me about anything missing. If `~/.ai-sdlc/` already exists, tell me before touching it.
 
 1. Install the CLI. Run `npm install -g @ai-sdlc/orchestrator`. Verify with `ai-sdlc --version`, which must print a version.
 2. Install the SDK in this repository. Run `pnpm add @ai-sdlc/reference`. Verify with `pnpm ls @ai-sdlc/reference`, which must list the package.
 3. Install the Claude Code plugin. Run `/plugin marketplace add ai-sdlc-framework/ai-sdlc` then `/plugin install ai-sdlc@ai-sdlc`. Verify that `/plugin` lists `ai-sdlc` as enabled and that `/ai-sdlc` commands are available (restart the session if they are not).
 4. Scaffold the repository. Run `ai-sdlc init --yes`. Verify with `ai-sdlc health`, which must report all checks passing, and confirm `.ai-sdlc/pipeline.yaml` exists.
-5. Initialise the signing key. Run `/ai-sdlc init-signing-key`, paste the printed public key block into `.ai-sdlc/trusted-reviewers.yaml` under `reviewers:` (fields `identity`, `machine`, `addedAt`, `addedBy`, `pubkey`). Verify that `~/.ai-sdlc/signing-key.pem` exists and the public key is in `trusted-reviewers.yaml`. Never commit the private key.
-6. Run the doctor. Run `/ai-sdlc doctor`. It must finish with no errors and no unresolved warnings.
+5. Run the doctor. Run `/ai-sdlc doctor`. It must finish with no errors and no unresolved warnings.
 
 Recovery for known failures:
 
 - Partial plugin cache install (plugin listed but commands missing, or files missing under the plugin cache): run `/plugin uninstall ai-sdlc@ai-sdlc`, delete the cached `ai-sdlc` directory under `~/.claude/plugins/` (show me the path before deleting), restart Claude Code, then repeat step 3.
 - Missing `@ai-sdlc/reference` (import or "cannot find module" errors, or doctor reports it absent): run `pnpm add @ai-sdlc/reference` in the repository root, confirm it appears in `package.json`, then re-run the failing step.
-- Keyring never initialised (doctor or signing reports no signing key, or `~/.ai-sdlc/signing-key.pem` is missing): run step 5. In a scripted environment generate it manually: `openssl genpkey -algorithm ed25519 -out ~/.ai-sdlc/signing-key.pem`, `chmod 600 ~/.ai-sdlc/signing-key.pem`, `openssl pkey -in ~/.ai-sdlc/signing-key.pem -pubout -out ~/.ai-sdlc/signing-key.pub.pem`, and register the public key in `.ai-sdlc/trusted-reviewers.yaml`.
-- Doctor warnings: read each warning, fix the cause it names (usually one of the three failures above, a missing `gh` login, or an uncommitted scaffold), and re-run `/ai-sdlc doctor` until it is clean. Do not suppress or ignore a warning without telling me why.
+- Doctor warnings: read each warning, fix the cause it names (usually one of the two failures above, a missing `gh` login, or an uncommitted scaffold), and re-run `/ai-sdlc doctor` until it is clean. Do not suppress or ignore a warning without telling me why.
 
-When doctor passes, commit the scaffold (`git add .ai-sdlc .github CLAUDE.md package.json pnpm-lock.yaml`, never the private key) and report what you installed and the doctor output.
+When doctor passes, commit the scaffold (the `git add` command init prints under "Next steps", which lists only paths that exist) and report what you installed and the doctor output.
 ````
 
 ## Raw install commands
@@ -58,7 +56,7 @@ discovered during guide development are listed in [Found Gaps](#found-gaps).
 > should link it here so AC#2 can be checked off.
 
 > **Substrate boundary note:** AI-SDLC's pipeline harness — the autonomous
-> executor loop, configured reviewer fan-out, and DSSE attestation signer — requires
+> executor loop and configured reviewer fan-out — requires
 > **Claude Code** (`claude` on PATH) today. Validation steps (schema checks,
 > resource building, lint) are harness-neutral and run in any Node.js environment.
 > Section [Step 5 — What Requires Claude Code](#step-5--what-requires-claude-code-today)
@@ -73,8 +71,7 @@ discovered during guide development are listed in [Found Gaps](#found-gaps).
 2. [Step 1 — Install the CLI and SDK](#step-1--install-the-cli-and-sdk)
 3. [Step 2 — Clone or initialize your target repository](#step-2--clone-or-initialize-your-target-repository)
 4. [Step 3 — Scaffold the `.ai-sdlc/` resource tree](#step-3--scaffold-the-ai-sdlc-resource-tree)
-5. [Step 4 — Initialize a signing key](#step-4--initialize-a-signing-key)
-6. [Step 5 — What requires Claude Code today](#step-5--what-requires-claude-code-today)
+5. [Step 5 — What requires Claude Code today](#step-5--what-requires-claude-code-today)
 7. [Step 6 — Run your first task through the pipeline](#step-6--run-your-first-task-through-the-pipeline)
 8. [Step 7 — Verify the attested PR](#step-7--verify-the-attested-pr)
 9. [Step 8 — Wire GitHub Actions (optional but recommended)](#step-8--wire-github-actions-optional-but-recommended)
@@ -224,67 +221,14 @@ git push -u origin main
 
 ---
 
-## Step 4 — Initialize a Signing Key
+## Step 4 — No signing key needed
 
-The attestation pipeline signs review envelopes with an ed25519 key stored in
-`~/.ai-sdlc/`. This key never leaves your machine; only the corresponding
-*public* key is checked in to the repository.
-
-```bash
-/ai-sdlc init-signing-key
-```
-
-This command (a Claude Code slash command — see the boundary note in the
-introduction):
-
-1. Generates an ed25519 key pair under `~/.ai-sdlc/`
-2. Prints the public key YAML block you need to paste into
-   `.ai-sdlc/trusted-reviewers.yaml`
-
-Expected output:
-
-```
-[ai-sdlc:init-signing-key] Generated key pair at ~/.ai-sdlc/signing-key.pem
-
-Add this block to .ai-sdlc/trusted-reviewers.yaml under `reviewers:` (fields `identity`, `machine`, `addedAt`, `addedBy`, `pubkey`):
-
-  - identity: 'you@example.com'
-    machine: 'your-machine'
-    addedAt: '2026-01-01'
-    addedBy: 'you'
-    pubkey: |
-      -----BEGIN PUBLIC KEY-----
-      MCowBQYDK2VwAyEA...
-      -----END PUBLIC KEY-----
-```
-
-Open `.ai-sdlc/trusted-reviewers.yaml` and paste the block as instructed, then
-commit:
-
-```bash
-git add .ai-sdlc/trusted-reviewers.yaml
-git commit -m "chore: register primary signing key"
-git push
-```
-
-> **Never commit the private key file.** `~/.ai-sdlc/signing-key.pem` stays on
-> your machine. If you ever need to regenerate it (e.g. after a key rotation),
-> run `/ai-sdlc init-signing-key` again and update the public key in
-> `trusted-reviewers.yaml`.
-
-### Alternative: manual key generation
-
-If you prefer to generate the key without the wizard (for scripted environments):
-
-```bash
-# Generate key pair
-openssl genpkey -algorithm ed25519 -out ~/.ai-sdlc/signing-key.pem
-chmod 600 ~/.ai-sdlc/signing-key.pem
-openssl pkey -in ~/.ai-sdlc/signing-key.pem -pubout -out ~/.ai-sdlc/signing-key.pub.pem
-
-# Print the public key for .ai-sdlc/trusted-reviewers.yaml
-cat ~/.ai-sdlc/signing-key.pub.pem
-```
+There is no key to create. The merge gate reads a review verdict record that the
+pipeline writes outside the branch, under `refs/ai-sdlc/verdicts/*` (RFC-0061); no
+key signs it and nothing is committed for it. See
+[`attestation-reference.md`](../operations/attestation-reference.md) for the
+mechanics. `.ai-sdlc/trusted-reviewers.yaml` is an optional allowlist of
+contributor keys, appended by hand when you need it.
 
 ---
 
@@ -301,10 +245,9 @@ pipeline to its current requirement:
 | `@ai-sdlc/reference` SDK validation | No | Node.js + TypeScript |
 | Conformance suite (`conformance/`) | No | Language-agnostic fixture runner |
 | `ai-sdlc run --issue <n>` (single issue) | No | SDK spawner; can use API key |
-| `/ai-sdlc init-signing-key` | **Yes** | Claude Code slash command |
 | `/ai-sdlc execute <task-id>` (full pipeline) | **Yes** | Orchestrator + worktree + attestation |
 | Configured reviewer fan-out ([reviewer-set-flag.md](../operations/reviewer-set-flag.md)) | **Yes** | `developer` and the reviewer agents of the configured set |
-| DSSE attestation signing | **Yes** | Operator's machine + signing key |
+| Review verdict record (`refs/ai-sdlc/verdicts/*`) | **Yes** | Written by the pipeline at the end of `/ai-sdlc execute` |
 | `cli-hierarchy up` (replaces retired `/ai-sdlc orchestrator-tick`) | **Yes** | Autonomous loop requires CC sessions |
 
 **Adopters on other substrates** (GitHub Copilot, Cursor, Codex, OpenAI API)
@@ -313,8 +256,8 @@ dispatches via `ANTHROPIC_API_KEY` — but this command is only available inside
 the **ai-sdlc monorepo checkout** (`@ai-sdlc/dogfood` is a private workspace
 package that is not published to npm). Adopters who do not have the monorepo
 checked out locally must use the Claude Code path above or wait for a standalone
-API-key spawner CLI (tracked as a follow-up). The signing key and attestation
-signing also remain operator-machine-local today regardless of substrate.
+API-key spawner CLI (tracked as a follow-up). The review verdict record is also
+written by the Claude Code pipeline today, regardless of substrate.
 
 The framework is designed to be substrate-agnostic at the pipeline orchestration
 level (the executor loop and `cli-hierarchy`). The Claude Code coupling exists
@@ -388,7 +331,7 @@ What happens next (you will see progress lines in the session):
 ```
 
 The PR opens as a **draft**. The executor loop fans out the configured reviewer set
-(see [reviewer-set-flag.md](../operations/reviewer-set-flag.md)), signs the attestation envelope, and flips the
+(see [reviewer-set-flag.md](../operations/reviewer-set-flag.md)), records the review verdict, and flips the
 PR from draft to ready-for-review — triggering CI exactly once on the
 fully-attested HEAD.
 
@@ -409,95 +352,37 @@ Note that `@ai-sdlc/dogfood` is a **private workspace package inside the
 ai-sdlc monorepo** — it is not available from npm. Adopters without the
 monorepo checked out must use the Claude Code path in Step 6.2.
 
-Attestation signing is still operator-local; you will need to sign manually
-after the agent commits (see
+Review verdicts are written by the Claude Code pipeline; on this path you review
+the agent's commit yourself (see
 [`docs/operations/attestation-troubleshooting.md`](../operations/attestation-troubleshooting.md)
-for diagnostics, and
-[`docs/operations/mcp-server-signing.md`](../operations/mcp-server-signing.md)
-for the signing key setup).
+for diagnostics).
 
 ---
 
 ## Step 7 — Verify the Attested PR
 
-### What the scaffold actually gives you today
+### What the gate checks
 
-The `ai-sdlc init` scaffold writes a **audit-only** `verify-attestation.yml`
-workflow. This workflow:
+The `ai-sdlc/pr-ready` rollup includes a `verdict-check` job. It reads the verdict
+record for the PR's head from `refs/ai-sdlc/verdicts/<head-sha>` (or carries an
+earlier approved record forward after a clean rebase) and posts the
+`ai-sdlc/attestation` status. Nothing is committed to the branch and no key signs
+anything. The full rules are in
+[`docs/operations/attestation-reference.md`](../operations/attestation-reference.md)
+and [`docs/operations/quality-gate.md`](../operations/quality-gate.md).
 
-- Checks whether a DSSE attestation envelope exists at
-  `.ai-sdlc/attestations/<head-sha>.dsse.json` on the PR's HEAD commit.
-- Logs the result as a GitHub Actions `::notice::` annotation in the Actions
-  log — it does NOT post an `ai-sdlc/attestation` required commit status.
-- Is therefore **non-blocking**: a missing or invalid envelope does not prevent
-  merge. It is governance-grade audit logging, not a hard gate.
+### Confirming the verdict was written
 
-> **Warning — v6 default and the scaffold's audit step.** With the v6 schema
-> default (active since AISDLC-409), the signer writes
-> `<patch-id>.v6.dsse.json` (or `<head-sha>.v6.dsse.json` when no patch-id is
-> available) rather than `<head-sha>.dsse.json`. The scaffolded workflow's `Log
-> audit result` step checks only for the `<head-sha>.dsse.json` path, so it
-> will ALWAYS log "no envelope" even when attestation succeeded. Before
-> trusting the audit log output, update the workflow's audit step to glob
-> `*.v6.dsse.json`:
->
-> ```bash
-> # In .github/workflows/verify-attestation.yml, replace the current check:
-> if [ -f ".ai-sdlc/attestations/${HEAD_SHA}.dsse.json" ]; then
->
-> # With a glob that covers v6 (primary) and the legacy path:
-> if ls .ai-sdlc/attestations/*.v6.dsse.json 2>/dev/null | grep -q .; then
-> ```
->
-> See `.github/workflows/verify-attestation.yml` in the ai-sdlc monorepo for
-> the reference implementation.
-
-The `scripts/verify-attestation.mjs` script used in the ai-sdlc monorepo is
-**not** included in the scaffold. It is part of the ai-sdlc development tooling
-and is not available in adopter repositories.
-
-### Confirming the envelope was written
-
-Once the executor loop has signed and flipped the PR to ready-for-review, confirm
-the attestation envelope was committed:
+Once the executor loop has finished review and flipped the PR to ready-for-review,
+confirm the record exists:
 
 ```bash
-# Inside the PR's worktree (or after checking out the branch):
-ls .ai-sdlc/attestations/
-
-# Expected for a Claude Code / /ai-sdlc execute run (v6 default, AISDLC-409):
-#   <patch-id>.v6.dsse.json   (primary, content-addressed by git patch-id)
-#
-# When no patch-id is available (empty diff after exclusions, or git
-# patch-id failed), the fallback filename is used instead:
-#   <head-sha>.v6.dsse.json   (per-SHA fallback)
-#
-# v5 legacy flows (AI_SDLC_V5_LEGACY=1 or --schema-version v5):
-#   <patch-id>.dsse.json      (v5 primary)
-#   <head-sha>.dsse.json      (v5 per-SHA bridge)
+git ls-remote origin 'refs/ai-sdlc/verdicts/*'
+# Expected: a ref named for the PR's head SHA
 ```
 
-### Viewing the audit log in GitHub Actions
-
-Navigate to the PR's **Checks** tab and open the **AI-SDLC Verify Review
-Attestation** workflow run. The `Log audit result` step emits one of:
-
-```
-::notice::ai-sdlc attestation AUDIT — envelope present at <sha>
-::notice::ai-sdlc attestation AUDIT — no envelope on <sha> (audit-only, not blocking)
-```
-
-### Promoting attestation to a hard gate (advanced)
-
-If you want the attestation check to block merges:
-
-1. Edit `.github/workflows/verify-attestation.yml`'s `Log audit result` step to
-   post a `gh api .../statuses` commit status instead of (or alongside) the
-   `::notice::` annotation.
-2. Add `ai-sdlc/attestation` to your branch protection required-checks list.
-3. Refer to the ai-sdlc monorepo's own `verify-attestation.yml` workflow for a
-   production-grade reference implementation (see
-   [`docs/operations/attestation-troubleshooting.md`](../operations/attestation-troubleshooting.md)).
+The PR's **Checks** tab shows the `ai-sdlc/attestation` status with a reason code
+(`ok`, `no-record`, `subject-mismatch`, ...).
 
 ---
 
@@ -551,7 +436,7 @@ Open a PR and confirm these checks fire:
 |---|---|---|---|
 | `ai-sdlc/pr-ready` | `ai-sdlc-gate.yml` | green (all inputs green) | The single required merge gate |
 | `Backlog Drift` | `dor-ingress.yml` | green (no unresolved drift) | Required merge gate |
-| Attestation audit log | `verify-attestation.yml` | `::notice::` annotation in Actions log | Audit-only — does NOT post a required status check in the scaffold; see [Step 7](#step-7--verify-the-attested-pr) for how to promote to a hard gate |
+| `ai-sdlc/attestation` | `ai-sdlc-gate.yml` (`verdict-check`) | green (verdict record found) | Feeds `ai-sdlc/pr-ready`; see [Step 7](#step-7--verify-the-attested-pr) |
 
 ---
 
@@ -579,17 +464,6 @@ requires adding the remote before running init to avoid the placeholder entirely
 **Workaround:** if you ran `ai-sdlc init` before adding the remote, edit
 `.ai-sdlc/pipeline.yaml` and replace `your-org` with your real org and repo name,
 then re-commit.
-
-### Gap 2 — `/ai-sdlc init-signing-key` is a Claude Code slash command; no standalone CLI equivalent for the signing-key wizard
-
-**Observed:** adopters on non-Claude Code substrates have no CLI equivalent for
-`/ai-sdlc init-signing-key`. The [manual key generation](#alternative-manual-key-generation)
-section in Step 4 covers the workaround (direct `openssl genpkey` commands), but
-it requires manually constructing the `trusted-reviewers.yaml` YAML block.
-
-**Status:** Architectural — a standalone `ai-sdlc init-signing-key` CLI command
-(without the slash-command prefix) would close this gap. Surfaced for operator
-routing.
 
 ### Gap 4 — Claude Code must be authenticated before `/ai-sdlc execute` dispatches
 
@@ -629,18 +503,11 @@ by `ai-sdlc init` (not `ai-sdlc health`). Edit `.ai-sdlc/pipeline.yaml` and
 replace the `your-org` placeholder with your real org and repo, then commit the
 fix.
 
-### Signing-key not found during attestation
+### `ai-sdlc/attestation` reports `no-record`
 
-The pre-push hook looks for `~/.ai-sdlc/signing-key.pem`. If it is absent, run
-Step 4 again or generate the key manually with `openssl genpkey`. The hook exits 0
-as a no-op when no `.active-task` sentinel exists — so docs-only branches don't
-require a signing key.
-
-### `[verify-attestation] No envelope found`
-
-The attestation envelope is written by the executor's reconcile step (after the
-configured reviewers complete). If you pushed the branch before the executor
-ran, the envelope will not be present. Wait for the executor loop to finish the review step (see
+The verdict record is written by the executor once the configured reviewers
+complete. If you pushed the branch before the executor ran, the record will not be
+present. Wait for the executor loop to finish the review step (see
 [`cli-hierarchy.md`](../operations/cli-hierarchy.md)) and re-push.
 
 ### Branch protection rejected: missing required checks
