@@ -55,6 +55,16 @@ func main() {
 | `compliance` | Regulatory framework compliance checking |
 | `metrics` | Metric store and instrumentation helpers |
 
+## Migration: compliance package
+
+The `compliance` package now uses the control model of the reference (`reference/src/compliance`) so coverage figures match the TypeScript and Python SDKs.
+
+- Removed: `FrameworkMappings`, `ComplianceResult`, and the `Features` field. Framework-side ids such as `AIA-1` are gone.
+- Added: `AISDLCControls` (10 controls), `MappingsForFramework`, and `AllControlIDs`.
+- `CheckCompliance(enabledControls map[string]bool, framework Framework)` now takes enabled AI-SDLC control ids (for example `quality-gates`), not feature names, and the argument order is swapped. `CheckAllFrameworks` takes the same set.
+- `ComplianceCoverageReport` now has `CoveredControls`, `Gaps` (the uncovered mappings) and `CoveragePercent` (0 to 100) in place of `CoveredCount`, `Controls` and `Coverage` (0 to 1).
+- To enable everything, pass `compliance.AllControlIDs()`.
+
 ## License
 
 Apache-2.0
