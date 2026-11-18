@@ -1,0 +1,3 @@
+{"reviewer":"code-reviewer","approved":true,"findings":5,"promptInjectionDetected":false}
+{"reviewer":"test-reviewer","approved":true,"findings":5,"promptInjectionDetected":false}
+{"reviewer":"security-reviewer","approved":true,"findings":4,"promptInjectionDetected":false}
