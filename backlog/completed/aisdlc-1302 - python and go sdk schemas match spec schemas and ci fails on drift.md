@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1302
 title: 'Python and Go SDK schemas match spec/schemas and CI fails on drift'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-17'
 labels:
