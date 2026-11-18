@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1305
 title: 'Parity manifest of the reference is checked by the Python and Go SDK suites'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-17'
 labels:

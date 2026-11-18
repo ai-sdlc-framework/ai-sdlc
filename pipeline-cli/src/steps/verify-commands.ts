@@ -145,7 +145,7 @@ export interface RunVerifyOptions {
 }
 
 const ROOT_TEST_CHAIN_REST =
-  'pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm git-env-hygiene:check && pnpm lint:publishable && pnpm knowledge:check';
+  'pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm parity:check && pnpm git-env-hygiene:check && pnpm lint:publishable && pnpm knowledge:check';
 
 /** Patch gate command, run after the tests (AISDLC-1185). */
 export function patchGateCommand(headSha: string): string {
