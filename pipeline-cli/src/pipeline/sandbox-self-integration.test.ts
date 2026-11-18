@@ -10,7 +10,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { loadSandboxConfig, runSandbox } from './sandbox-runner.js';
+import { loadSandboxConfig, runSandbox, tailLines } from './sandbox-runner.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const ENABLED =
@@ -23,6 +23,7 @@ describe.skipIf(!ENABLED)('sandbox on this repository (AISDLC-1296 AC-6)', () =>
       execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: __dirname }).toString().trim(),
     );
     const sha = execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD']).toString().trim();
+    const fetchOutputs: string[] = [];
     const baseTree = mkdtempSync(join(tmpdir(), 'self-int-base-'));
     try {
       const tarball = execFileSync('git', ['-C', repoRoot, 'archive', '--format=tar', 'HEAD'], {
@@ -41,7 +42,24 @@ describe.skipIf(!ENABLED)('sandbox on this repository (AISDLC-1296 AC-6)', () =>
         config: loadSandboxConfig(repoRoot),
         workDir: repoRoot,
         baseTreeDir: baseTree,
+        onFetchOutput: (out) => fetchOutputs.push(out),
       });
+      // AISDLC-1312: say why a suite failed; the last 200 lines only.
+      const failed =
+        result.outcome !== 'success' ||
+        !result.differentialTest.upstreamSuitePassed ||
+        !result.differentialTest.newTestsPassed;
+      if (failed) {
+        const dt = result.outcome === 'success' ? result.differentialTest : undefined;
+        process.stderr.write(
+          [
+            `sandbox outcome: ${result.outcome}`,
+            `--- fetch phase (last 200 lines) ---\n${tailLines(fetchOutputs.join('\n'), 200)}`,
+            `--- base suite (last 200 lines) ---\n${tailLines(dt?.upstreamSuiteOutput ?? JSON.stringify(result), 200)}`,
+            `--- head suite (last 200 lines) ---\n${tailLines(dt?.newTestsOutput ?? '', 200)}`,
+          ].join('\n') + '\n',
+        );
+      }
       expect(result.outcome).toBe('success');
       if (result.outcome === 'success') {
         expect(result.differentialTest.upstreamSuitePassed).toBe(true);

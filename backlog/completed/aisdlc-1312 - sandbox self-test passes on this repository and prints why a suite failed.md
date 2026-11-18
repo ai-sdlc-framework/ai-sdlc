@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1312
 title: 'Sandbox self-test passes on this repository and prints why a suite failed'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-17'
 labels:

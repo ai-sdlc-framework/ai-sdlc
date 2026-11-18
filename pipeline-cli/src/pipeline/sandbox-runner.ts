@@ -521,6 +521,8 @@ export interface SandboxSpawnInput {
    * the upstream suite runs against the base (AISDLC-1267).
    */
   baseTreeDir?: string;
+  /** Receives the fetch container's combined output once it exits (AISDLC-1312). */
+  onFetchOutput?: (output: string) => void;
   /**
    * AISDLC-1293: run this extra suite instead of the Node suite (its image,
    * fetch command and test command). Absent: the Node suite, as before.
@@ -1438,6 +1440,7 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       }
       proc.on('close', (exitCode) => {
         input.abortSignal?.removeEventListener('abort', onAbort);
+        input.onFetchOutput?.(output.slice(-SANDBOX_OUTPUT_TAIL_BYTES));
         if (input.abortSignal?.aborted) {
           reject(new Error('Docker fetch container aborted by wall-clock timeout'));
         } else if (exitCode !== 0) {
@@ -1549,6 +1552,18 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
  *
  * Exported for use in test assertions.
  */
+/** Bytes of each suite's output kept (the tail) in the differential result. */
+export const SANDBOX_OUTPUT_TAIL_BYTES = 20_000;
+
+/**
+ * Last `maxLines` lines of `text` (AISDLC-1312): bounds what a failing sandbox
+ * suite prints to the CI log.
+ */
+export function tailLines(text: string, maxLines: number): string {
+  const lines = text.split('\n');
+  return lines.length <= maxLines ? text : lines.slice(-maxLines).join('\n');
+}
+
 export const DIFFERENTIAL_RESULT_SENTINEL = '---DIFFERENTIAL-RESULT---';
 
 /**
@@ -1666,9 +1681,9 @@ export function parseDifferentialTestOutput(stdout: string): DifferentialTestRes
 
   return {
     upstreamSuitePassed: r['upstreamPassed'] as boolean,
-    upstreamSuiteOutput: (r['upstreamOutput'] as string).slice(0, 2000),
+    upstreamSuiteOutput: (r['upstreamOutput'] as string).slice(-SANDBOX_OUTPUT_TAIL_BYTES),
     newTestsPassed: r['headPassed'] as boolean,
-    newTestsOutput: (r['headOutput'] as string).slice(0, 2000),
+    newTestsOutput: (r['headOutput'] as string).slice(-SANDBOX_OUTPUT_TAIL_BYTES),
     newCodeCoveragePct: clampedCoverage,
   };
 }
@@ -1851,13 +1866,19 @@ elif [ -d "${SANDBOX_BASE_DIR}" ]; then
   # container prepares its dependencies (AISDLC-1291), and the result is mounted
   # read-only. Copy the sources into the writable workspace so the diff can be
   # applied; every node_modules directory stays on the read-only mount (the
-  # workspace is noexec, so native binaries must run from there) and is linked in.
+  # workspace is noexec, so native binaries must run from there). The
+  # node_modules directory itself is created in the writable workspace and each
+  # entry is linked in, so tools can write a cache dir (vite's .vite-temp) there
+  # (AISDLC-1312: a symlinked read-only directory made vitest fail to start).
   mkdir -p repo
   (cd "${SANDBOX_BASE_DIR}" && tar cf - --exclude=node_modules .) | (cd repo && tar xf -)
   find "${SANDBOX_BASE_DIR}" -name node_modules -type d -prune | while IFS= read -r nm; do
     rel="\${nm#${SANDBOX_BASE_DIR}/}"
-    mkdir -p "repo/$(dirname "$rel")"
-    ln -s "$nm" "repo/$rel"
+    mkdir -p "repo/$rel"
+    for entry in "$nm"/* "$nm"/.[!.]*; do
+      [ -e "$entry" ] || [ -L "$entry" ] || continue
+      ln -s "$entry" "repo/$rel/$(basename "$entry")"
+    done
   done
   cd repo
 elif echo "$UPSTREAM_REF" | grep -qE '^(https?|git|ssh)://|^git@'; then
@@ -1963,8 +1984,10 @@ fi
 # ── 7. Emit the sentinel + JSON result ──────────────────────────────────────────
 # The TypeScript parser reads everything AFTER the last sentinel occurrence.
 # Escape the output strings for JSON embedding (strip control chars, escape quotes).
-safe_upstream=$(printf '%s' "$UPSTREAM_OUTPUT" | head -c 2000 | tr -d '\\000-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
-safe_head=$(printf '%s' "$HEAD_OUTPUT" | head -c 2000 | tr -d '\\000-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+# Keep the TAIL (a failing suite prints its failures last) and keep newlines as
+# JSON \\n so the host can show the last lines (AISDLC-1312).
+safe_upstream=$(printf '%s' "$UPSTREAM_OUTPUT" | tail -c ${SANDBOX_OUTPUT_TAIL_BYTES} | tr -d '\\000-\\011\\013-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | awk 'BEGIN{ORS="\\\\n"}{print}')
+safe_head=$(printf '%s' "$HEAD_OUTPUT" | tail -c ${SANDBOX_OUTPUT_TAIL_BYTES} | tr -d '\\000-\\011\\013-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | awk 'BEGIN{ORS="\\\\n"}{print}')
 
 echo "${DIFFERENTIAL_RESULT_SENTINEL}"
 printf '{"upstreamPassed":%s,"upstreamOutput":"%s","headPassed":%s,"headOutput":"%s","coveragePct":%s}\\n' \\
@@ -2601,6 +2624,8 @@ export interface RunSandboxInput {
   proxyHostArgs?: string[];
   /** Host dir with the exported base tree (mounted read-only; AISDLC-1267). */
   baseTreeDir?: string;
+  /** Receives the fetch container's combined output once it exits (AISDLC-1312). */
+  onFetchOutput?: (output: string) => void;
 }
 
 /**
@@ -2649,6 +2674,7 @@ export async function runSandbox(input: RunSandboxInput): Promise<SandboxResult>
     // container reach the host-side proxy despite --network=none.
     extraDockerArgs: input.proxyHostArgs,
     baseTreeDir: input.baseTreeDir,
+    onFetchOutput: input.onFetchOutput,
   };
 
   // Hard-abort enforcement via Promise.race.
@@ -2754,7 +2780,7 @@ async function runSelectedSuites(
     )
       .concat(results.map((x) => `[${x.name}] ${x.dt[key]}`))
       .join('\n')
-      .slice(0, 2000);
+      .slice(-SANDBOX_OUTPUT_TAIL_BYTES);
 
   return {
     outcome: 'success',
