@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1306
 title: 'Go SDK compliance package uses the control model of the reference'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-17'
 labels:
