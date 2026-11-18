@@ -17,16 +17,6 @@
       "DesignSystemBinding",
       "DorConfig",
       "JudgmentConfig"
-    ],
-    "complianceControls": [
-      "agent-memory",
-      "audit-logging",
-      "autonomy-governance",
-      "human-review",
-      "metrics-collection",
-      "provenance-tracking",
-      "quality-gates",
-      "sandbox-isolation"
     ]
   }
 }
