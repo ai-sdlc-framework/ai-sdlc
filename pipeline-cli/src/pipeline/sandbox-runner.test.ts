@@ -49,6 +49,8 @@ import {
   buildDockerRunArgs,
   DOCKER_SECCOMP_PROFILE,
   parseDifferentialTestOutput,
+  tailLines,
+  SANDBOX_OUTPUT_TAIL_BYTES,
   buildDifferentialTestScript,
   buildFetchDockerArgs,
   buildFetchScript,
@@ -4010,5 +4012,35 @@ describe('AISDLC-1296: prepared pnpm, build and package scope', () => {
     expect(none).toContain(`echo '${NO_PACKAGE_CHANGED_OUTPUT}'`);
     expect(none).not.toContain('npm test');
     expect(buildDifferentialTestScript('a'.repeat(40))).toContain('npm test');
+  });
+});
+
+// ── AISDLC-1312: bounded tail of suite output ─────────────────────────────────
+describe('tailLines and output tail (AISDLC-1312)', () => {
+  it('keeps only the last N lines', () => {
+    const text = Array.from({ length: 500 }, (_, i) => `line ${i}`).join('\n');
+    const out = tailLines(text, 200).split('\n');
+    expect(out).toHaveLength(200);
+    expect(out[0]).toBe('line 300');
+    expect(out[199]).toBe('line 499');
+  });
+
+  it('returns short text unchanged', () => {
+    expect(tailLines('a\nb', 200)).toBe('a\nb');
+  });
+
+  it('parser keeps the tail of an over-long suite output', () => {
+    const long = 'x'.repeat(SANDBOX_OUTPUT_TAIL_BYTES) + 'FAILURE-AT-END';
+    const json = JSON.stringify({
+      upstreamPassed: false,
+      upstreamOutput: long,
+      headPassed: false,
+      headOutput: long,
+      coveragePct: 0,
+    });
+    const r = parseDifferentialTestOutput(`---DIFFERENTIAL-RESULT---\n${json}\n`);
+    expect(r.upstreamSuiteOutput).toHaveLength(SANDBOX_OUTPUT_TAIL_BYTES);
+    expect(r.upstreamSuiteOutput.endsWith('FAILURE-AT-END')).toBe(true);
+    expect(r.newTestsOutput.endsWith('FAILURE-AT-END')).toBe(true);
   });
 });
