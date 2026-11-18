@@ -55,6 +55,20 @@ func main() {
 | `compliance` | Regulatory framework compliance checking |
 | `metrics` | Metric store and instrumentation helpers |
 
+## Migration: compliance package
+
+The `compliance` package now uses the control model of the reference (`reference/src/compliance`) so coverage figures match the TypeScript and Python SDKs.
+
+- Removed: the per-framework feature-list model, including its result type and the feature-name field. Framework-side control ids from that model are gone.
+- Added: `AISDLCControls` (10 controls), `MappingsForFramework`, and `AllControlIDs`.
+- `CheckCompliance(enabledControls map[string]bool, framework Framework)` now takes enabled AI-SDLC control ids (for example `quality-gates`), not feature names, and the argument order is swapped. `CheckAllFrameworks` takes the same set.
+- `ComplianceCoverageReport` now has `CoveredControls`, `Gaps` (the uncovered mappings) and `CoveragePercent` (0 to 100) in place of `CoveredCount`, `Controls` and `Coverage` (0 to 1).
+- To enable everything, pass `compliance.AllControlIDs()`.
+
 ## License
 
 Apache-2.0
+
+## Scope
+
+This SDK carries the eleven `shared` reference modules: `adapters`, `agents`, `audit`, `builders`, `compliance`, `core`, `metrics`, `policy`, `reconciler`, `security` and `telemetry`. The reference modules `capabilities`, `judgment`, `models`, `usage` and `utils` are `typescript-only` and are not part of this SDK. The classification lives in `conformance/parity/scope.json` and `pnpm parity:check` enforces it.

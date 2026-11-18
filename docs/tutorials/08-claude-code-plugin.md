@@ -94,7 +94,7 @@ Shows pipeline status for the current branch or a specific task.
 ### Session hierarchy
 `/ai-sdlc planner`, `/ai-sdlc operator-dispatch` and `/ai-sdlc executor` run the parallel-dispatch hierarchy (RFC-0051); see [cli-hierarchy.md](../operations/cli-hierarchy.md). The older `/ai-sdlc orchestrator-tick` Conductor loop is retired.
 
-Housekeeping commands include `init`, `init-signing-key`, `doctor`, `version`, `cleanup`, `import-spec`, `rfc-init` and `memory-dream`.
+Housekeeping commands include `init`, `doctor`, `version`, `cleanup`, `import-spec`, `rfc-init` and `memory-dream`.
 
 ---
 

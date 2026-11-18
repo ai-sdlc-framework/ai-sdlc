@@ -580,12 +580,10 @@ This implements AC#8 — the signer refuses to run if any untrusted-PR-eval arti
 3. Zod-validate against `UntrustedPrReportSchema` (BEFORE key resolution — AC#5).
 4. Cross-validate `report.headSha` against `opts.headSha` (TOCTOU guard).
 5. Check `consensus.approved === true` and no reviewer rejected/detected injection (AC#4).
-6. Resolve signing key via `resolveSigningKeyPath()`.
-7. Build RFC-0042 v6 Merkle tree from transcript leaves.
-8. Sign Merkle root with operator ed25519 key.
-9. Write `.ai-sdlc/attestations/<patchId>.v6.dsse.json`.
 
-Returns a typed discriminated union — callers MUST check `result.success` before accessing `result.report` / `result.envelopePath`.
+It signs nothing and writes no file (RFC-0061 phase 3). The verdict record is written by `cli-ucvg emit-verdict` and the trusted verdict writer.
+
+Returns a typed discriminated union — callers MUST check `result.success` before accessing `result.report`.
 
 ```ts
 interface CleanRoomSignerOptions {
@@ -595,12 +593,10 @@ interface CleanRoomSignerOptions {
   repoRoot: string;
   /** Task ID used to select which transcript leaves belong to this PR. */
   taskId: string;
-  /** Git commit SHA of the PR head. Bound to the envelope subject. */
+  /** Git commit SHA of the PR head. Checked against the report (TOCTOU guard). */
   headSha: string;
   /** Optional content-addressed patch-id (AISDLC-398). */
   patchId?: string;
-  /** Optional identity string embedded in the attestation envelope. */
-  signerIdentity?: string;
   /**
    * Working directory for the isolation-invariant check (AC#8).
    * Defaults to `process.cwd()`. MUST be the operator's directory, not the sandbox.
@@ -613,13 +609,12 @@ type CleanRoomSignerResult = CleanRoomSignerSuccess | CleanRoomSignerFailure;
 interface CleanRoomSignerSuccess {
   success: true;
   report: UntrustedPrReport;
-  envelopePath: string;
 }
 
 interface CleanRoomSignerFailure {
   success: false;
   phase: 'isolation-check' | 'artifact-read' | 'zod-validation'
-       | 'consensus-rejected' | 'key-resolution' | 'signing';
+       | 'consensus-rejected';
   error: string;
 }
 ```
@@ -738,7 +733,7 @@ Output: unsigned report at `<output-dir>/<pr-number>.unsigned.json`.
 
 #### `clean-room-sign`
 
-Run Stage 4 (clean-room attestation). Reads unsigned report; emits signed DSSE envelope.
+Run Stage 4 (clean-room validation). Reads the unsigned report, validates it and refuses one that is not fully approved. It signs nothing; the verdict record is emitted by `cli-ucvg emit-verdict`.
 
 ```bash
 node pipeline-cli/bin/cli-ucvg.mjs clean-room-sign \
@@ -748,7 +743,7 @@ node pipeline-cli/bin/cli-ucvg.mjs clean-room-sign \
   --work-dir <repo-root>
 ```
 
-Output: DSSE envelope at `.ai-sdlc/attestations/<patchId>.v6.dsse.json`.
+Output: exit status only. Run `cli-ucvg emit-verdict` next to write the verdict record.
 
 ---
 

@@ -326,6 +326,8 @@ cli-hierarchy status [--json] [--check]
 
 **Filing PRs are docs-lane (AISDLC-1235).** A `cli-file` filing PR, new (`ai-sdlc/file-<id>`) or `--update` (`ai-sdlc/update-<id>`), is a docs-lane PR even though its title names a task id. Its merge never marks the task landed and never writes or rewrites a `done/` verdict. `cli-file` and the reconciler share the prefixes from `pipeline-cli/src/hierarchy/filing-branches.ts`. To reverse a false landing, run `cli-dispatch remove-verdict --task-id <id> --from done --with-manifest --unland --reason <text>`; it removes the `done/` marker, verdict and manifest, appends the reason to `<board>/board-events.jsonl`, and refuses while the task has a merged code PR.
 
+**A failed verdict is retired only by the task's own code (AISDLC-1297).** Both the reconcile pass and the tick step `retireFailedLanded` share one predicate (`isOwnCodePr` in `pipeline-cli/src/dispatch/retire-landed.ts`). A verdict that names a `prNumber` leaves `failed/` only when that pull request lands, or when the task file is under `backlog/completed/` on `origin/main`. A verdict without a `prNumber` is retired by a landing of kind `task` (or unstated) whose head branch is not a filing or docs branch. A merged filing or docs pull request never retires a verdict, whatever kind its landing record carries.
+
 **Landing retires a failed verdict (AISDLC-1158).** The verdict an executor wrote is a step record; only landing makes a task done. When the reconcile pass marks a PR landed, it moves that task's `failed/<id>.verdict.json` and `failed/<id>.manifest.json` to `done/`, adding `landedSha`, `landedAt` and `supersededCause` and keeping the original failed verdict under `supersededVerdict`. So `status`, `brief-status` and the handoff count a repaired, landed task as done, not failed. `cli-dispatch retire-landed` applies the same move to existing stale entries; it is idempotent and prints `{ "moved": [ { "taskId", "pr" } ] }`.
 
 ### Drain stall (AISDLC-1101)
@@ -466,7 +468,19 @@ the label. `webhook up` runs `launchctl bootout gui/<uid>/<label>` and retries b
 prints the launchctl stderr, the plist path and the two manual commands (`launchctl bootout gui/<uid>/<label>`,
 `launchctl bootstrap gui/<uid> <plist>`), starts the receiver in the foreground session anyway and exits non-zero:
 the feed works until logout but is not persisted. `webhook status` prints `persisted: launchd <label>` or
-`persisted: no (<reason>)`, read from `launchctl print gui/<uid>/<label>`. A named tunnel (for example Cloudflare Tunnel) pointing at
+`persisted: no (<reason>)`, read from `launchctl print gui/<uid>/<label>`. A job that is loaded but not running reads
+`persisted: no (<label> loaded, not running (last exit 126))`.
+
+**Self-repair (AISDLC-1299).** When the feed is `down` or `degraded` because the forwarder is dead (including a
+loaded job that is not running) or no event has arrived while a pull request changed, the dispatch tick repairs it
+before any decision is opened. It applies only to a launchd-supervised `gh-forward` feed on macOS; with a `tunnel` or
+`none` feed, or without launchd, it makes no `launchctl` call. The step runs `launchctl kickstart -k
+gui/<uid>/<label>`, or, when the installed agent file differs from the current shape (or a different secret) and
+`AI_SDLC_WEBHOOK_SECRET` is set, rewrites and reloads it as `webhook up` does. At most 3 attempts in 60 minutes, at
+least 5 minutes apart; each is recorded in `<board-dir>/webhook-health.json`. A decision is opened only when the
+attempts are used up or the agent file is out of date with the secret unset; its body lists the attempts and the tail
+of `webhook-forward.log` with the secret redacted (the secret is never written to the state file either). An arriving
+event returns the class to `healthy`, resets the attempt count and answers the open decision. A named tunnel (for example Cloudflare Tunnel) pointing at
 `127.0.0.1:8765` is the alternative for daily use (`--feed tunnel`).
 
 **Forwarder agent hardening (AISDLC-1285).** Four rules keep a crash-looping agent from reading as healthy:
@@ -1244,8 +1258,12 @@ reissues from local files and makes no GitHub call. Its GitHub reads (human-atte
 mark-ready, landing) run at most once per 5 minutes (`GITHUB_READ_INTERVAL_MS`, stamped as
 `lastGithubReadAt` in `operator-dispatch.state.json`), earlier only when the webhook receiver
 touched `<board>/.reconcile-wake` after the last read. The CI sweep runs on its own timer:
-`cli-ci sweep --board-dir "$BOARD_DIR"` runs at most once per 15 minutes per board (stamp
-`<board>/.ci-sweep.json`) and lists runs with `--limit 500`.
+`cli-ci sweep` runs at most once per 15 minutes per board, whether or not `--board-dir` is named
+(the default board is `<cwd>/.ai-sdlc/dispatch`; stamp `<board>/.ci-sweep.json`), and lists runs with
+`--limit 500`. `--dry-run` neither reads nor writes the stamp. A run whose cancel GitHub refuses with
+`Cannot cancel a workflow run that is completed` is recorded in the stamp (newest 200 ids) and is not
+cancelled again; the sweep prints one `skipped` line for them. Any other cancel failure is not recorded
+and is retried on the next sweep (AISDLC-1298).
 
 **Rejected briefs (AISDLC-952).** A brief the board refuses is recorded in
 `operator-dispatch.state.json` as `rejected[<file>] = { mtime, error, parentHead }` (the older

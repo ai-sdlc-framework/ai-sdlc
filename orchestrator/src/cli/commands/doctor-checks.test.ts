@@ -21,8 +21,6 @@ import {
   utimesSync,
   readdirSync,
   statSync,
-  accessSync,
-  constants as fsConstants,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -1891,7 +1889,8 @@ describe('worktree-hooks check', () => {
           return { stdout: `${HOOKS_REL}\n`, exitCode: 0 };
         if (cmd === 'test') {
           try {
-            accessSync(args[1], fsConstants.X_OK);
+            // Mode bits, not access(X_OK): a noexec tmpfs (the sandbox) fails X_OK for a 0755 file.
+            if ((statSync(args[1]).mode & 0o111) === 0) throw new Error('not executable');
             return { stdout: '', exitCode: 0 };
           } catch {
             return { stdout: '', exitCode: 1 };

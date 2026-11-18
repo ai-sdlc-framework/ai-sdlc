@@ -49,6 +49,7 @@ AISDLC-398 changed the content hash to be base-independent (`headBlobSha` only).
 ```
 1. Developer pushes branch + opens DRAFT PR
 2. /ai-sdlc execute: reviewers run, attestation signed, draft flipped → ready
+   (the gate decides "draft" from the live pull request state read through the API at run start, never from the event payload, so a stale draft event cannot leave `ai-sdlc/pr-ready` skipped on a ready pull request; AISDLC-1301)
 3. auto-enable-auto-merge.yml fires on ready_for_review
    → gh pr merge --auto --squash <PR>
 4. GitHub waits for required checks:
@@ -96,7 +97,7 @@ Dispatch holds new-task claims on two bounds, never repairs. The count (limit `o
 
 `auto-rebase-open-prs.yml` was deleted. It rebased every other open PR after every merge to `main`; each rebase restarted CI, cancelled runs in flight, disarmed auto-merge and invalidated the attestation envelope's head binding (a 50-PR sample showed ~37 workflow runs per PR, 343 cancelled runs and auto-merge toggled about 350 times). The up-to-date requirement on `main` is on (`strict=true`, as `scripts/sync-branch-protection.sh` applies), so GitHub disarms a BEHIND PR; the rebases are not restored because the arm is: `auto-enable-auto-merge.yml` re-arms on `synchronize` and the reconciler re-arms any green CLEAN ready task PR that is unarmed (AISDLC-1097).
 
-Current rule: a PR is rebased only when it conflicts with or is BEHIND `main`, by its executor, the reconciler (`land-prep`) or the `ci-conflict-resolver` / `/ai-sdlc rebase` path; it then merges once required checks pass. AISDLC-491 / AISDLC-448 keep the v6 attestation valid for disjoint PRs across any later rebase.
+Current rule: a PR is rebased only when it conflicts with or is BEHIND `main`, by its executor, the reconciler (`land-prep`) or the `ci-conflict-resolver` / `/ai-sdlc rebase` path; it then merges once required checks pass. AISDLC-491 / AISDLC-448 kept the v6 attestation valid across a rebase; the v6 envelope is retired (RFC-0061) and a rebase now needs no re-sign: the gate carries an approved verdict record forward when the reviewed diff replays cleanly (see the carry-forward rule below).
 
 `auto-rebase-on-queue-kick.yml` was also deleted: it triggered only on `ai-sdlc/attestation` failures on `gh-readonly-queue/main/pr-*` probe SHAs, which no longer exist. `auto-rearm-on-dequeue.yml` was deleted too (AISDLC-832, DEC-0099): its dequeue trigger cannot fire without a merge queue.
 
