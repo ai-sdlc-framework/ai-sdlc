@@ -54,8 +54,53 @@ adapter_binding_schema: dict[str, Any] = {
                         "SecretStore",
                         "MemoryStore",
                         "EventBus",
+                        "DesignTokenProvider",
+                        "ComponentCatalog",
+                        "VisualRegressionRunner",
+                        "UsabilitySimulationRunner",
                     ],
                     "type": "string",
+                },
+                "soulOverrides": {
+                    "description": "Per-soul adapter configuration overrides per "
+                    "RFC-0009 §8.2. Allows the same "
+                    "AdapterBinding to read from different "
+                    "concrete sources per soul (e.g., per-soul "
+                    "issue tracker channel, per-soul "
+                    "customer-signal source). Omission preserves "
+                    "single-DID behavior (platform-wide config "
+                    "only).",
+                    "items": {
+                        "additionalProperties": False,
+                        "properties": {
+                            "config": {
+                                "additionalProperties": True,
+                                "description": "Soul-specific "
+                                "adapter "
+                                "configuration. "
+                                "Merges "
+                                "over the "
+                                "top-level "
+                                "`config` "
+                                "field at "
+                                "resolution "
+                                "time.",
+                                "type": "object",
+                            },
+                            "soul": {
+                                "description": "Soul DID "
+                                "URI this "
+                                "override "
+                                "applies to "
+                                "(e.g., "
+                                "`did:platform-x:soul:soul-a`).",
+                                "type": "string",
+                            },
+                        },
+                        "required": ["soul", "config"],
+                        "type": "object",
+                    },
+                    "type": "array",
                 },
                 "source": {
                     "description": "Location of the adapter (registry URI, local path, "
@@ -106,6 +151,69 @@ adapter_binding_schema: dict[str, Any] = {
 
 agent_role_schema: dict[str, Any] = {
     "$defs": {
+        "BlockedTool": {
+            "additionalProperties": False,
+            "description": "One refused tool call: a tool name plus an optional argument matcher. "
+            "`match` names a built-in matcher; `argument` and `contains` together refuse "
+            "calls whose named argument contains the text (case-insensitive); with "
+            "neither, every call to the tool is refused.",
+            "properties": {
+                "argument": {
+                    "description": "Name of the tool-input field to test; used with `contains`.",
+                    "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+                    "type": "string",
+                },
+                "contains": {
+                    "description": "Text the argument must contain "
+                    "(case-insensitive) for the call to be refused; "
+                    "used with `argument`.",
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string",
+                },
+                "match": {
+                    "description": "Built-in matcher. `notDispatchRecipient`: the "
+                    "message recipient is not the dispatch session "
+                    "named in the roster. `decisionMutation`: a command "
+                    "runs a `cli-decisions` subcommand outside the "
+                    "allowlist (escalate, add without "
+                    "autonomous-fallback or timebox flags, and the "
+                    "read-only reads). `topLevelTask`: a task_create "
+                    "call that is not a sub-task of a task the session "
+                    "holds. `newTaskFile`: Write, Edit or MultiEdit "
+                    "creates a new task file that is not a sub-task of "
+                    "a task the session holds. `backlogCliCreate`: a "
+                    "`backlog task create` style command without "
+                    "`--parent` set to a task the session holds. Bash "
+                    "matchers are pattern matchers and do not catch "
+                    "every way a shell can write a file.",
+                    "enum": [
+                        "notDispatchRecipient",
+                        "decisionMutation",
+                        "topLevelTask",
+                        "newTaskFile",
+                        "backlogCliCreate",
+                    ],
+                    "type": "string",
+                },
+                "reason": {
+                    "description": "Sentence shown to the session when the call is "
+                    "refused and in the rendered rules.",
+                    "maxLength": 300,
+                    "minLength": 1,
+                    "type": "string",
+                },
+                "tool": {
+                    "description": "Tool name, exact or with `*` wildcards, or several "
+                    "names joined with `|` (e.g. `SendMessage`, "
+                    "`mcp__*__task_create`, `Write|Edit|MultiEdit`).",
+                    "pattern": "^[A-Za-z0-9_.*|-]{1,100}$",
+                    "type": "string",
+                },
+            },
+            "required": ["tool"],
+            "type": "object",
+        },
         "BudgetPressureRule": {
             "additionalProperties": False,
             "description": "A rule that downshifts model selection when budget pressure exceeds "
@@ -131,6 +239,218 @@ agent_role_schema: dict[str, Any] = {
                 },
             },
             "required": ["above", "downshift"],
+            "type": "object",
+        },
+        "Governance": {
+            "additionalProperties": False,
+            "description": "Per-repo governance hard-rule policy (RFC-0048). All keys optional; an "
+            "absent `governance` block resolves to strict defaults (never-merge / "
+            "never-force-push / never-close / never-branch-delete / never-reset-hard). "
+            "Malformed/unknown values fail closed to strict in the resolver "
+            "(ai-sdlc-plugin/hooks/lib/governance-resolver.js). Permanently-fixed "
+            "integrity rules (CI-skip tokens, editing `.ai-sdlc/attestations|verdicts`, "
+            "relaxing governance from a PR tree) are intentionally NOT representable "
+            "here.",
+            "properties": {
+                "allowBranchDelete": {
+                    "description": "Whether agents may delete branches "
+                    "(`git branch -D`/`-d`). Default false.",
+                    "type": "boolean",
+                },
+                "allowClosePrIssue": {
+                    "description": "Whether agents may close PRs or issues. Default false.",
+                    "type": "boolean",
+                },
+                "allowForcePush": {
+                    "default": "leaseOnOwnBranch",
+                    "description": "Force-push policy. When unset the default "
+                    "is `leaseOnOwnBranch`. `leaseOnOwnBranch` "
+                    "(boolean `true` is read the same way) = "
+                    "`git push --force-with-lease` is permitted "
+                    "only to the dispatched task's own branch "
+                    "(the worktree's `.active-task`, its "
+                    "directory name under `<repo>/.worktrees/` "
+                    "and the `ai-sdlc/<task-id>-*` branch must "
+                    "agree), never to `main`, `master`, a "
+                    "default deploy branch or a protected "
+                    "branch. Operator sessions without a task "
+                    "sentinel get no lease push. `lease` "
+                    "(explicit only; DEC-0264) = `git push "
+                    "--force-with-lease` is permitted to any "
+                    "non-protected branch from any session, "
+                    "with no task-worktree binding. `never` "
+                    "(boolean `false`) = no force pushes; set "
+                    "it explicitly to opt out. Any other value "
+                    "is malformed and fails closed to `never`.",
+                    "oneOf": [
+                        {"type": "boolean"},
+                        {"enum": ["never", "leaseOnOwnBranch", "lease"], "type": "string"},
+                    ],
+                },
+                "allowMerge": {
+                    "description": "Whether agents may merge PRs. `never` "
+                    "(default) = agents do not merge; it is a "
+                    "configurable value, not a project rule. "
+                    "`onGreenClean` = merge allowed once all "
+                    "required checks are green AND mergeStateStatus "
+                    "== CLEAN, for trusted-tier (internal backlog) "
+                    "work only.",
+                    "enum": ["never", "onGreenClean"],
+                    "type": "string",
+                },
+                "allowReleaseMerge": {
+                    "default": False,
+                    "description": "Narrow grant for `cli-merge-if-eligible "
+                    "--source-kind release`: when true, "
+                    "agents may land the release-please PR "
+                    "even if `allowMerge` is `never`. Never "
+                    "satisfies the backlog or gh-issue "
+                    "kinds, which still need `allowMerge: "
+                    "onGreenClean`. Default false.",
+                    "type": "boolean",
+                },
+                "allowResetHard": {
+                    "description": "Whether agents may run destructive git "
+                    "(`git reset --hard`, `git checkout -- .`, "
+                    "`git restore .`). Default false.",
+                    "type": "boolean",
+                },
+                "mergeAuthors": {
+                    "description": "GitHub logins whose pull requests the "
+                    "deterministic merge gate "
+                    "(`cli-merge-if-eligible`) may merge when "
+                    "`allowMerge: onGreenClean`. Read only from "
+                    "the file as committed on origin/main in the "
+                    "verified main checkout. Logins have no "
+                    "leading, trailing or consecutive hyphens. "
+                    "Absent or empty means nobody: every merge is "
+                    "refused (fail closed).",
+                    "items": {
+                        "maxLength": 39,
+                        "pattern": "^[A-Za-z0-9]+(-[A-Za-z0-9]+)*$",
+                        "type": "string",
+                    },
+                    "type": "array",
+                    "uniqueItems": True,
+                },
+                "openTaskPrsReady": {
+                    "default": False,
+                    "description": "When true, task PRs are opened ready "
+                    "instead of draft (AISDLC-896). When "
+                    "false (default), they are opened draft "
+                    "only if a workflow runs CodeQL on pull "
+                    "requests; otherwise they are opened "
+                    "ready (AISDLC-1149), since no `Analyze` "
+                    "check would ever flip a draft.",
+                    "type": "boolean",
+                },
+                "operational": {
+                    "description": "Operational actions granted to the dispatch "
+                    "role. Closed set; rendered into the dispatch "
+                    "session's rules. Does not relax any hook by "
+                    "itself.",
+                    "items": {
+                        "enum": [
+                            "rebase-own-branch",
+                            "lease-push-own-branch",
+                            "retrigger-ci",
+                            "requeue",
+                            "file-subid-followups",
+                            "answer-operational-decisions",
+                            "clear-executor-context",
+                            "mark-ready-after-codeql",
+                            "land-eligible-prs",
+                        ],
+                        "type": "string",
+                    },
+                    "type": "array",
+                    "uniqueItems": True,
+                },
+                "preset": {
+                    "description": "Sugar layer that expands to a resolved governance "
+                    "object. `strict` = the defaults (no-op). "
+                    "`operator-trusted` expands to `allowMerge: "
+                    "onGreenClean` (still trusted-tier only). A preset "
+                    "can never set anything the granular keys couldn't; "
+                    "explicit granular keys override the preset.",
+                    "enum": ["strict", "operator-trusted"],
+                    "type": "string",
+                },
+                "protectedBranches": {
+                    "description": "Additional branch names (exact, or a "
+                    "trailing `*` prefix match) that stay "
+                    "protected from force pushes, merged "
+                    "with the always-protected defaults: "
+                    "`main`, `master`, "
+                    "`release-please--branches--*`, "
+                    "`gh-pages`, `production`, `prod`, "
+                    "`release/*`, `releases/*`.",
+                    "items": {"pattern": "^[A-Za-z0-9._/-]+\\*?$", "type": "string"},
+                    "type": "array",
+                    "uniqueItems": True,
+                },
+                "releaseAuthors": {
+                    "description": "GitHub logins allowed as the author of the "
+                    "release-please PR and of its linked "
+                    "commits for `cli-merge-if-eligible "
+                    "--source-kind release`. OPTIONAL. "
+                    "Resolution order for the release path "
+                    "only: this key if present (an explicit "
+                    "empty list disables the release path: kill "
+                    "switch), else a non-empty `mergeAuthors`, "
+                    "else the built-in release-please bot "
+                    "logins `github-actions[bot]` and "
+                    "`release-please[bot]`. Bot logins use the "
+                    "REST spelling with the `[bot]` suffix. "
+                    "Never widens who the other source kinds "
+                    "trust. Read only from the file as "
+                    "committed on main.",
+                    "items": {
+                        "maxLength": 45,
+                        "pattern": "^[A-Za-z0-9]+(-[A-Za-z0-9]+)*(\\[bot\\])?$",
+                        "type": "string",
+                    },
+                    "type": "array",
+                    "uniqueItems": True,
+                },
+                "releaseMergeRoles": {
+                    "description": "Caller roles allowed to use "
+                    "`cli-merge-if-eligible --source-kind "
+                    "release`. Default: operator, planner "
+                    "(executor denied). The role comes from "
+                    "the caller's environment, so this is a "
+                    "mistake guard, not a security boundary "
+                    "(DEC-0038); the GitHub-derived PR "
+                    "checks are the real control.",
+                    "items": {
+                        "maxLength": 40,
+                        "pattern": "^[A-Za-z][A-Za-z0-9-]*$",
+                        "type": "string",
+                    },
+                    "type": "array",
+                    "uniqueItems": True,
+                },
+                "roles": {
+                    "additionalProperties": False,
+                    "description": "Per-hierarchy-role tool rules (session hierarchy "
+                    "roles `executor`, `operator-dispatch`, `planner`). "
+                    "A role's `blockedTools` list names tool calls a "
+                    "session holding that role is refused by the "
+                    "PreToolUse hook. Absent resolves to the strict "
+                    "defaults: an executor may not message anyone but "
+                    "the dispatch session, may not answer, resolve or "
+                    "override a decision, and may not create a top-level "
+                    "task. Only a session positively identified by the "
+                    "hierarchy roster is ever matched; any other session "
+                    "is treated as the operator and is never blocked.",
+                    "properties": {
+                        "executor": {"$ref": "#/$defs/RoleGovernance"},
+                        "operator-dispatch": {"$ref": "#/$defs/RoleGovernance"},
+                        "planner": {"$ref": "#/$defs/RoleGovernance"},
+                    },
+                    "type": "object",
+                },
+            },
             "type": "object",
         },
         "ModelRule": {
@@ -178,6 +498,23 @@ agent_role_schema: dict[str, Any] = {
             },
             "type": "object",
         },
+        "RoleGovernance": {
+            "additionalProperties": False,
+            "description": "Tool rules for one hierarchy role.",
+            "properties": {
+                "blockedTools": {
+                    "description": "Tool calls the role is refused. A "
+                    "non-empty list replaces the role's "
+                    "defaults; an explicit empty list removes "
+                    "them. A malformed list is ignored and "
+                    "the role's defaults apply (malformed "
+                    "input never relaxes a rule).",
+                    "items": {"$ref": "#/$defs/BlockedTool"},
+                    "type": "array",
+                }
+            },
+            "type": "object",
+        },
     },
     "$id": "https://ai-sdlc.io/schemas/v1alpha1/agent-role.schema.json",
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -222,8 +559,94 @@ agent_role_schema: dict[str, Any] = {
                             "items": {"type": "string"},
                             "type": "array",
                         },
+                        "blockedActions": {
+                            "description": "Shell "
+                            "command "
+                            "patterns the "
+                            "agent is "
+                            "forbidden "
+                            "from "
+                            "executing. "
+                            "Supports "
+                            "trailing * "
+                            "wildcards.",
+                            "items": {"type": "string"},
+                            "type": "array",
+                        },
                         "blockedPaths": {
-                            "description": "Glob patterns for paths the agent must not modify.",
+                            "description": "Glob patterns "
+                            "for paths the "
+                            "agent must not "
+                            "modify (e.g. "
+                            "'.github/workflows/**'). "
+                            "Enforced by "
+                            "the PreToolUse "
+                            "hook "
+                            "(ai-sdlc-plugin/hooks/enforce-blocked-actions.js) "
+                            "on Write/Edit "
+                            "calls, "
+                            "relative to "
+                            "the agent's "
+                            "active "
+                            "worktree (or "
+                            "project root "
+                            "when no "
+                            "worktree is "
+                            "resolvable). "
+                            "Neither "
+                            "`.ai-sdlc/**` "
+                            "nor "
+                            "`.github/workflows/**` "
+                            "is blocked by "
+                            "default for "
+                            "internal "
+                            "sessions "
+                            "(AISDLC-720): "
+                            "trusted agents "
+                            "may edit "
+                            "governance "
+                            "config when "
+                            "their task "
+                            "names the file "
+                            "and the "
+                            "change. List a "
+                            "path here to "
+                            "opt every "
+                            "session in the "
+                            "project, "
+                            "internal ones "
+                            "included, out "
+                            "of editing it. "
+                            "Runs marked "
+                            "untrusted (the "
+                            "`AI_SDLC_UNTRUSTED_RUN` "
+                            "environment "
+                            "signal, set by "
+                            "workflows for "
+                            "fork PRs, PRs "
+                            "whose author "
+                            "association is "
+                            "not "
+                            "OWNER/MEMBER/COLLABORATOR, "
+                            "and the "
+                            "gh-issue "
+                            "source kind) "
+                            "are always "
+                            "refused "
+                            "`.ai-sdlc/**`, "
+                            "`.github/workflows/**`, "
+                            "`.claude/**`, "
+                            "`.husky/**`, "
+                            "`ai-sdlc-plugin/hooks/**` "
+                            "and the "
+                            "`.active-task` "
+                            "sentinel "
+                            "(symlinks are "
+                            "resolved "
+                            "first), and "
+                            "nothing in "
+                            "this file can "
+                            "turn that off.",
                             "items": {"type": "string"},
                             "type": "array",
                         },
@@ -237,6 +660,33 @@ agent_role_schema: dict[str, Any] = {
                             "minimum": 1,
                             "type": "integer",
                         },
+                        "requireHumanApproval": {
+                            "description": "Action "
+                            "categories "
+                            "that "
+                            "require "
+                            "human "
+                            "approval "
+                            "before "
+                            "execution "
+                            "(e.g., "
+                            "merge, "
+                            "release, "
+                            "deploy).",
+                            "items": {"type": "string"},
+                            "type": "array",
+                        },
+                        "requireStory": {
+                            "description": "Whether the "
+                            "agent must "
+                            "produce a "
+                            "Storybook "
+                            "story for "
+                            "component "
+                            "changes "
+                            "(RFC-0006).",
+                            "type": "boolean",
+                        },
                         "requireTests": {
                             "description": "Whether the "
                             "agent must "
@@ -245,10 +695,76 @@ agent_role_schema: dict[str, Any] = {
                             "changes.",
                             "type": "boolean",
                         },
+                        "requireTokenUsage": {
+                            "description": "Whether "
+                            "the agent "
+                            "must use "
+                            "design "
+                            "tokens "
+                            "instead "
+                            "of "
+                            "hardcoded "
+                            "values "
+                            "(RFC-0006).",
+                            "type": "boolean",
+                        },
                     },
                     "type": "object",
                 },
+                "designSystem": {
+                    "additionalProperties": False,
+                    "description": "Design system context configuration for "
+                    "frontend agents (RFC-0006 §7).",
+                    "properties": {
+                        "binding": {
+                            "description": "Reference to a DesignSystemBinding resource name.",
+                            "type": "string",
+                        },
+                        "componentCreationPolicy": {
+                            "default": "compose-or-justify",
+                            "description": "Policy "
+                            "for "
+                            "when "
+                            "the "
+                            "agent "
+                            "may "
+                            "create "
+                            "new "
+                            "components "
+                            "vs. "
+                            "composing "
+                            "existing "
+                            "ones.",
+                            "enum": ["compose-or-justify", "compose-only", "unrestricted"],
+                            "type": "string",
+                        },
+                        "contextStrategy": {
+                            "default": "manifest-first",
+                            "description": "How the agent receives design system context.",
+                            "enum": ["manifest-first", "tokens-only", "full"],
+                            "type": "string",
+                        },
+                        "contextStrategyOverride": {
+                            "default": "auto",
+                            "description": "Whether "
+                            "the "
+                            "orchestrator "
+                            "may "
+                            "escalate "
+                            "the "
+                            "context "
+                            "strategy "
+                            "at "
+                            "runtime.",
+                            "enum": ["auto", "fixed"],
+                            "type": "string",
+                        },
+                    },
+                    "required": ["binding"],
+                    "type": "object",
+                },
                 "goal": {"description": "What the agent aims to achieve.", "type": "string"},
+                "governance": {"$ref": "#/$defs/Governance"},
                 "handoffs": {
                     "description": "Transitions to other agents.",
                     "items": {
@@ -309,6 +825,17 @@ agent_role_schema: dict[str, Any] = {
                     "description": "The agent's role title (e.g., 'Senior Software Engineer').",
                     "type": "string",
                 },
+                "scope": {
+                    "description": "Soul-scoping per RFC-0009 §8.1. `platform` agents "
+                    "operate across all souls (substrate-scoped roles; "
+                    "default when omitted). `soul` agents are bound to "
+                    "specific Soul DIDs via `soulBindings` (soul-specific "
+                    "specialists). `tenant` agents are bound to tenant "
+                    "boundaries (orthogonal to soul scoping). Omission "
+                    "preserves single-DID behavior (platform-wide).",
+                    "enum": ["platform", "soul", "tenant"],
+                    "type": "string",
+                },
                 "skills": {
                     "description": "Declared capabilities for discovery.",
                     "items": {
@@ -347,6 +874,17 @@ agent_role_schema: dict[str, Any] = {
                         "required": ["id", "description"],
                         "type": "object",
                     },
+                    "type": "array",
+                },
+                "soulBindings": {
+                    "description": "Soul DID URIs the agent is bound to when "
+                    "`scope: soul` (RFC-0009 §8.1). Each entry is "
+                    "a Soul DID URI (e.g., "
+                    "`did:platform-x:soul:soul-a`). Empty array or "
+                    "omission with `scope: soul` is treated as "
+                    "platform-wide (no soul-specific binding "
+                    "declared).",
+                    "items": {"type": "string"},
                     "type": "array",
                 },
                 "tools": {
@@ -501,6 +1039,22 @@ autonomy_policy_schema: dict[str, Any] = {
                                         "items": {"type": "string"},
                                         "type": "array",
                                     },
+                                    "maxComponentsPerPR": {
+                                        "description": "Maximum "
+                                        "number "
+                                        "of "
+                                        "components "
+                                        "the "
+                                        "agent "
+                                        "may "
+                                        "create/modify "
+                                        "per "
+                                        "PR "
+                                        "(RFC-0006 "
+                                        "§13.1).",
+                                        "minimum": 1,
+                                        "type": "integer",
+                                    },
                                     "maxLinesPerPR": {
                                         "description": "Maximum lines changed per pull request.",
                                         "minimum": 1,
@@ -514,6 +1068,21 @@ autonomy_policy_schema: dict[str, Any] = {
                                             "architecture-changes-only",
                                             "none",
                                         ],
+                                        "type": "string",
+                                    },
+                                    "requireDesignReview": {
+                                        "description": "When "
+                                        "design "
+                                        "review "
+                                        "is "
+                                        "required "
+                                        "for "
+                                        "this "
+                                        "autonomy "
+                                        "level "
+                                        "(RFC-0006 "
+                                        "§13.1).",
+                                        "enum": ["always", "conditional", "never"],
                                         "type": "string",
                                     },
                                     "transactionLimit": {
@@ -566,6 +1135,33 @@ autonomy_policy_schema: dict[str, Any] = {
                                 "additionalProperties": False,
                                 "description": "What the agent is allowed to do.",
                                 "properties": {
+                                    "designSystem": {
+                                        "additionalProperties": False,
+                                        "description": "Design "
+                                        "system "
+                                        "permissions "
+                                        "(RFC-0006 "
+                                        "§13.1).",
+                                        "properties": {
+                                            "approveVisualDiffs": {
+                                                "description": "Always "
+                                                "false "
+                                                "— "
+                                                "visual "
+                                                "diff "
+                                                "approval "
+                                                "is "
+                                                "human-only "
+                                                "(§13.3).",
+                                                "type": "boolean",
+                                            },
+                                            "createNewComponents": {"type": "boolean"},
+                                            "modifyExistingComponents": {"type": "boolean"},
+                                            "modifyStories": {"type": "boolean"},
+                                            "modifyTokens": {"type": "boolean"},
+                                        },
+                                        "type": "object",
+                                    },
                                     "execute": {
                                         "description": "Execute permission scopes (action names).",
                                         "items": {"type": "string"},
@@ -766,13 +1362,31 @@ common_schema: dict[str, Any] = {
             "additionalProperties": False,
             "description": "A metric threshold condition for evaluation.",
             "properties": {
+                "calibrationRange": {
+                    "description": "Expected calibration range [min, "
+                    "max] for this metric (RFC-0006 "
+                    "§13.2).",
+                    "items": {"type": "number"},
+                    "maxItems": 2,
+                    "minItems": 2,
+                    "type": "array",
+                },
                 "metric": {"description": "The metric to evaluate.", "type": "string"},
                 "operator": {
                     "description": "Comparison operator.",
                     "enum": [">=", "<=", "==", "!=", ">", "<"],
                     "type": "string",
                 },
+                "rationale": {
+                    "description": "Explanation of why this threshold was "
+                    "chosen and guidance for calibration.",
+                    "type": "string",
+                },
                 "threshold": {"description": "The threshold value.", "type": "number"},
+                "window": {
+                    "description": "Trailing time window for metric evaluation (e.g., 30d, 7d).",
+                    "type": "string",
+                },
             },
             "required": ["metric", "operator", "threshold"],
             "type": "object",
@@ -866,6 +1480,24 @@ pipeline_schema: dict[str, Any] = {
                 },
             },
             "required": ["dimensions"],
+            "type": "object",
+        },
+        "BacklogConfig": {
+            "additionalProperties": False,
+            "description": "Backlog-workflow specific configuration. Canonical location for settings "
+            "previously in pipeline-backlog.yaml (AISDLC-245.5). Readers fall back to "
+            "pipeline-backlog.yaml with a deprecation warning when this section is "
+            "absent.",
+            "properties": {
+                "branching": {"$ref": "#/$defs/BranchingConfig"},
+                "milestones": {
+                    "additionalProperties": {"items": {"type": "string"}, "type": "array"},
+                    "description": "Milestone-to-backlog-task mapping for "
+                    "cross-cutting release planning.",
+                    "type": "object",
+                },
+                "pullRequest": {"$ref": "#/$defs/PullRequestConfig"},
+            },
             "type": "object",
         },
         "BranchingConfig": {
@@ -1023,6 +1655,141 @@ pipeline_schema: dict[str, Any] = {
             "required": ["scope"],
             "type": "object",
         },
+        "EmbeddingSpec": {
+            "additionalProperties": False,
+            "description": "Embedding provider configuration per RFC-0019 §10.1. Absent = framework "
+            "disabled. Present + AI_SDLC_EMBEDDING_PROVIDER=on = framework loads. See "
+            "docs/operations/embedding-providers.md.",
+            "properties": {
+                "autoEmbedOnWrite": {
+                    "default": True,
+                    "description": "When true, write paths "
+                    "embed-and-store automatically. When "
+                    "false, callers must explicitly invoke "
+                    "embed() + store.",
+                    "type": "boolean",
+                },
+                "deprecationOverrides": {
+                    "additionalProperties": False,
+                    "description": "Per-org deprecation override per "
+                    "RFC-0019 OQ-4 re-walkthrough. "
+                    "Overrides the adapter-declared "
+                    "defaultGracePeriodDays (which "
+                    "itself overrides the 90d "
+                    "framework default). Catalog dedup "
+                    "milestones (89/60/30/7/1 days "
+                    "before deprecatedAt) are applied "
+                    "uniformly.",
+                    "properties": {
+                        "gracePeriodDays": {
+                            "description": "Days "
+                            "before "
+                            "deprecatedAt "
+                            "at "
+                            "which "
+                            "warnings "
+                            "begin. "
+                            "Three-layer "
+                            "precedence: "
+                            "framework "
+                            "default "
+                            "(90d) "
+                            "→ "
+                            "adapter "
+                            "defaultGracePeriodDays "
+                            "→ "
+                            "this "
+                            "per-org "
+                            "override.",
+                            "minimum": 1,
+                            "type": "integer",
+                        },
+                        "strictModeAtDeprecatedAt": {
+                            "default": False,
+                            "description": "When "
+                            "true, "
+                            "pipeline-load "
+                            "FAILS "
+                            "at "
+                            "deprecatedAt "
+                            "(operator-strict). "
+                            "When "
+                            "false "
+                            "(default), "
+                            "warnings "
+                            "continue "
+                            "past "
+                            "deprecatedAt "
+                            "and "
+                            "only "
+                            "removedAt "
+                            "fails "
+                            "the "
+                            "load.",
+                            "type": "boolean",
+                        },
+                    },
+                    "type": "object",
+                },
+                "fallback": {
+                    "description": "Adapter alias to fall back to when the "
+                    "primary is unavailable. Same value as "
+                    "`provider` means no fallback. Subject to the "
+                    "same registry resolution.",
+                    "type": "string",
+                },
+                "maxBatchSize": {
+                    "default": 2048,
+                    "description": "Maximum texts per embedBatch() call. "
+                    "Adapter-specific cap; framework chunks "
+                    "larger requests.",
+                    "minimum": 1,
+                    "type": "integer",
+                },
+                "provider": {
+                    "description": "Canonical adapter alias resolved against "
+                    "orchestrator/src/embedding/registry.ts. "
+                    "Example: 'openai-text-embedding-3-small'. "
+                    "Unknown names fail pipeline-load with "
+                    "UnknownEmbeddingProvider.",
+                    "type": "string",
+                },
+                "staleVectorPolicy": {
+                    "default": "lazy-re-embed",
+                    "description": "Per-org default for stale-vector "
+                    "encounters per RFC-0019 OQ-2 "
+                    "re-walkthrough. Consumers MAY pin a "
+                    "stricter policy at the API site "
+                    "(e.g., RFC-0009 "
+                    "Eτ_tessellation_drift pins "
+                    "'fail-loud' regardless of org "
+                    "default to preserve "
+                    "historical-trajectory fidelity).",
+                    "enum": ["lazy-re-embed", "fail-loud", "warn"],
+                    "type": "string",
+                },
+                "storageBackend": {
+                    "default": "jsonl",
+                    "description": "Backend identifier resolved against "
+                    "orchestrator/src/embedding/storage/index.ts. "
+                    "v1 ships 'jsonl'; future backends "
+                    "('sqlite', 'pgvector', 'qdrant') "
+                    "implement EmbeddingStorageBackend and "
+                    "self-register.",
+                    "type": "string",
+                },
+                "storageBackendConfig": {
+                    "additionalProperties": True,
+                    "description": "Backend-specific configuration. "
+                    "Opaque to the framework; passed "
+                    "through to the backend "
+                    "constructor.",
+                    "type": "object",
+                },
+            },
+            "required": ["provider"],
+            "type": "object",
+        },
         "ExecutionCostLimit": {
             "additionalProperties": False,
             "description": "Per-execution cost limits with soft and hard thresholds.",
@@ -1129,6 +1896,38 @@ pipeline_schema: dict[str, Any] = {
                     "description": "Map of template names to notification templates.",
                     "type": "object",
                 }
+            },
+            "type": "object",
+        },
+        "Parallelism": {
+            "additionalProperties": False,
+            "description": "Concurrency configuration introduced by RFC-0010. When this object is "
+            "omitted, the pipeline executes serially (current behavior).",
+            "properties": {
+                "maxConcurrent": {
+                    "description": "Maximum number of issues executing "
+                    "concurrently. When omitted, derived from "
+                    "the declared SubscriptionPlan per RFC-0010 "
+                    "§9.1 resolution table; falls back to 1 "
+                    "when no plan is declared.",
+                    "maximum": 20,
+                    "minimum": 1,
+                    "type": "integer",
+                },
+                "mergeStrategy": {
+                    "default": "serialized-rebase",
+                    "description": "Merge ordering strategy. parallel-merge is "
+                    "reserved and forbidden in v1; only "
+                    "serialized-rebase is supported.",
+                    "enum": ["serialized-rebase", "parallel-merge"],
+                    "type": "string",
+                },
+                "worktreePool": {
+                    "description": "Name of the WorktreePool resource backing "
+                    "this pipeline. Defaults to the pipeline's "
+                    "own name.",
+                    "type": "string",
+                },
             },
             "type": "object",
         },
@@ -1314,9 +2113,86 @@ pipeline_schema: dict[str, Any] = {
         "spec": {
             "additionalProperties": False,
             "properties": {
+                "accountId": {
+                    "description": "Override for HarnessAdapter.getAccountId() "
+                    "auto-derivation (LedgerKeyAmbiguous fallback). "
+                    "RFC-0010 §6.5.",
+                    "type": "string",
+                },
+                "artifactSchemaVersion": {
+                    "default": "v1",
+                    "description": "Pinned artifact-schema version per "
+                    "RFC-0010 §6.5 / §16.4 schema "
+                    "evolution semantics.",
+                    "type": "string",
+                },
+                "backlog": {"$ref": "#/$defs/BacklogConfig"},
                 "branching": {"$ref": "#/$defs/BranchingConfig"},
                 "costPolicy": {"$ref": "#/$defs/CostPolicy"},
+                "defaultHarness": {
+                    "default": "claude-code",
+                    "description": "Resolution target for any Stage with "
+                    "harness: inherit. Defaults to claude-code. "
+                    "RFC-0010 §6.5.",
+                    "enum": [
+                        "claude-code",
+                        "codex",
+                        "gemini-cli",
+                        "opencode",
+                        "aider",
+                        "generic-api",
+                    ],
+                    "type": "string",
+                },
+                "defaultHarnessFallback": {
+                    "description": "Pipeline-wide default fallback "
+                    "chain applied to stages that omit "
+                    "harnessFallback. RFC-0010 §6.5.",
+                    "items": {
+                        "enum": [
+                            "claude-code",
+                            "codex",
+                            "gemini-cli",
+                            "opencode",
+                            "aider",
+                            "generic-api",
+                        ],
+                        "type": "string",
+                    },
+                    "type": "array",
+                },
+                "defaultModel": {
+                    "default": "sonnet",
+                    "description": "Resolution target for any Stage with model: "
+                    "inherit (or absent). Defaults to sonnet. "
+                    "RFC-0010 §6.4.",
+                    "type": "string",
+                },
+                "embedding": {
+                    "$ref": "#/$defs/EmbeddingSpec",
+                    "description": "Optional embedding-provider configuration per "
+                    "RFC-0019 §10.1. When absent, the embedding "
+                    "framework is disabled and consumers emit "
+                    "EmbeddingProviderNotConfigured. When present AND "
+                    "AI_SDLC_EMBEDDING_PROVIDER=on, pipeline-load "
+                    "resolves the named adapter from "
+                    "orchestrator/src/embedding/registry.ts and "
+                    "instantiates the named storage backend.",
+                },
                 "notifications": {"$ref": "#/$defs/NotificationsConfig"},
+                "offPeakMaxWait": {
+                    "description": "Maximum time a schedule: off-peak stage may "
+                    "wait before dispatching on-peak. ISO 8601 "
+                    "duration; defaults to PT8H. RFC-0010 §6.5 / "
+                    "§14.3.",
+                    "type": "string",
+                },
+                "parallelism": {
+                    "$ref": "#/$defs/Parallelism",
+                    "description": "Concurrency configuration. When omitted, the "
+                    "pipeline executes serially. See RFC-0010 §6.1 "
+                    "/ §9.1.",
+                },
                 "priorityPolicy": {"$ref": "#/$defs/PriorityPolicy"},
                 "providers": {
                     "additionalProperties": {
@@ -1392,7 +2268,13 @@ pipeline_schema: dict[str, Any] = {
                     "type": "object",
                 },
                 "stages": {
-                    "description": "Ordered list of execution stages.",
+                    "deprecated": True,
+                    "description": "Ordered list of execution stages. Deprecated "
+                    "(RFC-0056 phase 3): pipeline-cli never executed it; "
+                    "the Workflow document (`.ai-sdlc/workflow.yaml`) "
+                    "replaces it. Still accepted for one release; "
+                    "loading a Pipeline that sets it logs one "
+                    "deprecation warning.",
                     "items": {
                         "additionalProperties": False,
                         "properties": {
@@ -1401,7 +2283,209 @@ pipeline_schema: dict[str, Any] = {
                                 "type": "string",
                             },
                             "approval": {"$ref": "#/$defs/ApprovalPolicy"},
+                            "condition": {
+                                "deprecated": True,
+                                "description": "Expression "
+                                "that must "
+                                "evaluate to "
+                                "true for the "
+                                "stage to "
+                                "execute. "
+                                "Deprecated "
+                                "(RFC-0056): "
+                                "replaced by "
+                                "Workflow "
+                                "edge `when`; "
+                                "accepted for "
+                                "one release "
+                                "with "
+                                "spec.stages, "
+                                "then "
+                                "removed.",
+                                "type": "string",
+                            },
+                            "config": {
+                                "additionalProperties": True,
+                                "description": "Stage-specific configuration.",
+                                "type": "object",
+                            },
+                            "constraints": {
+                                "additionalProperties": True,
+                                "description": "Stage-specific constraints for agent execution.",
+                                "properties": {
+                                    "preferComposition": {
+                                        "description": "Prefer "
+                                        "composing "
+                                        "existing "
+                                        "components "
+                                        "over "
+                                        "creating "
+                                        "new "
+                                        "ones.",
+                                        "type": "boolean",
+                                    },
+                                    "requireStory": {
+                                        "description": "Require Storybook story output.",
+                                        "type": "boolean",
+                                    },
+                                    "requireTokenUsage": {
+                                        "description": "Require "
+                                        "design "
+                                        "token "
+                                        "usage "
+                                        "(no "
+                                        "hardcoded "
+                                        "values).",
+                                        "type": "boolean",
+                                    },
+                                },
+                                "type": "object",
+                            },
+                            "context": {
+                                "additionalProperties": True,
+                                "description": "Context configuration for the stage.",
+                                "type": "object",
+                            },
                             "credentials": {"$ref": "#/$defs/CredentialPolicy"},
+                            "databaseAccess": {
+                                "default": "none",
+                                "description": "Per-stage "
+                                "database-access "
+                                "declaration. "
+                                "Drives "
+                                "DatabaseBranchPool "
+                                "provisioning "
+                                "per RFC "
+                                "§6.3 / "
+                                "§15.7.",
+                                "enum": ["none", "read", "write", "migrate"],
+                                "type": "string",
+                            },
+                            "estimatedTokens": {
+                                "additionalProperties": False,
+                                "description": "Operator "
+                                "hint "
+                                "for "
+                                "SubscriptionLedger "
+                                "window-headroom "
+                                "math. "
+                                "When "
+                                "omitted, "
+                                "cold-start "
+                                "defaults "
+                                "apply "
+                                "(50000/10000) "
+                                "and "
+                                "EstimateBootstrapped "
+                                "fires "
+                                "after "
+                                "first "
+                                "run. "
+                                "Set "
+                                "frozen: "
+                                "true "
+                                "to opt "
+                                "out of "
+                                "rolling "
+                                "updates. "
+                                "RFC "
+                                "§6.3 / "
+                                "§14.6.",
+                                "properties": {
+                                    "frozen": {"type": "boolean"},
+                                    "input": {"minimum": 0, "type": "integer"},
+                                    "output": {"minimum": 0, "type": "integer"},
+                                },
+                                "required": ["input", "output"],
+                                "type": "object",
+                            },
+                            "harness": {
+                                "description": "Per-stage "
+                                "harness "
+                                "selection. "
+                                "Defaults to "
+                                "'inherit' "
+                                "(Pipeline.spec.defaultHarness, "
+                                "default "
+                                "'claude-code'). "
+                                "RFC-0010 §6.3 "
+                                "/ §13.",
+                                "enum": [
+                                    "claude-code",
+                                    "codex",
+                                    "gemini-cli",
+                                    "opencode",
+                                    "aider",
+                                    "generic-api",
+                                    "inherit",
+                                ],
+                                "type": "string",
+                            },
+                            "harnessFallback": {
+                                "description": "Ordered "
+                                "fallback "
+                                "chain "
+                                "on "
+                                "availability "
+                                "failures. "
+                                "RFC-0010 "
+                                "§13.5.",
+                                "items": {
+                                    "enum": [
+                                        "claude-code",
+                                        "codex",
+                                        "gemini-cli",
+                                        "opencode",
+                                        "aider",
+                                        "generic-api",
+                                    ],
+                                    "type": "string",
+                                },
+                                "type": "array",
+                            },
+                            "kind": {
+                                "description": "Stage kind. "
+                                "Defaults to "
+                                "'agent'. "
+                                "review-classifier "
+                                "and review-fanout "
+                                "drive RFC-0010 "
+                                "§12 conditional "
+                                "review behavior.",
+                                "enum": ["agent", "review-classifier", "review-fanout"],
+                                "type": "string",
+                            },
+                            "maxBudgetUsd": {
+                                "description": "Per-stage "
+                                "cost "
+                                "ceiling. "
+                                "When "
+                                "exceeded "
+                                "the "
+                                "orchestrator "
+                                "emits "
+                                "BudgetExceeded "
+                                "and "
+                                "applies "
+                                "onFailure. "
+                                "RFC-0010 "
+                                "§6.3 / "
+                                "§11.5.",
+                                "exclusiveMinimum": 0,
+                                "type": "number",
+                            },
+                            "model": {
+                                "description": "Per-stage model "
+                                "alias (haiku, "
+                                "sonnet, opus, "
+                                "opus[1m]) or "
+                                "'inherit' to "
+                                "defer to "
+                                "Pipeline.spec.defaultModel. "
+                                "RFC-0010 §6.3 / "
+                                "§11.",
+                                "type": "string",
+                            },
                             "name": {
                                 "description": "Unique name within the pipeline.",
                                 "type": "string",
@@ -1412,6 +2496,46 @@ pipeline_schema: dict[str, Any] = {
                                 "items": {"type": "string"},
                                 "type": "array",
                             },
+                            "requiresIndependentHarnessFrom": {
+                                "description": "Upstream "
+                                "stage "
+                                "names "
+                                "whose "
+                                "resolved "
+                                "harness "
+                                "MUST "
+                                "be "
+                                "excluded "
+                                "from "
+                                "this "
+                                "stage's "
+                                "effective "
+                                "chain "
+                                "(cross-harness "
+                                "review "
+                                "independence "
+                                "per "
+                                "RFC "
+                                "§13.10 "
+                                "/ "
+                                "Q8).",
+                                "items": {"type": "string"},
+                                "type": "array",
+                            },
+                            "schedule": {
+                                "default": "now",
+                                "description": "Subscription-aware "
+                                "dispatch hint "
+                                "per RFC §6.3 "
+                                "/ §14.3.",
+                                "enum": [
+                                    "now",
+                                    "off-peak",
+                                    "quota-permitting",
+                                    "defer-if-low-priority",
+                                ],
+                                "type": "string",
+                            },
                             "timeout": {
                                 "description": "Maximum stage "
                                 "duration as an "
@@ -1420,12 +2544,36 @@ pipeline_schema: dict[str, Any] = {
                                 "(e.g., PT30M).",
                                 "type": "string",
                             },
+                            "type": {
+                                "description": "Stage type (e.g., "
+                                "design-system, "
+                                "design-review, "
+                                "quality-gate, "
+                                "usability-test).",
+                                "type": "string",
+                            },
                         },
                         "required": ["name"],
                         "type": "object",
                     },
                     "minItems": 1,
                     "type": "array",
+                },
+                "tenant": {
+                    "description": "Tenant identifier for SubscriptionLedger keying. "
+                    "When set, partitions a shared vendor account into "
+                    "virtual sub-windows per RFC-0010 §6.5 / §14.12.",
+                    "type": "string",
+                },
+                "tenantQuotaShare": {
+                    "description": "Fraction of the shared account's window "
+                    "quota allocated to this tenant. Required "
+                    "when tenant is set and multiple tenants "
+                    "exist on the same account; sum across "
+                    "tenants MUST equal 1.0.",
+                    "maximum": 1,
+                    "minimum": 0,
+                    "type": "number",
                 },
                 "triggers": {
                     "description": "Events that initiate the pipeline.",
@@ -1745,6 +2893,292 @@ quality_gate_schema: dict[str, Any] = {
                                         "title": "Cost-based rule",
                                         "type": "object",
                                     },
+                                    {
+                                        "additionalProperties": False,
+                                        "properties": {
+                                            "category": {
+                                                "description": "Token "
+                                                "category "
+                                                "to "
+                                                "check "
+                                                "(e.g., "
+                                                "color, "
+                                                "spacing, "
+                                                "typography).",
+                                                "type": "string",
+                                            },
+                                            "coverageMetric": {
+                                                "additionalProperties": False,
+                                                "description": "Evaluate "
+                                                "token "
+                                                "coverage "
+                                                "as "
+                                                "a "
+                                                "metric.",
+                                                "properties": {
+                                                    "operator": {
+                                                        "enum": [">=", "<=", "==", "!=", ">", "<"],
+                                                        "type": "string",
+                                                    },
+                                                    "threshold": {"type": "number"},
+                                                },
+                                                "required": ["operator", "threshold"],
+                                                "type": "object",
+                                            },
+                                            "designSystem": {
+                                                "description": "Reference "
+                                                "to "
+                                                "a "
+                                                "DesignSystemBinding "
+                                                "by "
+                                                "name.",
+                                                "type": "string",
+                                            },
+                                            "designTokenCompliance": {
+                                                "const": True,
+                                                "type": "boolean",
+                                            },
+                                            "maxViolations": {
+                                                "description": "Maximum "
+                                                "allowed "
+                                                "hardcoded "
+                                                "value "
+                                                "violations.",
+                                                "minimum": 0,
+                                                "type": "integer",
+                                            },
+                                        },
+                                        "required": ["designTokenCompliance", "designSystem"],
+                                        "title": "Design token compliance rule (RFC-0006 §8.1)",
+                                        "type": "object",
+                                    },
+                                    {
+                                        "additionalProperties": False,
+                                        "properties": {
+                                            "config": {
+                                                "additionalProperties": False,
+                                                "properties": {
+                                                    "diffThreshold": {
+                                                        "description": "Maximum "
+                                                        "pixel "
+                                                        "diff "
+                                                        "percentage "
+                                                        "(0.0-1.0).",
+                                                        "maximum": 1,
+                                                        "minimum": 0,
+                                                        "type": "number",
+                                                    },
+                                                    "failOnNewStory": {
+                                                        "description": "Whether "
+                                                        "new "
+                                                        "stories "
+                                                        "without "
+                                                        "baselines "
+                                                        "fail.",
+                                                        "type": "boolean",
+                                                    },
+                                                    "requireBaseline": {
+                                                        "description": "Whether "
+                                                        "a "
+                                                        "baseline "
+                                                        "must "
+                                                        "exist.",
+                                                        "type": "boolean",
+                                                    },
+                                                },
+                                                "required": ["diffThreshold"],
+                                                "type": "object",
+                                            },
+                                            "designSystem": {
+                                                "description": "Reference "
+                                                "to "
+                                                "a "
+                                                "DesignSystemBinding "
+                                                "by "
+                                                "name.",
+                                                "type": "string",
+                                            },
+                                            "override": {
+                                                "additionalProperties": False,
+                                                "properties": {
+                                                    "approvers": {
+                                                        "description": "Principals "
+                                                        "who "
+                                                        "may "
+                                                        "approve "
+                                                        "visual "
+                                                        "diffs.",
+                                                        "items": {"type": "string"},
+                                                        "type": "array",
+                                                    }
+                                                },
+                                                "type": "object",
+                                            },
+                                            "visualRegression": {"const": True, "type": "boolean"},
+                                        },
+                                        "required": ["visualRegression", "designSystem"],
+                                        "title": "Visual regression rule (RFC-0006 §8.2)",
+                                        "type": "object",
+                                    },
+                                    {
+                                        "additionalProperties": False,
+                                        "properties": {
+                                            "config": {
+                                                "additionalProperties": False,
+                                                "properties": {
+                                                    "minStories": {
+                                                        "description": "Minimum "
+                                                        "number "
+                                                        "of "
+                                                        "stories "
+                                                        "per "
+                                                        "component.",
+                                                        "minimum": 1,
+                                                        "type": "integer",
+                                                    },
+                                                    "requireA11yStory": {
+                                                        "description": "Require "
+                                                        "an "
+                                                        "accessibility-focused "
+                                                        "story.",
+                                                        "type": "boolean",
+                                                    },
+                                                    "requireDefaultStory": {
+                                                        "description": "Require "
+                                                        "a "
+                                                        "default/primary "
+                                                        "story.",
+                                                        "type": "boolean",
+                                                    },
+                                                    "requireStateStories": {
+                                                        "description": "Require "
+                                                        "stories "
+                                                        "for "
+                                                        "interactive "
+                                                        "states.",
+                                                        "type": "boolean",
+                                                    },
+                                                },
+                                                "type": "object",
+                                            },
+                                            "storyCompleteness": {
+                                                "const": True,
+                                                "type": "boolean",
+                                            },
+                                        },
+                                        "required": ["storyCompleteness"],
+                                        "title": "Story completeness rule (RFC-0006 §8.3)",
+                                        "type": "object",
+                                    },
+                                    {
+                                        "additionalProperties": False,
+                                        "properties": {
+                                            "designReview": {"const": True, "type": "boolean"},
+                                            "designSystem": {
+                                                "description": "Reference "
+                                                "to "
+                                                "a "
+                                                "DesignSystemBinding "
+                                                "by "
+                                                "name.",
+                                                "type": "string",
+                                            },
+                                            "feedback": {
+                                                "additionalProperties": False,
+                                                "properties": {
+                                                    "actionOnReject": {
+                                                        "enum": ["return-to-agent", "escalate"],
+                                                        "type": "string",
+                                                    },
+                                                    "categories": {
+                                                        "items": {
+                                                            "enum": [
+                                                                "visual-quality",
+                                                                "contextual-fit",
+                                                                "interaction-design",
+                                                                "accessibility-intent",
+                                                                "design-language-consistency",
+                                                            ],
+                                                            "type": "string",
+                                                        },
+                                                        "type": "array",
+                                                    },
+                                                    "maxRejections": {
+                                                        "minimum": 1,
+                                                        "type": "integer",
+                                                    },
+                                                    "structured": {"type": "boolean"},
+                                                },
+                                                "type": "object",
+                                            },
+                                            "minimumReviewers": {
+                                                "default": 1,
+                                                "minimum": 1,
+                                                "type": "integer",
+                                            },
+                                            "onTimeout": {
+                                                "enum": ["pause", "fail"],
+                                                "type": "string",
+                                            },
+                                            "reviewers": {
+                                                "description": "Principals "
+                                                "qualified "
+                                                "to "
+                                                "perform "
+                                                "design "
+                                                "review.",
+                                                "items": {"type": "string"},
+                                                "type": "array",
+                                            },
+                                            "timeout": {
+                                                "description": "ISO "
+                                                "8601 "
+                                                "duration "
+                                                "for "
+                                                "review "
+                                                "timeout.",
+                                                "type": "string",
+                                            },
+                                            "triggerConditions": {
+                                                "additionalProperties": False,
+                                                "properties": {
+                                                    "always": {
+                                                        "items": {
+                                                            "enum": [
+                                                                "new-component",
+                                                                "token-schema-change",
+                                                            ],
+                                                            "type": "string",
+                                                        },
+                                                        "type": "array",
+                                                    },
+                                                    "conditional": {
+                                                        "items": {
+                                                            "additionalProperties": False,
+                                                            "properties": {
+                                                                "condition": {
+                                                                    "enum": [
+                                                                        "semantic-token-cascade",
+                                                                        "visual-regression-diff",
+                                                                        "complexity-score",
+                                                                    ],
+                                                                    "type": "string",
+                                                                },
+                                                                "threshold": {"type": "number"},
+                                                            },
+                                                            "required": ["condition", "threshold"],
+                                                            "type": "object",
+                                                        },
+                                                        "type": "array",
+                                                    },
+                                                },
+                                                "type": "object",
+                                            },
+                                        },
+                                        "required": ["designReview", "designSystem", "reviewers"],
+                                        "title": "Design review rule (RFC-0006 §8.5)",
+                                        "type": "object",
+                                    },
                                 ],
                             },
                         },
@@ -1773,6 +3207,14 @@ quality_gate_schema: dict[str, Any] = {
                         },
                     },
                     "type": "object",
+                },
+                "soulScope": {
+                    "description": "Soul DID URI per RFC-0009 §8.4. When present, "
+                    "the gate applies only to work targeting this "
+                    "soul (e.g., a soul-specific voice-coherence "
+                    "gate). Omission preserves single-DID behavior "
+                    "(platform-wide gate applying to all souls).",
+                    "type": "string",
                 },
             },
             "required": ["gates"],

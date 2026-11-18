@@ -268,9 +268,11 @@ jobs:
           filters: |
             python:
               - 'sdk-python/**'
+              - 'spec/schemas/**'
               - 'conformance/**'
             go:
               - 'sdk-go/**'
+              - 'spec/schemas/**'
               - 'conformance/**'
             first_run:
               - 'ai-sdlc-plugin/**'
