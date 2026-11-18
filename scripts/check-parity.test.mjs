@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkParity, flattenExemptions } from './check-parity.mjs';
+import { checkParity, checkScope, flattenExemptions } from './check-parity.mjs';
 import { buildManifest, serializeManifest } from './generate-parity-manifest.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -68,4 +68,62 @@ test('shrinking exemptions passes; null base skips the growth check', () => {
   assert.deepEqual(checkParity(root, { go: { spanNames: ['a', 'b'] } }), []);
   assert.deepEqual(checkParity(root, null), []);
   assert.equal(flattenExemptions(undefined).size, 0);
+});
+
+function scopeFixture(modules, dirs = Object.keys(modules)) {
+  const root = mkdtempSync(join(tmpdir(), 'scope-'));
+  for (const d of dirs) mkdirSync(join(root, 'reference/src', d), { recursive: true });
+  mkdirSync(join(root, 'conformance/parity'), { recursive: true });
+  writeFileSync(join(root, 'conformance/parity/scope.json'), JSON.stringify({ modules }));
+  mkdirSync(join(root, 'sdk-typescript'), { recursive: true });
+  writeFileSync(
+    join(root, 'sdk-typescript/package.json'),
+    JSON.stringify({ exports: { './core': {} } }),
+  );
+  mkdirSync(join(root, 'sdk-python/src/ai_sdlc/core'), { recursive: true });
+  mkdirSync(join(root, 'sdk-go/core'), { recursive: true });
+  return root;
+}
+const ok = {
+  core: { class: 'shared', reason: 'r' },
+  utils: { class: 'typescript-only', reason: 'r' },
+};
+
+test('committed scope.json passes', () => {
+  assert.deepEqual(checkScope(REPO), []);
+});
+
+test('scope fixture passes; missing file fails', () => {
+  assert.deepEqual(checkScope(scopeFixture(ok)), []);
+  assert.match(checkScope(mkdtempSync(join(tmpdir(), 'empty-')))[0], /missing/);
+});
+
+test('fails when a reference directory has no entry', () => {
+  const p = checkScope(scopeFixture(ok, ['core', 'utils', 'newmod']));
+  assert.equal(p.length, 1);
+  assert.match(p[0], /no entry for reference\/src\/newmod/);
+});
+
+test('fails when a shared entry lacks a counterpart (python, go, exports)', () => {
+  let root = scopeFixture(ok);
+  rmSync(join(root, 'sdk-python/src/ai_sdlc/core'), { recursive: true });
+  assert.match(checkScope(root).join('\n'), /no package in sdk-python/);
+  root = scopeFixture(ok);
+  rmSync(join(root, 'sdk-go/core'), { recursive: true });
+  assert.match(checkScope(root).join('\n'), /no directory in sdk-go/);
+  root = scopeFixture(ok);
+  writeFileSync(join(root, 'sdk-typescript/package.json'), JSON.stringify({ exports: {} }));
+  assert.match(checkScope(root).join('\n'), /not in sdk-typescript\/package.json exports/);
+});
+
+test('fails on entry without directory, unknown class, missing reason', () => {
+  const noDir = scopeFixture({ ...ok, ghost: { class: 'typescript-only', reason: 'r' } }, [
+    'core',
+    'utils',
+  ]);
+  assert.match(checkScope(noDir).join('\n'), /"ghost" but reference\/src\/ghost does not exist/);
+  const badClass = scopeFixture({ ...ok, utils: { class: 'weird', reason: 'r' } });
+  assert.match(checkScope(badClass).join('\n'), /unknown class "weird"/);
+  const noReason = scopeFixture({ ...ok, utils: { class: 'typescript-only' } });
+  assert.match(checkScope(noReason).join('\n'), /"utils" has no reason/);
 });

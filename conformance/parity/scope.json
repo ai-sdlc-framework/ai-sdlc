@@ -1,0 +1,68 @@
+{
+  "modules": {
+    "adapters": {
+      "class": "shared",
+      "reason": "Exported by sdk-typescript, packaged in sdk-python, directory in sdk-go."
+    },
+    "agents": {
+      "class": "shared",
+      "reason": "Exported by sdk-typescript, packaged in sdk-python, directory in sdk-go."
+    },
+    "audit": {
+      "class": "shared",
+      "reason": "Exported by sdk-typescript, packaged in sdk-python, directory in sdk-go."
+    },
+    "builders": {
+      "class": "shared",
+      "reason": "Exported by sdk-typescript, packaged in sdk-python, directory in sdk-go."
+    },
+    "capabilities": {
+      "class": "typescript-only",
+      "reason": "Reference-only capability registry; no SDK carries it."
+    },
+    "compliance": {
+      "class": "shared",
+      "reason": "Exported by sdk-typescript, packaged in sdk-python, directory in sdk-go."
+    },
+    "core": {
+      "class": "shared",
+      "reason": "Exported by sdk-typescript, packaged in sdk-python, directory in sdk-go."
+    },
+    "judgment": {
+      "class": "typescript-only",
+      "reason": "Reference-only judgment engine used by the pipeline; no SDK carries it."
+    },
+    "metrics": {
+      "class": "shared",
+      "reason": "Exported by sdk-typescript, packaged in sdk-python, directory in sdk-go."
+    },
+    "models": {
+      "class": "typescript-only",
+      "reason": "Reference-only model routing; no SDK carries it."
+    },
+    "policy": {
+      "class": "shared",
+      "reason": "Exported by sdk-typescript, packaged in sdk-python, directory in sdk-go."
+    },
+    "reconciler": {
+      "class": "shared",
+      "reason": "Exported by sdk-typescript, packaged in sdk-python, directory in sdk-go."
+    },
+    "security": {
+      "class": "shared",
+      "reason": "Exported by sdk-typescript, packaged in sdk-python, directory in sdk-go."
+    },
+    "telemetry": {
+      "class": "shared",
+      "reason": "Exported by sdk-typescript, packaged in sdk-python, directory in sdk-go."
+    },
+    "usage": {
+      "class": "typescript-only",
+      "reason": "Reference-only usage accounting; no SDK carries it."
+    },
+    "utils": {
+      "class": "typescript-only",
+      "reason": "Reference-only internal helpers; each SDK has its own."
+    }
+  }
+}

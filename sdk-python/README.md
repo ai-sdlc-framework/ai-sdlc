@@ -56,3 +56,7 @@ assert result.valid
 ## License
 
 Apache-2.0
+
+## Scope
+
+This SDK carries the eleven `shared` reference modules: `adapters`, `agents`, `audit`, `builders`, `compliance`, `core`, `metrics`, `policy`, `reconciler`, `security` and `telemetry`. The reference modules `capabilities`, `judgment`, `models`, `usage` and `utils` are `typescript-only` and are not part of this SDK. The classification lives in `conformance/parity/scope.json` and `pnpm parity:check` enforces it.

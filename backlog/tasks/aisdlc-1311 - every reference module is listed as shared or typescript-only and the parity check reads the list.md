@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1311
 title: 'Every reference module is listed as shared or TypeScript-only and the parity check reads the list'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-17'
 labels:
