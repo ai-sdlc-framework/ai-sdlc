@@ -7,28 +7,6 @@
       "DesignSystemBinding",
       "DorConfig",
       "JudgmentConfig"
-    ],
-    "standardMetrics": [
-      "cost-per-run",
-      "tokens-per-run",
-      "total-cost-usd",
-      "total-input-tokens",
-      "total-output-tokens"
-    ],
-    "spanNames": ["ai_sdlc.cost.tracking", "ai_sdlc.pipeline.run"],
-    "metricNames": [
-      "ai_sdlc.cost.per_task_usd",
-      "ai_sdlc.cost.usd.total",
-      "ai_sdlc.tokens.input.total",
-      "ai_sdlc.tokens.output.total",
-      "ai_sdlc.tokens.total"
-    ],
-    "attributeKeys": [
-      "ai_sdlc.complexity_band",
-      "ai_sdlc.cost_usd",
-      "ai_sdlc.model",
-      "ai_sdlc.run_id",
-      "ai_sdlc.tokens"
     ]
   },
   "go": {
