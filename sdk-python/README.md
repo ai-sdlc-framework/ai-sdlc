@@ -5,7 +5,7 @@ Python SDK for the [AI-SDLC Framework](https://ai-sdlc.io) — a Kubernetes-styl
 ## Installation
 
 ```bash
-pip install ai-sdlc
+pip install ai-sdlc-framework
 ```
 
 ## Quick Start
