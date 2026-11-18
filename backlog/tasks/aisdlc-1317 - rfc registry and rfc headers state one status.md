@@ -7,7 +7,8 @@ created_date: '2026-11-18'
 labels:
   - docs
   - rfc
-dependencies: []
+dependencies:
+  - AISDLC-1322
 references:
   - spec/rfcs/README.md
   - scripts/check-rfc-registry.mjs
@@ -87,14 +88,14 @@ RFC-0035 and RFC-0017 were not in the audit's list; they were found by the same 
 - **Rules that apply** (`.claude/rules/rfcs.md`, `spec/rfcs/README.md`): the lifecycle ladder is changed only through the lifecycle gate, so this task changes no `lifecycle:` value. No Open Question is resolved, no `**Resolution:**` or `RESOLVED:` marker is added, and no text inside an Open Questions section is edited.
 - **Registry Status cells.** Set the five cells of the first table to the frontmatter value (by `--write` once the check below exists).
 - **Body lines.** For RFC-0009, 0010, 0016, 0019, 0022, 0035 (evidence: the operator ruling of 2026-11-07 recorded in the completed task AISDLC-1223, which names each of them), RFC-0042 (evidence: line 35 of the file and RFC-0061) and RFC-0061 (evidence: its frontmatter with `runtimeEvidence`, and the completed task AISDLC-1173): the `**Status:**` line begins with the frontmatter `lifecycle` value, and the former text is kept on the same line after "Previously:". Nothing else in those files changes.
-- **RFC-0047.** Set `status: Approved`, the value the mapping guide gives for `lifecycle: Signed Off` (evidence: the sign-off dated 2026-09-06 on line 17 and the `lifecycle` field). Run `node scripts/check-rfc-docs.mjs` afterwards: `Approved` is an enforced status and the RFC declares `requiresDocs: []`. Then regenerate its Registry row.
+- **RFC-0047.** AISDLC-1322 (a dependency) sets its `status:` and `lifecycle:` to the superseded values. Change nothing in the file; confirm that its Registry row matches it.
 - **Notes and summary lists.** In the five notes cells remove or reword the clause that contradicts the row, citing the completing task where one is named. In the Open Questions Inventory and the critical-path table set the lifecycle of RFC-0009, 0023, 0024 and 0035 to the frontmatter value and drop the "awaiting" clause that no longer holds.
-- **For the operator, not decided here.** RFC-0017, RFC-0023 and RFC-0041: change nothing in the files; list each in the PR body with the two statements that disagree and the evidence found. Any other RFC whose evidence does not settle its status when the work starts is listed the same way.
+- **For the operator, not decided here.** RFC-0023 and RFC-0041, and RFC-0017 only if AISDLC-1322 left it unchanged: change nothing in the files; list each in the PR body with the two statements that disagree and the evidence found. Any other RFC whose evidence does not settle its status when the work starts is listed the same way.
 - **Check.** `scripts/check-rfc-registry.mjs`: (a) the Status cell (`cells(line)[3]`) must equal frontmatter `status`; `--write` fixes it as it fixes the Lifecycle cell; (b) the first line of the RFC body that starts with `**Status:**` must continue with the frontmatter `lifecycle` or `status` value; an RFC without such a line passes. RFCs left to the operator whose body line fails (b) go into an exported set `BODY_STATUS_KNOWN`, with the reason in a comment; an id in the set that passes (b) is an error, so the set only shrinks. Error lines name the RFC, the place and both values.
 - **Tests.** `scripts/check-rfc-registry.test.mjs`: a stale Status cell fails and `--write` repairs it; a body line that disagrees fails; a body line that starts with the `status` value passes; an RFC with no body line passes; a `BODY_STATUS_KNOWN` entry that no longer fails is an error.
 - **Stop rule.** If aligning a body line or a cell would require changing a `lifecycle:` value, or the completed tasks do not show the work an `Implemented` claim rests on, do not edit that RFC: list it for the operator.
 
-Out of scope: any `lifecycle:` change; RFC text other than the `**Status:**` line and the `status:` field of RFC-0047; the lifecycle-transition gate; `requiresDocs`; whether `status` and `lifecycle` should become one field.
+Out of scope: any `lifecycle:` change; RFC text other than the `**Status:**` line; the lifecycle-transition gate; `requiresDocs`; whether `status` and `lifecycle` should become one field.
 
 ## Acceptance Criteria
 
@@ -103,7 +104,7 @@ Out of scope: any `lifecycle:` change; RFC text other than the `**Status:**` lin
 - [ ] #3 `BODY_STATUS_KNOWN` contains only RFCs that the PR body lists for the operator, and an entry that no longer fails is an error; a test asserts it.
 - [ ] #4 The Status cells of RFC-0025, 0041, 0042, 0059 and 0061 equal the frontmatter `status` of their files.
 - [ ] #5 The `**Status:**` line of RFC-0009, 0010, 0016, 0019, 0022, 0035, 0042 and 0061 starts with the frontmatter `lifecycle` value and keeps the former text after "Previously:"; `git diff` shows no other changed line in those eight files.
-- [ ] #6 RFC-0047 has `status: Approved` and no other changed line; its Registry row matches.
+- [ ] #6 RFC-0047 is not changed by this task; its Registry row matches the file as AISDLC-1322 left it.
 - [ ] #7 `git diff origin/main -- spec/rfcs | grep -E "^[+-]lifecycle:"` prints nothing, and the diff adds no line containing `**Resolution:**` or `RESOLVED:`.
 - [ ] #8 In `spec/rfcs/README.md`, the notes cells of RFC-0009, 0010, 0024, 0025 and 0035, lines 510 to 513 and 531, and the critical-path table no longer state a lifecycle or a pending step that the row contradicts.
 - [ ] #9 The PR body has one row per RFC touched (place corrected, old value, new value, evidence) and a list "for the operator" with RFC-0017, RFC-0023, RFC-0041 and any other RFC left unchanged, each with the two statements that disagree.
