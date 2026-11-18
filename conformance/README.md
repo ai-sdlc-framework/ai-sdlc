@@ -48,3 +48,7 @@ The `runner/` package provides a TypeScript-based conformance runner. See the [r
 ## License
 
 Apache-2.0
+
+## Module scope
+
+`parity/scope.json` names every directory of `reference/src/` with a class and a reason. `shared` means each SDK carries the module: `sdk-typescript/package.json` exports it, `sdk-python/src/ai_sdlc/` has a package and `sdk-go/` has a directory of that name. `typescript-only` means only the reference carries it. `pnpm parity:check` fails when a directory has no entry, an entry has no directory, a class is unknown, a reason is missing, or a `shared` module lacks a counterpart. The shared modules are `adapters`, `agents`, `audit`, `builders`, `compliance`, `core`, `metrics`, `policy`, `reconciler`, `security` and `telemetry`; `capabilities`, `judgment`, `models`, `usage` and `utils` are `typescript-only`.
