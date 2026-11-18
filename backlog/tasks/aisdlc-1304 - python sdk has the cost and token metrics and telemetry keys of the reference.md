@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1304
 title: 'Python SDK has the cost and token metrics and telemetry keys of the reference'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-17'
 labels:
