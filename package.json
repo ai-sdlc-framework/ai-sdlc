@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r --no-bail test && pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm git-env-hygiene:check && pnpm lint:publishable && pnpm knowledge:check",
+    "test": "pnpm -r --no-bail test && pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm parity:check && pnpm git-env-hygiene:check && pnpm lint:publishable && pnpm knowledge:check",
     "test:gates": "node scripts/run-gate-tests.mjs",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint . && node scripts/check-clock-discipline.mjs",
@@ -36,6 +36,7 @@
     "test:typecheck-workspace-gate": "node --import ./vitest.git-env.setup.mjs --test scripts/typecheck-workspace.test.mjs",
     "test:publishable": "node --import ./vitest.git-env.setup.mjs --test scripts/check-publishable-package-configs.test.mjs",
     "dark-code:check": "node scripts/check-dark-code.mjs",
+    "parity:check": "node scripts/check-parity.mjs",
     "git-env-hygiene:check": "node scripts/check-git-env-hygiene.mjs",
     "test:git-env-hygiene-gate": "node --import ./vitest.git-env.setup.mjs --test scripts/check-git-env-hygiene.test.mjs",
     "test:clock-discipline-gate": "node --import ./vitest.git-env.setup.mjs --test scripts/check-clock-discipline.test.mjs",
