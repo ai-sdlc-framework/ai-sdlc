@@ -114,16 +114,6 @@
       "ai_sdlc.run_id",
       "ai_sdlc.stage",
       "ai_sdlc.tokens"
-    ],
-    "complianceControls": [
-      "agent-memory",
-      "audit-logging",
-      "autonomy-governance",
-      "human-review",
-      "metrics-collection",
-      "provenance-tracking",
-      "quality-gates",
-      "sandbox-isolation"
     ]
   }
 }
