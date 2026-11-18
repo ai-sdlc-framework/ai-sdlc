@@ -4,6 +4,7 @@
  */
 
 import { listBoard, peekQueue } from '../dispatch/board.js';
+import { readHold, type Hold } from './hold.js';
 import { listHeld } from './held-triage.js';
 import { listUnbriefed } from './auto-brief.js';
 import type { QueueCounts } from '../dispatch/types.js';
@@ -121,6 +122,8 @@ export interface StatusResult {
   contextThresholds?: Record<HierarchyRole, number>;
   /** Token budget pace from `usage.json` (AISDLC-1072); absent when never sampled. */
   budget?: BudgetStatus;
+  /** The board hold (AISDLC-1319): who set it, since when and why; absent when not held. */
+  hold?: Hold;
   /** Spawn cap: min of executors.max and the pacer allowance (AISDLC-1076). */
   executorCap?: ExecutorCap;
   /** Open task PRs against the limit that holds new tasks (AISDLC-1189). */
@@ -249,6 +252,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* an unreadable usage file must not break status */
   }
+  const boardHold = readHold(deps.boardDir) ?? undefined;
   let resourcesNow: ReturnType<HierarchyDeps['resources']> | undefined;
   try {
     resourcesNow = deps.resources();
@@ -431,6 +435,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     ...(lastTick ? { lastTick } : {}),
     contextThresholds: thresholdsByRole,
     ...(budgetNow ? { budget: budgetNow } : {}),
+    ...(boardHold ? { hold: boardHold } : {}),
     executorCap: capNow,
     openPrs: openPrState(deps.boardDir, deps.env),
     ...(unbriefed.length > 0 ? { unbriefed } : {}),
@@ -465,6 +470,11 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ]
     : [];
   const budgetLine = [
+    ...(result.hold
+      ? [
+          `HOLD by ${result.hold.by || 'unknown'} since ${result.hold.since || 'unknown'}: ${result.hold.reason}`,
+        ]
+      : []),
     ...(result.budget ? [formatBudget(result.budget)] : []),
     ...(result.executorCap ? [formatExecutorCap(result.executorCap)] : []),
     ...(result.openPrs ? [formatOpenPrs(result.openPrs)] : []),

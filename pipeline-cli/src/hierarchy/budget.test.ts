@@ -139,7 +139,7 @@ describe('pacer', () => {
     expect(readHold(dir)).toBeNull();
   });
 
-  it('keeps the hold between the margins and uses default margin 2 without config', async () => {
+  it('uses default margin 2 without config', async () => {
     rmSync(path.join(dir, 'config.json'));
     expect(resolveMargins(dir)).toEqual({ sevenDay: 2, fiveHour: 10 });
     seven = 43;
@@ -151,10 +151,52 @@ describe('pacer', () => {
     seven = 47;
     expect((await runBudgetPacer(dir, deps())).set).toBeDefined();
     clock += 3600_000;
-    seven = 44.5; // inside the band: hold stays
+    seven = 44.5; // inside the band: the pacer lifts (AISDLC-1319)
     const r = await runBudgetPacer(dir, deps());
-    expect(r.lifted).toBeUndefined();
+    expect(r.lifted).toBeDefined();
+    expect(readHold(dir)).toBeNull();
+  });
+
+  it('lifts inside the band and logs each window at the lift (AISDLC-1319)', async () => {
+    rmSync(path.join(dir, 'config.json'));
+    seven = 43;
+    await runBudgetPacer(dir, deps());
+    clock += 3600_000;
+    seven = 47;
+    expect((await runBudgetPacer(dir, deps())).set).toBeDefined();
+    clock += 3600_000;
+    seven = 44.5; // line ~44.05: ahead 0.45, inside the margin of 2
+    const r = await runBudgetPacer(dir, deps());
+    expect(r.lifted).toContain('budget');
+    expect(readHold(dir)).toBeNull();
+    const events = readFileSync(path.join(dir, 'hold-events.jsonl'), 'utf-8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l));
+    const resume = events.find((e) => e.event === 'resume');
+    expect(resume.by).toBe('pacer');
+    const w = resume.windows.find((x: { name: string }) => x.name === 'sevenDay');
+    expect(w).toMatchObject({ utilization: 44.5, margin: 2 });
+    expect(w.line).toBeCloseTo(44.05, 1);
+    expect(w.ahead).toBeCloseTo(0.45, 1);
+  });
+
+  it('keeps the hold while a window is above its margin and ignores holds not set by the pacer', async () => {
+    rmSync(path.join(dir, 'config.json'));
+    seven = 43;
+    await runBudgetPacer(dir, deps());
+    clock += 3600_000;
+    seven = 47;
+    await runBudgetPacer(dir, deps());
+    clock += 3600_000;
+    seven = 50; // ahead ~6
+    expect((await runBudgetPacer(dir, deps())).lifted).toBeUndefined();
     expect(readHold(dir)).not.toBeNull();
+    writeHold(dir, { reason: 'canary', since: 'x', by: 'y' });
+    clock += 3600_000;
+    seven = 10;
+    expect((await runBudgetPacer(dir, deps())).lifted).toBeUndefined();
+    expect(readHold(dir)?.reason).toBe('canary');
   });
 
   it('never touches a hold it did not set and leaves inflight manifests alone', async () => {

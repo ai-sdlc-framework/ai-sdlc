@@ -918,6 +918,23 @@ describe('hierarchy status', () => {
     const result = hierarchyStatus(deps);
     expect(formatStatus(result)[0]).toBeDefined();
     expect(formatStatus(result).join('\n')).toContain('BUDGET 7d 91%');
+    // AISDLC-1319: no hold, no HOLD line; with a hold exactly one line names who, since when and why.
+    expect(result.hold).toBeUndefined();
+    expect(formatStatus(result).filter((l) => l.startsWith('HOLD'))).toEqual([]);
+    writeFileSync(
+      path.join(boardDir, '.hold'),
+      JSON.stringify({ reason: 'budget: x', since: '2026-11-17T20:30:16Z', by: 'pacer' }),
+    );
+    const heldResult = hierarchyStatus(deps);
+    expect(heldResult.hold).toEqual({
+      reason: 'budget: x',
+      since: '2026-11-17T20:30:16Z',
+      by: 'pacer',
+    });
+    expect(formatStatus(heldResult).filter((l) => l.startsWith('HOLD'))).toEqual([
+      'HOLD by pacer since 2026-11-17T20:30:16Z: budget: x',
+    ]);
+    rmSync(path.join(boardDir, '.hold'));
     const byName = Object.fromEntries(result.rows.map((r) => [r.entry.name, r]));
     expect(byName[Q('executor-alpha')]).toMatchObject({
       state: 'idle',
