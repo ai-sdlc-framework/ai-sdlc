@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1303
 title: 'Python and Go SDK version constants follow the released version'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-17'
 labels:
