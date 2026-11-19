@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1327
 title: 'Plugin cache lookups use the install entry of the project, and doctor reports stale install entries'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
