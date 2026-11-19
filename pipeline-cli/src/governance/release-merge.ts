@@ -121,6 +121,8 @@ export const RELEASE_FILE_ALLOWLIST: ReadonlySet<string> = new Set([
   ...CHANGELOG_DIRS.map((d) => (d ? `${d}/CHANGELOG.md` : 'CHANGELOG.md')),
   ...NODE_PACKAGE_DIRS.map((d) => `${d}/package.json`),
   'sdk-python/pyproject.toml',
+  'sdk-go/aisdlc.go',
+  'sdk-python/src/ai_sdlc/__init__.py',
   '.release-please-manifest.json',
   'release-please-config.json',
   '.claude-plugin/marketplace.json',
@@ -448,6 +450,31 @@ export function tomlContentRefusal(file: string, base: string, head: string): st
   return null;
 }
 
+const MARKER = 'x-release-please-version';
+const MARKED_VERSION_LINE =
+  /^(.*?")(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(".*x-release-please-version.*)$/;
+
+/**
+ * SDK version constant files (`sdk-go/aisdlc.go`, `sdk-python/src/ai_sdlc/__init__.py`):
+ * exactly one line carrying the x-release-please-version marker may change, and only
+ * its quoted version value.
+ */
+export function markedVersionLineRefusal(file: string, base: string, head: string): string | null {
+  const marked = (t: string) => t.split('\n').filter((l) => l.includes(MARKER));
+  const bm = marked(base);
+  const hm = marked(head);
+  if (bm.length !== 1 || hm.length !== 1) {
+    return `${file}: expected exactly one "${MARKER}" line in base and head`;
+  }
+  const hp = MARKED_VERSION_LINE.exec(hm[0]);
+  const bp = MARKED_VERSION_LINE.exec(bm[0]);
+  if (!hp || !bp) return `${file}: the marked line does not hold a version value`;
+  if (base.replace(bm[0], '') !== head.replace(hm[0], '') || bp[1] !== hp[1] || bp[3] !== hp[3]) {
+    return `${file}: content other than the marked version value changed`;
+  }
+  return null;
+}
+
 interface Blob {
   type: string;
   text: string;
@@ -516,7 +543,9 @@ export async function validateReleaseContent(
     if (base.type !== 'file') return `${f.path}: base is a "${base.type}", not a regular file`;
     const bad = f.path.endsWith('.toml')
       ? tomlContentRefusal(f.path, base.text, head.text)
-      : jsonContentRefusal(f.path, base.text, head.text);
+      : f.path.endsWith('.go') || f.path.endsWith('.py')
+        ? markedVersionLineRefusal(f.path, base.text, head.text)
+        : jsonContentRefusal(f.path, base.text, head.text);
     if (bad) return bad;
   }
   return null;

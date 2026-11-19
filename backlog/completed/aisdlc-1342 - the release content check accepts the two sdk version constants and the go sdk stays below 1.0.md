@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1342
 title: 'The release content check accepts the two SDK version constants and the Go SDK stays below 1.0'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
