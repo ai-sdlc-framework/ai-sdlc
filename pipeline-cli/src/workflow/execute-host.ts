@@ -187,7 +187,7 @@ class ExecuteHost implements EngineHost {
     return this.state;
   }
 
-  private early(taskId: string, reason: string): StepOutcome {
+  private early(taskId: string, reason: string, cause?: string): StepOutcome {
     return {
       kind: 'halt',
       instruction: {
@@ -195,6 +195,7 @@ class ExecuteHost implements EngineHost {
         taskId,
         outcome: 'aborted',
         reason,
+        ...(cause ? { cause } : {}),
         prUrl: null,
         notes: reason,
       },
@@ -247,7 +248,7 @@ class ExecuteHost implements EngineHost {
     const { ctx, deps } = this;
     ctx.logger.progress('step-1', `detected ARG_FORM=backlog-task (${this.taskArg})`);
     const init = await deps.initTask(ctx, this.taskArg);
-    if (!init.ok) return this.early(this.taskArg, init.reason);
+    if (!init.ok) return this.early(this.taskArg, init.reason, init.cause);
 
     const loop = this.prepared.edges.find((e) => e.loop);
     const state: NextStepState = {

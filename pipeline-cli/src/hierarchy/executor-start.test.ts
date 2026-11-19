@@ -472,3 +472,41 @@ describe('executorStart under AI_SDLC_EXECUTOR_TASK (AISDLC-1073)', () => {
     expect(r.taskId).toBe('AISDLC-9');
   });
 });
+
+describe('executorStart with a dirty parent (AISDLC-1346)', () => {
+  it('claims none of four queued tasks and reports once, naming the file', async () => {
+    for (const id of ['AISDLC-1', 'AISDLC-2', 'AISDLC-3', 'AISDLC-4']) {
+      writeManifest(board, mkManifest(id));
+    }
+    const claim = vi.fn();
+    const lines: string[] = [];
+    const r = await executorStart(
+      { boardDir: board, cwd: tmp },
+      {
+        identity: identityFor('executor', 'proj-executor-alpha'),
+        repoGit: gitAt(tmp),
+        claim,
+        parentChanges: () => ['.ai-sdlc/agent-role.yaml'],
+        log: (l) => lines.push(l),
+      },
+    );
+    expect(claim).not.toHaveBeenCalled();
+    expect(r.taskId).toBeNull();
+    expect(lines.filter((l) => l.includes('PARENT DIRTY'))).toHaveLength(1);
+    expect(lines.join('\n')).toContain('.ai-sdlc/agent-role.yaml');
+  });
+
+  it('refuses a pinned task with the same reason', async () => {
+    vi.stubEnv('AI_SDLC_EXECUTOR_TASK', 'AISDLC-1');
+    await expect(
+      executorStart(
+        { boardDir: board, cwd: tmp },
+        {
+          identity: identityFor('executor', 'proj-executor-alpha'),
+          repoGit: gitAt(tmp),
+          parentChanges: () => ['x.ts'],
+        },
+      ),
+    ).rejects.toThrow(/x\.ts/);
+  });
+});
