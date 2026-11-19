@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1326
 title: 'Command preambles never fall back to a plugin folder that does not exist'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
