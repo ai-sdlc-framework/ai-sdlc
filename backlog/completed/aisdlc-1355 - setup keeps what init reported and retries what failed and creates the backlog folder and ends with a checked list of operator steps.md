@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1355
 title: 'Setup keeps what init reported, retries what failed, creates the backlog folder and ends with a checked list of operator steps'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
