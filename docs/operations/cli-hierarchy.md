@@ -298,6 +298,9 @@ no executor state; `down`/`restart` answer the host's "Background work is runnin
 tasks" instead of leaving the pane parked on it.
 The `MODULE` column (AISDLC-1061) is the hierarchy hooks module's heartbeat for the session, read from
 `<board-dir>/handoff/module-<name>.json` (`{state, reason, version, at}`): `loaded`, `refused: <reason>`,
+`failing: <reason>` (dispatch host: the last tick returned no result; `loaded` is written only after a tick
+returned one, AISDLC-1358; `up` records the directory it runs the bins from in `<board-dir>/handoff/cli-bin.json`
+and the module runs them from there, keeping the repository-relative path when there is no record),
 `absent` (no file: the session has no hierarchy role, or the module never ran in it) or, for the dispatch
 host only, `stale: ...` when its per-tick refresh stopped for two minutes. The module's `session.start`
 gate writes the file through `$.process.run`; the dispatch role refreshes it on every tick. `up` ends by
@@ -323,7 +326,7 @@ cli-hierarchy status [--json] [--check]
 
 `--json` prints one JSON object: `{ "rows": [ { "entry": <roster entry>, "state": "...",
 "attached": true|false, "inflightTask": "AISDLC-N", "launchEnv": "ok|missing",
-"nodeVersion": "22.23.2", "nodeMismatch": true, "module": { "state": "loaded|refused|absent|stale", "reason": "..." }, "nextStep": "..." } ], "board": { "queued": n,
+"nodeVersion": "22.23.2", "nodeMismatch": true, "module": { "state": "loaded|refused|failing|absent|stale", "reason": "..." }, "nextStep": "..." } ], "board": { "queued": n,
 "inflight": n, "done": n, "failed": n }, "webhook": { "state": "up", "port": n, "pid": n }, "scheduler": { "state": "up", "pid": n } }`. Read-only. Exit code `0`; with `--check` it exits `1` when a stuck entry is older than `stuckAfterMinutes` (see below).
 
 **Filing PRs are docs-lane (AISDLC-1235).** A `cli-file` filing PR, new (`ai-sdlc/file-<id>`) or `--update` (`ai-sdlc/update-<id>`), is a docs-lane PR even though its title names a task id. Its merge never marks the task landed and never writes or rewrites a `done/` verdict. `cli-file` and the reconciler share the prefixes from `pipeline-cli/src/hierarchy/filing-branches.ts`. To reverse a false landing, run `cli-dispatch remove-verdict --task-id <id> --from done --with-manifest --unland --reason <text>`; it removes the `done/` marker, verdict and manifest, appends the reason to `<board>/board-events.jsonl`, and refuses while the task has a merged code PR.

@@ -36,6 +36,8 @@ export interface DispatchPorts extends Omit<Ports, 'compact' | 'submit'> {
   runProcess: (a: { command: string; args: string[] }) => Promise<Any>;
   send: (a: { to: string; text: string }) => Promise<Any>;
   uiOpen: (a: { id: string; title: string }) => Promise<Any>;
+  /** AISDLC-1358: directory `up` records in `cli-bin.json`; the bins run from it. Unset: the repository-relative path. */
+  binDir?: string;
 }
 
 export interface DispatchOptions {
@@ -156,7 +158,7 @@ export async function writeModuleHealth(
   run: (a: { command: string; args: string[] }) => Promise<Any>,
   boardDir: string | undefined,
   name: string,
-  health: { state: 'loaded' | 'refused'; reason?: string; version?: string },
+  health: { state: 'loaded' | 'refused' | 'failing'; reason?: string; version?: string },
   storeSet?: (k: string, v: unknown) => Promise<Any>,
   projectDir?: string,
 ): Promise<void> {
@@ -177,6 +179,28 @@ export async function writeModuleHealth(
   }
 }
 
+/** Prints the `binDir` of the JSON record in argv[1] (empty when unreadable). */
+const BIN_DIR_SCRIPT =
+  "try{const d=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).binDir;if(typeof d==='string')process.stdout.write(d)}catch(e){}";
+
+/**
+ * AISDLC-1358: the directory `up` ran the pipeline-cli bins from, recorded in `<board>/handoff/cli-bin.json`.
+ * Empty when there is no record (this repository: the relative path is right).
+ */
+export async function readBinDir(
+  run: (a: { command: string; args: string[] }) => Promise<Any>,
+  boardDir: string | undefined,
+  projectDir?: string,
+): Promise<string | undefined> {
+  const board = await resolveBoardDir(run, boardDir, projectDir);
+  if (!board) return undefined;
+  const r = await safe(() =>
+    run({ command: NODE, args: ['-e', BIN_DIR_SCRIPT, `${board}/handoff/cli-bin.json`] }),
+  );
+  const dir = String(((r.value ?? {}) as Any).stdout ?? '').trim();
+  return dir || undefined;
+}
+
 const EVENT_LIMIT = 10;
 
 function note(state: DispatchState, line: string): void {
@@ -193,7 +217,8 @@ export async function runCli(
   bin: string,
   args: string[],
 ): Promise<{ ok: boolean; stdout: string; stderr: string }> {
-  const r = await safe(() => p.runProcess({ command: NODE, args: [bin, ...args] }));
+  const file = p.binDir ? `${p.binDir.replace(/[\\/]+$/, '')}/${bin.split('/').pop()}` : bin;
+  const r = await safe(() => p.runProcess({ command: NODE, args: [file, ...args] }));
   const v = (r.value ?? {}) as Any;
   const code = v.exitCode ?? v.status ?? v.code ?? (r.ok ? 0 : 1);
   return { ok: r.ok && code === 0, stdout: String(v.stdout ?? ''), stderr: String(v.stderr ?? '') };
@@ -335,25 +360,35 @@ export async function escalate(
   );
 }
 
+/** AISDLC-1358: the heartbeat reports the last tick result; `loaded` only after a tick returned one. */
+async function recordHealth(
+  p: DispatchPorts,
+  state: DispatchState,
+  h: { state: 'loaded' | 'failing'; reason?: string },
+): Promise<void> {
+  if (!state.sessionName) return;
+  await writeModuleHealth(
+    p.runProcess,
+    state.boardDir,
+    state.sessionName,
+    { ...h, ...(state.hostVersion ? { version: state.hostVersion } : {}) },
+    p.storeSet,
+    state.projectDir,
+  );
+}
+
 /** One tick: run `cli-hierarchy tick`, wake executors for ingested work, escalate, refresh the pane. */
 export async function tick(p: DispatchPorts, state: DispatchState): Promise<void> {
   if (state.ticking) return;
   state.ticking = true;
   try {
-    if (state.sessionName) {
-      await writeModuleHealth(
-        p.runProcess,
-        state.boardDir,
-        state.sessionName,
-        { state: 'loaded', ...(state.hostVersion ? { version: state.hostVersion } : {}) },
-        p.storeSet,
-        state.projectDir,
-      );
-    }
+    p.binDir = await readBinDir(p.runProcess, state.boardDir, state.projectDir);
     const r = await runCli(p, HIERARCHY_BIN, ['tick', ...boardArgs(state)]);
     const result = parseJson(r.stdout) as Any;
     if (!r.ok || !result || typeof result !== 'object') {
-      note(state, `tick failed: ${(r.stderr || r.stdout).split('\n')[0] || 'no output'}`);
+      const firstLine = (r.stderr || r.stdout).split('\n')[0] || 'no output';
+      note(state, `tick failed: ${firstLine}`);
+      await recordHealth(p, state, { state: 'failing', reason: firstLine.slice(0, 200) });
       const failure = `cli-hierarchy tick did not return a result: ${r.stderr || r.stdout}`.slice(
         0,
         500,
@@ -366,6 +401,7 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
       return;
     }
     state.lastTickFailure = '';
+    await recordHealth(p, state, { state: 'loaded' });
     state.blockers = Array.isArray(result.blockers) ? result.blockers.map(String) : [];
     const ingested: string[] = ((result.ingested ?? []) as Any[]).flatMap((x) => x.tasks ?? []);
     note(

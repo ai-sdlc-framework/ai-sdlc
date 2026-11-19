@@ -1556,6 +1556,7 @@ export function checkHierarchyModule(ctx: DoctorRunContext): DoctorCheckResult[]
     const at = typeof h.at === 'string' ? Date.parse(h.at) : NaN;
     const reason = typeof h.reason === 'string' && h.reason ? `: ${h.reason}` : '';
     if (h.state === 'refused') bad.push(`${e.name} refused${reason}`);
+    else if (h.state === 'failing') bad.push(`${e.name} failing${reason}`);
     else if (h.state !== 'loaded') bad.push(`${e.name} absent`);
     else if (Number.isNaN(at) || clockNow().getTime() - at > 120_000)
       bad.push(`${e.name} stale (no heartbeat)`);

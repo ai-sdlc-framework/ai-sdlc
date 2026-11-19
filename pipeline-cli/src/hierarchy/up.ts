@@ -7,7 +7,7 @@
  */
 
 import { ghCallsPath, GH_CALL_LOG_ENV, installGhShim } from './gh-calls.js';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { routedLaunchProfile } from '../routing/role-model.js';
 import type { LaunchProfile } from '../routing/default-table.js';
@@ -678,6 +678,18 @@ export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): P
   for (const e of existing)
     deps.log(`already running ${e.role} '${e.tmuxWindow}' (session left alone)`);
   for (const w of warnings) deps.log(`warning: ${w}`);
+
+  // AISDLC-1358: the module runs the three bins from the directory `up` runs from.
+  try {
+    const binDir = path.dirname(deps.binPath ?? process.argv[1] ?? '');
+    mkdirSync(path.join(deps.boardDir, 'handoff'), { recursive: true });
+    writeFileSync(
+      path.join(deps.boardDir, 'handoff', 'cli-bin.json'),
+      JSON.stringify({ binDir, at: deps.now().toISOString() }),
+    );
+  } catch (err) {
+    deps.log(`warning: could not record the cli bin directory: ${(err as Error).message}`);
+  }
 
   // The consumer of the webhook wake file; runs whether or not a secret is set (AISDLC-932).
   try {

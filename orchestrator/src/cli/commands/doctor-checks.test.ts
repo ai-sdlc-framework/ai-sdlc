@@ -2663,6 +2663,14 @@ describe('hierarchy-module check', () => {
     expect(checkHierarchyModule(ctxFor(stale))[0]?.title).toContain('stale');
   });
 
+  it('fails on a failing heartbeat and names the reason (AISDLC-1358)', () => {
+    const r = checkHierarchyModule(
+      ctxFor(JSON.stringify({ state: 'failing', reason: 'Cannot find module', at: new Date() })),
+    );
+    expect(r[0]?.id).toBe('hierarchy-module');
+    expect(r[0]?.title).toContain('p-dispatch failing: Cannot find module');
+  });
+
   it('is registered', () => {
     expect(DOCTOR_CHECKS.find((x) => x.id === 'hierarchy-module')).toBeDefined();
   });
