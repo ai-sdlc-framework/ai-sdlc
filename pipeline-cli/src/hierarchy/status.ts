@@ -17,6 +17,7 @@ import { AGING_WINDOW_MS, listLanding, readDocsSitePin, recordLastActionAt } fro
 import { formatPrTable } from './pr-rows.js';
 import { paneNodeVersion, readNvmrc, versionMatches } from './node-pin.js';
 import { hasLaunchEnv } from './up.js';
+import { loadOperationalPolicy, mergeOffLines } from './operational.js';
 import {
   callsPerSession,
   ghCallsPath,
@@ -162,6 +163,8 @@ export interface StatusResult {
   spawnErrors?: { taskId: string; error: string }[];
   /** Worktree directories, how many the last sweep could not remove, and the alarm ceiling (AISDLC-1108). */
   worktrees?: { count: number; removable: number; ceiling: number };
+  /** AISDLC-1351: why this board will never merge, one line per cause; absent when merging is configured. */
+  mergeOff?: string[];
 }
 
 /** Count `.worktrees/*` directories and read the last sweep's unremoved-removable count. */
@@ -418,8 +421,17 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
       };
     })
     .sort((a, b) => b.waitMs - a.waitMs);
+  let mergeOff: string[] = [];
+  try {
+    mergeOff = mergeOffLines(
+      (deps.loadPolicy ?? ((r: string) => loadOperationalPolicy(r, r)))(deps.cwd),
+    );
+  } catch {
+    /* an unreadable policy must not stop status */
+  }
   return {
     rows,
+    ...(mergeOff.length > 0 ? { mergeOff } : {}),
     ...(routedToPlanner.length > 0 ? { routedToPlanner } : {}),
     ...(agedPrs.length > 0 ? { agedPrs } : {}),
     prTable: formatPrTable(deps.boardDir, nowMs, loadPrLifecycleConfig(deps.cwd).maxCiRounds),
@@ -625,6 +637,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     formatLastTick(result.lastTick),
     ...thresholds,
     ...budgetLine,
+    ...(result.mergeOff ?? []),
     ...unbriefed,
     ...blockedLines,
     ...heldLines,

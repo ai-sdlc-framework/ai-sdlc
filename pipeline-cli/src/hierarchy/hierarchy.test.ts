@@ -644,6 +644,44 @@ describe('hierarchy up', () => {
     ]);
   });
 
+  it('up and status print a merge-off line per cause and none when merging is configured (AISDLC-1351)', async () => {
+    const policies = {
+      never: { allowMerge: 'never', mergeAuthors: ['a'], operational: ['land-eligible-prs'] },
+      noAuthors: {
+        allowMerge: 'onGreenClean',
+        mergeAuthors: [],
+        operational: ['land-eligible-prs'],
+      },
+      noGrant: { allowMerge: 'onGreenClean', mergeAuthors: ['a'], operational: [] },
+      ok: { allowMerge: 'onGreenClean', mergeAuthors: ['a'], operational: ['land-eligible-prs'] },
+    };
+    const run = async (p: (typeof policies)[keyof typeof policies]) => {
+      const out: string[] = [];
+      const d = {
+        ...deps,
+        log: (l: string) => void out.push(l),
+        loadPolicy: () => ({ forcePushMode: 'lease', ...p }),
+      };
+      await hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true }, d);
+      const up = out.filter((l) => l.includes('merge off'));
+      const status = formatStatus(hierarchyStatus(d)).filter((l) => l.includes('merge off'));
+      return { up, status };
+    };
+    const never = await run(policies.never);
+    expect(never.up).toHaveLength(1);
+    expect(never.up[0]).toContain('allowMerge');
+    expect(never.status).toEqual(never.up.map((l) => l.replace('warning: ', '')));
+    const noAuthors = await run(policies.noAuthors);
+    expect(noAuthors.up[0]).toContain('mergeAuthors');
+    expect(noAuthors.status).toHaveLength(1);
+    const noGrant = await run(policies.noGrant);
+    expect(noGrant.up[0]).toContain('land-eligible-prs');
+    expect(noGrant.status).toHaveLength(1);
+    const ok = await run(policies.ok);
+    expect(ok.up).toEqual([]);
+    expect(ok.status).toEqual([]);
+  });
+
   it('never emits a global option from up, status, attach or down', async () => {
     await hierarchyUp(baseOpts, deps);
     hierarchyStatus(deps);

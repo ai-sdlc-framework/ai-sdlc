@@ -334,8 +334,8 @@ describe('init command — agent-role tiers (AISDLC-79)', () => {
       const yaml = renderAgentRole(tier);
       expect(yaml).toContain('allowForcePush defaults');
       expect(yaml).toContain('leaseOnOwnBranch');
-      // Documented, not written: an active governance block would pin the value.
-      expect(yaml).not.toMatch(/^\s*governance:/m);
+      // Documented, not written: an active allowForcePush key would pin the value.
+      expect(yaml).not.toMatch(/^\s*allowForcePush:/m);
     }
   });
 });

@@ -43,6 +43,8 @@ export interface LandReport {
   refused: { pr: number; reason: string }[];
   /** Tasks completed as success because their PR merged on an iterate-needed verdict. */
   autoCompleted?: string[];
+  /** Set when the pass did nothing on purpose, naming the key to change (AISDLC-1351). */
+  disabled?: string;
   /** Set when GitHub could not be read; nothing was attempted. */
   error?: string;
 }
@@ -83,6 +85,18 @@ function writeOnce(file: string, text: string): boolean {
   return true;
 }
 
+/** AISDLC-1351: record once that the landing pass is skipped because `operational` lacks the grant. */
+export function noteMissingLandGrant(boardDir: string): void {
+  try {
+    writeOnce(
+      path.join(boardDir, 'notes', 'land-disabled.operational.txt'),
+      'land-eligible-prs is not in spec.governance.operational in .ai-sdlc/agent-role.yaml; the landing pass is skipped and no PR is landed. Add land-eligible-prs to operational to enable it\n',
+    );
+  } catch {
+    /* a note failure must not stop the dispatch loop */
+  }
+}
+
 function autoMergeAvailable(run: CommandRunner, repoRoot: string): boolean {
   const r = run('gh', ['repo', 'view', '--json', 'autoMergeAllowed', '--jq', '.autoMergeAllowed'], {
     cwd: repoRoot,
@@ -93,7 +107,16 @@ function autoMergeAvailable(run: CommandRunner, repoRoot: string): boolean {
 /** Run one landing pass. */
 export async function landEligiblePrs(deps: LandDeps): Promise<LandReport> {
   const report: LandReport = { landed: [], refused: [] };
-  if (deps.mergeAuthors.length === 0) return report;
+  if (deps.mergeAuthors.length === 0) {
+    report.disabled =
+      'mergeAuthors is empty in .ai-sdlc/agent-role.yaml; no PR is landed. List the logins whose PRs the board may land under spec.governance.mergeAuthors';
+    // One note, written once, so the standing reason is on the board without repeating each tick.
+    writeOnce(
+      path.join(deps.boardDir, 'notes', 'land-disabled.mergeAuthors.txt'),
+      `${report.disabled}\n`,
+    );
+    return report;
+  }
   const listed = deps.run(
     'gh',
     [

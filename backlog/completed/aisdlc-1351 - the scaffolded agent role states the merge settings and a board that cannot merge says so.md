@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1351
 title: 'The scaffolded agent role states the merge settings, and a board that cannot merge says so'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
