@@ -20,6 +20,7 @@ import {
   readMergeAuthors,
   type LandOutcome,
 } from './land-eligible.js';
+import { readRefusalReason } from './pr-snapshot.js';
 import type { CommandRunner } from './types.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -150,6 +151,24 @@ describe('landEligiblePrs', () => {
     // A new head sha is a new note.
     await landEligiblePrs(deps(fakeGh([pr(1, { headRefOid: 'b'.repeat(40) })], 'false'), land));
     expect(readdirSync(path.join(board, 'notes'))).toHaveLength(2);
+  });
+
+  it('stores the refusal reason in the record and a later landing clears it (AISDLC-1352)', async () => {
+    const gh = fakeGh([pr(1)], 'false');
+    await landEligiblePrs(
+      deps(gh, async () => ({
+        merged: false,
+        armed: false,
+        reason: 'required check(s) not green',
+      })),
+    );
+    expect(readRefusalReason(board, 1)).toBe('required check(s) not green');
+    const moved = fakeGh(
+      [pr(1, { statusCheckRollup: [{ name: 'a', conclusion: 'SUCCESS' }] })],
+      'false',
+    );
+    await landEligiblePrs(deps(moved, async () => ({ merged: true, armed: false, reason: 'ok' })));
+    expect(readRefusalReason(board, 1)).toBeUndefined();
   });
 
   it('reports a thrown lander as a refusal and keeps going', async () => {

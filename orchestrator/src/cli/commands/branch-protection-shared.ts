@@ -16,7 +16,7 @@
  * importers.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 
@@ -90,30 +90,99 @@ export function resolveProtectedBranch(
   return configured || defaultBranch || 'main';
 }
 
+/** Context posted by the scaffolded gate workflow's aggregate job. */
+export const PR_READY_CONTEXT = 'ai-sdlc/pr-ready';
+/** Context the Codecov GitHub App posts after a coverage upload. */
+export const CODECOV_PATCH_CONTEXT = 'codecov/patch';
+
 /**
- * Recommended branch-protection ruleset for AI-SDLC adopters. The required
- * checks are `ai-sdlc/pr-ready` (the gate aggregator) and `codecov/patch`
- * (the de facto coverage signal). Other AI-SDLC apps post their own
- * statuses but they're all rolled into pr-ready.
+ * Build the recommended branch-protection ruleset for AI-SDLC adopters
+ * (AISDLC-1352). Only contexts the repository's own workflows will post are
+ * required: `ai-sdlc/pr-ready` (the gate aggregator) always, `codecov/patch`
+ * only when a workflow uploads to Codecov. A required check nobody posts can
+ * never pass.
  *
  * The body conforms to the GitHub REST API
  * `PUT /repos/{owner}/{repo}/branches/{branch}/protection` schema.
  */
-export const RECOMMENDED_BRANCH_PROTECTION_BODY = {
-  required_status_checks: {
-    strict: true,
-    contexts: ['ai-sdlc/pr-ready', 'codecov/patch'],
-  },
-  enforce_admins: false,
-  required_pull_request_reviews: {
-    dismiss_stale_reviews: true,
-    require_code_owner_reviews: false,
-    required_approving_review_count: 1,
-  },
-  restrictions: null,
-  allow_force_pushes: false,
-  allow_deletions: false,
-};
+export function buildBranchProtectionBody(contexts: readonly string[]) {
+  return {
+    required_status_checks: {
+      strict: true,
+      contexts: [...contexts],
+    },
+    enforce_admins: false,
+    required_pull_request_reviews: {
+      dismiss_stale_reviews: true,
+      require_code_owner_reviews: false,
+      required_approving_review_count: 1,
+    },
+    restrictions: null,
+    allow_force_pushes: false,
+    allow_deletions: false,
+  };
+}
+
+/** The always-required baseline (no Codecov upload). */
+export const RECOMMENDED_BRANCH_PROTECTION_BODY = buildBranchProtectionBody([PR_READY_CONTEXT]);
+
+export interface PostedContexts {
+  /** Job names (or ids when unnamed) across the workflow files. */
+  jobNames: string[];
+  /** True when any workflow step uses `codecov/codecov-action`. */
+  uploadsToCodecov: boolean;
+}
+
+/** Derive the check contexts a set of workflow files will post. Never throws. */
+export function postedContextsFromWorkflows(texts: readonly string[]): PostedContexts {
+  const jobNames: string[] = [];
+  let uploadsToCodecov = false;
+  for (const text of texts) {
+    if (/uses:\s*['"]?codecov\/codecov-action/.test(text)) uploadsToCodecov = true;
+    try {
+      const doc = parseYaml(text) as { jobs?: Record<string, { name?: unknown } | null> } | null;
+      for (const [id, job] of Object.entries(doc?.jobs ?? {})) {
+        jobNames.push(typeof job?.name === 'string' && job.name ? job.name : id);
+      }
+    } catch {
+      // unparseable workflow: contributes nothing
+    }
+  }
+  return { jobNames, uploadsToCodecov };
+}
+
+/** Contexts the scaffolded protection should require for these workflows. */
+export function requiredContextsFor(posted: PostedContexts): string[] {
+  return posted.uploadsToCodecov ? [PR_READY_CONTEXT, CODECOV_PATCH_CONTEXT] : [PR_READY_CONTEXT];
+}
+
+/** Read `.github/workflows/*.yml|yaml` from disk. Never throws. */
+export function readWorkflowTextsFs(projectDir: string): string[] {
+  const dir = join(projectDir, '.github', 'workflows');
+  try {
+    return readdirSync(dir)
+      .filter((f) => /\.ya?ml$/.test(f))
+      .map((f) => readFileSync(join(dir, f), 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+/** True when a required context is posted by a job name or the Codecov upload. */
+export function isContextPosted(context: string, posted: PostedContexts): boolean {
+  if (context === CODECOV_PATCH_CONTEXT || context.startsWith('codecov/')) {
+    return posted.uploadsToCodecov;
+  }
+  return posted.jobNames.some((name) => {
+    if (name === context) return true;
+    if (!name.includes('${{')) return false;
+    const re = name
+      .split(/\$\{\{.*?\}\}/)
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('.*');
+    return new RegExp(`^${re}$`).test(context);
+  });
+}
 
 /**
  * True when `gh api` output from a branch-protection call indicates the
@@ -145,6 +214,8 @@ export interface BranchProtectionCheck {
   requiresAttestationDirectly: boolean;
   /** `required_status_checks.contexts` includes `Backlog Drift` (AISDLC-388 contract needs it alongside `ai-sdlc/pr-ready`; AISDLC-582). */
   requiresBacklogDrift: boolean;
+  /** All `required_status_checks.contexts` on the protected branch (AISDLC-1352). */
+  requiredContexts?: string[];
   /**
    * The branch-protection API returned 403 (GitHub Free private repo):
    * the server cannot enforce, only the client-side merge gate applies.
@@ -216,6 +287,7 @@ export function fetchBranchProtectionStatus(
       requiresPrReady,
       requiresAttestationDirectly,
       requiresBacklogDrift,
+      requiredContexts: contexts,
       branch,
     };
   } catch {

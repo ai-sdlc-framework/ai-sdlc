@@ -10,6 +10,7 @@ import {
   reconcileLogPath,
   rowsForOpen,
 } from './pr-rows.js';
+import { recordRefusal } from './pr-snapshot.js';
 import { landingPath, type LandingRecord } from './reconcile.js';
 import { schedulerUp } from './reconcile-scheduler.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
@@ -81,6 +82,17 @@ describe('pr rows', () => {
     expect(lines[1]).toContain(
       '#1 lane task, action rerun, reason ci-red, owner machine, age 2h10m',
     );
+  });
+
+  it('prints the merge refusal reason only for a refused PR (AISDLC-1352)', () => {
+    land({ pr: 1 });
+    land({ pr: 2 });
+    recordRefusal(board, 1, 'fp', new Date(), 'no required checks were resolved');
+    const lines = formatPrTable(board, Date.now());
+    expect(lines.find((l) => l.includes('#1 '))).toContain(
+      'merge refused: no required checks were resolved',
+    );
+    expect(lines.find((l) => l.includes('#2 '))).not.toContain('merge refused');
   });
 
   it('starts the scheduler with its output on the reconcile log', () => {

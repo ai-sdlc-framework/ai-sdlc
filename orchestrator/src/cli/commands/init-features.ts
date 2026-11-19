@@ -50,6 +50,10 @@ import {
 import {
   CLIENT_SIDE_ONLY_MESSAGE,
   RECOMMENDED_BRANCH_PROTECTION_BODY,
+  buildBranchProtectionBody,
+  postedContextsFromWorkflows,
+  readWorkflowTextsFs,
+  requiredContextsFor,
   isBranchProtectionUnavailable,
   resolveOwnerRepoSlug,
   readConfiguredTargetBranch,
@@ -1207,7 +1211,7 @@ export async function resolveFeatureSelection(
     sel.branchProtection = true;
   } else {
     sel.branchProtection = await adapters.prompt(
-      'Apply recommended branch protection? (required: ai-sdlc/pr-ready + codecov/patch)',
+      'Apply recommended branch protection? (required: ai-sdlc/pr-ready, plus codecov/patch only when a workflow uploads to Codecov)',
       true,
     );
   }
@@ -1877,6 +1881,8 @@ export interface BranchProtectionResult {
   applied: boolean;
   /** The PUT body as a JSON string (always populated for visibility). */
   bodyJson: string;
+  /** Required status-check contexts in the body (AISDLC-1352). */
+  contexts?: string[];
   /** Error message from `gh api`, if non-zero exit. */
   error?: string;
   /**
@@ -1918,7 +1924,10 @@ export async function applyBranchProtection(
   adapters: Pick<FeatureAdapters, 'runCommand' | 'log'>,
   templatePostsApproval: boolean = ADOPTER_TEMPLATE_POSTS_APPROVAL,
 ): Promise<BranchProtectionResult> {
-  const bodyJson = JSON.stringify(RECOMMENDED_BRANCH_PROTECTION_BODY, null, 2);
+  const contexts = requiredContextsFor(
+    postedContextsFromWorkflows(readWorkflowTextsFs(projectDir)),
+  );
+  const bodyJson = JSON.stringify(buildBranchProtectionBody(contexts), null, 2);
 
   if (flags.dryRun) {
     adapters.log('');
@@ -1930,7 +1939,7 @@ export async function applyBranchProtection(
     adapters.log(
       `  apply with: gh api -X PUT repos/{owner}/{repo}/branches/${dryBranch}/protection ...`,
     );
-    return { applied: false, bodyJson };
+    return { applied: false, bodyJson, contexts };
   }
 
   // Resolve owner/repo via gh (shared with doctor.ts's checkBranchProtection —
@@ -1940,6 +1949,7 @@ export async function applyBranchProtection(
     return {
       applied: false,
       bodyJson,
+      contexts,
       error: ownerRepo.error,
     };
   }
@@ -1965,6 +1975,7 @@ export async function applyBranchProtection(
     return {
       applied: false,
       bodyJson,
+      contexts,
       error: `failed to stage branch-protection body: ${(err as Error).message}`,
     };
   }
@@ -1993,19 +2004,20 @@ export async function applyBranchProtection(
     );
     adapters.log(`  ${CLIENT_SIDE_ONLY_MESSAGE} (ai-sdlc doctor reports this as an error).`);
     adapters.log('  opt out with: --no-branch-protection');
-    return { applied: false, bodyJson, mode: 'client-side' };
+    return { applied: false, bodyJson, contexts, mode: 'client-side' };
   }
   if (apply.exitCode !== 0) {
     return {
       applied: false,
       bodyJson,
+      contexts,
       error: `gh api PUT failed: ${apply.stdout.trim() || 'unknown error'}`,
     };
   }
 
   adapters.log(`  applied branch protection to ${slug}:${branch} (server-side enforcement)`);
   adapters.log(
-    '  installed: required checks ai-sdlc/pr-ready, codecov/patch + 1 approving review (DEC-0014).',
+    `  installed: required checks ${contexts.join(', ')} + 1 approving review (DEC-0014).`,
   );
   if (templatePostsApproval) {
     adapters.log(
@@ -2021,7 +2033,7 @@ export async function applyBranchProtection(
     adapters.log('             template ships the approve job.');
   }
   adapters.log('  opt out with: --no-branch-protection');
-  return { applied: true, bodyJson, mode: 'server', branch };
+  return { applied: true, bodyJson, contexts, mode: 'server', branch };
 }
 
 // ── Next-steps summary ───────────────────────────────────────────────────
@@ -2143,7 +2155,9 @@ export function renderNextSteps(
       lines.push(
         `${stepN}. Branch protection on \`${result.branchProtection.branch ?? 'main'}\` was updated (server-side enforcement).`,
       );
-      lines.push('     Required checks: ai-sdlc/pr-ready, codecov/patch');
+      lines.push(
+        `     Required checks: ${(result.branchProtection.contexts ?? ['ai-sdlc/pr-ready']).join(', ')}`,
+      );
       lines.push('     Opt out with: --no-branch-protection');
     } else if (result.branchProtection?.mode === 'client-side') {
       lines.push(`${stepN}. Branch protection is unavailable for this repo (HTTP 403).`);

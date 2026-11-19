@@ -40,6 +40,7 @@ import {
   checkPluginInstallAmbiguity,
   checkReviewerAttributionResolver,
   checkAttestationGovernanceCheck,
+  checkRequiredContextsPosted,
   checkMarketplaceCatalogDrift,
   checkNpmDistTagReachability,
   checkUsageIngest,
@@ -2985,5 +2986,58 @@ describe('AISDLC-1327: plugin install entries', () => {
 
   it('is registered in the doctor registry', () => {
     expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('plugin-install-entries');
+  });
+});
+
+// ── checkRequiredContextsPosted (AISDLC-1352) ───────────────────────────
+
+describe('checkRequiredContextsPosted (AISDLC-1352)', () => {
+  const GATE = 'jobs:\n  gate:\n    name: ai-sdlc/pr-ready\n    runs-on: ubuntu-latest\n';
+  const UPLOAD = 'jobs:\n  cov:\n    steps:\n      - uses: codecov/codecov-action@v5\n';
+  const run = (contexts: string[], workflows: Record<string, string>, ghFails = false) =>
+    checkRequiredContextsPosted(
+      makeCtx(
+        makeAdapters({
+          listFiles: () => Object.keys(workflows),
+          readFile: (p) => workflows[p.split('/').pop() ?? ''] ?? null,
+          runCommand: (_cmd, args) => {
+            if (ghFails) return { stdout: 'boom', exitCode: 1 };
+            if (args[0] === 'repo') return { stdout: 'o/r main', exitCode: 0 };
+            return {
+              stdout: JSON.stringify({ required_status_checks: { contexts } }),
+              exitCode: 0,
+            };
+          },
+        }),
+      ),
+    );
+
+  it('fails and names codecov/patch when nothing uploads to Codecov', () => {
+    const r = run(['ai-sdlc/pr-ready', 'codecov/patch'], { 'gate.yml': GATE });
+    expect(r.severity).toBe('fail');
+    expect(r.title).toContain('codecov/patch');
+    expect(r.title).not.toContain('ai-sdlc/pr-ready`');
+  });
+
+  it('passes when every context is a job name or an uploaded Codecov check', () => {
+    const r = run(['ai-sdlc/pr-ready', 'codecov/patch'], { 'gate.yml': GATE, 'ci.yml': UPLOAD });
+    expect(r.severity).toBe('pass');
+  });
+
+  it('matches a templated job name', () => {
+    const wf = 'jobs:\n  t:\n    name: test (${{ matrix.node }})\n';
+    expect(run(['test (20)'], { 'ci.yml': wf }).severity).toBe('pass');
+  });
+
+  it('reports not checked (warn, not pass) when gh api fails', () => {
+    const r = run(['x'], { 'gate.yml': GATE }, true);
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('not checked');
+  });
+
+  it('reports not checked when no workflow files exist', () => {
+    const r = run(['ai-sdlc/pr-ready'], {});
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('not checked');
   });
 });
