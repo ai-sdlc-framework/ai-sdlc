@@ -44,6 +44,7 @@ import {
   parseApproverIdentities,
   checkOqResolutionMarkers,
   parseNameStatusZ,
+  checkPublishedDocs,
 } from './check-rfc-docs.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -909,12 +910,79 @@ describe('CLI', () => {
   });
 });
 
+// ------------------------------------------- checkPublishedDocs (AISDLC-1316)
+
+describe('checkPublishedDocs', () => {
+  const impl = (id, requiresDocs, extra = {}) => ({
+    id,
+    lifecycle: 'Implemented',
+    requiresDocs,
+    ...extra,
+  });
+  const empty = { gaps: [], exempt: [] };
+
+  it('fails naming the RFC when requiresDocs is []', () => {
+    const f = checkPublishedDocs([impl('RFC-0100', [])], empty);
+    assert.equal(f.length, 1);
+    assert.equal(f[0].rfc, 'RFC-0100');
+  });
+
+  it('fails when only operator-runbook is declared', () => {
+    const f = checkPublishedDocs([impl('RFC-0101', ['operator-runbook'])], empty);
+    assert.equal(f[0].rfc, 'RFC-0101');
+  });
+
+  it('fails when deferredDocs is true without a published surface', () => {
+    const fm = impl('RFC-0102', [], { deferredDocs: true, deferredDocsDeadline: '2026-01-01' });
+    assert.equal(checkPublishedDocs([fm], empty)[0].rfc, 'RFC-0102');
+  });
+
+  it('passes with a published surface, incl. concept', () => {
+    assert.deepEqual(checkPublishedDocs([impl('RFC-0103', ['concept'])], empty), []);
+    assert.deepEqual(checkPublishedDocs([impl('RFC-0104', ['tutorial'])], empty), []);
+  });
+
+  it('ignores non-Implemented lifecycles', () => {
+    assert.deepEqual(
+      checkPublishedDocs([{ id: 'RFC-0105', lifecycle: 'Signed Off', requiresDocs: [] }], empty),
+      [],
+    );
+  });
+
+  it('passes a gaps entry that is still needed and on the base baseline', () => {
+    const b = { gaps: ['RFC-0100'], exempt: [] };
+    assert.deepEqual(checkPublishedDocs([impl('RFC-0100', [])], b, b), []);
+  });
+
+  it('fails a gaps entry that no longer needs to be there', () => {
+    const b = { gaps: ['RFC-0100'], exempt: [] };
+    const f = checkPublishedDocs([impl('RFC-0100', ['concept'])], b, b);
+    assert.match(f[0].reason, /no longer needed/);
+  });
+
+  it('fails a gaps entry absent from the base-ref baseline', () => {
+    const b = { gaps: ['RFC-0100'], exempt: [] };
+    const f = checkPublishedDocs([impl('RFC-0100', [])], b, empty);
+    assert.match(f[0].reason, /absent from the baseline on the base ref/);
+  });
+
+  it('exempt with a reason passes; without a reason fails', () => {
+    const ok = { gaps: [], exempt: [{ id: 'RFC-0100', reason: 'internal only' }] };
+    assert.deepEqual(checkPublishedDocs([impl('RFC-0100', [])], ok), []);
+    const bad = { gaps: [], exempt: [{ id: 'RFC-0100', reason: '  ' }, { id: 'RFC-0101' }, 'x'] };
+    const f = checkPublishedDocs([impl('RFC-0100', [])], bad);
+    assert.equal(f.length, 3);
+    assert.match(f[0].reason, /non-empty 'reason'/);
+  });
+});
+
 // ---------------------------------------------------------- Module hygiene
 
 describe('module exports', () => {
   it('exports the surface→subdir map matching the schema enum', () => {
     assert.deepEqual(Object.keys(SURFACE_TO_SUBDIR).sort(), [
       'api-reference',
+      'concept',
       'example',
       'getting-started',
       'operator-runbook',
@@ -1404,18 +1472,28 @@ describe('checkAllRfcs — runtimeEvidence', () => {
       const rfcs = join(dir, 'rfcs');
       mkdirSync(rfcs);
       const write = (name, body) => writeFileSync(join(rfcs, name), body);
+      mkdirSync(join(dir, 'concepts'));
+      writeFileSync(join(dir, 'concepts', 'c.md'), 'RFC-9001 RFC-9002\n');
       const fm = (id, entries) =>
-        `---\nid: ${id}\ntitle: Test RFC\nstatus: Approved\nlifecycle: Implemented\nauthor: a\ncreated: 2026-01-01\nupdated: 2026-01-01\nrequiresDocs: []\nruntimeEvidence:\n${entries}\n---\n# ${id}\n`;
+        `---\nid: ${id}\ntitle: Test RFC\nstatus: Approved\nlifecycle: Implemented\nauthor: a\ncreated: 2026-01-01\nupdated: 2026-01-01\nrequiresDocs:\n  - concept\nruntimeEvidence:\n${entries}\n---\n# ${id}\n`;
       write('RFC-9001-warn.md', fm('RFC-9001', evEntry('dor.stage-b', 'degraded', 'OWN-1')));
-      let run = spawnSync(process.execPath, [SCRIPT, '--rfcs-dir', rfcs, '--docs-dir', dir], {
-        encoding: 'utf-8',
-      });
+      let run = spawnSync(
+        process.execPath,
+        [SCRIPT, '--rfcs-dir', rfcs, '--docs-dir', dir, '--baseline', join(dir, 'none.json')],
+        {
+          encoding: 'utf-8',
+        },
+      );
       assert.equal(run.status, 0);
       assert.match(run.stdout, /WARN RFC-9001: capability 'dor\.stage-b' is degraded/);
       write('RFC-9002-bad.md', fm('RFC-9002', evEntry('nope.cap', 'live')));
-      run = spawnSync(process.execPath, [SCRIPT, '--rfcs-dir', rfcs, '--docs-dir', dir], {
-        encoding: 'utf-8',
-      });
+      run = spawnSync(
+        process.execPath,
+        [SCRIPT, '--rfcs-dir', rfcs, '--docs-dir', dir, '--baseline', join(dir, 'none.json')],
+        {
+          encoding: 'utf-8',
+        },
+      );
       assert.equal(run.status, 1);
       assert.match(run.stderr, /unknown capability 'nope\.cap'/);
     } finally {

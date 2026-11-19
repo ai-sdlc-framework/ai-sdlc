@@ -75,9 +75,16 @@
       "uniqueItems": true,
       "items": {
         "type": "string",
-        "enum": ["tutorial", "operator-runbook", "api-reference", "getting-started", "example"]
+        "enum": [
+          "tutorial",
+          "operator-runbook",
+          "api-reference",
+          "getting-started",
+          "example",
+          "concept"
+        ]
       },
-      "description": "Closed enum declaring which user-facing doc surfaces must reference this RFC. Each value maps to a `docs/` subdirectory: `tutorial` → `docs/tutorials/`, `operator-runbook` → `docs/operations/`, `api-reference` → `docs/api-reference/`, `getting-started` → `docs/getting-started/`, `example` → `docs/examples/`. The CI script (AISDLC-69.3) enforces that for each value in this array, at least one file in the corresponding subdirectory must reference the RFC by its `id` (e.g. literal text `RFC-0006`). An empty array (`[]`) is valid for purely strategic/conceptual RFCs (e.g. product strategy) and means CI does not check for any doc surface — the RFC body SHOULD explain why no user docs are required."
+      "description": "Closed enum declaring which user-facing doc surfaces must reference this RFC. Each value maps to a `docs/` subdirectory: `tutorial` → `docs/tutorials/`, `operator-runbook` → `docs/operations/`, `api-reference` → `docs/api-reference/`, `getting-started` → `docs/getting-started/`, `example` → `docs/examples/`, `concept` → `docs/concepts/`. The CI script (AISDLC-69.3) enforces that for each value in this array, at least one file in the corresponding subdirectory must reference the RFC by its `id` (e.g. literal text `RFC-0006`). An empty array (`[]`) is valid for purely strategic/conceptual RFCs (e.g. product strategy) and means CI does not check for any doc surface — the RFC body SHOULD explain why no user docs are required."
     },
     "deferredDocs": {
       "type": "boolean",

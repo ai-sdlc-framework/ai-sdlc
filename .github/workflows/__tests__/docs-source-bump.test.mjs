@@ -60,6 +60,7 @@ describe('docs-source-bump workflow (AISDLC-859)', () => {
     const idx = steps.findIndex((st) => st.id === 'site');
     assert.ok(idx >= 0);
     assert.match(steps[idx].run, /::warning/);
+    assert.match(steps[idx].run, /GITHUB_STEP_SUMMARY/);
     assert.ok(!/exit 1/.test(steps[idx].run));
     for (const st of steps.slice(idx + 1)) {
       // The arm step is gated on the bump step's output, which is empty when skipped.

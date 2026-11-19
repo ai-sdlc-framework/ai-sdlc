@@ -13,7 +13,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { SWEEP_STATUS_FILE, type SweepStatusRecord } from '../steps/00-sweep.js';
 import { loadPrLifecycleConfig } from './pr-lifecycle-config.js';
-import { AGING_WINDOW_MS, listLanding, recordLastActionAt } from './reconcile.js';
+import { AGING_WINDOW_MS, listLanding, readDocsSitePin, recordLastActionAt } from './reconcile.js';
 import { formatPrTable } from './pr-rows.js';
 import { paneNodeVersion, readNvmrc, versionMatches } from './node-pin.js';
 import { hasLaunchEnv } from './up.js';
@@ -122,6 +122,8 @@ export interface StatusResult {
   contextThresholds?: Record<HierarchyRole, number>;
   /** Token budget pace from `usage.json` (AISDLC-1072); absent when never sampled. */
   budget?: BudgetStatus;
+  /** AISDLC-1316: recorded docs site pin state when the last bump run was skipped or failed. */
+  docsSitePin?: { state: 'skipped' | 'failed'; runUrl?: string };
   /** The board hold (AISDLC-1319): who set it, since when and why; absent when not held. */
   hold?: Hold;
   /** Spawn cap: min of executors.max and the pacer allowance (AISDLC-1076). */
@@ -388,6 +390,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* an unreadable board must not break status */
   }
+  const docsPin = readDocsSitePin(deps.boardDir);
   const lastTick = lastTickInfo(deps.boardDir, deps.now());
   const spawnErrors = readLoopState(deps.boardDir).lastSpawnErrors ?? [];
   const nowMs = deps.now().getTime();
@@ -436,6 +439,9 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     contextThresholds: thresholdsByRole,
     ...(budgetNow ? { budget: budgetNow } : {}),
     ...(boardHold ? { hold: boardHold } : {}),
+    ...(docsPin && docsPin.state !== 'ok'
+      ? { docsSitePin: { ...docsPin, state: docsPin.state } }
+      : {}),
     executorCap: capNow,
     openPrs: openPrState(deps.boardDir, deps.env),
     ...(unbriefed.length > 0 ? { unbriefed } : {}),
@@ -500,6 +506,11 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
           ),
         ]
       : [];
+  const docsPinLine = result.docsSitePin
+    ? [
+        `docs site pin: ${result.docsSitePin.state}${result.docsSitePin.runUrl ? ` (${result.docsSitePin.runUrl})` : ''}; the website was not updated by the last bump run`,
+      ]
+    : [];
   const unownedLine = `unowned PRs: ${result.unowned ?? 0}`;
   const agedLines = (result.agedPrs ?? []).map(
     (a) =>
@@ -528,6 +539,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ...heldLines,
       ...stallLines,
       ...stuckLines,
+      ...docsPinLine,
       unownedLine,
       ...agedLines,
       ...routedLines,
@@ -614,6 +626,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     ...blockedLines,
     ...heldLines,
     ...stallLines,
+    ...docsPinLine,
     unownedLine,
     ...agedLines,
     ...routedLines,

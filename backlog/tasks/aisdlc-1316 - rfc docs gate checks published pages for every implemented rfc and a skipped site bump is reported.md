@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1316
 title: 'RFC docs gate checks published pages for every implemented RFC, and a skipped site bump is reported'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-18'
 labels:
