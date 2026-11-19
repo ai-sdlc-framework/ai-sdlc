@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1321
 title: 'Fork PR clean-room record satisfies the merge gate coverage check, both sides read one required-reviewer rule'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-18'
 labels:

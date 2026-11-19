@@ -7,7 +7,7 @@
  */
 
 import type { Runner } from '../runtime/exec.js';
-import { computeRequiredReviewers, evaluateCoverage } from './review-coverage.js';
+import { evaluateCoverage, requiredReviewersFor } from './review-coverage.js';
 import {
   INDEPENDENCE_TIERS,
   LEAVES_FILE,
@@ -118,7 +118,10 @@ export async function checkVerdict(opts: VerdictCheckOpts): Promise<VerdictCheck
     );
   }
 
-  const required = computeRequiredReviewers({ changedPaths: opts.changedPaths });
+  const required = requiredReviewersFor(
+    opts.requireCleanRoom ? 'clean-room' : 'pipeline',
+    opts.changedPaths,
+  );
   const approved = parsed.reviewers.filter((r) => r.verdict === 'approved').map((r) => r.name);
   const recorded = new Set(parsed.coverage.required);
   const missingFromRecord = required.required.filter((r) => !recorded.has(r));
@@ -129,11 +132,13 @@ export async function checkVerdict(opts: VerdictCheckOpts): Promise<VerdictCheck
     missingFromRecord.length > 0 ||
     !cov.satisfied
   ) {
+    const approvedSet = new Set(approved);
+    const short = required.required.filter((r) => !approvedSet.has(r) || !recorded.has(r));
     return fail(
       'coverage-short',
       parsed.verdict !== 'approved'
         ? 'verdict is not approved'
-        : `required reviewers not all approving: ${required.required.join(', ')}`,
+        : `required reviewers missing or not approving: ${short.join(', ') || required.required.join(', ')}`,
     );
   }
 
