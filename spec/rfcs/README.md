@@ -240,8 +240,18 @@ The closed enum is captured in the JSON schema. Each value maps to a `docs/` sub
 | `api-reference`    | `docs/api-reference/` | The RFC introduces or changes a programmatic surface (TypeScript types, schemas, runtime APIs).         |
 | `getting-started`  | `docs/getting-started/` | The RFC affects the first-run path / onboarding.                                                      |
 | `example`          | `docs/examples/`     | A worked example file (config, code, transcript) is needed to show real usage.                          |
+| `concept`          | `docs/concepts/`     | The RFC needs an explanatory page on the published site (how it works and why).                         |
 
 For each value listed in an RFC's `requiresDocs`, **at least one file** in the corresponding subdirectory MUST reference the RFC by its `id` (literal text, e.g. `RFC-0006`). The CI script in AISDLC-69.3 enforces this; AISDLC-69.2 (this PR) defines the convention.
+
+### Published-page rule and baseline (AISDLC-1316)
+
+The website publishes `docs/tutorials/`, `docs/api-reference/`, `docs/getting-started/` and `docs/concepts/`. It does not publish `docs/operations/` or `docs/examples/`. An RFC with `lifecycle: Implemented` MUST list at least one published surface (`tutorial`, `api-reference`, `getting-started`, `concept`) in `requiresDocs`; `[]`, `operator-runbook` only, or `deferredDocs: true` alone does not satisfy the rule. `node scripts/check-rfc-docs.mjs` fails naming the RFC otherwise.
+
+`scripts/rfc-published-docs-baseline.json` records the RFCs that predate the rule:
+
+- `gaps` lists ids of Implemented RFCs without a published surface. It is a ratchet: the gate fails on an entry that no longer needs to be there (remove it) and on an entry absent from the baseline on the base ref (no new gaps).
+- `exempt` lists `{ "id": "RFC-NNNN", "reason": "..." }` entries; an entry with an empty `reason` fails.
 
 ### `docsCoverage` — from citation check to coverage check (AISDLC-550)
 

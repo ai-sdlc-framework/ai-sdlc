@@ -218,6 +218,7 @@ import {
   listLanding,
   reconcile,
   gatherMainHealth,
+  gatherDocsBump,
   type ReconcilePr,
 } from '../hierarchy/reconcile.js';
 import { autoEnqueueFiled, readTaskOnMain } from '../hierarchy/filing-enqueue.js';
@@ -558,6 +559,7 @@ export async function runDispatchCli(
           boardDir,
           execute,
           mainHealth: gatherMainHealth(createSystemRunner(), cwd),
+          docsBump: gatherDocsBump(createSystemRunner(), cwd),
           maxSameHeadActions,
           maxCiRounds,
           closeSuperseded,

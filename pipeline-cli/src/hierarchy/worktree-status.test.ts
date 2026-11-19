@@ -56,4 +56,19 @@ describe('worktree status (AISDLC-1108)', () => {
     expect(lines).toContain('worktrees: 264 (260 removable)');
     expect(lines.some((l) => l.startsWith('ALARM'))).toBe(true);
   });
+
+  it('prints the docs site pin line only for a skipped or failed state (AISDLC-1316)', () => {
+    const base = {
+      rows: [],
+      board: { queued: 0, inflight: 0, done: 0, failed: 0 },
+      webhook: { state: 'off', reason: 'no secret' },
+      scheduler: { state: 'off' },
+    } as unknown as StatusResult;
+    const has = (r: StatusResult) => formatStatus(r).some((l) => l.startsWith('docs site pin:'));
+    expect(has(base)).toBe(false);
+    expect(has({ ...base, docsSitePin: { state: 'skipped', runUrl: 'https://x/runs/7' } })).toBe(
+      true,
+    );
+    expect(has({ ...base, docsSitePin: { state: 'failed' } })).toBe(true);
+  });
 });

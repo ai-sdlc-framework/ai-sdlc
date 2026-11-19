@@ -697,6 +697,8 @@ export interface ReconcileReport {
   main?: string;
   /** Set once per red sha: the item the tick routes to the planner. */
   routed?: { action: 'route-to-planner'; text: string };
+  /** AISDLC-1316: the line sent to the planner when the docs site pin turned `skipped` or `failed`. */
+  docsBump?: string;
 }
 
 /** Dedupe ledger for planner reports, persisted on the board (AISDLC-924). */
@@ -848,6 +850,106 @@ export function reportMainHealth(
   return { main: text, routed: { action: 'route-to-planner', text } };
 }
 
+/** AISDLC-1316: outcome of the latest completed docs-source-bump run. */
+export type DocsBumpState = 'ok' | 'skipped' | 'failed';
+
+export interface DocsBump {
+  /** `unknown` (no run, or `gh` failed) records nothing. */
+  state: DocsBumpState | 'unknown';
+  runUrl?: string;
+}
+
+const DOCS_BUMP_PR_STEP = 'Open or update the bump PR in the site repository';
+
+/** `skipped` when a green run skipped the bump step (site repo not visible to the token). */
+export function gatherDocsBump(run: CommandRunner, cwd: string): DocsBump {
+  const listed = run(
+    'gh',
+    [
+      'run',
+      'list',
+      '--workflow',
+      'docs-source-bump.yml',
+      '--status',
+      'completed',
+      '--limit',
+      '1',
+      '--json',
+      'databaseId,conclusion,url',
+    ],
+    { cwd },
+  );
+  if (listed.status !== 0) return { state: 'unknown' };
+  const latest = parse<{ databaseId?: number; conclusion?: string; url?: string }[]>(
+    listed.stdout,
+  )?.[0];
+  if (!latest?.conclusion) return { state: 'unknown' };
+  const url = latest.url ? { runUrl: latest.url } : {};
+  if (latest.conclusion === 'failure') return { state: 'failed', ...url };
+  if (latest.conclusion !== 'success') return { state: 'unknown' };
+  const viewed = run('gh', ['run', 'view', String(latest.databaseId), '--json', 'jobs'], { cwd });
+  if (viewed.status !== 0) return { state: 'unknown' };
+  const jobs = parse<{ jobs?: { steps?: { name?: string; conclusion?: string }[] }[] }>(
+    viewed.stdout,
+  )?.jobs;
+  const skipped = (jobs ?? []).some((j) =>
+    (j.steps ?? []).some((st) => st.name === DOCS_BUMP_PR_STEP && st.conclusion === 'skipped'),
+  );
+  return { state: skipped ? 'skipped' : 'ok', ...url };
+}
+
+function docsSitePinPath(boardDir: string): string {
+  return path.join(boardDir, 'docs-site-pin.json');
+}
+
+/** The recorded state, or undefined when none was recorded. */
+export function readDocsSitePin(
+  boardDir: string,
+): { state: DocsBumpState; runUrl?: string } | undefined {
+  try {
+    const rec = JSON.parse(readFileSync(docsSitePinPath(boardDir), 'utf-8')) as {
+      state?: string;
+      runUrl?: string;
+    };
+    if (rec.state === 'ok' || rec.state === 'skipped' || rec.state === 'failed')
+      return { state: rec.state, ...(rec.runUrl ? { runUrl: rec.runUrl } : {}) };
+  } catch {
+    /* none recorded */
+  }
+  return undefined;
+}
+
+/**
+ * Record the bump state; the planner gets one line only when the state changes to
+ * `skipped` or `failed`. The state is recorded only after the planner was told.
+ */
+export function reportDocsBump(
+  boardDir: string,
+  bump: DocsBump,
+  notify?: (text: string) => void,
+): string | undefined {
+  if (bump.state === 'unknown') return undefined;
+  const prior = readDocsSitePin(boardDir)?.state;
+  let text: string | undefined;
+  if (prior !== bump.state && bump.state !== 'ok') {
+    text = `docs site pin: ${bump.state}${bump.runUrl ? ` ${bump.runUrl}` : ''}. See cli-hierarchy status.`;
+    if (notify) {
+      try {
+        notify(text);
+      } catch {
+        return text;
+      }
+    }
+  }
+  mkdirSync(boardDir, { recursive: true });
+  writeFileSync(
+    docsSitePinPath(boardDir),
+    JSON.stringify({ state: bump.state, ...(bump.runUrl ? { runUrl: bump.runUrl } : {}) }) + '\n',
+    'utf-8',
+  );
+  return text;
+}
+
 /** One-line summary of the open landing records, for the tick's progress line. */
 export function summariseLanding(boardDir: string): string {
   const open = listLanding(boardDir).filter((r) => !r.landed);
@@ -918,6 +1020,8 @@ export interface ReconcileOpts {
   stuckAfterMinutes?: number;
   /** AISDLC-1190: delivers a routed PR or a red main to the planner session; throws when it cannot. */
   notifyPlanner?: (text: string) => void;
+  /** AISDLC-1316: latest docs-source-bump outcome. */
+  docsBump?: DocsBump;
   /** AISDLC-1242: enqueues a landed filing's task from its brief; returns the planner line, or undefined when it left the task alone. */
   enqueueFiled?: (pr: number, headBranch: string | undefined) => string | undefined;
 }
@@ -936,6 +1040,10 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
   const stuckMs = (opts.stuckAfterMinutes ?? DEFAULT_ROUTE_STUCK_MINUTES) * 60_000;
   if (opts.mainHealth)
     Object.assign(report, reportMainHealth(opts.boardDir, opts.mainHealth, opts.notifyPlanner));
+  if (opts.docsBump) {
+    const line = reportDocsBump(opts.boardDir, opts.docsBump, opts.notifyPlanner);
+    if (line) report.docsBump = line;
+  }
   const routeOnce = (pr: number, headSha: string | undefined, reason: string): boolean => {
     const first = firstRoute(opts.boardDir, pr, headSha, reason, opts.notifyPlanner);
     if (!first) report.suppressed++;

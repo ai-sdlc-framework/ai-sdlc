@@ -15,7 +15,9 @@ import {
   DOCS_ACTIONS,
   allowedAuthors,
   gatherFacts,
+  gatherDocsBump,
   gatherMainHealth,
+  readDocsSitePin,
   LIVE_CLAIM_NOTE,
   prBelongsToTask,
   listLanding,
@@ -1601,5 +1603,84 @@ describe('stale verdict-check (AISDLC-1232)', () => {
     );
     expect(d.action).toBe('route-to-planner');
     expect(d.note).toBe('stale-verdict-check@2');
+  });
+});
+
+describe('docs site pin (AISDLC-1316)', () => {
+  const runner =
+    (list: string | number, view: string | number = '{}'): CommandRunner =>
+    (_f, args) => {
+      const v = args[1] === 'list' ? list : view;
+      return typeof v === 'number'
+        ? { status: v, stdout: '', stderr: 'err' }
+        : { status: 0, stdout: v, stderr: '' };
+    };
+  const run = (conclusion: string) =>
+    JSON.stringify([{ databaseId: 7, conclusion, url: 'https://x/runs/7' }]);
+  const jobs = (conclusion: string) =>
+    JSON.stringify({
+      jobs: [
+        {
+          steps: [
+            { name: 'Open or update the bump PR in the site repository', conclusion },
+            { name: 'other' },
+          ],
+        },
+      ],
+    });
+  const opts = () => ({ boardDir: board, execute: () => ({ ran: false }), now: fixedNow });
+
+  it('reads ok, skipped, failed and unknown', () => {
+    expect(gatherDocsBump(runner(run('success'), jobs('success')), '/')).toEqual({
+      state: 'ok',
+      runUrl: 'https://x/runs/7',
+    });
+    expect(gatherDocsBump(runner(run('success'), jobs('skipped')), '/').state).toBe('skipped');
+    expect(gatherDocsBump(runner(run('success'), '{"jobs":[{}]}'), '/').state).toBe('ok');
+    expect(gatherDocsBump(runner(run('failure')), '/')).toEqual({
+      state: 'failed',
+      runUrl: 'https://x/runs/7',
+    });
+    expect(gatherDocsBump(runner(run('cancelled')), '/').state).toBe('unknown');
+    expect(gatherDocsBump(runner('[]'), '/').state).toBe('unknown');
+    expect(gatherDocsBump(runner(run('success'), 1), '/').state).toBe('unknown');
+  });
+
+  it('a gh error records nothing and tells nobody', () => {
+    const notify = vi.fn();
+    const r = reconcile([], {
+      ...opts(),
+      docsBump: gatherDocsBump(runner(1), '/'),
+      notifyPlanner: notify,
+    });
+    expect(r.docsBump).toBeUndefined();
+    expect(notify).not.toHaveBeenCalled();
+    expect(readDocsSitePin(board)).toBeUndefined();
+  });
+
+  it('tells the planner once when the state changes to skipped or failed', () => {
+    const notify = vi.fn();
+    const base = { ...opts(), notifyPlanner: notify };
+    const skipped = { state: 'skipped' as const, runUrl: 'https://x/runs/7' };
+    expect(reconcile([], { ...base, docsBump: skipped }).docsBump).toContain(
+      'docs site pin: skipped',
+    );
+    expect(readDocsSitePin(board)).toEqual(skipped);
+    expect(reconcile([], { ...base, docsBump: skipped }).docsBump).toBeUndefined();
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(reconcile([], { ...base, docsBump: { state: 'failed' } }).docsBump).toContain('failed');
+    expect(notify).toHaveBeenCalledTimes(2);
+    // back to ok records the state and sends nothing
+    expect(reconcile([], { ...base, docsBump: { state: 'ok' } }).docsBump).toBeUndefined();
+    expect(readDocsSitePin(board)).toEqual({ state: 'ok' });
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+
+  it('a failed send is not recorded, so the next pass retries', () => {
+    const notify = vi.fn(() => {
+      throw new Error('down');
+    });
+    reconcile([], { ...opts(), docsBump: { state: 'skipped' }, notifyPlanner: notify });
+    expect(readDocsSitePin(board)).toBeUndefined();
   });
 });

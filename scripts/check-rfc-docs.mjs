@@ -63,7 +63,21 @@ export const SURFACE_TO_SUBDIR = {
   'api-reference': 'api-reference',
   'getting-started': 'getting-started',
   example: 'examples',
+  concept: 'concepts',
 };
+
+/**
+ * Surfaces whose folder the website publishes (AISDLC-1316). `operator-runbook`
+ * (docs/operations/) and `example` (docs/examples/) are not published.
+ */
+export const PUBLISHED_SURFACES = new Set([
+  'tutorial',
+  'api-reference',
+  'getting-started',
+  'concept',
+]);
+
+export const PUBLISHED_DOCS_BASELINE_PATH = 'scripts/rfc-published-docs-baseline.json';
 
 /**
  * Statuses that REQUIRE doc surfaces to be in place. Per
@@ -804,6 +818,7 @@ export function checkAllRfcs({
   const files = listRfcFiles(rfcsDir);
   const failures = [];
   const warnings = [];
+  const frontmatters = [];
   let enforcedCount = 0;
   let skippedCount = 0;
 
@@ -820,6 +835,7 @@ export function checkAllRfcs({
       });
       continue;
     }
+    frontmatters.push(parsed.frontmatter);
     const {
       failures: f,
       warnings: w,
@@ -858,6 +874,7 @@ export function checkAllRfcs({
 
   return {
     files,
+    frontmatters,
     failures,
     warnings,
     enforcedCount,
@@ -952,6 +969,95 @@ export function validateRuntimeEvidence(source, rfcId, { extraCapabilityIds = []
     }
   }
   return { failures, warnings };
+}
+
+/** Read the published-docs baseline from `path`; missing or invalid = empty. */
+export function loadPublishedDocsBaseline(path) {
+  try {
+    return normalisePublishedDocsBaseline(JSON.parse(readFileSync(path, 'utf-8')));
+  } catch {
+    return { gaps: [], exempt: [] };
+  }
+}
+
+function normalisePublishedDocsBaseline(parsed) {
+  return {
+    gaps: Array.isArray(parsed?.gaps) ? parsed.gaps : [],
+    exempt: Array.isArray(parsed?.exempt) ? parsed.exempt : [],
+  };
+}
+
+/** The baseline as committed at `ref`; null when unavailable (first introduction). */
+export function loadPublishedDocsBaselineAtRef(ref, repoRoot = REPO_ROOT) {
+  try {
+    const raw = execFileSync('git', ['show', `${ref}:${PUBLISHED_DOCS_BASELINE_PATH}`], {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return normalisePublishedDocsBaseline(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * AISDLC-1316: every `lifecycle: Implemented` RFC must list a published
+ * surface in `requiresDocs`, unless it is in the baseline `exempt` (with a
+ * reason) or `gaps` (ratchet). `deferredDocs` does not satisfy the rule.
+ *
+ * `frontmatters` is an array of parsed RFC frontmatter objects.
+ * `baseBaseline` is the baseline on the base ref, or null when unavailable.
+ */
+export function checkPublishedDocs(frontmatters, baseline, baseBaseline = null) {
+  const failures = [];
+  const fail = (rfc, reason) => failures.push({ rfc, surface: null, reason });
+  const exemptIds = new Set();
+  for (const e of baseline.exempt) {
+    const id = e && typeof e === 'object' ? e.id : undefined;
+    const reason = e && typeof e === 'object' ? e.reason : undefined;
+    if (typeof reason !== 'string' || reason.trim() === '') {
+      fail(
+        typeof id === 'string' ? id : '<unknown>',
+        `${PUBLISHED_DOCS_BASELINE_PATH}: exempt entry needs a non-empty 'reason'`,
+      );
+    }
+    if (typeof id === 'string') exemptIds.add(id);
+  }
+  const gapIds = new Set(baseline.gaps);
+  const baseGaps = baseBaseline ? new Set(baseBaseline.gaps) : null;
+  const byId = new Map();
+  for (const fm of frontmatters) if (typeof fm?.id === 'string') byId.set(fm.id, fm);
+
+  for (const [id, fm] of byId) {
+    if (fm.lifecycle !== 'Implemented') continue;
+    const surfaces = Array.isArray(fm.requiresDocs) ? fm.requiresDocs : [];
+    const published = surfaces.some((s) => PUBLISHED_SURFACES.has(s));
+    if (published || exemptIds.has(id) || gapIds.has(id)) continue;
+    fail(
+      id,
+      `lifecycle 'Implemented' but requiresDocs lists no published surface (${[...PUBLISHED_SURFACES].join(', ')}); add one with a page under docs/, or exempt it with a reason in ${PUBLISHED_DOCS_BASELINE_PATH}`,
+    );
+  }
+
+  for (const id of gapIds) {
+    const fm = byId.get(id);
+    const surfaces = Array.isArray(fm?.requiresDocs) ? fm.requiresDocs : [];
+    const needs =
+      fm?.lifecycle === 'Implemented' && !surfaces.some((s) => PUBLISHED_SURFACES.has(s));
+    if (!needs) {
+      fail(
+        id,
+        `${PUBLISHED_DOCS_BASELINE_PATH}: gaps entry no longer needed (RFC now has a published surface or is not Implemented); remove it`,
+      );
+    } else if (baseGaps && !baseGaps.has(id)) {
+      fail(
+        id,
+        `${PUBLISHED_DOCS_BASELINE_PATH}: gaps entry is absent from the baseline on the base ref; the baseline may shrink, never grow`,
+      );
+    }
+  }
+  return failures;
 }
 
 /**
@@ -1198,6 +1304,7 @@ function parseArgs(argv) {
     approvingLoginsFile: null,
     prAuthor: '',
     oqScan: false,
+    baseline: resolve(REPO_ROOT, PUBLISHED_DOCS_BASELINE_PATH),
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -1208,10 +1315,11 @@ function parseArgs(argv) {
     else if (a === '--approving-logins-file') args.approvingLoginsFile = argv[++i];
     else if (a === '--pr-author') args.prAuthor = argv[++i];
     else if (a === '--head-ref') args.headRef = argv[++i];
+    else if (a === '--baseline') args.baseline = resolve(argv[++i]);
     else if (a === '--oq-scan') args.oqScan = true;
     else if (a === '--help' || a === '-h') {
       console.log(
-        'Usage: node scripts/check-rfc-docs.mjs [--rfcs-dir <path>] [--docs-dir <path>] [--base-ref <git-ref>] [--pr-body <text>] [--oq-scan --base-ref <ref> [--head-ref <ref>] [--approving-logins-file <path>] [--pr-author <login>]]',
+        'Usage: node scripts/check-rfc-docs.mjs [--rfcs-dir <path>] [--docs-dir <path>] [--baseline <path>] [--base-ref <git-ref>] [--pr-body <text>] [--oq-scan --base-ref <ref> [--head-ref <ref>] [--approving-logins-file <path>] [--pr-author <login>]]',
       );
       process.exit(0);
     } else {
@@ -1277,6 +1385,13 @@ function main() {
 
   // Phase 1: docs-surface check (requiresDocs vs actual doc files).
   const report = checkAllRfcs(args);
+  report.failures.push(
+    ...checkPublishedDocs(
+      report.frontmatters,
+      loadPublishedDocsBaseline(args.baseline),
+      effectiveBaseRef ? loadPublishedDocsBaselineAtRef(effectiveBaseRef) : null,
+    ),
+  );
   const docsExitCode = reportAndExit(report);
 
   // Phase 2: lifecycle-transition check (wired in per AISDLC-297).
