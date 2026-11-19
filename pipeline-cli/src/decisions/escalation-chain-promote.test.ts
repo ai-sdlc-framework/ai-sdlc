@@ -1,4 +1,5 @@
-import { appendFileSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -97,5 +98,53 @@ describe('promoteExpiredDecisions notices', () => {
     });
     expect(second).toEqual([]);
     expect(sent).toHaveLength(1);
+  });
+});
+
+describe('promoteExpiredDecisions repeat guard (AISDLC-1343)', () => {
+  const git = (...args: string[]): string =>
+    execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
+  const eventsDir = (): string => join(dir, '.ai-sdlc', '_decisions', 'events');
+  const routing = (): string[] =>
+    readdirSync(eventsDir()).filter((n) => n.includes('__routing-changed__'));
+  function initRepo(): void {
+    git('init', '-q');
+    git('config', 'user.email', 't@t');
+    git('config', 'user.name', 't');
+    git('commit', '-q', '--allow-empty', '-m', 'base');
+  }
+  const later = new Date(LATER.getTime() + 60_000);
+
+  it('does not move again when the merged event file is gone and HEAD is stale', () => {
+    initRepo();
+    open('operational');
+    expect(promoteExpiredDecisions(chain([]), { workDir: dir, now: LATER })).toHaveLength(1);
+    git('add', '-A');
+    git('commit', '-q', '-m', 'event');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git('reset', '-q', '--soft', 'HEAD~1');
+    git('reset', '-q');
+    for (const n of routing()) rmSync(join(eventsDir(), n));
+    expect(promoteExpiredDecisions(chain([]), { workDir: dir, now: later })).toEqual([]);
+    expect(routing()).toHaveLength(0);
+  });
+
+  it('counts a routing-changed event that exists only on the sync branch', () => {
+    initRepo();
+    open('operational');
+    promoteExpiredDecisions(chain([]), { workDir: dir, now: LATER });
+    git('add', '-A');
+    git('commit', '-q', '-m', 'event');
+    git('update-ref', 'refs/remotes/origin/ai-sdlc/decisions-sync', 'HEAD');
+    git('reset', '-q', '--soft', 'HEAD~1');
+    git('reset', '-q');
+    for (const n of routing()) rmSync(join(eventsDir(), n));
+    expect(promoteExpiredDecisions(chain([]), { workDir: dir, now: later })).toEqual([]);
+  });
+
+  it('still promotes when no remote holds the move', () => {
+    initRepo();
+    open('operational');
+    expect(promoteExpiredDecisions(chain([]), { workDir: dir, now: LATER })).toHaveLength(1);
   });
 });

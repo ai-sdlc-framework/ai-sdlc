@@ -1064,6 +1064,20 @@ describe('removeUntrackedIdenticalToMain (AISDLC-874)', () => {
     expect(existsSync(join(workDir, rel))).toBe(false);
   });
 
+  it('keeps an identical untracked event that parent HEAD does not hold (AISDLC-1343)', async () => {
+    setup('x');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fake = new FakeRunner()
+      .on(/^git rev-parse --verify -q HEAD:/, fakeRunnerFail('', 1))
+      .on(/^git rev-parse --verify/, ok('abc123\n'))
+      .on(/^git hash-object/, ok('abc123\n'));
+    const removed = await removeUntrackedIdenticalToMain([rel], workDir, fake.toRunner());
+    expect(removed).toEqual([]);
+    expect(existsSync(join(workDir, rel))).toBe(true);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('not in parent HEAD'));
+    warn.mockRestore();
+  });
+
   it('keeps and reports an untracked event that differs from origin/main', async () => {
     setup('x');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
