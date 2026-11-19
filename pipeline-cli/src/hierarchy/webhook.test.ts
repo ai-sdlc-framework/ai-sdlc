@@ -20,6 +20,7 @@ import {
   installForwarder,
 } from './webhook-forwarder.js';
 import {
+  formatWebhookForeign,
   formatWebhookStatus,
   parseFeed,
   trackPrActivity,
@@ -43,6 +44,7 @@ const mk = (env: NodeJS.ProcessEnv, alive = true): HierarchyDeps =>
     env,
     log: (l: string) => lines.push(l),
     isAlive: () => alive,
+    probeWebhookIdentity: () => ({ repo: null, boardDir: dir }),
     binPath: '/bin/cli-hierarchy.mjs',
   }) as unknown as HierarchyDeps;
 
@@ -225,7 +227,7 @@ describe('webhook health (AISDLC-1157)', () => {
       quiet: false,
     });
     expect(formatWebhookStatus({ state: 'up', port: 9, pid: 1 }, h)).toBe(
-      'webhook: degraded (port 9, last event 45m, feed none, target http://127.0.0.1:9/webhooks/github)',
+      'webhook: degraded (port 9, repo unknown, last event 45m, feed none, target http://127.0.0.1:9/webhooks/github)',
     );
   });
 
@@ -621,5 +623,74 @@ describe('webhook per-project port selection (AISDLC-1254)', () => {
     } as unknown as HierarchyDeps;
     webhookUp(deps, undefined, t.spawner, { kind: 'gh-forward' }, 'linux');
     expect(lines.join('\n')).toContain('--url http://127.0.0.1:8766/webhooks/github');
+  });
+});
+
+describe('board identity (AISDLC-1349)', () => {
+  const NOW = Date.parse('2026-11-02T12:00:00Z');
+  const hd = (identity: unknown, spawnless = true) =>
+    ({
+      ...mk({ AI_SDLC_WEBHOOK_SECRET: 'x' }),
+      now: () => new Date(NOW),
+      run: () => ({ status: 1, stdout: '', stderr: '' }),
+      isPortFree: () => spawnless,
+      probeWebhookIdentity: () => identity,
+    }) as unknown as HierarchyDeps;
+  const record = (extra: object = {}): void =>
+    writeFileSync(path.join(dir, 'webhook.json'), JSON.stringify({ pid: 1, port: 9, ...extra }));
+  const up = { probePort: () => true };
+
+  it('reads the repository as unknown when none is recorded, and names it when recorded', () => {
+    record();
+    const own = { repo: null, boardDir: dir };
+    const h = webhookHealth(hd(own), up);
+    expect(h.repo).toBeUndefined();
+    expect(formatWebhookStatus({ state: 'up', port: 9, pid: 1 }, h)).toContain('repo unknown');
+    record({ repo: 'o/a' });
+    const named = webhookHealth(hd(own), up);
+    expect(named.repo).toBe('o/a');
+    expect(formatWebhookStatus({ state: 'up', port: 9, pid: 1 }, named)).toContain('repo o/a');
+  });
+
+  it('a live pid whose port answers as another board, or not at all, is not up and webhookUp starts one', () => {
+    record({ repo: 'o/a' });
+    const other = { repo: 'o/b', boardDir: '/some/other/board' };
+    const h = webhookHealth(hd(other), up);
+    expect(h.class).toBe('down');
+    expect(h.signals.receiver).toBe(false);
+    expect(h.reasons[0]).toMatch(/another board.*o\/b/);
+    const silent = webhookHealth(hd(undefined), up);
+    expect(silent.class).toBe('down');
+    expect(silent.reasons[0]).toMatch(/does not answer \/health/);
+    const st = webhookStatus(hd(other));
+    expect(st).toMatchObject({ state: 'off', reason: 'foreign listener' });
+    expect(formatWebhookStatus(st)).toMatch(/^webhook: down \(.*another board/);
+    expect(webhookStatus(hd(undefined))).toMatchObject({ reason: 'foreign listener' });
+    const spawner = vi.fn();
+    webhookUp(hd(other), undefined, spawner);
+    expect(spawner).toHaveBeenCalledTimes(1);
+  });
+
+  it('events of another repository do not count as this board last event', () => {
+    record({ repo: 'o/a' });
+    mkdirSync(path.join(dir, 'events'), { recursive: true });
+    const f = path.join(dir, 'events', encodeURIComponent('o/b#3@abc:pull_request:d1') + '.json');
+    writeFileSync(f, '{}');
+    const h = webhookHealth(hd({ repo: 'o/a', boardDir: dir }), up);
+    expect(h.signals.lastEventAt).toBeUndefined();
+  });
+
+  it('status prints the refused foreign deliveries, and nothing when there are none', () => {
+    record({ repo: 'o/a' });
+    const own = { repo: 'o/a', boardDir: dir };
+    expect(formatWebhookForeign(webhookHealth(hd(own), up))).toEqual([]);
+    expect(formatWebhookForeign(undefined)).toEqual([]);
+    writeFileSync(
+      path.join(dir, 'webhook-foreign.json'),
+      JSON.stringify({ at: 'x', count: 3, repo: 'o/b' }),
+    );
+    const lines = formatWebhookForeign(webhookHealth(hd(own), up));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/3 delivery\(ies\) refused for repository o\/b.*o\/a/);
   });
 });

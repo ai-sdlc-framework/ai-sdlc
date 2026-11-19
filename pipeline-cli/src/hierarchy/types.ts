@@ -144,6 +144,8 @@ export interface HierarchyDeps {
   /** Blocks for `ms` (forwarder start settle). Absent: `Atomics.wait`. */
   sleepMs?: (ms: number) => void;
   isAlive?: (pid: number) => boolean;
+  /** Asks the listener on a port who it is (`/health`); undefined when it does not answer (AISDLC-1349). */
+  probeWebhookIdentity?: (port: number) => { repo: string | null; boardDir: string } | undefined;
   /** Whether nvm has the given node version installed. Absent: looks under `$NVM_DIR/versions/node`. */
   nodeInstalled?: (version: string) => boolean;
   /** Parent of a process, or null when unreadable (register's pane ancestry check). Absent: `ps`. */

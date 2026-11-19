@@ -168,6 +168,25 @@ describe('webhook health tick (AISDLC-1157)', () => {
   });
 });
 
+describe('webhook notices name the repository (AISDLC-1349)', () => {
+  it('puts the repository in the decision summary and the desktop notice', () => {
+    const filed: { summary: string }[] = [];
+    const notices: string[] = [];
+    runWebhookHealthTick({
+      boardDir: dir,
+      now: () => new Date('2026-11-02T12:00:00Z'),
+      health: () => ({ ...reading('down'), repo: 'o/a' }),
+      escalate: (input: { summary: string }) => {
+        filed.push(input);
+        return 'DEC-0901';
+      },
+      notify: (m: string) => notices.push(m),
+    } as never);
+    expect(filed[0]!.summary).toContain('o/a');
+    expect(notices[0]).toContain('o/a');
+  });
+});
+
 describe('webhook escalation dedup (AISDLC-1167)', () => {
   const input = (since: string) => ({
     since,

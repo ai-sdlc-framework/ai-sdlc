@@ -181,3 +181,72 @@ describe('refused deliveries (AISDLC-1285)', () => {
     expect(() => readFileSync(file, 'utf-8')).toThrow();
   });
 });
+
+describe('repository identity (AISDLC-1349)', () => {
+  const mkReceiver = async (repo: string | undefined, wk: Mock<() => void>) => {
+    const d = mkdtempSync(path.join(os.tmpdir(), 'webhook-id-'));
+    const r = createReceiver({
+      secret: SECRET,
+      boardDir: d,
+      port: 0,
+      debounceMs: 20,
+      ...(repo ? { repo } : {}),
+      wake: wk,
+    });
+    await r.start();
+    return { d, r };
+  };
+  const forRepo = (repo: string): string =>
+    JSON.stringify({
+      repository: { full_name: repo },
+      check_run: { head_sha: SHA, pull_requests: [{ number: 7 }] },
+    });
+  const send = async (port: number, body: string, id: string): Promise<number> =>
+    (
+      await fetch(`http://127.0.0.1:${port}${WEBHOOK_PATH}`, {
+        method: 'POST',
+        body,
+        headers: good(body, id),
+      })
+    ).status;
+
+  it('refuses a signed delivery for another repository and records it; accepts its own', async () => {
+    const wa = vi.fn<() => void>();
+    const a = await mkReceiver('o/a', wa);
+    try {
+      const foreign = forRepo('o/b');
+      expect(await send(a.r.port, foreign, 'f-1')).toBe(200);
+      expect(await send(a.r.port, foreign, 'f-2')).toBe(200);
+      await new Promise((r) => setTimeout(r, 80));
+      expect(() => readdirSync(path.join(a.d, 'events'))).toThrow();
+      expect(wa).not.toHaveBeenCalled();
+      expect(
+        JSON.parse(readFileSync(path.join(a.d, 'webhook-foreign.json'), 'utf-8')),
+      ).toMatchObject({ count: 2, repo: 'o/b' });
+      expect(await send(a.r.port, forRepo('o/a'), 'g-1')).toBe(200);
+      expect(readdirSync(path.join(a.d, 'events'))).toHaveLength(1);
+      await vi.waitFor(() => expect(wa).toHaveBeenCalledTimes(1));
+    } finally {
+      await a.r.stop();
+      removeFixtureDir(a.d);
+    }
+  });
+
+  it('accepts every delivery when no repository is resolved, and /health names repo and board', async () => {
+    const any = await mkReceiver(undefined, vi.fn<() => void>());
+    const a = await mkReceiver('o/a', vi.fn<() => void>());
+    try {
+      expect(await send(any.r.port, forRepo('o/b'), 'u-1')).toBe(200);
+      expect(readdirSync(path.join(any.d, 'events'))).toHaveLength(1);
+      const h = await (await fetch(`http://127.0.0.1:${a.r.port}/health`)).json();
+      expect(h).toMatchObject({ repo: 'o/a', boardDir: path.resolve(a.d) });
+      const u = await (await fetch(`http://127.0.0.1:${any.r.port}/health`)).json();
+      expect(u.repo).toBeNull();
+    } finally {
+      await any.r.stop();
+      await a.r.stop();
+      removeFixtureDir(any.d);
+      removeFixtureDir(a.d);
+    }
+  });
+});

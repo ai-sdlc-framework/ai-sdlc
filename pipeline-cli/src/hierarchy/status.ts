@@ -43,6 +43,7 @@ import {
 import { readLoopState } from './dispatch-loop.js';
 import { formatLastTick, lastTickInfo } from './host-liveness.js';
 import {
+  formatWebhookForeign,
   formatWebhookStatus,
   webhookHealth,
   webhookStatus,
@@ -529,6 +530,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       'no sessions in the roster',
       ...dynamicLines,
       formatWebhookStatus(result.webhook, result.webhookHealth),
+      ...formatWebhookForeign(result.webhookHealth),
       formatSchedulerStatus(result.scheduler),
       ...formatWorktrees(result.worktrees),
       formatLastTick(result.lastTick),
@@ -617,6 +619,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     '',
     `board: ${queued} queued, ${inflight} inflight, ${done} done, ${failed} failed`,
     formatWebhookStatus(result.webhook, result.webhookHealth),
+    ...formatWebhookForeign(result.webhookHealth),
     formatSchedulerStatus(result.scheduler),
     ...formatWorktrees(result.worktrees),
     formatLastTick(result.lastTick),
