@@ -31,6 +31,7 @@ const reading = (cls: WebhookClass, reason = 'no event'): WebhookHealth => ({
     receiver: true,
     port: true,
     lastEventAgeMin: 45,
+    lastEventAt: '2026-11-02T13:00:00.000Z',
     prActivityWithoutEvent: cls !== 'healthy',
     prActivity: cls !== 'healthy',
     quiet: cls === 'healthy',
@@ -95,17 +96,50 @@ describe('webhook health tick (AISDLC-1157)', () => {
     ).toEqual({});
     const r = runWebhookHealthTick({
       boardDir: dir,
-      now: () => new Date(),
+      now: () => new Date('2026-11-02T12:00:00Z'),
       health: () => reading('down'),
     });
     expect(r.report?.text).toMatch(/healthy to down/);
     expect(
       runWebhookHealthTick({
         boardDir: dir,
-        now: () => new Date(),
+        now: () => new Date('2026-11-02T12:00:00Z'),
         health: () => reading('healthy'),
       }).report,
     ).toBeDefined();
+  });
+
+  it('a restart reading unverified does not close the open episode (AISDLC-1345)', () => {
+    const closeEpisode = vi.fn();
+    const tick = (h: WebhookHealth) =>
+      runWebhookHealthTick({
+        boardDir: dir,
+        now: () => new Date('2026-11-02T12:30:00Z'),
+        health: () => h,
+        closeEpisode,
+      });
+    tick(reading('down'));
+    const restarted = reading('healthy');
+    delete restarted.signals.lastEventAt;
+    restarted.class = 'unverified';
+    expect(tick(restarted).report).toBeUndefined();
+    // a healthy reading whose newest event predates the episode does not close it either
+    const old = reading('healthy');
+    old.signals.lastEventAt = '2026-11-02T11:00:00.000Z';
+    expect(tick(old).report).toBeUndefined();
+    expect(closeEpisode).not.toHaveBeenCalled();
+    // an event after the episode start closes it
+    expect(tick(reading('healthy')).report).toBeDefined();
+    expect(closeEpisode).toHaveBeenCalledTimes(1);
+  });
+
+  it('the body names the recorded port, and the default only when none is recorded', () => {
+    const withPort = reading('down');
+    withPort.signals.receiverPort = 8767;
+    const body = formatWebhookEscalationBody(withPort);
+    expect(body).toContain('127.0.0.1:8767/');
+    expect(body).not.toContain('8765');
+    expect(formatWebhookEscalationBody(reading('down'))).toContain('127.0.0.1:8765/');
   });
 
   it('formats the escalation body and the stall channel notifier', () => {

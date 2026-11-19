@@ -32,8 +32,13 @@ import {
 const STATE_FILE = 'webhook-health.json';
 
 /** The command that restarts the feed, as documented in docs/operations/cli-hierarchy.md. */
-export const WEBHOOK_FIX_COMMAND =
-  'gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:8765/webhooks/github';
+const DEFAULT_WEBHOOK_PORT = 8765;
+
+/** The restart command forwarding to `port` (the receiver's recorded port, else the default). */
+export const webhookFixCommand = (port: number = DEFAULT_WEBHOOK_PORT): string =>
+  `gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:${port}/webhooks/github`;
+
+export const WEBHOOK_FIX_COMMAND = webhookFixCommand();
 
 export interface WebhookEscalationInput {
   /** Episode key. */
@@ -107,7 +112,7 @@ export function formatWebhookEscalationBody(
     `Webhook health is ${h.class}: ${h.reasons.join('; ') || 'see signals'}.`,
     `Signals: ${JSON.stringify(h.signals)}.`,
     'Dispatch keeps working by polling gh (about 2,700 calls an hour), which is the rate-limit pressure.',
-    `Fix (operator only; it touches your GitHub account and network): restart the feed with \`${WEBHOOK_FIX_COMMAND}\` ` +
+    `Fix (operator only; it touches your GitHub account and network): restart the feed with \`${webhookFixCommand(h.signals.receiverPort)}\` ` +
       'and record it with `cli-hierarchy webhook up --feed gh-forward`, or re-register the repository hook ' +
       '(secret equal to AI_SDLC_WEBHOOK_SECRET). If the receiver itself is down run `cli-hierarchy webhook up`.',
     ...tried,
@@ -125,8 +130,14 @@ export function runWebhookHealthTick(deps: WebhookHealthTickDeps): WebhookHealth
   const nowIso = deps.now().toISOString();
   const nowMs = deps.now().getTime();
 
+  // Unverified says nothing either way: it neither opens nor closes an episode (AISDLC-1345).
+  if (h.class === 'unverified') return { health: h };
+
   if (h.class === 'healthy') {
     if (h.class === state.class) return { health: h };
+    // Close only on proof: an event received after the episode started.
+    const at = h.signals.lastEventAt ? Date.parse(h.signals.lastEventAt) : NaN;
+    if (state.since && !(at > Date.parse(state.since))) return { health: h };
     // Every open webhook-health record is answered, not only the one this file remembers.
     // The attempt count is not carried over: a delivery resets it.
     deps.closeEpisode?.(state.decisionId, `webhook health recovered at ${nowIso}`);

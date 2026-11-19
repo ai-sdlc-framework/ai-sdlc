@@ -191,11 +191,26 @@ describe('webhook health (AISDLC-1157)', () => {
     expect(after.signals.refusedDeliveries).toBeUndefined();
   });
 
-  it('is healthy and quiet with no PR activity, even with no events', () => {
+  it('is unverified, not healthy, with no events and no PR activity (AISDLC-1345)', () => {
     receiver({ kind: 'none' });
     const h = webhookHealth(hd(), up);
-    expect(h.class).toBe('healthy');
+    expect(h.class).toBe('unverified');
     expect(h.signals).toMatchObject({ quiet: true, lastEventAgeMin: null, forwarder: 'none' });
+  });
+
+  it('is not healthy with no events and recent PR activity either (AISDLC-1345)', () => {
+    receiver({ kind: 'none' });
+    activity(7, 10);
+    expect(webhookHealth(hd(), up).class).not.toBe('healthy');
+  });
+
+  it('reports the newest event time and the recorded port (AISDLC-1345)', () => {
+    receiver({ kind: 'none' });
+    event(1, 5);
+    const h = webhookHealth(hd(), up);
+    expect(h.class).toBe('healthy');
+    expect(typeof h.signals.lastEventAt).toBe('string');
+    expect(h.signals.receiverPort).toBeDefined();
   });
 
   it('is degraded when a PR changed, no event for the stale window', () => {
