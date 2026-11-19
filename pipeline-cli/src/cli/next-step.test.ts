@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -158,6 +159,44 @@ describe('registration', () => {
   });
 });
 
+describe('lone dash --result (AISDLC-1337)', () => {
+  // Capture the parsed argv via middleware; a stub handler replaces the real one.
+  const parseArgs = async (...args: string[]): Promise<Record<string, unknown>> => {
+    const saved = process.argv;
+    process.argv = ['node', 'ai-sdlc-pipeline', ...args];
+    let captured: Record<string, unknown> = {};
+    try {
+      await Promise.resolve()
+        .then(() =>
+          buildCli()
+            .exitProcess(false)
+            .fail(false)
+            .middleware((argv) => {
+              captured = argv as Record<string, unknown>;
+              throw new Error('captured');
+            }, true)
+            .parseAsync(),
+        )
+        .catch((e: Error) => {
+          if (e.message !== 'captured') throw e;
+        });
+    } finally {
+      process.argv = saved;
+    }
+    return captured;
+  };
+  const base = ['next-step', '--task', 'AISDLC-1', '--state', 's.json'];
+
+  it('accepts `--result -` with no Unknown argument error', async () => {
+    expect((await parseArgs(...base, '--result', '-')).result).toBe('-');
+  });
+
+  it('keeps `--result=-` and `--result <file>` unchanged', async () => {
+    expect((await parseArgs(...base, '--result=-')).result).toBe('-');
+    expect((await parseArgs(...base, '--result', 'r.json')).result).toBe('r.json');
+  });
+});
+
 describe('handler', () => {
   let dir: string;
   let stdout: string;
@@ -191,6 +230,23 @@ describe('handler', () => {
       ...args,
     });
   };
+
+  it('re-emits the pending instruction for the dash form with empty stdin', async () => {
+    const state = join(dir, 's.json');
+    await run({ task: 'not-an-arg!', state });
+    stdout = '';
+    const stdin = Object.getOwnPropertyDescriptor(process, 'stdin')!;
+    Object.defineProperty(process, 'stdin', { value: Readable.from([]), configurable: true });
+    try {
+      await run({ task: 'not-an-arg!', state, result: '-' });
+    } finally {
+      Object.defineProperty(process, 'stdin', stdin);
+    }
+    const parsed = JSON.parse(stdout);
+    expect(parsed.action).toBe('stop');
+    expect(parsed.reason).toContain('Accepted forms');
+    expect(stdout).not.toContain('Unknown argument');
+  });
 
   it('prints exactly one JSON document and exits 1 on a stop', async () => {
     await run({ task: 'not-an-arg!', state: join(dir, 's.json') });

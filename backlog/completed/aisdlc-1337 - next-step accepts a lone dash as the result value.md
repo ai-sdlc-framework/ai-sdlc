@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1337
 title: 'The next-step command accepts a lone dash as the result value'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
