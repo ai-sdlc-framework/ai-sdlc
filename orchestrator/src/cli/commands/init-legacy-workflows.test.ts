@@ -115,6 +115,16 @@ describe('scaffolded gate (AC 1)', () => {
     const [maj, min] = version.split('.').map(Number);
     expect(maj > 0 || min >= 41).toBe(true);
   });
+
+  it('tolerates a skipped verdict-check in the pr-ready rollup', () => {
+    const doc = parseYaml(AI_SDLC_GATE_WORKFLOW) as {
+      jobs: Record<string, { steps?: { with?: Record<string, string> }[] }>;
+    };
+    const skips = doc.jobs['pr-ready'].steps
+      ?.map((st) => st.with?.['allowed-skips'])
+      .find((v) => v !== undefined);
+    expect(skips?.split(',').map((x) => x.trim())).toContain('verdict-check');
+  });
 });
 
 describe('scaffold sets (AC 2, 4)', () => {

@@ -132,7 +132,7 @@ jobs:
   # RFC-0061 / DEC-0284: the merge gate reads the review verdict record in
   # refs/ai-sdlc/verdicts/<head>. A code PR with no valid record fails here, so
   # \`ai-sdlc/pr-ready\` fails. Docs-only, draft and dependabot PRs skip it
-  # (alls-green treats skipped as success). The CLI is installed from npm into a
+  # (listed in the rollup's allowed-skips, so a skip passes). The CLI is installed from npm into a
   # folder OUTSIDE the checkout at an exact pinned version; the PR head is
   # fetched as data only and never checked out or executed.
   verdict-check:
@@ -152,8 +152,9 @@ jobs:
       # PUBLISHED version of both and at least 0.41.0 (first with verdict-check).
       AI_SDLC_CLI_VERSION: '0.43.0'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           ref: \${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
       - name: Fetch the PR head as DATA only (never checked out)
@@ -172,7 +173,7 @@ jobs:
             git fetch --no-tags "https://github.com/\${HEAD_REPO_FULL}.git" \\
               "+\${HEAD_SHA}:refs/remotes/head/\${HEAD_SHA}"
           fi
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - name: Install the AI-SDLC CLI (outside the checkout)
@@ -211,6 +212,9 @@ jobs:
         uses: re-actors/alls-green@release/v1
         with:
           jobs: \${{ toJSON(needs) }}
+          # alls-green fails a skipped job that is not listed here. These jobs
+          # skip by design (docs-only, draft, merge_group, dependabot PRs).
+          allowed-skips: lint,build-test,coverage,verdict-check
 `;
 
 /**
