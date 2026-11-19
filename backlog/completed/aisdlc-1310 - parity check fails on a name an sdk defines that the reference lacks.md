@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1310
 title: 'Parity check fails on a name an SDK defines that the reference lacks'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-17'
 labels:
