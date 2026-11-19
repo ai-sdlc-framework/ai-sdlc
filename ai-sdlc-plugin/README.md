@@ -111,12 +111,18 @@ Slash command bodies invoke `@ai-sdlc/pipeline-cli` CLIs and plugin-internal scr
 
 ### Usage in slash command bodies
 
-**Rule: never hardcode `node pipeline-cli/bin/cli-XXX.mjs` or `node ai-sdlc-plugin/scripts/XXX.mjs` in a slash command body.** Use the portable preamble:
+**Rule: never hardcode `node pipeline-cli/bin/cli-XXX.mjs` or `node ai-sdlc-plugin/scripts/XXX.mjs` in a slash command body.** Use the portable preamble. It resolves the plugin root in this order and stops at the first folder that exists on disk: `CLAUDE_PLUGIN_DIR`, `CLAUDE_PLUGIN_ROOT`, `./ai-sdlc-plugin` (the monorepo), then the install entry of the current project in `~/.claude/plugins/installed_plugins.json` (a `project` or `local` entry for the working directory or its nearest ancestor, else the `user` entry; skipped when its `installPath` is missing). When none exists it prints one line naming both variables and the registry file and exits non-zero. The block is identical in every command (`commands/plugin-root-preamble.test.mjs` enforces it):
 
 ```bash
 # PLUGIN_SCRIPTS_DIR — resolves plugin-internal scripts (compute-slug.mjs etc.):
 # Must be set FIRST — resolve-pipeline-cli.sh lives under PLUGIN_SCRIPTS_DIR.
-PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}}/scripts"
+# >>> plugin-root preamble
+unset PLUGIN_SCRIPTS_DIR
+for _c in "${CLAUDE_PLUGIN_DIR:-}" "${CLAUDE_PLUGIN_ROOT:-}" "$(pwd)/ai-sdlc-plugin" "$(node -e 'const f=require("fs"),p=require("path"),r=(d)=>{try{return f.realpathSync(d)}catch(e){return d}};try{const g=JSON.parse(f.readFileSync(p.join(require("os").homedir(),".claude/plugins/installed_plugins.json"))).plugins,s=[];for(const k in g)if(k.startsWith("ai-sdlc@"))s.push(...g[k]);const o=[];for(let d=process.cwd(),u;u!==d;d=p.dirname(d)){u=d;for(const e of s)if(e.scope!="user"&&e.scope!="managed"&&e.projectPath&&r(e.projectPath)==d)o.push(e)}for(const e of s)if(e.scope=="user")o.push(e);console.log(o.find((e)=>f.existsSync(e.installPath)).installPath)}catch(e){}' 2>/dev/null)"; do
+  [ -n "$_c" ] && [ -d "$_c" ] && PLUGIN_SCRIPTS_DIR="$_c/scripts" && break
+done
+[ -n "${PLUGIN_SCRIPTS_DIR:-}" ] || { echo "ERROR: plugin not found: set CLAUDE_PLUGIN_DIR or CLAUDE_PLUGIN_ROOT, or install it (see ~/.claude/plugins/installed_plugins.json)" >&2; exit 1; }
+# <<< plugin-root preamble
 
 # PIPELINE_CLI_BIN — resolves across all 5 install topologies (AISDLC-272).
 # Override: export PIPELINE_CLI_BIN=/path/to/pipeline-cli/bin to skip resolution.
