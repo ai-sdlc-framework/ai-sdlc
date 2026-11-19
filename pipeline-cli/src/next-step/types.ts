@@ -103,6 +103,12 @@ export interface ReviewRoundState {
   roundPlan?: Omit<import('../incremental-review/review-rounds.js').ReviewRoundPlan, 'deltaDiff'>;
   /** Set while the staged review (RFC-0052) is driving this round. */
   staged?: StagedRoundState;
+  /** AISDLC-1335: reviewers asked to run again alone (transcript lacked the nonce marker). */
+  rerun?: string[];
+  /** AISDLC-1335: reports kept while a re-run is pending; the re-run's report replaces its own. */
+  heldReports?: import('./review-finalize.js').ReviewerReport[];
+  /** AISDLC-1335: re-runs asked so far this round, by reviewer agent. */
+  rerunAttempts?: Record<string, number>;
 }
 
 /** Durable state, JSON on disk between `next-step` invocations. */

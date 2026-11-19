@@ -379,12 +379,14 @@ export function buildSpawnReviewers(
     action: 'spawn-reviewers',
     taskId: state.taskId,
     round: review.round,
-    reviewers: review.spawned.map((r) => ({
-      agent: r.agent,
-      promptFile: r.promptFile,
-      bootstrapPrompt: bootstrapPromptFor(r.promptFile),
-      ...(r.model ? { model: r.model } : {}),
-    })),
+    reviewers: review.spawned
+      .filter((r) => !review.rerun || review.rerun.includes(r.agent))
+      .map((r) => ({
+        agent: r.agent,
+        promptFile: r.promptFile,
+        bootstrapPrompt: bootstrapPromptFor(r.promptFile),
+        ...(r.model ? { model: r.model } : {}),
+      })),
     replyShape:
       review.staged && review.staged.stage !== 'security' ? STAGED_REPORT_SHAPE : REPORT_SHAPE,
     reply: resumeCommand(ctx, state.taskId),
@@ -656,6 +658,7 @@ class Machine {
     const prep = await deps.prepareReview(ctx, state, state.reviewRound, opts);
     if (prep.kind === 'abort') return this.fail(state, 'aborted', prep.reason);
     state.review = prep.review;
+    state.reviewRound = prep.review.round;
     state.classifierLine = prep.classifierLine;
     if (prep.kind === 'nothing-to-spawn') {
       state.verdict = await aggregateRound(prep.verdicts, prep.review.harnessNote);
@@ -696,6 +699,7 @@ class Machine {
     }
     const fin = await deps.finalizeReview(ctx, state, reports);
     if (!fin.ok) {
+      if (fin.rerun && state.review) return this.spawnReviewers(state, state.review);
       return fin.recoverable
         ? this.fixReport(state, fin.reason)
         : this.fail(state, 'aborted', fin.reason);

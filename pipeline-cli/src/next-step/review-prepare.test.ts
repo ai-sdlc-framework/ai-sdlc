@@ -452,6 +452,16 @@ spec:
     ...over,
   });
 
+  it('names the round by the recorded-round plan everywhere, not the in-run counter (AISDLC-1335)', async () => {
+    script();
+    const res = await prepareReview(h.ctx, state, 1, { planRound: () => plan({ round: 3 }) });
+    expect(res.kind).toBe('spawn');
+    if (res.kind !== 'spawn') return;
+    expect(res.review.round).toBe(3);
+    expect(res.review.roundPlan?.round).toBe(3);
+    expect(res.review.spawned.every((sp) => sp.promptFile.includes('review-r3-'))).toBe(true);
+  });
+
   it('plans full when the unchanged-content anchor lacks a required reviewer (AISDLC-1196)', async () => {
     script();
     h.runner.on(/ls-remote/, ok('abc\trefs/ai-sdlc/verdicts/headsha\n'));
