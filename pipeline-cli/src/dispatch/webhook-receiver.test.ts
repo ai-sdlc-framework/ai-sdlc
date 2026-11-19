@@ -240,7 +240,9 @@ describe('repository identity (AISDLC-1349)', () => {
       expect(readdirSync(path.join(any.d, 'events'))).toHaveLength(1);
       const h = await (await fetch(`http://127.0.0.1:${a.r.port}/health`)).json();
       expect(h).toMatchObject({ repo: 'o/a', boardDir: path.resolve(a.d) });
-      const u = await (await fetch(`http://127.0.0.1:${any.r.port}/health`)).json();
+      const u = (await (await fetch(`http://127.0.0.1:${any.r.port}/health`)).json()) as {
+        repo: unknown;
+      };
       expect(u.repo).toBeNull();
     } finally {
       await any.r.stop();
