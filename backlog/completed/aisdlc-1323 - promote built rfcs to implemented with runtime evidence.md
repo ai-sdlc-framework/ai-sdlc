@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1323
 title: 'Promote built RFCs to Implemented with runtime evidence (0017, 0036, 0043, 0046, 0050, 0051, 0053)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-18'
 labels:
