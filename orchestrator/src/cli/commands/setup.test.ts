@@ -50,6 +50,9 @@ describe('ai-sdlc setup', () => {
     expect(r.steps.find((s) => s.id === 'init')?.status).toBe('skipped');
     expect(r.steps.find((s) => s.id === 'mcp')?.status).toBe('skipped');
     expect(renderSetupReport(r).join('\n')).toContain('Nothing changed');
+    expect(renderSetupReport(r).join('\n')).toContain(
+      'first pull request that adds .ai-sdlc/ is merged by a person',
+    );
   });
 
   it('reports not-possible steps with a next action', () => {

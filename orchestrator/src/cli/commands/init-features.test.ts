@@ -17,10 +17,15 @@
 
 import {
   ADOPTER_TEMPLATE_POSTS_APPROVAL,
+  ATTESTATION_TEMPLATES,
+  BASELINE_WORKFLOW_TEMPLATES,
+  CLASSIFIER_TEMPLATES,
+  DOR_TEMPLATES,
   VERIFY_ATTESTATION_WORKFLOW,
   WORKFLOWS_TEMPLATES,
   templatePostsApproval,
 } from './init-templates.js';
+import { spawnSync } from 'node:child_process';
 import { buildWizardFlags } from './init.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { parse as parseYaml } from 'yaml';
@@ -1822,5 +1827,56 @@ describe('AISDLC-1332: scaffolded status descriptions fit the 140 char limit', (
       /else\s+STATE=failure\s+DESC='[^']*not wired[^']*AISDLC_REVIEW_STUB_AUTOPASS=true/,
     );
     expect(review).toContain("-f context='Post Review Results'");
+  });
+});
+
+describe('AISDLC-1336: scaffolded workflows and first-merge rule', () => {
+  const allWorkflows = (): Record<string, string> => ({
+    ...WORKFLOWS_TEMPLATES.files,
+    ...BASELINE_WORKFLOW_TEMPLATES.files,
+    ...DOR_TEMPLATES.files,
+    ...ATTESTATION_TEMPLATES.files,
+    ...CLASSIFIER_TEMPLATES.files,
+  });
+  type Step = { name?: string; run?: string; env?: Record<string, unknown> };
+
+  it('every step that runs gh sets GH_TOKEN in its env', () => {
+    let checked = 0;
+    for (const [path, text] of Object.entries(allWorkflows())) {
+      if (!path.startsWith('.github/workflows/')) continue;
+      const doc = parseYaml(text) as { jobs?: Record<string, { steps?: Step[] }> };
+      for (const job of Object.values(doc.jobs ?? {})) {
+        for (const step of job.steps ?? []) {
+          if (typeof step.run === 'string' && /(^|[^A-Za-z0-9_-])gh /m.test(step.run)) {
+            checked++;
+            expect(step.env?.GH_TOKEN, `${path}: step "${step.name}"`).toBeTruthy();
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('enable-auto-merge first step names AI_SDLC_PAT; no github.token fallback', () => {
+    const text = WORKFLOWS_TEMPLATES.files['.github/workflows/auto-enable-auto-merge.yml']!;
+    const doc = parseYaml(text) as { jobs: Record<string, { steps: Step[] }> };
+    const first = doc.jobs['enable-auto-merge']!.steps[0]!;
+    expect(String(first.env?.AI_SDLC_PAT)).toContain('secrets.AI_SDLC_PAT');
+    const bad = spawnSync('bash', ['-c', first.run!], { env: { ...process.env, AI_SDLC_PAT: '' } });
+    expect(bad.status).toBe(1);
+    expect(bad.stdout.toString()).toContain('AI_SDLC_PAT');
+    const ok = spawnSync('bash', ['-c', first.run!], { env: { ...process.env, AI_SDLC_PAT: 'x' } });
+    expect(ok.status).toBe(0);
+    expect(text).not.toMatch(/GH_TOKEN:.*github\.token/);
+  });
+
+  it('next steps with workflows include the first pull request rule', () => {
+    const { adapters } = makeStub();
+    const out = renderNextSteps(
+      { ...NO_FEATURES, workflows: true },
+      { created: [], skipped: [], wouldCreate: [] },
+      adapters,
+    );
+    expect(out).toContain('first pull request that adds .ai-sdlc/ is merged by a person');
   });
 });

@@ -146,6 +146,10 @@ export function renderSetupReport(result: SetupResult): string[] {
     if (s.nextAction) lines.push(`      next: ${s.nextAction}`);
   }
   lines.push('');
+  lines.push(
+    'Note: the first pull request that adds .ai-sdlc/ is merged by a person (the merge policy is read only from the default branch); every later pull request goes through cli-merge-if-eligible.',
+  );
+  lines.push('');
   if (result.unchanged) lines.push('Nothing changed: this repo was already set up.');
   lines.push(
     result.ok

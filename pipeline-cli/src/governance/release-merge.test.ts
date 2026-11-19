@@ -337,6 +337,7 @@ describe('runReleaseMerge: refusals name the failed check', () => {
   it('unreadable policy', async () => {
     const reason = await refused({}, { policyYaml: null });
     expect(reason).toMatch(/agent-role\.yaml/);
+    expect(reason).toMatch(/first pull request that adds \.ai-sdlc\/ is merged by a person/);
   });
 });
 

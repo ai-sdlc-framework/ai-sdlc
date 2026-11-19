@@ -1149,6 +1149,12 @@ describe('verified main root + policy read from git', () => {
       expect(result.eligibility.reason).toMatch(
         /could not read \.ai-sdlc\/agent-role\.yaml from main/,
       );
+      expect(result.eligibility.reason).toMatch(
+        /first pull request that adds \.ai-sdlc\/ is merged by a person/,
+      );
+      expect(result.eligibility.reason).toMatch(
+        /^could not read \.ai-sdlc\/agent-role\.yaml from main/,
+      );
       expect(calls).toHaveLength(2);
     }
   });

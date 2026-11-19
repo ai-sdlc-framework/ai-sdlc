@@ -77,6 +77,7 @@ import {
   type ChecksSource,
   type RequiredCheckStatus,
   type RunMergeIfEligibleResult,
+  FIRST_PR_RULE,
 } from './merge-if-eligible.js';
 
 /** The single branch release-please maintains for the rolling release PR. */
@@ -758,7 +759,9 @@ export async function runReleaseMerge(
       : null;
   }
   if (yamlText === null) {
-    return refuse('could not read .ai-sdlc/agent-role.yaml from main as GitHub serves it');
+    return refuse(
+      `could not read .ai-sdlc/agent-role.yaml from main as GitHub serves it. ${FIRST_PR_RULE}`,
+    );
   }
   const gov = resolveReleaseGovernance(yamlText);
   const { policy } = resolveGovernanceFromYaml(yamlText);

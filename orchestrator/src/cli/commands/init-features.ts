@@ -2112,6 +2112,9 @@ export function renderNextSteps(
     lines.push('     To activate auto-merge:');
     lines.push('       a) Enable "Allow auto-merge" in GitHub Settings → General.');
     lines.push('       b) Set the AI_SDLC_PAT secret with write access to the repo.');
+    lines.push('     The first pull request that adds .ai-sdlc/ is merged by a person (the merge');
+    lines.push('     policy is read only from the default branch); every later pull request goes');
+    lines.push('     through cli-merge-if-eligible.');
     lines.push('     Re-run with --force to overwrite workflows on a pre-261 repo:');
     lines.push('       ai-sdlc init --add workflows --force');
     lines.push('');
