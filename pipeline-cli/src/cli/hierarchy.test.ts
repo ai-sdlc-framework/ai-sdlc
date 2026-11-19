@@ -73,6 +73,16 @@ describe('runHierarchyCli', () => {
     expect(write.mock.calls[0]?.[0]).toContain('Usage: cli-hierarchy');
   });
 
+  it('webhook help names every feed flag and the prerequisites', async () => {
+    const write = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    await runHierarchyCli(['help'], overrides());
+    const text = String(write.mock.calls[0]?.[0]);
+    expect(text).toContain('--feed <kind>');
+    expect(text).toContain('--feed-pid <pid>');
+    expect(text).toContain('--feed-agent <label>');
+    expect(text).toContain('gh webhook');
+  });
+
   it('rejects unknown commands', async () => {
     vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     expect(await runHierarchyCli(['bogus'], overrides())).toBe(2);

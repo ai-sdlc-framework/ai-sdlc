@@ -47,7 +47,13 @@ import {
   ROLE_PROMPT,
   withProfile,
 } from './up.js';
-import { readState as readWebhookState, webhookDown, webhookUp } from './webhook.js';
+import {
+  logNoFeed,
+  NO_FEED_LINE,
+  readState as readWebhookState,
+  webhookDown,
+  webhookUp,
+} from './webhook.js';
 import { assertModel, assertPermissionMode, splitSessionName } from './validate.js';
 
 /** Options for `restart`. */
@@ -355,6 +361,7 @@ function reRegisterDispatchServices(deps: HierarchyDeps): void {
   if (deps.env.AI_SDLC_WEBHOOK_SECRET) {
     try {
       webhookUp(deps);
+      logNoFeed(deps);
     } catch (err) {
       deps.log(`warning: webhook receiver not started: ${(err as Error).message}`);
     }
@@ -384,6 +391,7 @@ function restartDispatchServices(deps: HierarchyDeps): void {
         undefined,
         recorded?.feed?.agent ? { kind: recorded.feed.kind } : recorded?.feed,
       );
+      if (!recorded?.feed) deps.log(NO_FEED_LINE);
     } catch (err) {
       deps.log(`warning: webhook receiver not restarted: ${(err as Error).message}`);
     }

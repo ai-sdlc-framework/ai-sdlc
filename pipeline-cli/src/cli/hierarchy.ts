@@ -292,6 +292,10 @@ Options for stall-notice:
 
 Options for webhook:
   --port <n>               Local port, bound to 127.0.0.1 (default 8765, or AI_SDLC_WEBHOOK_PORT)
+  --feed <kind>            What feeds the receiver: gh-forward, tunnel or none (needs the \`gh webhook\`
+                           extension and permission to manage hooks on the repository)
+  --feed-pid <pid>         Pid of a hand-started forwarder or tunnel to record with --feed
+  --feed-agent <label>     launchd label supervising the feed (set by gh-forward install)
 
 Options for attach:
   <name>                   Agent name from the roster (planner, operator-dispatch, executor-alpha, ...)

@@ -378,15 +378,8 @@ function forwarderSignal(
   if (feed?.kind === 'none') return 'none';
   if (feed?.agent) return forwarderAgentAlive(deps, feed.agent) ? 'alive' : 'dead';
   if (feed?.pid !== undefined) return alive(feed.pid) ? 'alive' : 'dead';
-  try {
-    const r = deps.run('pgrep', ['-f', feed?.kind === 'tunnel' ? 'tunnel' : 'gh webhook forward'], {
-      cwd: deps.cwd,
-    });
-    if (r?.status === 0 && (r.stdout ?? '').trim() !== '') return 'alive';
-  } catch {
-    /* pgrep missing */
-  }
-  // A recorded feed with no pid and no process match is gone; with no record we do not know.
+  // Liveness comes only from this board's own record, never a process-name match (another
+  // board's forwarder must not read as ours). A recorded feed with no pid or agent is gone.
   return feed ? 'dead' : 'unknown';
 }
 
@@ -439,7 +432,7 @@ export function webhookHealth(deps: HierarchyDeps, opts: WebhookHealthOptions = 
     prActivity: recent.length > 0,
     quiet: recent.length === 0,
     forwarder,
-    feed: state?.feed?.kind ?? (forwarder === 'alive' ? 'gh-forward' : 'none'),
+    feed: state?.feed?.kind ?? 'none',
   };
 
   const reasons: string[] = [];
@@ -545,6 +538,15 @@ export type Spawner = (file: string, args: readonly string[]) => void;
 const spawnDetached: Spawner = (file, args) => {
   spawn(file, [...args], { detached: true, stdio: 'ignore' }).unref();
 };
+
+/** The line `up` and `restart` print for a board with no recorded feed. */
+export const NO_FEED_LINE =
+  'webhook: no feed is installed, so this board receives no events; run `cli-hierarchy webhook up --feed gh-forward` to install one';
+
+/** Print {@link NO_FEED_LINE} when the board's state file records no feed. */
+export function logNoFeed(deps: HierarchyDeps): void {
+  if (!readState(deps.boardDir)?.feed) deps.log(NO_FEED_LINE);
+}
 
 /** Start the receiver in a detached process. No secret: a no-op (poll-only mode). */
 export function webhookUp(

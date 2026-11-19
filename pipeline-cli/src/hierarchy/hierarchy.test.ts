@@ -2878,6 +2878,30 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(logs.some((l) => l.includes('webhook starting'))).toBe(true);
   });
 
+  it('up and restart print one no-feed line only when no feed is recorded', async () => {
+    deps.env = { AI_SDLC_WEBHOOK_SECRET: 's', HOME: path.join(boardDir, 'home') };
+    const noFeed = () => logs.filter((l) => l.includes('no feed is installed'));
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    expect(noFeed()).toHaveLength(1);
+    expect(noFeed()[0]).toContain('cli-hierarchy webhook up --feed gh-forward');
+    logs.length = 0;
+    await hierarchyRestartAll({}, deps);
+    expect(noFeed()).toHaveLength(1);
+    logs.length = 0;
+    await hierarchyRestart({ session: Q('operator-dispatch') }, deps);
+    expect(noFeed()).toHaveLength(1);
+    // A recorded feed prints nothing.
+    writeFileSync(
+      path.join(boardDir, 'webhook.json'),
+      JSON.stringify({ pid: 7777, port: 4567, feed: { kind: 'tunnel', pid: 5 } }) + '\n',
+    );
+    deps.isAlive = (p) => p === 7777;
+    logs.length = 0;
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    await hierarchyRestart({ session: Q('operator-dispatch') }, deps);
+    expect(noFeed()).toEqual([]);
+  });
+
   it('restart --all keeps the recorded webhook port and forwarder feed', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
     deps.env = { AI_SDLC_WEBHOOK_SECRET: 's', HOME: path.join(boardDir, 'home') };

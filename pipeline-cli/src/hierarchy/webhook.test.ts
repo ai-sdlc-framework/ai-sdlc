@@ -256,13 +256,17 @@ describe('webhook health (AISDLC-1157)', () => {
     expect(h.signals.forwarder).toBe('dead');
   });
 
-  it('falls back to a process match for the forwarder', () => {
-    receiver({ kind: 'gh-forward' });
-    const alive = hd({ run: () => ({ status: 0, stdout: '123\n', stderr: '' }) });
-    expect(webhookHealth(alive, up).signals.forwarder).toBe('alive');
-    expect(webhookHealth(hd(), up).signals.forwarder).toBe('dead');
+  it('reads liveness from this board record only, never a process match', () => {
+    const other = vi.fn(() => ({ status: 0, stdout: '123\n', stderr: '' }));
     write('webhook.json', { pid: 1, port: 9 });
-    expect(webhookHealth(hd(), up).signals.forwarder).toBe('unknown');
+    const h = webhookHealth(hd({ run: other }), up);
+    expect(h.signals.forwarder).toBe('unknown');
+    expect(h.signals.feed).toBe('none');
+    expect(other.mock.calls.some((c) => (c as unknown[])[0] === 'pgrep')).toBe(false);
+    receiver({ kind: 'gh-forward' });
+    expect(webhookHealth(hd({ run: other }), up).signals.forwarder).toBe('dead');
+    receiver({ kind: 'gh-forward', pid: 1 });
+    expect(webhookHealth(hd(), up).signals.forwarder).toBe('alive');
   });
 
   it('probes the port through run and tracks PR activity from the snapshot', () => {
@@ -510,7 +514,9 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
     expect(webhookPersistence(mkd(env, true), 'darwin')).toMatch(
       /^persisted: launchd com\.ai-sdlc\.webhook\./,
     );
-    expect(webhookPersistence(mkd(env, false), 'darwin')).toMatch(/^persisted: no \(.* not loaded/);
+    expect(webhookPersistence(mkd(env, false), 'darwin')).toMatch(
+      /^persisted: no \(\S+ not installed\)$/,
+    );
     expect(forwarderPersistence(mkd(env), undefined, 'linux')).toMatch(/^persisted: no/);
     const boom = {
       ...mkd(env),
