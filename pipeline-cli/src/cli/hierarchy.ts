@@ -291,7 +291,8 @@ Options for stall-notice:
   --minutes <n>            Minutes without a verdict or heartbeat before alerting (default 45)
 
 Options for webhook:
-  --port <n>               Local port, bound to 127.0.0.1 (default 8765, or AI_SDLC_WEBHOOK_PORT)
+  --port <n>               Local port, bound to 127.0.0.1. Pinned: it must be free. Unset: scans up to 20 ports from the recorded
+                           port or the configured default (8765) and takes the first that binds
   --feed <kind>            What feeds the receiver: gh-forward, tunnel or none (needs the \`gh webhook\`
                            extension and permission to manage hooks on the repository)
   --feed-pid <pid>         Pid of a hand-started forwarder or tunnel to record with --feed
@@ -913,7 +914,8 @@ export async function runHierarchyCli(
               ? JSON.stringify({ ...w, ...(h ? { health: h } : {}), persisted })
               : `${formatWebhookStatus(w, h)}\n${persisted}`,
           );
-        } else if (action === 'serve') await webhookServe(deps, flags.port, feed);
+        } else if (action === 'serve')
+          await webhookServe(deps, flags.port, feed, { scan: flags.scan === 'true' });
         else {
           process.stderr.write(`cli-hierarchy: webhook needs up, down or status\n\n${USAGE}`);
           return 2;

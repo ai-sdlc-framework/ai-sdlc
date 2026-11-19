@@ -20,7 +20,9 @@ import {
   forwarderLabel,
   forwarderPersistence,
   installForwarder,
+  LEGACY_FORWARDER_LABEL,
   removeForwarder,
+  removeLegacyForwarder,
 } from './webhook-forwarder.js';
 
 export const WEBHOOK_SECRET_ENV = 'AI_SDLC_WEBHOOK_SECRET';
@@ -186,17 +188,22 @@ function recordCollision(boardDir: string, message: string): void {
   writeFileSync(path.join(boardDir, COLLISION_FILE), message + '\n');
 }
 
-/** Whether 127.0.0.1:<port> can be bound; an unusable probe counts as free. */
+/** Whether 127.0.0.1:<port> can be bound; an unusable or failed probe counts as busy. */
 function defaultPortFree(deps: HierarchyDeps, port: number): boolean {
   const script =
     `const s=require('net').createServer();` +
     `s.on('error',()=>process.exit(7));` +
     `s.listen(${port},'127.0.0.1',()=>s.close(()=>process.exit(0)))`;
   try {
-    return deps.run(process.execPath, ['-e', script], { cwd: deps.cwd })?.status !== 7;
+    return deps.run(process.execPath, ['-e', script], { cwd: deps.cwd })?.status === 0;
   } catch {
-    return true;
+    return false;
   }
+}
+
+/** Whether `port` can be bound now, through the injected probe when present. */
+export function isWebhookPortFree(deps: HierarchyDeps, port: number): boolean {
+  return (deps.isPortFree ?? ((p: number) => defaultPortFree(deps, p)))(port);
 }
 
 /** Best-effort `<command> (pid N)` of the listener on `port`. */
@@ -214,7 +221,7 @@ function portOwner(deps: HierarchyDeps, port: number): string {
 }
 
 /**
- * Choose the receiver port. A pinned port (flag or env) wins and must be free. Otherwise the
+ * Choose the candidate receiver port; the receiver records it only once it has bound. A pinned port (flag or env) wins and must be free. Otherwise the
  * recorded port is reused, else the configured default, scanning upward to the first free one.
  * All candidates held: throws naming the first port and its owner, and records the collision.
  */
@@ -233,8 +240,6 @@ function selectPort(deps: HierarchyDeps, flag: string | undefined): number {
   const start = readRecordedPort(deps.boardDir) ?? loadPrLifecycleConfig(deps.cwd).webhook.port;
   for (let p = start; p < start + WEBHOOK_PORT_SCAN && p <= 65535; p += 1) {
     if (free(p)) {
-      mkdirSync(deps.boardDir, { recursive: true });
-      writeFileSync(path.join(deps.boardDir, PORT_FILE), `${p}\n`);
       rmSync(path.join(deps.boardDir, COLLISION_FILE), { force: true });
       return p;
     }
@@ -548,42 +553,62 @@ export function logNoFeed(deps: HierarchyDeps): void {
   if (!readState(deps.boardDir)?.feed) deps.log(NO_FEED_LINE);
 }
 
+/** The feed a start carries forward: a supervised forwarder is reinstalled on the bound port. */
+export function carriedFeed(recorded: WebhookFeed): WebhookFeed {
+  if (recorded.kind !== 'gh-forward' || recorded.pid !== undefined) return recorded;
+  // A recorded machine-wide label rides along so the receiver removes it once.
+  return recorded.agent === LEGACY_FORWARDER_LABEL
+    ? { kind: 'gh-forward', agent: recorded.agent }
+    : { kind: 'gh-forward' };
+}
+
 /** Start the receiver in a detached process. No secret: a no-op (poll-only mode). */
 export function webhookUp(
   deps: HierarchyDeps,
   portFlag?: string,
-  spawner: Spawner = spawnDetached,
+  spawner: Spawner = deps.spawnWebhook ?? spawnDetached,
   feed?: WebhookFeed,
   platform: NodeJS.Platform = process.platform,
 ): WebhookStatus {
   const before = webhookStatus(deps);
-  let chosen: number | undefined;
-  let persistError: ForwarderPersistError | undefined;
-  if (feed?.kind === 'gh-forward' && feed.pid === undefined) {
-    const secret = deps.env[WEBHOOK_SECRET_ENV];
-    if (!secret) throw new Error(`${WEBHOOK_SECRET_ENV} is not set: cannot start the forwarder`);
-    const fwdPort = before.state === 'up' ? before.port : selectPort(deps, portFlag);
-    if (before.state !== 'up') chosen = fwdPort;
-    try {
-      const supervised = installForwarder(deps, secret, fwdPort, platform);
-      feed = supervised ? { kind: 'gh-forward', agent: forwarderLabel(deps) } : feed;
-    } catch (e) {
-      if (!(e instanceof ForwarderPersistError)) throw e;
-      // The receiver still starts (foreground session only); the command then exits non-zero.
-      persistError = e;
-    }
+  const recorded = readState(deps.boardDir)?.feed;
+  const legacy = recorded?.agent === LEGACY_FORWARDER_LABEL;
+  const explicitForward = feed?.kind === 'gh-forward' && feed.pid === undefined;
+  if (before.state === 'off' && before.reason === 'no secret') {
+    if (explicitForward)
+      throw new Error(`${WEBHOOK_SECRET_ENV} is not set: cannot start the forwarder`);
+    deps.log(`webhook off: ${WEBHOOK_SECRET_ENV} is not set (poll-only mode)`);
+    return before;
   }
   if (before.state === 'up') {
+    // A running receiver keeps its feed; only a machine-wide label is replaced by the per-board one.
+    if (!feed && recorded?.kind === 'gh-forward' && legacy) feed = carriedFeed(recorded);
+    let persistError: ForwarderPersistError | undefined;
+    if (feed?.kind === 'gh-forward' && feed.pid === undefined) {
+      try {
+        const supervised = installForwarder(
+          deps,
+          deps.env[WEBHOOK_SECRET_ENV],
+          before.port,
+          platform,
+        );
+        feed = supervised ? { kind: 'gh-forward', agent: forwarderLabel(deps) } : feed;
+        if (legacy) removeLegacyForwarder(deps);
+      } catch (e) {
+        if (!(e instanceof ForwarderPersistError)) throw e;
+        persistError = e;
+      }
+    }
     if (feed) recordFeed(deps.boardDir, feed);
     deps.log(`webhook already running on 127.0.0.1:${before.port}`);
     if (persistError) throw persistError;
     return before;
   }
-  if (before.reason === 'no secret') {
-    deps.log(`webhook off: ${WEBHOOK_SECRET_ENV} is not set (poll-only mode)`);
-    return before;
-  }
-  const port = chosen ?? selectPort(deps, portFlag);
+  // Every start carries the recorded feed forward; the receiver installs the forwarder once bound.
+  if (!feed && recorded) feed = carriedFeed(recorded);
+  const port = selectPort(deps, portFlag);
+  const raw = portFlag ?? deps.env[WEBHOOK_PORT_ENV];
+  const pinned = raw !== undefined && raw !== '';
   spawner(process.execPath, [
     deps.binPath ?? process.argv[1] ?? '',
     'webhook',
@@ -592,6 +617,7 @@ export function webhookUp(
     String(port),
     '--board-dir',
     deps.boardDir,
+    ...(pinned ? [] : ['--scan', 'true']),
     ...(feed
       ? [
           '--feed',
@@ -602,7 +628,6 @@ export function webhookUp(
       : []),
   ]);
   deps.log(`webhook starting on 127.0.0.1:${port}`);
-  if (persistError) throw persistError;
   return before;
 }
 
@@ -629,11 +654,22 @@ export function webhookDown(
   return true;
 }
 
-/** Run the receiver in the foreground until SIGTERM or SIGINT. Needs the secret. */
+/** Options of {@link webhookServe}. */
+export interface ServeOptions {
+  /** Try the next ports when the first is held (an unpinned start). */
+  scan?: boolean;
+  platform?: NodeJS.Platform;
+}
+
+/**
+ * Run the receiver in the foreground until SIGTERM or SIGINT. Needs the secret. The receiver
+ * binds first; only then are the port recorded and a supervised forwarder installed on it.
+ */
 export async function webhookServe(
   deps: HierarchyDeps,
   portFlag?: string,
   feed?: WebhookFeed,
+  opts: ServeOptions = {},
 ): Promise<void> {
   const secret = deps.env[WEBHOOK_SECRET_ENV];
   if (!secret) throw new Error(`${WEBHOOK_SECRET_ENV} is not set`);
@@ -643,34 +679,57 @@ export async function webhookServe(
   } catch {
     /* unresolvable: accept every delivery; status reads the repository as unknown */
   }
-  const receiver = createReceiver({
-    secret,
-    ...(repo ? { repo } : {}),
-    boardDir: deps.boardDir,
-    port: resolvePort(deps, portFlag),
-    debounceMs: loadPrLifecycleConfig(deps.cwd).webhook.debounceMs,
-  });
-  try {
-    await receiver.start();
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
-    if (code === 'EADDRINUSE') {
-      const port = resolvePort(deps, portFlag);
-      const message = `cannot bind webhook port: port ${port} is held by ${portOwner(deps, port)}`;
-      recordCollision(deps.boardDir, message);
-      throw new Error(message, { cause: e });
+  const first = resolvePort(deps, portFlag);
+  const attempts = opts.scan && first !== 0 ? WEBHOOK_PORT_SCAN : 1;
+  let receiver: ReturnType<typeof createReceiver> | undefined;
+  for (let i = 0; i < attempts && !receiver; i += 1) {
+    const port = first + i;
+    if (port > 65535) break;
+    const candidate = createReceiver({
+      secret,
+      ...(repo ? { repo } : {}),
+      boardDir: deps.boardDir,
+      port,
+      debounceMs: loadPrLifecycleConfig(deps.cwd).webhook.debounceMs,
+    });
+    try {
+      await candidate.start();
+      receiver = candidate;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw e;
     }
-    throw e;
+  }
+  if (!receiver) {
+    const message = `cannot bind webhook port: port ${first} is held by ${portOwner(deps, first)}`;
+    recordCollision(deps.boardDir, message);
+    throw new Error(message);
   }
   rmSync(path.join(deps.boardDir, COLLISION_FILE), { force: true });
   mkdirSync(deps.boardDir, { recursive: true });
+  writeFileSync(path.join(deps.boardDir, PORT_FILE), `${receiver.port}\n`);
+  let recordedFeed = feed;
+  if (feed?.kind === 'gh-forward' && feed.pid === undefined) {
+    try {
+      const supervised = installForwarder(deps, secret, receiver.port, opts.platform);
+      recordedFeed = supervised ? { kind: 'gh-forward', agent: forwarderLabel(deps) } : feed;
+      if (feed.agent === LEGACY_FORWARDER_LABEL) removeLegacyForwarder(deps);
+    } catch (e) {
+      if (!(e instanceof ForwarderPersistError)) {
+        await receiver.stop();
+        throw e;
+      }
+      // The receiver keeps running; the feed is recorded without an agent, so status says not persisted.
+      deps.log((e as Error).message);
+      recordedFeed = { kind: 'gh-forward' };
+    }
+  }
   writeFileSync(
     stateFile(deps.boardDir),
     JSON.stringify({
       pid: process.pid,
       port: receiver.port,
       ...(repo ? { repo } : {}),
-      ...(feed ? { feed } : {}),
+      ...(recordedFeed ? { feed: recordedFeed } : {}),
     }) + '\n',
   );
   deps.log(`webhook listening on 127.0.0.1:${receiver.port}`);

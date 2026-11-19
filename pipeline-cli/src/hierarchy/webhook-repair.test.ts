@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -130,6 +130,16 @@ const tick = (
   });
 
 describe('webhook self-repair (AISDLC-1299)', () => {
+  it('with no recorded port installs nothing and reports the reason (AISDLC-1350 AC9)', () => {
+    const t = setup({ feed: { kind: 'gh-forward', agent: 'x' }, plist: 'none' });
+    const repair = makeWebhookRepair(t.deps, 'darwin');
+    rmSync(path.join(dir, 'webhook.json'), { force: true });
+    const r = repair.run();
+    expect(r).toMatchObject({ action: 'blocked', ok: false });
+    expect(r.detail).toMatch(/no receiver port is recorded/);
+    expect(t.calls.some(([f]) => f === 'launchctl')).toBe(false);
+  });
+
   it('a silent feed gets one kickstart -k and a recorded attempt, no decision (AC1)', () => {
     const s = setup({ plist: 'current' });
     const filed: WebhookEscalationInput[] = [];

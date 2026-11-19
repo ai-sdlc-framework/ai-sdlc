@@ -253,6 +253,7 @@ const baseOpts: UpOptions = {
 };
 
 let schedulerSpawns: string[][];
+let webhookSpawns: string[][];
 
 beforeEach(() => {
   // Never read the ambient executor session (AISDLC-1137).
@@ -269,6 +270,10 @@ beforeEach(() => {
   attached = [];
   deps = {
     run: (f, a, o) => fake.run(f, a, o),
+    isPortFree: () => true,
+    spawnWebhook: (_f, a) => {
+      webhookSpawns.push([...a]);
+    },
     boardDir,
     cwd: '/repo',
     resolveRoot: (c) => c,
@@ -296,6 +301,7 @@ beforeEach(() => {
     },
   };
   schedulerSpawns = [];
+  webhookSpawns = [];
 });
 
 afterEach(() => {
@@ -2915,6 +2921,7 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
       stateFile,
       JSON.stringify({ pid: 7777, port: 4567, feed: { kind: 'gh-forward', agent: 'fwd' } }) + '\n',
     );
+    writeFileSync(path.join(boardDir, 'webhook-port'), '4567\n');
     const events: string[] = [];
     deps.isAlive = (p) => p === 7777;
     deps.killProcess = (pid) => events.push(`kill ${pid}`);
@@ -2924,6 +2931,35 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(logs.some((l) => l.includes('webhook stopped (port 4567)'))).toBe(true);
     expect(logs.some((l) => l.includes('webhook starting on 127.0.0.1:4567'))).toBe(true);
     expect(logs.filter((l) => l.includes('warning: webhook receiver'))).toEqual([]);
+    expect(webhookSpawns.at(-1)).toEqual(expect.arrayContaining(['--feed', 'gh-forward']));
+  });
+
+  it('restart --all rescans when the recorded port is held and reuses it when free (AC-6)', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    deps.env = { AI_SDLC_WEBHOOK_SECRET: 's' };
+    deps.sleepMs = () => undefined;
+    writeFileSync(path.join(boardDir, 'webhook-port'), '4567\n');
+    deps.isPortFree = (p) => p !== 4567;
+    logs.length = 0;
+    await hierarchyRestartAll({}, deps);
+    expect(logs.some((l) => l.includes('webhook starting on 127.0.0.1:4568'))).toBe(true);
+    writeFileSync(path.join(boardDir, 'webhook-port'), '4567\n');
+    deps.isPortFree = () => true;
+    logs.length = 0;
+    await hierarchyRestartAll({}, deps);
+    expect(logs.some((l) => l.includes('webhook starting on 127.0.0.1:4567'))).toBe(true);
+  });
+
+  it('a dispatch restart keeps the recorded gh-forward feed (AC-2)', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    deps.env = { AI_SDLC_WEBHOOK_SECRET: 's' };
+    writeFileSync(
+      path.join(boardDir, 'webhook.json'),
+      JSON.stringify({ pid: 7777, port: 4567, feed: { kind: 'gh-forward', agent: 'fwd' } }) + '\n',
+    );
+    deps.isAlive = (p) => p !== 7777 && p > 0;
+    await hierarchyRestart({ session: Q('operator-dispatch') }, deps);
+    expect(webhookSpawns.at(-1)).toEqual(expect.arrayContaining(['--feed', 'gh-forward']));
   });
 
   it('restart <name> leaves the scheduler alone; a scheduler failure warns only', async () => {

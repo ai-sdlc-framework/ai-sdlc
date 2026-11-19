@@ -130,7 +130,15 @@ export function makeWebhookRepair(
     run: () => {
       const at = deps.now().toISOString();
       const label = feedAgent() ?? forwarderLabel(deps);
-      const port = readState(deps.boardDir)?.port ?? 0;
+      const port = readState(deps.boardDir)?.port;
+      if (!port) {
+        return {
+          at,
+          action: 'blocked',
+          ok: false,
+          detail: 'no receiver port is recorded, so the forwarder cannot be pointed anywhere',
+        };
+      }
       const secret = deps.env[WEBHOOK_SECRET_ENV];
       const redact = (t: string): string => redactSecrets(t, [secret]);
       try {
@@ -142,7 +150,10 @@ export function makeWebhookRepair(
           }
         })();
         const effective = secret ?? (installed ? plistSecret(installed) : undefined);
-        const shape = effective ? agentFileShape(deps, label, port, effective) : 'outdated';
+        const shape =
+          effective && label === forwarderLabel(deps)
+            ? agentFileShape(deps, label, port, effective)
+            : 'outdated';
         if (shape === 'outdated') {
           if (!secret) {
             return {
