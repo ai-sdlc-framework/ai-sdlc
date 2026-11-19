@@ -2583,6 +2583,32 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(validateHierarchyRoster(after).valid).toBe(true);
   });
 
+  it('a restarted dynamic executor keeps its taskId and AI_SDLC_EXECUTOR_TASK (AISDLC-1340)', async () => {
+    const dyn = 'ai-sdlc-executor-acs-4';
+    const roster = readRoster(boardDir);
+    const base = entryOf(alpha) as RosterEntry;
+    writeRoster(boardDir, {
+      ...roster,
+      sessions: [
+        ...roster.sessions,
+        { ...base, name: dyn, tmuxSession: dyn, tmuxWindow: dyn, taskId: 'ACS-4' },
+      ],
+    });
+    fake.calls.length = 0;
+    await hierarchyRestart({ session: dyn }, deps);
+    const fresh = entryOf(dyn) as RosterEntry;
+    expect(fresh.taskId).toBe('ACS-4');
+    expect(unsafeEntryReason(fresh)).toBeUndefined();
+    expect(readRosterChecked(boardDir).rejected).toHaveLength(0);
+    expect(newWindowCommands()[0]).toContain("AI_SDLC_EXECUTOR_TASK='ACS-4'");
+  });
+
+  it('a restarted standing executor still has no taskId (AISDLC-1340)', async () => {
+    await hierarchyRestart({ session: 'executor-alpha' }, deps);
+    expect((entryOf(alpha) as RosterEntry).taskId).toBeUndefined();
+    expect(newWindowCommands()[0]).not.toContain('AI_SDLC_EXECUTOR_TASK');
+  });
+
   it('records the new pane, pid and startedAt, and send reaches the restarted session at once (AISDLC-1258)', async () => {
     const old = entryOf(alpha) as RosterEntry;
     fake.startedAtMs = later;
