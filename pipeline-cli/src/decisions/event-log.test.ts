@@ -11,6 +11,7 @@ import {
   acquireEventLogLock,
   appendDecisionEvent,
   makeDecisionOpenedEvent,
+  makeRoutingChangedEvent,
   nextDecisionId,
   readDecisionEvents,
   resolveDecisionsDir,
@@ -270,5 +271,29 @@ describe('decision-opened id uniqueness (AISDLC-1167)', () => {
       else process.env.AI_SDLC_DECISIONS_NO_REMOTE = prev;
       rmSync(wd, { recursive: true, force: true });
     }
+  });
+});
+
+describe('routing-changed repeat refusal (AISDLC-1344)', () => {
+  it('refuses the same from and to tier as the latest event, accepts a different tier', () => {
+    const mk = (
+      fromTier: 'operational' | 'design' | 'operator',
+      toTier: 'operational' | 'design' | 'operator',
+      ms: number,
+    ) =>
+      makeRoutingChangedEvent({
+        decisionId: 'DEC-0001',
+        fromTier,
+        toTier,
+        now: new Date(Date.UTC(2026, 0, 1, 0, 0, 0, ms)),
+      });
+    appendDecisionEvent(mk('operational', 'design', 1), { workDir });
+    expect(() => appendDecisionEvent(mk('operational', 'design', 2), { workDir })).toThrow(
+      /refusing the repeat/,
+    );
+    expect(() => appendDecisionEvent(mk('design', 'operator', 3), { workDir })).not.toThrow();
+    expect(
+      readDecisionEvents({ workDir }).events.filter((e) => e.type === 'routing-changed'),
+    ).toHaveLength(2);
   });
 });

@@ -29,10 +29,21 @@
  * pre-push gates (coverage, attestation) do not apply.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { basename, dirname, join, relative } from 'node:path';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
-import { loadDecisionsConfig } from './decisions-config.js';
+import { now as clockNow } from '../clock.js';
+import { loadDecisionsConfig, resolveSyncPrLimits } from './decisions-config.js';
+import { writeEscalationFile } from '../hierarchy/escalation-file.js';
+import { DEFAULT_BOARD_DIR } from '../dispatch/board.js';
 import { formatDecisionId, validateDecisionEvent, type DecisionEvent } from './decision-record.js';
 import {
   eventContentHash,
@@ -74,6 +85,8 @@ export interface DurableOpts {
   env?: NodeJS.ProcessEnv;
   /** Warning sink (defaults to stderr). */
   warn?: (msg: string) => void;
+  /** Clock (tests); defaults to the current time. */
+  now?: () => Date;
 }
 
 const FALSY = ['0', 'false', 'no', 'off'];
@@ -483,7 +496,7 @@ export function persistDecisionLog(opts: DurableOpts): PersistResult {
       ]);
       if (push.status !== 0) throw new Error(`push: ${push.stderr.trim()}`);
 
-      const prUrl = openSyncPr(ctx);
+      const prUrl = openSyncPr(ctx, (opts.now ?? clockNow)(), warn);
       return { persisted: true, commit: sha, ...(prUrl ? { prUrl } : {}) };
     } finally {
       rmSync(idx, { force: true });
@@ -496,7 +509,42 @@ export function persistDecisionLog(opts: DurableOpts): PersistResult {
   }
 }
 
-function openSyncPr(ctx: Ctx): string | undefined {
+interface SyncPrState {
+  lastOpenedAt?: string;
+  day?: string;
+  count?: number;
+  escalatedDay?: string;
+}
+
+function syncStatePath(ctx: Ctx): string | undefined {
+  const r = ctx.run('git', ['rev-parse', '--git-common-dir']);
+  const dir = r.stdout.trim();
+  if (r.status !== 0 || !dir) return undefined;
+  return join(isAbsolute(dir) ? dir : resolve(ctx.root, dir), 'decisions-sync-state.json');
+}
+
+function readSyncState(file: string | undefined): SyncPrState {
+  if (!file) return {};
+  try {
+    const v = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+    return v && typeof v === 'object' ? (v as SyncPrState) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSyncState(file: string | undefined, state: SyncPrState): void {
+  if (!file) return;
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(state) + '\n', 'utf8');
+}
+
+/**
+ * AISDLC-1344: spacing and a daily ceiling on opening sync pull requests. Events written inside
+ * the gap stay on the branch and ride in the next pull request. At the ceiling one escalation
+ * file per day is written for the planner.
+ */
+function openSyncPr(ctx: Ctx, now: Date, warn: (m: string) => void): string | undefined {
   const existing = ctx.run('gh', [
     'pr',
     'list',
@@ -511,10 +559,41 @@ function openSyncPr(ctx: Ctx): string | undefined {
   ]);
   if (existing.status !== 0) return undefined; // gh missing / unauthenticated: branch push is enough
   if (existing.stdout.trim()) return existing.stdout.trim();
+
+  const config = loadDecisionsConfig({ workDir: ctx.root });
+  const limits = resolveSyncPrLimits(config);
+  const stateFile = syncStatePath(ctx);
+  const state = readSyncState(stateFile);
+  const day = now.toISOString().slice(0, 10);
+  const last = state.lastOpenedAt ? Date.parse(state.lastOpenedAt) : Number.NaN;
+  if (Number.isFinite(last) && now.getTime() - last < limits.minIntervalMinutes * 60_000) {
+    return undefined; // inside the gap: the branch holds the events for the next pull request
+  }
+  const count = state.day === day ? (state.count ?? 0) : 0;
+  if (count >= limits.maxPerDay) {
+    if (state.escalatedDay !== day) {
+      const message = `decisions sync pull request ceiling of ${limits.maxPerDay} per day reached on ${day}; no further sync pull requests are opened today, events stay on ${DECISIONS_SYNC_BRANCH}`;
+      try {
+        writeEscalationFile({
+          boardDir: join(ctx.root, DEFAULT_BOARD_DIR),
+          taskId: 'decisions-sync',
+          message,
+          now,
+          run: (cmd, args) => ctx.run(cmd, [...args]),
+        });
+        writeSyncState(stateFile, { ...state, escalatedDay: day });
+      } catch (err) {
+        warn(
+          `[decisions] WARN: could not write the sync ceiling escalation (${(err as Error).message})`,
+        );
+      }
+    }
+    return undefined;
+  }
   const created = ctx.run('gh', [
     'pr',
     'create',
-    ...(loadDecisionsConfig({ workDir: ctx.root }).syncPrDraft === true ? ['--draft'] : []),
+    ...(config.syncPrDraft === true ? ['--draft'] : []),
     '--base',
     'main',
     '--head',
@@ -524,5 +603,12 @@ function openSyncPr(ctx: Ctx): string | undefined {
     '--body',
     'Automated by `cli-decisions` (AISDLC-546). Persists Decision Catalog events (append-only, attestation-exempt `.ai-sdlc/_decisions/`) so a Pattern-C parent reset cannot lose them or reuse a DEC number.',
   ]);
-  return created.status === 0 ? created.stdout.trim() || undefined : undefined;
+  if (created.status !== 0) return undefined;
+  writeSyncState(stateFile, {
+    lastOpenedAt: now.toISOString(),
+    day,
+    count: count + 1,
+    ...(state.escalatedDay ? { escalatedDay: state.escalatedDay } : {}),
+  });
+  return created.stdout.trim() || undefined;
 }

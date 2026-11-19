@@ -455,16 +455,20 @@ export function promoteExpiredDecisions(
       toTier: d.toTier,
     };
     if (chain) {
-      appendDecisionEvent(
-        makeRoutingChangedEvent({
-          decisionId: row.decisionId,
-          fromTier: d.fromTier,
-          toTier: d.toTier,
-          reason: `${d.fromTier} timebox of ${d.timeboxMinutes} minutes lapsed unanswered`,
-          by: 'framework',
-        }),
-        { workDir: opts.workDir },
-      );
+      try {
+        appendDecisionEvent(
+          makeRoutingChangedEvent({
+            decisionId: row.decisionId,
+            fromTier: d.fromTier,
+            toTier: d.toTier,
+            reason: `${d.fromTier} timebox of ${d.timeboxMinutes} minutes lapsed unanswered`,
+            by: 'framework',
+          }),
+          { workDir: opts.workDir },
+        );
+      } catch {
+        continue; // AISDLC-1344: a repeat of the latest move is refused; skip it, never loop
+      }
       row.notified = announcePromotion(chain, d);
     }
     promoted.push(row);
