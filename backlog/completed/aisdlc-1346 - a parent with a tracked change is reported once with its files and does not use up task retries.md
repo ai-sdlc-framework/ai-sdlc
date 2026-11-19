@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1346
 title: 'A parent with a tracked change is reported once with its files and does not use up task retries'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
