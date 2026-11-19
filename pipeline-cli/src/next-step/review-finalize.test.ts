@@ -137,6 +137,36 @@ describe('parseReviewReports', () => {
     expect(parseReviewReports('[{"agent":"a","approved":"true"}]')[0].approved).toBe(false);
   });
 
+  it('keeps a harnessFailed flag, reason and retry time; a rejection has no flag (AISDLC-1333)', () => {
+    const r = parseReviewReports(
+      JSON.stringify([
+        {
+          agent: 'code-reviewer-codex',
+          harnessFailed: true,
+          approved: true,
+          reason: 'usage limit',
+          retryAfter: 'Nov 19',
+        },
+        { agent: 'x', harnessFailed: true },
+        {
+          agent: 'y',
+          approved: false,
+          findings: [{ severity: 'critical', message: 'bad' }],
+        },
+      ]),
+    );
+    expect(r[0]).toMatchObject({
+      harnessFailed: true,
+      failureReason: 'usage limit',
+      retryAfter: 'Nov 19',
+      approved: false,
+      findings: [],
+    });
+    expect(r[1]).toMatchObject({ failureReason: 'no reason given', retryAfter: null });
+    expect(r[2].harnessFailed).toBeUndefined();
+    expect(r[2].approved).toBe(false);
+  });
+
   it('throws on text that is not JSON', () => {
     expect(() => parseReviewReports('LGTM')).toThrow();
   });
@@ -280,6 +310,55 @@ describe('finalizeReview', () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.verdict.decision).toBe('CHANGES_REQUESTED');
+  });
+
+  it('treats a harnessFailed reviewer as no verdict: recoverable, nothing persisted (AISDLC-1333)', async () => {
+    markPersisted();
+    const reports = approvals();
+    reports[0] = {
+      agent: 'code-reviewer-codex',
+      approved: false,
+      harnessFailed: true,
+      failureReason: 'usage limit reached',
+      retryAfter: 'Nov 19th',
+    };
+    const res = await finalizeReview(h.ctx, state, reports);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.recoverable).toBe(true);
+    expect(res.reason).toContain('code-reviewer-codex');
+    expect(res.reason).toContain('usage limit reached');
+    expect(res.reason).toContain('Nov 19th');
+    expect(res.reason).toContain('review did not run');
+    expect(h.runner.calls).toHaveLength(0);
+  });
+
+  it('a round where every reviewer harness failed never approves (AISDLC-1333)', async () => {
+    const reports: ReviewerReport[] = approvals().map((r) => ({
+      agent: r.agent,
+      approved: true,
+      harnessFailed: true,
+      failureReason: 'not signed in',
+      retryAfter: null,
+    }));
+    const res = await finalizeReview(h.ctx, state, reports);
+    expect(res.ok).toBe(false);
+    expect(h.runner.calls).toHaveLength(0);
+  });
+
+  it('a real rejection with a critical finding still yields a rejected verdict (AISDLC-1333)', async () => {
+    markPersisted();
+    const reports = approvals();
+    reports[0] = {
+      ...reports[0],
+      approved: false,
+      findings: [{ severity: 'critical', message: 'real bug' }],
+    };
+    const res = await finalizeReview(h.ctx, state, reports);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.verdict.decision).toBe('CHANGES_REQUESTED');
+    expect(res.verdict.verdicts[0].approved).toBe(false);
   });
 
   it('persists, emits one leaf per reviewer and approves', async () => {

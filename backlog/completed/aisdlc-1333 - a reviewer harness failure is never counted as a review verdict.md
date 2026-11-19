@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1333
 title: 'A reviewer harness failure is never counted as a review verdict'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:

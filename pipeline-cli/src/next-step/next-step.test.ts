@@ -19,7 +19,7 @@ import {
 } from '../__test-helpers/next-step-fixtures.js';
 import type { AggregatedVerdict, ReviewerVerdict } from '../types.js';
 import { loadReviewState } from '../incremental-review/review-rounds.js';
-import { approvedWithoutReviewers } from './review-finalize.js';
+import { approvedWithoutReviewers, finalizeReview } from './review-finalize.js';
 import { bootstrapPromptFor } from './review-prepare.js';
 import {
   DEFAULT_DEVELOPER_BUDGET_MINUTES,
@@ -877,6 +877,41 @@ describe('a fixable reviewer report asks for a corrected report instead of faili
       'after 2 corrected reports',
     );
     expect(persisted().phase).toBe('aborted');
+  });
+
+  describe('a reviewer harness failure is not a verdict (AISDLC-1333)', () => {
+    const failedJson = (): string =>
+      JSON.stringify({
+        reviewers: [
+          {
+            agent: 'code-reviewer-codex',
+            harnessFailed: true,
+            reason: 'usage limit reached',
+            retryAfter: 'Nov 19th, 2026 12:22 PM',
+          },
+          { agent: 'security-reviewer', agentId: 'a1', approved: true, findings: [] },
+        ],
+      });
+
+    it('re-asks for the report without a developer round, then stops naming the reviewer', async () => {
+      const d = { ...deps(), finalizeReview };
+      await toReviewers(d);
+      for (let i = 0; i < 2; i++) {
+        const out = await nextStep(ctx, { task: 'AISDLC-900', result: failedJson() }, d);
+        expect(out.instruction.action).toBe('fix-report');
+        expect(persisted()).toMatchObject({ phase: 'awaiting-reviewers', reportRetries: i + 1 });
+        expect(persisted().iteration).toBe(1);
+      }
+      const third = await nextStep(ctx, { task: 'AISDLC-900', result: failedJson() }, d);
+      expect(third.exitCode).toBe(1);
+      const reason = third.instruction.action === 'stop' ? third.instruction.reason : '';
+      expect(reason).toContain('code-reviewer-codex');
+      expect(reason).toContain('codex');
+      expect(reason).toContain('usage limit reached');
+      expect(reason).toContain('Nov 19th, 2026 12:22 PM');
+      expect(reason).toContain('review did not run');
+      expect(persisted().iteration).toBe(1);
+    });
   });
 
   it('a non-recoverable finalize failure still stops the run', async () => {

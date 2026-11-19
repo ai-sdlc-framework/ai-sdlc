@@ -845,3 +845,18 @@ describe('staged review: review-planner and review-synthesizer', () => {
     assert.ok(!text.includes('Validation enforces this'));
   });
 });
+
+describe('codex reviewers report a harness failure, not a rejection (AISDLC-1333)', () => {
+  for (const file of ['code-reviewer-codex.md', 'test-reviewer-codex.md']) {
+    it(`${file} returns the harnessFailed envelope for tool, exit and usage-limit failures`, () => {
+      const text = readFileSync(join(__dirname, file), 'utf8');
+      assert.ok(text.includes('"harnessFailed": true'));
+      assert.ok(text.includes('"retryAfter"'));
+      assert.ok(text.includes('usage limit'));
+      assert.ok(!/"message": "Codex CLI/.test(text), 'no critical finding for a Codex CLI failure');
+      for (const m of text.matchAll(/```json\n([\s\S]*?)```/g)) {
+        if (m[1].includes('harnessFailed')) assert.ok(!m[1].includes('"approved"'));
+      }
+    });
+  }
+});
