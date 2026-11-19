@@ -18,6 +18,7 @@
 import {
   ADOPTER_TEMPLATE_POSTS_APPROVAL,
   VERIFY_ATTESTATION_WORKFLOW,
+  WORKFLOWS_TEMPLATES,
   templatePostsApproval,
 } from './init-templates.js';
 import { buildWizardFlags } from './init.js';
@@ -1801,5 +1802,25 @@ describe('buildWizardFlags --no-branch-protection (AISDLC-748)', () => {
   it('leaves noBranchProtection false when the option is omitted', () => {
     expect(buildWizardFlags({}).noBranchProtection).toBe(false);
     expect(buildWizardFlags({ branchProtection: true }).noBranchProtection).toBe(false);
+  });
+});
+
+describe('AISDLC-1332: scaffolded status descriptions fit the 140 char limit', () => {
+  it('every description= / DESC= literal is at most 140 chars', () => {
+    const found: string[] = [];
+    for (const text of Object.values(WORKFLOWS_TEMPLATES.files)) {
+      for (const m of text.matchAll(/(?:description=|DESC=)'([^']*)'/g)) found.push(m[1]!);
+    }
+    expect(found.length).toBeGreaterThanOrEqual(3);
+    for (const d of found) expect(d.length).toBeLessThanOrEqual(140);
+  });
+
+  it('review stub keeps failure default, autopass success, context name', () => {
+    const review = WORKFLOWS_TEMPLATES.files['.github/workflows/ai-sdlc-review.yml']!;
+    expect(review).toMatch(/if \[ "\$\{AUTOPASS:-\}" = "true" \]; then\s+STATE=success/);
+    expect(review).toMatch(
+      /else\s+STATE=failure\s+DESC='[^']*not wired[^']*AISDLC_REVIEW_STUB_AUTOPASS=true/,
+    );
+    expect(review).toContain("-f context='Post Review Results'");
   });
 });

@@ -732,7 +732,7 @@ jobs:
             DESC='Review passed (STUB AUTOPASS — wire your reviewers, then unset AISDLC_REVIEW_STUB_AUTOPASS)'
           else
             STATE=failure
-            DESC='Review stub not wired. Either replace this workflow step with your reviewers OR set repo var AISDLC_REVIEW_STUB_AUTOPASS=true (acknowledged risk).'
+            DESC='Review stub not wired: add your reviewers or set var AISDLC_REVIEW_STUB_AUTOPASS=true (risk accepted)'
           fi
           gh api "repos/\${REPO}/statuses/\${HEAD_SHA}" \\
             -X POST \\
