@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1324
 title: 'Promote RFC-0054 and RFC-0059 to Implemented'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-18'
 labels:
