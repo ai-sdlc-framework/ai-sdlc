@@ -2783,6 +2783,17 @@ function attestationEnabled(ctx: DoctorRunContext): boolean {
 
 export function checkHuskyPrePushGate(ctx: DoctorRunContext): DoctorCheckResult {
   const id = 'husky-pre-push-gate';
+  // AISDLC-1325: a stale signer block is a defect in any project.
+  const staleHook = readPrePushHook(ctx);
+  if (staleHook && hasStaleAttestationSignReference(staleHook.text)) {
+    return {
+      id,
+      severity: 'fail',
+      title: 'pre-push: stale attestation-sign reference',
+      remediation:
+        'The hook names check-attestation-sign.sh, removed with envelope signing (RFC-0061). Run `ai-sdlc doctor --fix` or `ai-sdlc init --add attestation` to rewrite it.',
+    };
+  }
   if (!attestationEnabled(ctx)) {
     return {
       id,
@@ -2840,6 +2851,22 @@ export function fixHuskyPrePushGate(ctx: DoctorRunContext): DoctorFixResult {
   const huskyDir = join(ctx.projectDir, '.husky');
   const hookPath = join(huskyDir, 'pre-push');
   const existing = ctx.adapters.readFile(hookPath);
+  if (!attestationEnabled(ctx)) {
+    // No workflow: only strip the stale block; never append a snippet or create a hook.
+    if (existing == null || !hasStaleAttestationSignReference(existing)) {
+      return { id, applied: false, detail: 'stale signer block is not in .husky/pre-push' };
+    }
+    const stripped = stripStaleAttestationSignBlock(existing);
+    if (hasStaleAttestationSignReference(stripped)) {
+      return {
+        id,
+        applied: false,
+        detail: `${hookPath} still names check-attestation-sign outside the ai-sdlc block — remove that line by hand`,
+      };
+    }
+    ctx.adapters.writeFile(hookPath, stripped);
+    return { id, applied: true, detail: `removed the stale signer block from ${hookPath}` };
+  }
   if (existing == null && !ctx.adapters.exists(huskyDir)) {
     return {
       id,

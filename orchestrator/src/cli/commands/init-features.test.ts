@@ -425,6 +425,20 @@ describe('applyFeatureSelection', () => {
     expect(result.wouldCreate).toContain('.husky/pre-push');
   });
 
+  it('AISDLC-1325: re-run without attestation strips a stale signer block and logs one line', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set(
+      '/proj/.husky/pre-push',
+      'echo keep\n# ai-sdlc:attestation-sign-block\nbash "$H/scripts/check-attestation-sign.sh"\n# end ai-sdlc:attestation-sign-block\n',
+    );
+    await applyFeatureSelection('/proj', { ...NO_FEATURES }, baseFlags, adapters);
+    const hook = state.files.get('/proj/.husky/pre-push')!;
+    expect(hook).toBe('echo keep\n');
+    expect(state.log.filter((l) => l.includes('.husky/pre-push'))).toEqual([
+      '  rewrote .husky/pre-push (removed stale attestation-sign block)',
+    ]);
+  });
+
   it('husky hook: appends to existing pre-push without clobbering user content', async () => {
     const { state, adapters } = makeStub();
     // Pre-existing user pre-push hook
