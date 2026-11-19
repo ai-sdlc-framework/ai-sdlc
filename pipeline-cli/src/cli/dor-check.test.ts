@@ -68,6 +68,8 @@ describe('cli-dor-check decision-point wiring (AISDLC-785)', () => {
             rejected: true,
             unresolvedOqCount: 1,
             unresolvedOqSample: ['### OQ-2'],
+            rfcFilePath: 'spec/rfcs/RFC-0061-x.md',
+            unresolvedOqEntries: [{ line: 42, text: '### OQ-2' }],
           },
         ],
       },
@@ -80,7 +82,8 @@ describe('cli-dor-check decision-point wiring (AISDLC-785)', () => {
     process.argv = ['node', 'cli-dor-check', '--task', file];
     expect(await runDorCheckCli()).toBe(1);
     const text = out.join('');
-    expect(text).toContain('RFC-0061: 1 unresolved OQ(s): ### OQ-2');
+    expect(text).toContain('RFC-0061: 1 unresolved OQ(s):');
+    expect(text).toContain('spec/rfcs/RFC-0061-x.md:42: ### OQ-2');
     expect(text).not.toContain('COMMENT');
   });
 });

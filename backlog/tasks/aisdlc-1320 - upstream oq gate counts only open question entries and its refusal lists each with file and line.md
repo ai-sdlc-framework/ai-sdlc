@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1320
 title: 'Upstream open-question gate counts only open question entries and its refusal lists each with file and line'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-18'
 labels:
