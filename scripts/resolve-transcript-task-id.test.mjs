@@ -22,7 +22,15 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+} from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -118,17 +126,6 @@ describe('resolve-transcript-task-id.sh — attribution sources', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
-
-  it('a whitespace-only AI_SDLC_ACTIVE_TASK_ID is treated as unattributable, not as an empty task id (fail-soft, AISDLC-623)', () => {
-    const dir = scratchDir();
-    try {
-      const result = run(dir, ['code-reviewer'], { AI_SDLC_ACTIVE_TASK_ID: '   \n\t  ' });
-      assert.equal(result.status, 0);
-      assert.match(result.stdout.trim(), /^UNKNOWN-code-reviewer-/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
 });
 
 describe('resolve-transcript-task-id.sh — path-safety shape validation (security)', () => {
@@ -183,211 +180,126 @@ describe('resolve-transcript-task-id.sh — path-safety shape validation (securi
   });
 });
 
-describe('resolve-transcript-task-id.sh — no-sentinel case (fail-soft-unique, AISDLC-623)', () => {
-  it('fails SOFT (exit 0) when no attribution source resolves, printing a unique UNKNOWN-<reviewer>-... id', () => {
+describe('resolve-transcript-task-id.sh — no id is ever invented (AISDLC-1334)', () => {
+  it('exits non-zero with empty stdout, names cause and fix, and prints no UNKNOWN- id when nothing resolves', () => {
     const dir = scratchDir();
     try {
-      const result = run(dir, ['code-reviewer']);
-      assert.equal(result.status, 0);
-      assert.match(result.stdout.trim(), /^UNKNOWN-code-reviewer-[0-9TZ]+-[0-9a-f]+-[0-9]+$/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('the synthesized id satisfies the same path-shape guard as a real task id', () => {
-    const dir = scratchDir();
-    try {
-      const result = run(dir, ['code-reviewer']);
-      assert.equal(result.status, 0);
-      assert.match(result.stdout.trim(), /^[A-Za-z0-9][A-Za-z0-9._-]*$/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('warning names the .active-task sentinel as a remedy', () => {
-    const dir = scratchDir();
-    try {
-      const result = run(dir, ['test-reviewer']);
+      const result = run(dir, []);
+      assert.notEqual(result.status, 0);
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /no task attribution/);
+      assert.match(result.stderr, /Fix:/);
       assert.match(result.stderr, /\.active-task/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('warning names AI_SDLC_ACTIVE_TASK_ID as a remedy', () => {
-    const dir = scratchDir();
-    try {
-      const result = run(dir, ['test-reviewer']);
       assert.match(result.stderr, /AI_SDLC_ACTIVE_TASK_ID/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('warning and synthesized id both name the calling reviewer', () => {
-    const dir = scratchDir();
-    try {
-      const result = run(dir, ['security-reviewer-example']);
-      assert.match(result.stderr, /security-reviewer-example/);
-      assert.match(result.stdout.trim(), /^UNKNOWN-security-reviewer-example-/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('sanitizes an unsafe reviewer name in the synthesized id so it stays path-safe (defense-in-depth, AISDLC-623 review)', () => {
-    // The fail-soft branch exits 0 before the PRESENT-id shape guard, so the
-    // reviewer-name component ($1) must be sanitized by construction. A caller
-    // passing an unsafe name ('../evil', a slash) must NOT be able to produce
-    // an id that escapes .ai-sdlc/transcripts/.
-    const dir = scratchDir();
-    try {
-      for (const unsafe of ['../evil', 'a/b/c', 'has space', 'weird$name']) {
-        const result = run(dir, [unsafe]);
-        assert.equal(result.status, 0, `unsafe name "${unsafe}" must still fail soft`);
-        const id = result.stdout.trim();
-        // The whole synthesized id must satisfy the same path-shape guard the
-        // PRESENT-id path enforces — no '/', '..', whitespace, or '$'.
-        assert.match(id, /^UNKNOWN-[A-Za-z0-9._-]+-[0-9TZ]+-[0-9a-f]+-[0-9]+$/);
-        assert.ok(!id.includes('/'), `id must not contain '/' for "${unsafe}"`);
-        assert.ok(!id.includes('..'), `id must not contain '..' for "${unsafe}"`);
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('two same-reviewer runs in different processes get distinct ids via the PID component (macOS %N fallback hardening)', () => {
-    // On BSD/macOS `date +%N` yields no sub-second precision, so uniqueness
-    // leans on $RANDOM + the PID ($$). Two separate invocations are two
-    // separate processes, so the PID component differs (or, same PID reused
-    // across time, the timestamp/random differs) — ids must not collide.
-    const dir = scratchDir();
-    try {
-      const a = run(dir, ['code-reviewer']).stdout.trim();
-      const b = run(dir, ['code-reviewer']).stdout.trim();
-      assert.notEqual(a, b, 'two unattributed runs must produce distinct ids');
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('never writes a filesystem directory as a side effect (only prints the id — the caller mkdirs)', () => {
-    const dir = scratchDir();
-    try {
-      run(dir, ['code-reviewer']);
+      assert.doesNotMatch(result.stdout + result.stderr, /UNKNOWN-/);
       assert.equal(existsSync(join(dir, '.ai-sdlc')), false);
-      assert.equal(existsSync(join(dir, 'UNKNOWN')), false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('an empty .active-task file is treated as unattributable, not as an empty task id (fail-soft)', () => {
+  it('an empty .active-task file is unattributable and exits non-zero', () => {
     const dir = scratchDir();
     try {
       writeFileSync(join(dir, '.active-task'), '');
       const result = run(dir, ['code-reviewer']);
-      assert.equal(result.status, 0);
-      assert.match(result.stdout.trim(), /^UNKNOWN-code-reviewer-/);
+      assert.notEqual(result.status, 0);
+      assert.equal(result.stdout, '');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('requires a reviewer-name argument', () => {
+  it('a whitespace-only AI_SDLC_ACTIVE_TASK_ID is unattributable and exits non-zero', () => {
     const dir = scratchDir();
     try {
-      const result = spawnSync('bash', [SCRIPT], { cwd: dir, encoding: 'utf-8' });
+      const result = run(dir, ['code-reviewer'], { AI_SDLC_ACTIVE_TASK_ID: '   \n\t  ' });
       assert.notEqual(result.status, 0);
+      assert.equal(result.stdout, '');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 });
 
-describe('resolve-transcript-task-id.sh — collision case (AC #2, uniqueness preserved under AISDLC-623)', () => {
-  it('two concurrent unattributed runs both proceed (exit 0) with DIFFERENT unique ids — neither writes a shared path', () => {
-    const dirA = scratchDir();
-    const dirB = scratchDir();
+describe('resolve-transcript-task-id.sh — id and worktree arguments (AISDLC-1334)', () => {
+  it('prints the id and exits 0 from a directory with no .active-task, creating no file there', () => {
+    const cwd = scratchDir();
+    const worktree = scratchDir();
     try {
-      // Simulate two separate reviewer subagent runs (e.g. against
-      // .worktrees/aisdlc-557/ and .worktrees/aisdlc-559/ from the incident
-      // report) that both lack a .active-task sentinel.
-      const resultA = run(dirA, ['code-reviewer']);
-      const resultB = run(dirB, ['test-reviewer']);
-
-      assert.equal(resultA.status, 0);
-      assert.equal(resultB.status, 0);
-      // Both runs proceed and print a task id, but the ids are UNIQUE per
-      // invocation, so a caller that naively did
-      // `mkdir -p .ai-sdlc/transcripts/$TASK_ID` right after this script has
-      // nothing to collide on — the AISDLC-562 property is preserved by
-      // uniqueness, not by refusal.
-      assert.notEqual(resultA.stdout.trim(), '');
-      assert.notEqual(resultB.stdout.trim(), '');
-      assert.notEqual(resultA.stdout.trim(), resultB.stdout.trim());
+      writeFileSync(join(worktree, '.active-task'), 'AISDLC-1334\n');
+      const result = run(cwd, ['code-reviewer', 'AISDLC-1334', worktree]);
+      assert.equal(result.status, 0);
+      assert.equal(result.stdout.trim(), 'AISDLC-1334');
+      assert.equal(readdirSync(cwd).length, 0, 'the parent directory must stay untouched');
     } finally {
-      rmSync(dirA, { recursive: true, force: true });
-      rmSync(dirB, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(worktree, { recursive: true, force: true });
     }
   });
 
-  it('two consecutive unattributed calls for the SAME reviewer in the SAME cwd print DIFFERENT ids', () => {
-    const dir = scratchDir();
+  it('wins over TASK_ID, the cwd sentinel and AI_SDLC_ACTIVE_TASK_ID', () => {
+    const cwd = scratchDir();
+    const worktree = scratchDir();
     try {
-      const first = run(dir, ['code-reviewer']);
-      const second = run(dir, ['code-reviewer']);
-      assert.equal(first.status, 0);
-      assert.equal(second.status, 0);
-      assert.notEqual(first.stdout.trim(), second.stdout.trim());
+      writeFileSync(join(cwd, '.active-task'), 'AISDLC-1');
+      writeFileSync(join(worktree, '.active-task'), 'AISDLC-1334');
+      const result = run(cwd, ['code-reviewer', 'AISDLC-1334', worktree], {
+        TASK_ID: 'AISDLC-2',
+        AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-3',
+      });
+      assert.equal(result.status, 0);
+      assert.equal(result.stdout.trim(), 'AISDLC-1334');
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(worktree, { recursive: true, force: true });
     }
   });
 
-  it('two DIFFERENT attributed runs never resolve to the same task id from different sentinels', () => {
-    const dirA = scratchDir();
-    const dirB = scratchDir();
+  it('refuses a malformed id with a reason', () => {
+    const cwd = scratchDir();
+    const worktree = scratchDir();
     try {
-      writeFileSync(join(dirA, '.active-task'), 'AISDLC-557');
-      writeFileSync(join(dirB, '.active-task'), 'AISDLC-559');
-
-      const resultA = run(dirA, ['code-reviewer']);
-      const resultB = run(dirB, ['code-reviewer']);
-
-      assert.equal(resultA.status, 0);
-      assert.equal(resultB.status, 0);
-      assert.notEqual(resultA.stdout.trim(), resultB.stdout.trim());
-      assert.equal(resultA.stdout.trim(), 'AISDLC-557');
-      assert.equal(resultB.stdout.trim(), 'AISDLC-559');
+      for (const bad of ['../evil', 'a/b', '-lead', 'has space']) {
+        const result = run(cwd, ['code-reviewer', bad, worktree]);
+        assert.notEqual(result.status, 0, bad);
+        assert.equal(result.stdout, '');
+        assert.match(result.stderr, /unsafe or empty shape/);
+      }
     } finally {
-      rmSync(dirA, { recursive: true, force: true });
-      rmSync(dirB, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(worktree, { recursive: true, force: true });
     }
   });
 
-  it('a worktree with a sentinel and a sibling worktree without one never fall back to the SAME path', () => {
-    const attributed = scratchDir();
-    const unattributed = scratchDir();
+  it('refuses a worktree whose .active-task names a different id', () => {
+    const cwd = scratchDir();
+    const worktree = scratchDir();
     try {
-      writeFileSync(join(attributed, '.active-task'), 'AISDLC-562');
-
-      const good = run(attributed, ['code-reviewer']);
-      const soft = run(unattributed, ['code-reviewer']);
-
-      assert.equal(good.status, 0);
-      assert.equal(good.stdout.trim(), 'AISDLC-562');
-      // AISDLC-623: the unattributed worktree no longer refuses — it
-      // proceeds with a unique unattributed id, distinct from the real one.
-      assert.equal(soft.status, 0);
-      assert.notEqual(soft.stdout.trim(), '');
-      assert.notEqual(soft.stdout.trim(), good.stdout.trim());
+      writeFileSync(join(worktree, '.active-task'), 'AISDLC-999');
+      const result = run(cwd, ['code-reviewer', 'AISDLC-1334', worktree]);
+      assert.notEqual(result.status, 0);
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /names 'AISDLC-999', not 'AISDLC-1334'/);
     } finally {
-      rmSync(attributed, { recursive: true, force: true });
-      rmSync(unattributed, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a missing worktree, a non-directory worktree and a worktree without .active-task', () => {
+    const cwd = scratchDir();
+    const worktree = scratchDir();
+    try {
+      for (const wt of ['', join(worktree, 'nope'), worktree]) {
+        const result = run(cwd, ['code-reviewer', 'AISDLC-1334', wt]);
+        assert.notEqual(result.status, 0, `worktree '${wt}'`);
+        assert.equal(result.stdout, '');
+        assert.match(result.stderr, /Fix:/);
+      }
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(worktree, { recursive: true, force: true });
     }
   });
 });

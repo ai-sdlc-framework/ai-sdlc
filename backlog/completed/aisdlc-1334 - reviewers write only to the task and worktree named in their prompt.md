@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1334
 title: 'Reviewers write only to the task and worktree named in their prompt, and never into the parent checkout'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
