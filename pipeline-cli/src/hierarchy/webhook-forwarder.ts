@@ -287,6 +287,15 @@ export function installForwarder(
   return true;
 }
 
+/** The machine-wide launch agent label used before AISDLC-1256. */
+export const LEGACY_FORWARDER_LABEL = 'io.ai-sdlc.webhook-forward';
+
+/** Unload a legacy machine-wide agent and delete its plist, once. Best effort. */
+export function removeLegacyForwarder(deps: HierarchyDeps): void {
+  deps.run('launchctl', ['bootout', agentDomain(LEGACY_FORWARDER_LABEL)], { cwd: deps.cwd });
+  rmSync(forwarderPlistPath(deps, LEGACY_FORWARDER_LABEL), { force: true });
+}
+
 /** Unload the agent, delete its plist and any leftover `cli` hook. Best effort. */
 export function removeForwarder(deps: HierarchyDeps, label = forwarderLabel(deps)): void {
   deps.run('launchctl', ['bootout', agentDomain(label)], { cwd: deps.cwd });

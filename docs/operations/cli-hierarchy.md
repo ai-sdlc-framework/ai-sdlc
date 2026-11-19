@@ -433,22 +433,25 @@ writes nothing. After a record is written, deliveries for the same `(pr, headSha
 and then the file `.ai-sdlc/dispatch/.reconcile-wake` (the file `reconcile --watch` polls) is touched, once. A replayed delivery id or a failed signature touches nothing. The receiver never classifies or acts.
 
 ```bash
-AI_SDLC_WEBHOOK_SECRET=... cli-hierarchy webhook up [--port 8765] [--feed gh-forward|tunnel|none [--feed-pid <pid>] [--feed-agent <label>]]
+AI_SDLC_WEBHOOK_SECRET=... cli-hierarchy webhook up [--port <n>] [--feed gh-forward|tunnel|none [--feed-pid <pid>] [--feed-agent <label>]]
 cli-hierarchy webhook status [--json]
 cli-hierarchy webhook down
 ```
 
 The secret comes only from the `AI_SDLC_WEBHOOK_SECRET` environment variable, never a file in the
 repository. Without it `webhook up` does nothing and dispatch stays poll-only (not an error). The
-receiver binds to `127.0.0.1` only, on `--port` or `AI_SDLC_WEBHOOK_PORT` (default 8765), at path
+receiver binds to `127.0.0.1` only, on `--port` or `AI_SDLC_WEBHOOK_PORT` (unset: the receiver scans upward from the recorded port or the configured default, 8765), at path
 `/webhooks/github`. `cli-hierarchy up` starts it when the secret is set (and always starts the reconcile scheduler that consumes its wake file, see `up`). Subscribed event kinds:
 `pull_request`, `check_suite`, `check_run`, `workflow_run`, `status`, `pull_request_review`.
 
 Several projects on one host (AISDLC-1254): without `--port` or `AI_SDLC_WEBHOOK_PORT`, `webhook up` picks the
 port itself. It starts from the port recorded in the board dir's `webhook-port` file (else `spec.webhook.port`,
 default 8765) and takes the first port that binds, scanning 20 ports upward, so a second project's receiver lands on
-8766 while the first holds 8765. The choice is recorded and reused on every restart, and the forwarder is installed
-against that same port; `webhook status` prints the full target URL (`target http://127.0.0.1:<n>/webhooks/github`).
+8766 while the first holds 8765. The receiver binds first; only then are the port written to `webhook-port` and the
+forwarder installed or re-pointed at the bound port, and a bind lost to another process retries on the next port.
+Every start (`up`, a dispatch restart, `restart --all`) carries the recorded feed forward, and `restart --all` waits
+for its own receiver to release the port, then rescans if another process holds it. A recorded machine-wide launch
+agent (`io.ai-sdlc.webhook-forward`) is replaced by the per-board one. Repair with no recorded port installs nothing; `webhook status` prints the full target URL (`target http://127.0.0.1:<n>/webhooks/github`).
 `--port` and `AI_SDLC_WEBHOOK_PORT` pin the port and win over selection (a held pinned port is an error). When no
 candidate is free, or the receiver loses the bind, `webhook up` exits non-zero naming the port and its owner
 (`lsof`) and `webhook status` reports `webhook: collision (...)` instead of "not running" until the next
@@ -459,7 +462,7 @@ Prerequisites for the feed: the `gh webhook` extension (`gh extension install cl
 
 Reaching it from GitHub: `cli-hierarchy webhook up --feed gh-forward` (AISDLC-1207) installs and loads a
 launchd agent (`com.ai-sdlc.webhook.<project-slug>`, KeepAlive, plist in `~/Library/LaunchAgents`, mode 0600) that runs
-`gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:8765/webhooks/github --secret $AI_SDLC_WEBHOOK_SECRET`,
+`gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:<port>/webhooks/github --secret $AI_SDLC_WEBHOOK_SECRET`,
 so the feed survives a closed terminal, sleep and a network drop. The hook secret must equal the receiver's, or
 every delivery is a 401; a missing `AI_SDLC_WEBHOOK_SECRET` is therefore an error. Before loading, `webhook up`
 deletes stale hooks named `cli` on the repository (a forwarder that died uncleanly leaves one, and the next start
@@ -488,7 +491,7 @@ least 5 minutes apart; each is recorded in `<board-dir>/webhook-health.json`. A 
 attempts are used up or the agent file is out of date with the secret unset; its body lists the attempts and the tail
 of `webhook-forward.log` with the secret redacted (the secret is never written to the state file either). An arriving
 event returns the class to `healthy`, resets the attempt count and answers the open decision. A named tunnel (for example Cloudflare Tunnel) pointing at
-`127.0.0.1:8765` is the alternative for daily use (`--feed tunnel`).
+`127.0.0.1:<port>` (the selected port) is the alternative for daily use (`--feed tunnel`).
 
 **Forwarder agent hardening (AISDLC-1285).** Four rules keep a crash-looping agent from reading as healthy:
 

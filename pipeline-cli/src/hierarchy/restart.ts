@@ -50,6 +50,8 @@ import {
 import {
   logNoFeed,
   NO_FEED_LINE,
+  carriedFeed,
+  isWebhookPortFree,
   readState as readWebhookState,
   webhookDown,
   webhookUp,
@@ -368,6 +370,14 @@ function reRegisterDispatchServices(deps: HierarchyDeps): void {
   }
 }
 
+/** Wait up to ~2s for `port` to be released by a receiver that was just signalled. */
+function waitPortReleased(deps: HierarchyDeps, port: number): void {
+  for (let i = 0; i < 10 && !isWebhookPortFree(deps, port); i += 1) {
+    if (deps.sleepMs) deps.sleepMs(200);
+    else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+  }
+}
+
 /**
  * `restart --all`: stop and start the reconcile scheduler and, when a secret is set, the webhook
  * receiver, so both run the installed code. A failure is a warning naming the process (AISDLC-1272).
@@ -385,11 +395,13 @@ function restartDispatchServices(deps: HierarchyDeps): void {
       // feed back into up so the receiver keeps its port and the forwarder is reinstalled.
       const recorded = readWebhookState(deps.boardDir);
       webhookDown(deps, deps.killProcess);
+      // The old receiver releases its port just after SIGTERM; wait briefly, then scan from it.
+      if (recorded) waitPortReleased(deps, recorded.port);
       webhookUp(
         deps,
-        recorded ? String(recorded.port) : undefined,
         undefined,
-        recorded?.feed?.agent ? { kind: recorded.feed.kind } : recorded?.feed,
+        undefined,
+        recorded?.feed ? carriedFeed(recorded.feed) : undefined,
       );
       if (!recorded?.feed) deps.log(NO_FEED_LINE);
     } catch (err) {
