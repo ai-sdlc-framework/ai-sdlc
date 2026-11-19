@@ -34,7 +34,7 @@ implementedBy:
 
 > **Superseded by RFC-0061 (AISDLC-1174, 2026-11-06).** The v6 Merkle-transcript envelope, its signer and verifier were deleted (AISDLC-1173); the merge gate reads the review verdict record instead.
 
-**Status:** Approved
+**Status:** Superseded. Previously: Approved
 **Lifecycle:** Implemented
 **Author:** Dominique Legault
 **Created:** 2026-05-20
