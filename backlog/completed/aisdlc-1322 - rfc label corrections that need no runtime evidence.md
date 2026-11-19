@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1322
 title: 'RFC label corrections that need no runtime evidence (0017 and 0036 to Signed Off, 0015 and 0047 to Superseded)'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-18'
 labels:
