@@ -43,6 +43,16 @@ Use this when:
 - The team has disabled Codex for compliance or budget reasons.
 - You want a fully Claude-native review for an audit or comparison.
 
+### A reviewer that cannot run mid-run (AISDLC-1333)
+
+When Codex fails during a run (usage limit reached, not signed in, crash, timeout, missing tool), the `-codex` reviewer does not return a rejection. It returns a failure envelope with no `approved` and no findings:
+
+```json
+{ "harnessFailed": true, "reason": "<one line>", "retryAfter": "<text or null>" }
+```
+
+The coordinator treats this as no verdict: nothing is persisted, no leaf or ledger row is written, no finding is counted and no developer round starts. The round asks for that reviewer's report again through the capped report-retry path. When the cap is reached the run stops with a reason naming the reviewer, its harness, the reason and the retry time, and stating that the review did not run, for example `reviewer code-reviewer-codex (harness codex) did not run: usage limit reached; retry after Nov 19th, 2026 12:22 PM`. A failed reviewer still blocks approval; it can never produce one. To continue before the retry time, set `AI_SDLC_REVIEWER_HARNESS=claude` and run again.
+
 ### Override per invocation (shell one-liner)
 
 ```bash

@@ -34,6 +34,12 @@ export interface ReviewerReport {
   approved: boolean;
   findings?: ReviewerFinding[];
   summary?: string;
+  /** AISDLC-1333: the reviewer could not run (usage limit, not signed in, crash); not a verdict. */
+  harnessFailed?: boolean;
+  /** One-line cause when `harnessFailed`. */
+  failureReason?: string;
+  /** Text saying when to retry (for example a usage-limit reset time), when `harnessFailed`. */
+  retryAfter?: string | null;
   /** Model the reporting agent ran on; recorded on the leaf when a fallback ran (AISDLC-911). */
   model?: string;
   /** Staged stages only (RFC-0052): the agent's final message, inline. */
@@ -68,11 +74,22 @@ function asReport(raw: unknown, fallbackAgent?: string): ReviewerReport | null {
         ];
       })
     : [];
+  const failed = nested.harnessFailed === true;
   return {
     agent,
+    ...(failed
+      ? {
+          harnessFailed: true,
+          failureReason:
+            typeof nested.reason === 'string' && nested.reason !== ''
+              ? nested.reason
+              : 'no reason given',
+          retryAfter: typeof nested.retryAfter === 'string' ? nested.retryAfter : null,
+        }
+      : {}),
     ...(typeof r.agentId === 'string' && r.agentId !== '' ? { agentId: r.agentId } : {}),
-    approved: nested.approved === true,
-    findings,
+    approved: !failed && nested.approved === true,
+    findings: failed ? [] : findings,
     ...(typeof nested.summary === 'string' ? { summary: nested.summary } : {}),
     ...(typeof r.output === 'string' ? { output: r.output } : {}),
     ...(typeof r.outputFile === 'string' ? { outputFile: r.outputFile } : {}),
@@ -277,6 +294,25 @@ export async function finalizeReview(
   const verdicts: ReviewerVerdict[] = [];
   const tiers: Record<string, IndependenceTier> = {};
   const wtAiSdlc = join(state.worktreePath, '.ai-sdlc');
+
+  // AISDLC-1333: a reviewer whose harness failed produced no verdict. Nothing is persisted,
+  // emitted or counted; the round asks for that reviewer's report again (capped retry path).
+  const notRun = review.spawned.flatMap((sp) => {
+    const report = reports.find((r) => r.agent === sp.agent || r.agent === sp.reviewer);
+    return report?.harnessFailed ? [{ sp, report }] : [];
+  });
+  if (notRun.length > 0) {
+    const parts = notRun.map(
+      ({ sp, report }) =>
+        `reviewer ${sp.agent} (harness ${sp.harness}) did not run: ${report.failureReason}; ` +
+        `retry after ${report.retryAfter ?? 'unknown'}`,
+    );
+    return {
+      ok: false,
+      recoverable: true,
+      reason: `Step 7b.5: the review did not run: ${parts.join('; ')}. No verdict was recorded; re-run the reviewer and report again.`,
+    };
+  }
 
   // Resolve every reviewer's harness agent id BEFORE touching disk, so a reporting slip
   // (a missing id) is fixable by re-sending the report with no half-persisted state.

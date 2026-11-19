@@ -112,6 +112,10 @@ The transcript file is gitignored (RFC-0042 OQ-1: local disk, 90-day retention d
 
 **Phase 1 scope (intentional):** the transcript captures only the wrapper events emitted by Step 0 and the verdict-formed step — Codex CLI's internal turns are not captured. See RFC-0042 §Design Layer 1 follow-up notes.
 
+## Harness failure envelope (AISDLC-1333)
+
+When Codex cannot run the review (tool missing, unsupported sandbox flag, non-zero exit, usage limit reached, not signed in, crash, timeout), you did not review anything, so you return a harness failure and never an `approved: false` rejection with a critical finding. The envelope has no `approved` and no findings: `{ "harnessFailed": true, "reason": "<one line>", "retryAfter": "<text or null>" }`. The coordinator does not count it as a verdict and asks for this reviewer again.
+
 ## Step 1 — Verify Codex CLI is available
 
 Use the Bash tool to run:
@@ -124,16 +128,9 @@ If the output contains `CODEX_UNAVAILABLE`, immediately return this error envelo
 
 ```json
 {
-  "approved": false,
-  "findings": [
-    {
-      "severity": "critical",
-      "file": null,
-      "line": null,
-      "message": "Codex CLI is not installed or not on PATH. Install from https://docs.codex.ai/installation or ensure /opt/homebrew/bin/codex is on PATH. Falling back to this finding so the pipeline can surface the misconfiguration."
-    }
-  ],
-  "summary": "Codex CLI unavailable — cannot perform cross-harness test review. Install codex and retry."
+  "harnessFailed": true,
+  "reason": "Codex CLI is not installed or not on PATH",
+  "retryAfter": null
 }
 ```
 
@@ -230,16 +227,9 @@ Flags used:
 
 ```json
 {
-  "approved": false,
-  "findings": [
-    {
-      "severity": "critical",
-      "file": null,
-      "line": null,
-      "message": "Codex CLI does not support -s read-only sandbox mode. Escalating: operators must not fall back to --dangerously-bypass-approvals-and-sandbox as it enables prompt-injection-to-RCE. Upgrade codex CLI to v0.128.0+."
-    }
-  ],
-  "summary": "Codex CLI sandbox mode unavailable — cannot run securely. Do not use bypass flag. See finding for remediation."
+  "harnessFailed": true,
+  "reason": "Codex CLI does not support -s read-only sandbox mode; upgrade codex to v0.128.0+, never use the bypass flag",
+  "retryAfter": null
 }
 ```
 
@@ -247,16 +237,9 @@ If the exit code is non-zero for any other reason, return:
 
 ```json
 {
-  "approved": false,
-  "findings": [
-    {
-      "severity": "critical",
-      "file": null,
-      "line": null,
-      "message": "Codex CLI exited with non-zero status <exit-code>. Check codex auth (run `codex login`) and retry."
-    }
-  ],
-  "summary": "Codex CLI invocation failed (exit <exit-code>). See finding for remediation."
+  "harnessFailed": true,
+  "reason": "Codex CLI exited with non-zero status <exit-code> (for example usage limit reached, not signed in; run `codex login`)",
+  "retryAfter": "<the retry time quoted in the Codex output, such as \"try again at Nov 19th, 2026 12:22 PM\", or null>"
 }
 ```
 
