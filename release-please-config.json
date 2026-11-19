@@ -97,6 +97,7 @@
     "sdk-go": {
       "release-type": "go",
       "component": "sdk-go",
+      "bump-minor-pre-major": true,
       "extra-files": ["aisdlc.go"]
     },
     "ai-sdlc-plugin": {
