@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1343
 title: 'A decision is promoted once, even when its merged event file is missing from the parent checkout'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
