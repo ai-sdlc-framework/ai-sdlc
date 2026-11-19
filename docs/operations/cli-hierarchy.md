@@ -433,7 +433,7 @@ writes nothing. After a record is written, deliveries for the same `(pr, headSha
 and then the file `.ai-sdlc/dispatch/.reconcile-wake` (the file `reconcile --watch` polls) is touched, once. A replayed delivery id or a failed signature touches nothing. The receiver never classifies or acts.
 
 ```bash
-AI_SDLC_WEBHOOK_SECRET=... cli-hierarchy webhook up [--port 8765] [--feed gh-forward|tunnel|none [--feed-pid <pid>]]
+AI_SDLC_WEBHOOK_SECRET=... cli-hierarchy webhook up [--port 8765] [--feed gh-forward|tunnel|none [--feed-pid <pid>] [--feed-agent <label>]]
 cli-hierarchy webhook status [--json]
 cli-hierarchy webhook down
 ```
@@ -454,6 +454,8 @@ candidate is free, or the receiver loses the bind, `webhook up` exits non-zero n
 (`lsof`) and `webhook status` reports `webhook: collision (...)` instead of "not running" until the next
 successful start. The forwarder launchd label is per project
 (`com.ai-sdlc.webhook.<board-dir-name>-<hash>`, derived from the board dir), so two projects never collide.
+
+Prerequisites for the feed: the `gh webhook` extension (`gh extension install cli/gh-webhook`) and permission to manage hooks on the repository (admin). A board with no recorded feed gets no events: `up` and `restart` print one line saying so and naming `cli-hierarchy webhook up --feed gh-forward`, and `status` reads `feed none`. Forwarder liveness comes only from this board's own record, never a process-name match.
 
 Reaching it from GitHub: `cli-hierarchy webhook up --feed gh-forward` (AISDLC-1207) installs and loads a
 launchd agent (`com.ai-sdlc.webhook.<project-slug>`, KeepAlive, plist in `~/Library/LaunchAgents`, mode 0600) that runs

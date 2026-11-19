@@ -210,8 +210,7 @@ export function forwarderPersistence(
     const a = forwarderAgentState(deps, label);
     if (a.loaded && a.running) return `persisted: launchd ${label}`;
     if (a.loaded) return `persisted: no (${label} ${describeLoadedNotRunning(a)})`;
-    const why = (a.stderr ?? '').trim().split('\n')[0];
-    return `persisted: no (${label} not loaded${why ? `: ${why}` : ''})`;
+    return `persisted: no (${label} not installed)`;
   } catch {
     return `persisted: no (launchctl unavailable)`;
   }

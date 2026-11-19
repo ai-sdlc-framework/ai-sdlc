@@ -16,7 +16,7 @@ import { loadOperationalPolicy } from './operational.js';
 import { verifiedMainRoot } from './trusted-root.js';
 import { loadPrLifecycleConfig } from './pr-lifecycle-config.js';
 import { schedulerUp } from './reconcile-scheduler.js';
-import { webhookUp } from './webhook.js';
+import { logNoFeed, webhookUp } from './webhook.js';
 import { attachEntry } from './attach.js';
 import { findStartedSession, readSessionRegistry, reconcileStartingEntries } from './registry.js';
 import { checkCrossSessionInbound, evaluateResourceGate, readSettingsView } from './preflight.js';
@@ -721,6 +721,7 @@ export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): P
   if (deps.env.AI_SDLC_WEBHOOK_SECRET) {
     try {
       webhookUp(deps);
+      logNoFeed(deps);
     } catch (err) {
       deps.log(`warning: webhook receiver not started: ${(err as Error).message}`);
     }
