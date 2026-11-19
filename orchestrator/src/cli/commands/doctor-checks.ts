@@ -62,10 +62,14 @@ import {
 } from '@ai-sdlc/reference';
 import { now as clockNow } from '../../clock.js';
 import {
-  ARTIFACTS_GITIGNORE_ENTRY,
+  RUNTIME_GITIGNORE_PATHS,
+  RUNTIME_GITIGNORE_SENTINEL,
   gitCheckIgnoreArgs,
   gitignoreCovers,
+  hasSentinelLine,
+  insertIntoSentinelBlock,
   interpretCheckIgnoreExit,
+  missingRuntimeGitignorePaths,
 } from '../../runtime-gitignore.js';
 import {
   HUSKY_PREPUSH_SIGN_SNIPPET,
@@ -1130,40 +1134,70 @@ export function checkOrphanedVitestWorkers(ctx: DoctorRunContext): DoctorCheckRe
   ];
 }
 
-// ── Runtime artifacts ignore entry ──────────────────────────────────────
+// ── Runtime ignore entries ──────────────────────────────────────────────
+
+/** Whether git (or, when it cannot answer, the .gitignore text) ignores `entry`. */
+function runtimeEntryIgnored(
+  ctx: DoctorRunContext,
+  gitignore: string | null,
+  entry: string,
+): boolean {
+  // git is the authority (it sees broader lines, `.ai-sdlc/*` with a later `!`, nested
+  // .gitignore files); the text reading is the fallback when git cannot be asked.
+  const git = interpretCheckIgnoreExit(
+    ctx.adapters.runCommand('git', gitCheckIgnoreArgs(ctx.projectDir, entry)).exitCode,
+  );
+  return git ?? (gitignore !== null && gitignoreCovers(gitignore, entry));
+}
 
 /**
- * `.ai-sdlc/artifacts/` holds the evidence files, assignment logs and replay
- * results the routing commands write (RFC-0050, AISDLC-657.3). A repository whose
- * .gitignore lacks the entry would commit them. Warns, not fails: nothing is
- * broken until someone stages the directory.
+ * Every path in RUNTIME_GITIGNORE_PATHS is written by the framework and never
+ * reviewed (AISDLC-1331). One that git does not ignore shows up as untracked and
+ * makes Step 0.5 refuse to dispatch, so a missing entry is a `fail`.
  */
 export function checkRuntimeGitignore(ctx: DoctorRunContext): DoctorCheckResult {
   const gitignore = ctx.adapters.readFile(join(ctx.projectDir, '.gitignore'));
-  // git is the authority (it sees `artifacts/`, `.ai-sdlc/*` with a later `!`, nested
-  // .gitignore files); the text reading is the fallback when git cannot be asked.
-  const git = interpretCheckIgnoreExit(
-    ctx.adapters.runCommand('git', gitCheckIgnoreArgs(ctx.projectDir, ARTIFACTS_GITIGNORE_ENTRY))
-      .exitCode,
+  const missing = RUNTIME_GITIGNORE_PATHS.filter(
+    (entry) => !runtimeEntryIgnored(ctx, gitignore, entry),
   );
-  const ignored =
-    git ?? (gitignore !== null && gitignoreCovers(gitignore, ARTIFACTS_GITIGNORE_ENTRY));
-  if (ignored) {
+  if (missing.length === 0) {
     return {
       id: 'runtime-gitignore',
       severity: 'pass',
-      title: `.gitignore ignores ${ARTIFACTS_GITIGNORE_ENTRY}`,
+      title: '.gitignore ignores every AI-SDLC runtime path',
     };
   }
   return {
     id: 'runtime-gitignore',
-    severity: 'warn',
-    title:
-      gitignore === null
-        ? `no .gitignore found: ${ARTIFACTS_GITIGNORE_ENTRY} (usage evidence, assignment logs, replay results) would be committed`
-        : `.gitignore does not ignore ${ARTIFACTS_GITIGNORE_ENTRY} (usage evidence, assignment logs, replay results would be committed)`,
-    remediation: `Add \`${ARTIFACTS_GITIGNORE_ENTRY}\` to .gitignore (running \`ai-sdlc execute\` appends it to the runtime block), and remove any later \`!\` line that re-includes it.`,
-    anonymizableEvidence: { gitignorePresent: gitignore !== null },
+    severity: 'fail',
+    title: `${gitignore === null ? 'no .gitignore found' : '.gitignore'}: runtime paths not ignored (untracked, they block Step 0.5): ${missing.join(', ')}`,
+    remediation:
+      'Run `ai-sdlc doctor --fix` (or `ai-sdlc init`, or `ai-sdlc execute`) to add them to the runtime block, and remove any later `!` line that re-includes them.',
+    anonymizableEvidence: { gitignorePresent: gitignore !== null, missingCount: missing.length },
+  };
+}
+
+/** `doctor --fix`: add the missing entries the way `init` does. Idempotent. */
+export function fixRuntimeGitignore(ctx: DoctorRunContext): DoctorFixResult {
+  const existing = ctx.adapters.readFile(join(ctx.projectDir, '.gitignore')) ?? '';
+  const missing = missingRuntimeGitignorePaths(existing, (entry) =>
+    runtimeEntryIgnored(ctx, existing, entry),
+  );
+  if (missing.length === 0) {
+    return { id: 'runtime-gitignore', applied: false, detail: 'every runtime path is ignored' };
+  }
+  let next: string;
+  if (hasSentinelLine(existing)) {
+    next = insertIntoSentinelBlock(existing, missing);
+  } else {
+    const block = `${RUNTIME_GITIGNORE_SENTINEL}\n${missing.join('\n')}\n`;
+    next = existing.length > 0 ? `${existing.trimEnd()}\n${block}` : block;
+  }
+  ctx.adapters.writeFile(join(ctx.projectDir, '.gitignore'), next);
+  return {
+    id: 'runtime-gitignore',
+    applied: true,
+    detail: `added to .gitignore: ${missing.join(', ')}`,
   };
 }
 
@@ -3036,8 +3070,10 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
   },
   {
     id: 'runtime-gitignore',
-    description: '.gitignore ignores the .ai-sdlc/artifacts/ runtime output directory (RFC-0050).',
+    description:
+      '.gitignore ignores every runtime path the framework writes (artifacts, dispatch, transcripts, worktrees, ...; AISDLC-1331).',
     run: checkRuntimeGitignore,
+    fix: fixRuntimeGitignore,
   },
   {
     id: 'worktree-hooks',

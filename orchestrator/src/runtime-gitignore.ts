@@ -3,7 +3,7 @@
  *
  * `init` writes them when it scaffolds a repository and `execute` repairs them on
  * every run, so both must agree on the list; `doctor` reports a repository that
- * lacks the artifacts entry. This module only holds the list and the pure text
+ * lacks any entry. This module only holds the list and the pure text
  * logic. Each caller keeps its own file I/O.
  */
 
@@ -26,6 +26,21 @@ export const RUNTIME_GITIGNORE_PATHS: readonly string[] = [
   ARTIFACTS_GITIGNORE_ENTRY,
   // AISDLC-1260: SubagentStart markers; untracked ones would block Step 0.5.
   SUBAGENT_SESSIONS_GITIGNORE_ENTRY,
+  // AISDLC-1331: every other path the framework writes in a project and nobody reviews.
+  // Untracked, each one makes the clean-parent check (Step 0.5) refuse to dispatch.
+  '.ai-sdlc/dispatch/', // pipeline-cli/src/hierarchy/trusted-root.ts
+  '.ai-sdlc/transcripts/', // reviewer transcripts
+  '.ai-sdlc/verdicts/', // per-task reviewer verdict files
+  '.ai-sdlc/review-state/', // per-task review-round state
+  '.ai-sdlc/context-index.db', // pipeline-cli/src/knowledge/config.ts
+  '.ai-sdlc/context-index.db-wal',
+  '.ai-sdlc/context-index.db-shm',
+  '.ai-sdlc/context/sessions/', // per-session load ledgers
+  '.ai-sdlc/.last-build-sha', // pipeline-cli/src/steps/ensure-workspace-built.ts
+  '.ai-sdlc/captures-drafts/', // pipeline-cli/src/capture/draft-capture.ts
+  '.ai-sdlc/sweep-landed-cache.json', // pipeline-cli/src/steps/00-sweep.ts
+  '.active-task', // per-worktree active-task sentinel
+  '.worktrees/', // task worktrees
 ];
 
 /** Strips leading and trailing slashes by index, never by a backtracking regex. */

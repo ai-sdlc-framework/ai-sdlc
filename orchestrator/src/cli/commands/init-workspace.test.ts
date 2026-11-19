@@ -25,7 +25,9 @@ import {
   rmSync,
   realpathSync,
 } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
+import { RUNTIME_GITIGNORE_PATHS } from '../../runtime-gitignore.js';
+import { cleanGitEnv } from '../../runtime/git-env.js';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -254,6 +256,15 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
     expect(gi).toContain('.ai-sdlc/audit.jsonl');
     // AISDLC-657.3: the shared runtime output directory is ignored from the first init.
     expect(gi).toContain('.ai-sdlc/artifacts/');
+
+    // AISDLC-1331: git itself reports every runtime path as ignored.
+    for (const entry of RUNTIME_GITIGNORE_PATHS) {
+      const probe = entry.endsWith('/') ? `${entry}probe` : entry;
+      const r = spawnSync('git', ['-C', tmpDir, 'check-ignore', '-q', '--no-index', '--', probe], {
+        env: cleanGitEnv(),
+      });
+      expect(r.status, entry).toBe(0);
+    }
   });
 
   it('scaffolds every no-input manifest entry so doctor config-manifest passes first run (AISDLC-1240)', async () => {
@@ -276,9 +287,8 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
     await runInit(['--skip-mcp', '--yes']);
 
     const gi = readFileSync(join(tmpDir, '.gitignore'), 'utf-8');
-    expect(gi).toBe(
-      `node_modules/\n\n${oldBlock}.ai-sdlc/artifacts/\n.ai-sdlc/subagent-sessions/\n`,
-    );
+    expect(gi).toBe(`node_modules/\n\n${oldBlock}${RUNTIME_GITIGNORE_PATHS.slice(3).join('\n')}\n`);
+    expect(gi.split('# ai-sdlc:runtime-gitignore').length).toBe(2);
 
     // AISDLC-1260: idempotent re-run
     await runInit(['--skip-mcp', '--yes']);
