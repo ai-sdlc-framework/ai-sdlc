@@ -208,7 +208,7 @@ import { routedModel } from '../routing/role-model.js';
 import { defaultRunner } from '../runtime/exec.js';
 import { runParentUpkeep, type ParentUpkeepResult } from '../steps/00-parent-upkeep.js';
 import { sweepDue, sweepMergedWorktrees } from '../steps/00-sweep.js';
-import { resolvePluginScriptsDir } from './next-step.js';
+import { PluginScriptsNotFoundError, resolvePluginScriptsDir } from './next-step.js';
 import {
   fileTurnBudgetDecision,
   hasOpenTurnBudgetDecision,
@@ -689,6 +689,7 @@ export async function runHierarchyCli(
     >;
   } = {},
 ): Promise<number> {
+  let pluginScriptsWarned = false; // AISDLC-1328: the missing-plugin warning prints once per run
   const { subcommand, flags } = parseArgv(argv);
   if (
     subcommand === '' ||
@@ -1475,11 +1476,25 @@ export async function runHierarchyCli(
               } catch {
                 /* unreadable list: the sweep asks gh for every branch */
               }
+              let pluginScriptsDir = '';
+              let exists: (p: string) => boolean = existsSync;
+              try {
+                pluginScriptsDir = resolvePluginScriptsDir(deps.env, repoRoot);
+              } catch (err) {
+                if (!(err instanceof PluginScriptsNotFoundError)) throw err;
+                exists = () => false;
+                if (!pluginScriptsWarned) {
+                  pluginScriptsWarned = true;
+                  deps.log(
+                    `warning: parent upkeep skipped the orchestrator-state check: ${err.message}`,
+                  );
+                }
+              }
               return runParentUpkeep({
                 workDir: repoRoot,
                 runner: defaultRunner,
-                pluginScriptsDir: resolvePluginScriptsDir(deps.env, repoRoot),
-                exists: existsSync,
+                pluginScriptsDir,
+                exists,
                 knownOpenBranches: open,
                 worktreeConfig: wtConfig,
                 skipSweep,
