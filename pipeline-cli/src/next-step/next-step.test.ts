@@ -914,6 +914,110 @@ describe('a fixable reviewer report asks for a corrected report instead of faili
     });
   });
 
+  describe('a reviewer that leaves out the nonce marker runs again alone (AISDLC-1335)', () => {
+    const reviewerOf = (args: string[]): string => args[args.indexOf('--reviewer') + 1];
+    const securityOnly = (): string =>
+      JSON.stringify({
+        reviewers: [{ agent: 'security-reviewer', agentId: 'a9', approved: true, findings: [] }],
+      });
+
+    function persistedFiles(): void {
+      for (const a of ['code-reviewer-codex', 'security-reviewer']) {
+        h.present.add(join(worktree, '.ai-sdlc', 'transcripts', 'aisdlc-900', `${a}.jsonl`));
+        h.present.add(join(worktree, '.ai-sdlc', 'verdicts', `${a}-aisdlc-900.json`));
+      }
+    }
+
+    it('re-spawns only that reviewer with the same prompt file and nonce, then completes', async () => {
+      persistedFiles();
+      let refusals = 1;
+      h.runner.on(
+        (_c, args) =>
+          !!args[0]?.endsWith('persist-reviewer-artifacts.sh') &&
+          reviewerOf(args) === 'security-reviewer' &&
+          refusals-- > 0,
+        { code: 4, stdout: '', stderr: 'does not contain the nonce marker' },
+      );
+      const d = { ...deps(), finalizeReview };
+      await toReviewers(d);
+      const first = persisted().review!;
+      const out = await nextStep(ctx, { task: 'AISDLC-900', result: reviewersJson() }, d);
+      expect(out.exitCode).toBe(0);
+      if (out.instruction.action !== 'spawn-reviewers') throw new Error('expected a re-spawn');
+      expect(out.instruction.reviewers.map((r) => r.agent)).toEqual(['security-reviewer']);
+      expect(out.instruction.reviewers[0].promptFile).toBe(first.spawned[1].promptFile);
+      expect(out.instruction.round).toBe(first.round);
+      expect(persisted().review?.nonce).toBe(first.nonce);
+      expect(persisted().phase).toBe('awaiting-reviewers');
+      const done = await nextStep(ctx, { task: 'AISDLC-900', result: securityOnly() }, d);
+      // The round completed: both reviewers are in the aggregate, exactly as with no retry.
+      // (This two-reviewer fixture is short of the test-reviewer, so the coverage gate iterates.)
+      expect(done.instruction.action).toBe('spawn-developer');
+      expect(persisted().verdict?.verdicts.slice(0, 2)).toEqual([
+        expect.objectContaining({ agentId: 'code-reviewer-codex', approved: true }),
+        expect.objectContaining({ agentId: 'security-reviewer', approved: true }),
+      ]);
+      expect(persisted().review?.rerun).toBeUndefined();
+    });
+
+    it('aborts after the attempt cap naming the reviewer and the count', async () => {
+      h.runner.on(
+        (_c, args) =>
+          !!args[0]?.endsWith('persist-reviewer-artifacts.sh') &&
+          reviewerOf(args) === 'security-reviewer',
+        { code: 4, stdout: '', stderr: 'does not contain the nonce marker' },
+      );
+      const d = { ...deps(), finalizeReview };
+      await toReviewers(d);
+      let out = await nextStep(ctx, { task: 'AISDLC-900', result: reviewersJson() }, d);
+      for (let i = 0; i < 2; i++) {
+        expect(out.instruction.action).toBe('spawn-reviewers');
+        out = await nextStep(ctx, { task: 'AISDLC-900', result: securityOnly() }, d);
+      }
+      expect(out.exitCode).toBe(1);
+      const reason = out.instruction.action === 'stop' ? out.instruction.reason : '';
+      expect(reason).toContain('security-reviewer after 2 re-runs');
+    });
+  });
+
+  it('numbers the round by the recorded round for the instruction, the plan and the developer reply (AISDLC-1335)', async () => {
+    mkdirSync(join(worktree, '.git'), { recursive: true });
+    const seen: number[] = [];
+    const roundPlan = (round: number) => ({
+      round,
+      mode: 'full' as const,
+      reason: 'first-round' as const,
+      baseSha: null,
+      headSha: 'a'.repeat(40),
+      deltaSize: 0,
+      contentHash: 'b'.repeat(64),
+      headBlobHash: 'c'.repeat(64),
+      prior: null,
+      deltaReviewers: [],
+    });
+    // An earlier run left rounds 1 and 2 on disk: the plan names the next round 3, then 4.
+    const { instructions } = await drive(
+      deps({
+        approvals: [false, true],
+        prepare: async (_c, _s, round) => {
+          seen.push(round);
+          const n = round === 1 ? 3 : round;
+          return {
+            kind: 'spawn',
+            review: { ...reviewRound(n), roundPlan: roundPlan(n) },
+            classifierLine: 'x',
+          };
+        },
+      }),
+    );
+    const rounds = instructions.flatMap((i) => (i.action === 'spawn-reviewers' ? [i.round] : []));
+    expect(rounds).toEqual([3, 4]);
+    expect(seen).toEqual([1, 4]);
+    const recorded = loadReviewState('AISDLC-900', worktree);
+    expect(recorded.rounds.map((r) => r.round)).toEqual([3, 4]);
+    expect(recorded.responses.map((r) => r.round)).toEqual([3]);
+  });
+
   it('a non-recoverable finalize failure still stops the run', async () => {
     const d = {
       ...deps(),

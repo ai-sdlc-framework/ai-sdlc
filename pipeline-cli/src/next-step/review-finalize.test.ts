@@ -7,6 +7,7 @@ import {
   aggregateRound,
   approvedWithoutReviewers,
   finalizeReview,
+  MAX_REVIEWER_RERUNS,
   parseReviewReports,
   resolveAgentIdFromMarkers,
   detectReusedContexts,
@@ -513,6 +514,82 @@ describe('finalizeReview', () => {
     expect(res).toEqual({
       ok: false,
       reason: expect.stringContaining('persist-reviewer-artifacts failed'),
+    });
+  });
+
+  describe('a transcript without the nonce marker (AISDLC-1335)', () => {
+    const noMarker = (reviewer: string): void => {
+      h.runner.on(
+        (cmd, args) =>
+          !!args[0]?.endsWith('persist-reviewer-artifacts.sh') &&
+          args[args.indexOf('--reviewer') + 1] === reviewer,
+        fail('does not contain the nonce marker; refusing to persist', 4),
+      );
+    };
+
+    it('asks for that reviewer alone and aborts nothing (exit 4)', async () => {
+      noMarker('test-reviewer-codex');
+      const res = await finalizeReview(h.ctx, state, approvals());
+      expect(res).toMatchObject({ ok: false, rerun: ['test-reviewer-codex'] });
+      expect(state.review?.rerun).toEqual(['test-reviewer-codex']);
+      expect(state.review?.heldReports?.map((r) => r.agent)).toEqual([
+        'code-reviewer-codex',
+        'security-reviewer',
+      ]);
+      // No leaf is emitted and nothing is recorded for the failing reviewer.
+      expect(h.runner.calls.some((c) => c.args.includes('emit-leaf'))).toBe(false);
+    });
+
+    it('completes once the re-run reports, with the same verdict as a round with no retry', async () => {
+      markPersisted();
+      const baseline = await finalizeReview(h.ctx, state, approvals());
+      state = makeState(h.root, { review: review(), iteration: 2 });
+      h.runner.calls.length = 0;
+      noMarker('test-reviewer-codex');
+      const first = await finalizeReview(h.ctx, state, approvals());
+      expect(first.ok).toBe(false);
+      const handlers = (h.runner as unknown as { handlers: unknown[] }).handlers;
+      handlers.shift();
+      const rerun = approvals().filter((r) => r.agent === 'test-reviewer-codex');
+      const res = await finalizeReview(h.ctx, state, rerun);
+      expect(res.ok).toBe(true);
+      if (!res.ok || !baseline.ok) return;
+      expect(res.verdict.decision).toBe(baseline.verdict.decision);
+      expect(res.verdict.verdicts.map((v) => v.agentId)).toEqual(
+        baseline.verdict.verdicts.map((v) => v.agentId),
+      );
+      expect(state.review?.rerun).toBeUndefined();
+      expect(state.review?.heldReports).toBeUndefined();
+    });
+
+    it('aborts naming the reviewer and the attempt count once the cap is reached', async () => {
+      noMarker('test-reviewer-codex');
+      const rerun = approvals().filter((r) => r.agent === 'test-reviewer-codex');
+      const first = await finalizeReview(h.ctx, state, approvals());
+      expect(first).toMatchObject({ ok: false, rerun: ['test-reviewer-codex'] });
+      for (let i = 1; i < MAX_REVIEWER_RERUNS; i++) {
+        expect(await finalizeReview(h.ctx, state, rerun)).toMatchObject({
+          rerun: expect.any(Array),
+        });
+      }
+      const last = await finalizeReview(h.ctx, state, rerun);
+      expect(last).toEqual({
+        ok: false,
+        reason: expect.stringMatching(
+          new RegExp(`test-reviewer-codex after ${MAX_REVIEWER_RERUNS} re-runs`),
+        ),
+      });
+      expect(h.runner.calls.some((c) => c.args.includes('emit-leaf'))).toBe(false);
+    });
+
+    it.each([1, 2, 3])('exit %i still aborts at once with no retry', async (code) => {
+      h.runner.on(/persist-reviewer-artifacts\.sh/, fail('boom', code));
+      const res = await finalizeReview(h.ctx, state, approvals());
+      expect(res).toEqual({
+        ok: false,
+        reason: expect.stringContaining('persist-reviewer-artifacts failed'),
+      });
+      expect(state.review?.rerun).toBeUndefined();
     });
   });
 

@@ -611,6 +611,11 @@ class ExecuteHost implements EngineHost {
 
     const fin = await deps.finalizeReview(ctx, state, reports);
     if (!fin.ok) {
+      if (fin.rerun && state.review) {
+        const instruction = buildSpawnReviewers(ctx, state, state.review);
+        state.pending = instruction;
+        return { kind: 'respawn', instruction, shadows: shadowResults };
+      }
       return fin.recoverable
         ? this.corrected(state, fin.reason, this.fixReplyShape(state))
         : { kind: 'halt', instruction: await failRun(ctx, state, 'aborted', fin.reason) };
