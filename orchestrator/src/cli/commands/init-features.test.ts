@@ -206,7 +206,7 @@ describe('resolveFeatureSelection', () => {
       'Will this repo use Definition-of-Ready gates?',
       'Do you want attestation infrastructure (audit-only)?',
       'Add review classifier for cost-optimized reviews?',
-      'Apply recommended branch protection? (required: ai-sdlc/pr-ready + codecov/patch)',
+      'Apply recommended branch protection? (required: ai-sdlc/pr-ready, plus codecov/patch only when a workflow uploads to Codecov)',
       'Scaffold GitHub Actions workflows (gate, review, attestation, auto-merge)?',
       'Scaffold RFC-0030 signal-ingestion config (default OFF; opt in via AI_SDLC_SIGNAL_INGESTION soak)?',
     ]);
@@ -231,7 +231,7 @@ describe('resolveFeatureSelection', () => {
     );
     expect(state.promptCalls.map((c) => c.question)).toEqual([
       'Do you want attestation infrastructure (audit-only)?',
-      'Apply recommended branch protection? (required: ai-sdlc/pr-ready + codecov/patch)',
+      'Apply recommended branch protection? (required: ai-sdlc/pr-ready, plus codecov/patch only when a workflow uploads to Codecov)',
       'Scaffold GitHub Actions workflows (gate, review, attestation, auto-merge)?',
       'Scaffold RFC-0030 signal-ingestion config (default OFF; opt in via AI_SDLC_SIGNAL_INGESTION soak)?',
     ]);
@@ -769,12 +769,58 @@ describe('applyFeatureSelection', () => {
 // ── applyBranchProtection ────────────────────────────────────────────────
 
 describe('applyBranchProtection', () => {
+  it('AISDLC-1352: requires codecov/patch only when a workflow uses codecov-action, and names it in every message', async () => {
+    const withCodecov = mkdtempSync(join(tmpdir(), 'init-codecov-'));
+    const without = mkdtempSync(join(tmpdir(), 'init-nocodecov-'));
+    try {
+      for (const [dir, yml] of [
+        [withCodecov, 'jobs:\n  c:\n    steps:\n      - uses: codecov/codecov-action@v5\n'],
+        [without, 'jobs:\n  c:\n    steps:\n      - run: pnpm test\n'],
+      ] as const) {
+        mkdirSync(join(dir, '.github', 'workflows'), { recursive: true });
+        writeFileSync(join(dir, '.github', 'workflows', 'ci.yml'), yml);
+      }
+      const dry = makeStub();
+      const r = await applyBranchProtection(
+        withCodecov,
+        { ...baseFlags, dryRun: true },
+        dry.adapters,
+      );
+      expect(r.contexts).toEqual(['ai-sdlc/pr-ready', 'codecov/patch']);
+      expect(r.bodyJson).toContain('"codecov/patch"');
+
+      const mk = () =>
+        makeStub({
+          runResponses: new Map([
+            ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
+            ['gh api', { stdout: '{}', exitCode: 0 }],
+          ]),
+        });
+      const a = mk();
+      const ra = await applyBranchProtection(withCodecov, baseFlags, a.adapters);
+      expect(a.state.log.join('\n')).toContain('required checks ai-sdlc/pr-ready, codecov/patch +');
+      expect(JSON.parse(ra.bodyJson).required_status_checks.contexts).toEqual([
+        'ai-sdlc/pr-ready',
+        'codecov/patch',
+      ]);
+
+      const b = mk();
+      const rb = await applyBranchProtection(without, baseFlags, b.adapters);
+      expect(rb.contexts).toEqual(['ai-sdlc/pr-ready']);
+      expect(b.state.log.join('\n')).toContain('required checks ai-sdlc/pr-ready +');
+      expect(b.state.log.join('\n')).not.toContain('codecov/patch');
+    } finally {
+      rmSync(withCodecov, { recursive: true, force: true });
+      rmSync(without, { recursive: true, force: true });
+    }
+  });
+
   it('AC #6: --dry-run prints the JSON body and does NOT call gh api', async () => {
     const { state, adapters } = makeStub();
     const result = await applyBranchProtection('/proj', { ...baseFlags, dryRun: true }, adapters);
     expect(result.applied).toBe(false);
     expect(result.bodyJson).toContain('"ai-sdlc/pr-ready"');
-    expect(result.bodyJson).toContain('"codecov/patch"');
+    expect(result.bodyJson).not.toContain('"codecov/patch"');
     // `gh` should NOT have been invoked in dry-run.
     expect(state.runCommandCalls.length).toBe(0);
     // The JSON must have been logged.
@@ -847,10 +893,9 @@ describe('applyBranchProtection', () => {
     });
   });
 
-  it('AC #1 (branch-protection branch): the recommended body has the two required checks', () => {
+  it('AC #1 (branch-protection branch): the recommended body requires only ai-sdlc/pr-ready', () => {
     expect(RECOMMENDED_BRANCH_PROTECTION_BODY.required_status_checks.contexts).toEqual([
       'ai-sdlc/pr-ready',
-      'codecov/patch',
     ]);
     // Stale-review dismissal is critical for the post-force-push workflow
     // documented in CLAUDE.md.
@@ -1036,7 +1081,7 @@ describe('applyBranchProtection', () => {
         expect(result.mode).toBe('server');
         const body = JSON.parse(result.bodyJson);
         expect(body.required_pull_request_reviews.required_approving_review_count).toBe(1);
-        expect(body.required_status_checks.contexts).toEqual(['ai-sdlc/pr-ready', 'codecov/patch']);
+        expect(body.required_status_checks.contexts).toEqual(['ai-sdlc/pr-ready']);
         expect(body.required_status_checks.contexts).toContain('ai-sdlc/pr-ready');
         const out = state.log.join('\n');
         expect(out).toContain(phrase);

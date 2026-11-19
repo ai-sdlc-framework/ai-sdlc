@@ -43,7 +43,12 @@
  */
 
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
-import { CLIENT_SIDE_ONLY_MESSAGE } from './branch-protection-shared.js';
+import {
+  CLIENT_SIDE_ONLY_MESSAGE,
+  fetchBranchProtectionStatus,
+  isContextPosted,
+  postedContextsFromWorkflows,
+} from './branch-protection-shared.js';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { Ajv2020 } from 'ajv/dist/2020.js';
@@ -747,6 +752,58 @@ export function checkAttestationGovernanceCheck(ctx: DoctorRunContext): DoctorCh
         : 'Attestation artifacts present but not enforced (audit-only)',
     remediation: gov.closingCommand,
     anonymizableEvidence: evidence,
+  };
+}
+
+// ── Check: required contexts are posted by a workflow (AISDLC-1352) ──────
+
+/**
+ * Compares the live required status contexts on the protected branch with
+ * the names the repository's workflows post (job names, plus `codecov/*`
+ * when a workflow uses `codecov/codecov-action`). A required context nobody
+ * posts can never pass. Reports `warn` "not checked" (never pass) when the
+ * comparison cannot run.
+ */
+export function checkRequiredContextsPosted(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'required-contexts-posted';
+  const prot = fetchBranchProtectionStatus(ctx.adapters, ctx.projectDir);
+  if (!prot.checked) {
+    return {
+      id,
+      severity: 'warn',
+      title: `required contexts not checked: ${prot.error ?? 'branch protection unreadable'}`,
+      anonymizableEvidence: { checked: false },
+    };
+  }
+  const dir = join(ctx.projectDir, '.github', 'workflows');
+  const files = (ctx.adapters.listFiles?.(dir) ?? []).filter((f) => /\.ya?ml$/.test(f));
+  const texts = files
+    .map((f) => ctx.adapters.readFile(join(dir, f)))
+    .filter((t): t is string => t !== null);
+  if (texts.length === 0) {
+    return {
+      id,
+      severity: 'warn',
+      title: 'required contexts not checked: no workflow files found in .github/workflows',
+      anonymizableEvidence: { checked: false },
+    };
+  }
+  const posted = postedContextsFromWorkflows(texts);
+  const missing = (prot.requiredContexts ?? []).filter((c) => !isContextPosted(c, posted));
+  if (missing.length > 0) {
+    return {
+      id,
+      severity: 'fail',
+      title: `branch protection requires ${missing.map((c) => `\`${c}\``).join(', ')} but no workflow posts it, so no pull request can satisfy protection`,
+      remediation:
+        'Remove the context from the required status checks (Settings > Branches), add a workflow job with that name, or upload coverage with codecov/codecov-action for codecov contexts',
+      anonymizableEvidence: { missing },
+    };
+  }
+  return {
+    id,
+    severity: 'pass',
+    title: 'every required status context is posted by a workflow',
   };
 }
 
@@ -3165,6 +3222,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     id: 'attestation-governance',
     description: 'Attestation required-but-unconfigured detection (reuses AISDLC-560).',
     run: checkAttestationGovernanceCheck,
+  },
+  {
+    id: 'required-contexts-posted',
+    description:
+      'Every required status context on the protected branch is posted by a workflow (AISDLC-1352).',
+    run: checkRequiredContextsPosted,
   },
   {
     id: 'reviewer-attribution-resolver',

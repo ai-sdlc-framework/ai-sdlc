@@ -170,6 +170,8 @@ export function prFingerprint(
 interface Refusal {
   fingerprint: string;
   at: string;
+  /** Why the merge gate refused (AISDLC-1352); absent on records written before it. */
+  reason?: string;
 }
 
 /** True when `pr` was refused with this same fingerprint less than 15 minutes ago. */
@@ -190,15 +192,25 @@ export function recordRefusal(
   pr: number,
   fingerprint: string | undefined,
   now: Date = clock(),
+  reason?: string,
 ): void {
   const all = readJson<Record<string, Refusal>>(fingerprintPath(boardDir)) ?? {};
   if (fingerprint === undefined) {
     if (!(String(pr) in all)) return;
     delete all[String(pr)];
   } else {
-    all[String(pr)] = { fingerprint, at: now.toISOString() };
+    all[String(pr)] = {
+      fingerprint,
+      at: now.toISOString(),
+      ...(reason ? { reason } : {}),
+    };
   }
   writeJson(fingerprintPath(boardDir), all);
+}
+
+/** The stored merge refusal reason for `pr`, if it was refused and not since landed. */
+export function readRefusalReason(boardDir: string, pr: number): string | undefined {
+  return readJson<Record<string, Refusal>>(fingerprintPath(boardDir))?.[String(pr)]?.reason;
 }
 
 function listArgs(args: readonly string[]): { draftOnly: boolean; fields: string[] } | undefined {

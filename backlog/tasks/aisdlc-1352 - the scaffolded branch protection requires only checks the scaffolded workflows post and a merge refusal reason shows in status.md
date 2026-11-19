@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1352
 title: 'The scaffolded branch protection requires only checks the scaffolded workflows post, and a merge refusal reason shows in status'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-19'
 labels:

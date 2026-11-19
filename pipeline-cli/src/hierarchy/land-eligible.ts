@@ -167,7 +167,7 @@ export async function landEligiblePrs(deps: LandDeps): Promise<LandReport> {
       continue;
     }
     report.refused.push({ pr: pr.number, reason: outcome.reason });
-    recordRefusal(deps.boardDir, pr.number, fingerprint, now());
+    recordRefusal(deps.boardDir, pr.number, fingerprint, now(), outcome.reason);
     if (sha) {
       writeOnce(
         notesPath(deps.boardDir, pr.number, sha, 'refused'),
