@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1332
 title: 'The scaffolded review status posts a description that fits the commit status limit'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
