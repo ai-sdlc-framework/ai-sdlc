@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1328
 title: 'next-step and parent upkeep find the plugin scripts from the installed plugin'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-19'
 labels:
