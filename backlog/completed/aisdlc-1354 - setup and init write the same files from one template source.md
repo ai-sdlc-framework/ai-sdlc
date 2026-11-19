@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1354
 title: 'Setup and init write the same files from one template source'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
