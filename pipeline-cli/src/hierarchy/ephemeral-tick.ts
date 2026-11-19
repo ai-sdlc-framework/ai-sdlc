@@ -179,8 +179,17 @@ export async function spawnForEligibleClaims(
     /* an unreadable landing record must not stop the spawn step */
   }
   const heldIds: string[] = [];
-  for (const { taskId, repair } of claimable) {
+  // AISDLC-1330: the claim allows one holder per sequence group, so start only the first queued
+  // member of a group, and none when an executor already started for that group is unclaimed.
+  const startedGroups = new Set<string>();
+  for (const { taskId, sequenceGroup } of claimable) {
+    if (sequenceGroup && liveTasks.has(taskId.toUpperCase())) startedGroups.add(sequenceGroup);
+  }
+  for (const { taskId, repair, sequenceGroup } of claimable) {
     if (slots <= 0) break;
+    if (sequenceGroup && !liveTasks.has(taskId.toUpperCase()) && startedGroups.has(sequenceGroup)) {
+      continue;
+    }
     if (atLimit && !repair) {
       if (!liveTasks.has(taskId.toUpperCase())) heldIds.push(taskId);
       continue;
@@ -190,6 +199,7 @@ export async function spawnForEligibleClaims(
       await deps.spawn(taskId);
       out.spawned.push(taskId);
       slots -= 1;
+      if (sequenceGroup) startedGroups.add(sequenceGroup);
     } catch (err) {
       out.spawnErrors.push({ taskId, error: err instanceof Error ? err.message : String(err) });
     }

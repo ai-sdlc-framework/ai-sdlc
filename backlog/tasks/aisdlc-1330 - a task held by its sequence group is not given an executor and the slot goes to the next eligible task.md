@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1330
 title: 'A task held by its sequence group is not given an executor and the slot goes to the next eligible task'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-19'
 labels:

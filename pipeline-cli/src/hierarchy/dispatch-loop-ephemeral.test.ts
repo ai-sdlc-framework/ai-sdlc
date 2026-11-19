@@ -6,7 +6,8 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { writeHeartbeat, writeVerdict } from '../dispatch/board.js';
+import { writeHeartbeat, writeManifest, writeVerdict } from '../dispatch/board.js';
+import type { DispatchManifest } from '../dispatch/types.js';
 import { enqueueTasks } from '../dispatch/enqueue.js';
 import { readLoopState, runDispatchTick, type LoopDeps } from './dispatch-loop.js';
 import { readRosterChecked, writeRoster } from './roster.js';
@@ -66,6 +67,21 @@ function queue(taskId: string): void {
     baseSha: 'abc1234',
     dispatchedBy: 'operator-dispatch',
     resolveTaskFile: (id) => `backlog/tasks/${id.toLowerCase()}.md`,
+  });
+}
+
+function queueWith(taskId: string, extra: Partial<DispatchManifest>): void {
+  writeManifest(board, {
+    schemaVersion: 'v1',
+    taskId,
+    branch: `ai-sdlc/${taskId.toLowerCase()}`,
+    worktree: `.worktrees/${taskId.toLowerCase()}`,
+    baseSha: 'abc1234',
+    workerKind: 'any',
+    dispatchedAt: '2026-10-27T11:00:00.000Z',
+    dispatchedBy: 'operator-dispatch',
+    spec: { taskFile: 'x.md', verifyCommands: ['pnpm build'] },
+    ...extra,
   });
 }
 
@@ -193,6 +209,55 @@ describe('ephemeral executors in the tick', () => {
     const r = await runDispatchTick(deps());
     expect(spawns).toHaveLength(2);
     expect(r.ephemeral?.spawned).toEqual(spawns);
+  });
+
+  describe('sequence groups (AISDLC-1330)', () => {
+    const wide = () => {
+      const d = deps();
+      d.ephemeral!.cap = () => 3;
+      return d;
+    };
+
+    it('starts one task per group and the ungrouped task', async () => {
+      queueWith('AISDLC-101', { sequenceGroup: 'g', priority: 1 });
+      queueWith('AISDLC-102', { sequenceGroup: 'g', priority: 1 });
+      queueWith('AISDLC-103', { sequenceGroup: 'g', priority: 2 });
+      queueWith('AISDLC-120', { priority: 2 });
+      await runDispatchTick(wide());
+      expect(spawns).toHaveLength(2);
+      expect(spawns).toContain('AISDLC-120');
+      expect(spawns.filter((t) => t.startsWith('AISDLC-10'))).toHaveLength(1);
+    });
+
+    it('starts none of a group held by an inflight task and gives the slot on', async () => {
+      queueWith('AISDLC-111', { sequenceGroup: 'g' });
+      mkdirSync(path.join(board, 'inflight'), { recursive: true });
+      renameSync(
+        path.join(board, 'queue', 'AISDLC-111.dispatch.json'),
+        path.join(board, 'inflight', 'AISDLC-111.dispatch.json'),
+      );
+      queueWith('AISDLC-112', { sequenceGroup: 'g' });
+      queueWith('AISDLC-113', { sequenceGroup: 'g' });
+      queueWith('AISDLC-120', {});
+      await runDispatchTick(wide());
+      expect(spawns).toEqual(['AISDLC-120']);
+    });
+
+    it('starts no second member while an executor for the group has not claimed', async () => {
+      writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-101')] });
+      queueWith('AISDLC-101', { sequenceGroup: 'g' });
+      queueWith('AISDLC-102', { sequenceGroup: 'g' });
+      queueWith('AISDLC-120', {});
+      await runDispatchTick(wide());
+      expect(spawns).toEqual(['AISDLC-120']);
+    });
+
+    it('starts an ungrouped task whatever the group state', async () => {
+      queueWith('AISDLC-101', { sequenceGroup: 'g' });
+      queueWith('AISDLC-120', {});
+      await runDispatchTick(wide());
+      expect(spawns.sort()).toEqual(['AISDLC-101', 'AISDLC-120']);
+    });
   });
 
   it('spawns nothing for a task no executor may claim and reports the reason once (AISDLC-1121)', async () => {
