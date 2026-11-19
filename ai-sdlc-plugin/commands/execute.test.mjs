@@ -378,10 +378,8 @@ describe('/ai-sdlc execute — floors enforced by next-step are still documented
 
 describe('/ai-sdlc execute — path resolution (AISDLC-245.4, AISDLC-272)', () => {
   it('establishes PLUGIN_SCRIPTS_DIR from CLAUDE_PLUGIN_DIR, then CLAUDE_PLUGIN_ROOT, then the dogfood dir', () => {
-    assert.match(
-      cmdBody,
-      /PLUGIN_SCRIPTS_DIR="\$\{CLAUDE_PLUGIN_DIR:-\$\{CLAUDE_PLUGIN_ROOT:-\$\(pwd\)\/ai-sdlc-plugin\}\}\/scripts"/,
-    );
+    assert.match(cmdBody, /# >>> plugin-root preamble/);
+    assert.match(cmdBody, /PLUGIN_SCRIPTS_DIR="\$_c\/scripts"/);
   });
 
   it('delegates PIPELINE_CLI_BIN resolution to resolve-pipeline-cli.sh', () => {
