@@ -219,6 +219,33 @@ export interface DecisionsConfig {
    * (ready), so the decisions-sync source kind can land it when green and clean.
    */
   syncPrDraft?: boolean;
+  /**
+   * AISDLC-1344: minimum minutes between two decisions-sync pull requests. Events written
+   * inside the gap wait on the branch for the next pull request. Default 15.
+   */
+  syncPrMinIntervalMinutes?: number;
+  /** AISDLC-1344: most decisions-sync pull requests opened per UTC day. Default 24. */
+  syncPrMaxPerDay?: number;
+}
+
+export const DEFAULT_SYNC_PR_MIN_INTERVAL_MINUTES = 15;
+export const DEFAULT_SYNC_PR_MAX_PER_DAY = 24;
+
+/** The sync pull request spacing and daily ceiling, defaults filled in for unset or invalid values. */
+export function resolveSyncPrLimits(loaded: DecisionsConfig): {
+  minIntervalMinutes: number;
+  maxPerDay: number;
+} {
+  const ok = (n: unknown, fallback: number, min: number): number =>
+    typeof n === 'number' && Number.isFinite(n) && n >= min ? n : fallback;
+  return {
+    minIntervalMinutes: ok(
+      loaded.syncPrMinIntervalMinutes,
+      DEFAULT_SYNC_PR_MIN_INTERVAL_MINUTES,
+      0,
+    ),
+    maxPerDay: ok(loaded.syncPrMaxPerDay, DEFAULT_SYNC_PR_MAX_PER_DAY, 1),
+  };
 }
 
 // ── Loader ────────────────────────────────────────────────────────────────────

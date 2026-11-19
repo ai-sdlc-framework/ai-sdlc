@@ -187,7 +187,7 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     ghCalls.length = 0;
     writeFileSync(join(parent, '.ai-sdlc', 'decisions-config.yaml'), 'syncPrDraft: true\n');
     addDec(parent, 'DEC-0002');
-    persistDecisionLog({ workDir: parent, runner });
+    persistDecisionLog({ workDir: parent, runner, now: () => new Date(Date.now() + 3_600_000) });
     expect(ghCalls.find((a) => a[0] === 'pr' && a[1] === 'create')).toContain('--draft');
   });
 
@@ -373,5 +373,66 @@ describe('persistDecisionLog (AISDLC-546)', () => {
     const r = persistDecisionLog({ workDir: parent, runner, warn: (m) => warns.push(m) });
     expect(r).toMatchObject({ persisted: true, reason: 'already on main' });
     expect(warns.some((w) => /name does not match its content/.test(w))).toBe(true);
+  });
+});
+
+describe('sync pull request spacing and ceiling (AISDLC-1344)', () => {
+  const creates = (): number => ghCalls.filter((a) => a[1] === 'create').length;
+  const at =
+    (min: number): (() => Date) =>
+    () =>
+      new Date(Date.UTC(2026, 0, 1, 0, min, 0));
+  const escalations = (): string[] => {
+    try {
+      return readdirSync(join(parent, '.ai-sdlc', 'dispatch', 'escalations')).filter((n) =>
+        n.endsWith('.json'),
+      );
+    } catch {
+      return [];
+    }
+  };
+
+  it('a second persist inside the interval pushes the branch and opens no pull request; the next one after it carries the gap events', () => {
+    addDec(parent, 'DEC-0001');
+    expect(persistDecisionLog({ workDir: parent, runner, now: at(0) }).prUrl).toBeDefined();
+    addDec(parent, 'DEC-0002');
+    const second = persistDecisionLog({ workDir: parent, runner, now: at(5) });
+    expect(second.persisted).toBe(true);
+    expect(second.prUrl).toBeUndefined();
+    expect(creates()).toBe(1);
+    expect(syncLedger()).toContain('DEC-0002');
+    addDec(parent, 'DEC-0003');
+    const third = persistDecisionLog({ workDir: parent, runner, now: at(20) });
+    expect(third.prUrl).toBeDefined();
+    expect(creates()).toBe(2);
+    const ledger = syncLedger();
+    expect(ledger).toContain('DEC-0002');
+    expect(ledger).toContain('DEC-0003');
+  });
+
+  it('at the daily ceiling opens no pull request and writes one escalation file for the day', () => {
+    writeFileSync(
+      join(parent, '.ai-sdlc', 'decisions-config.yaml'),
+      'syncPrMinIntervalMinutes: 1\nsyncPrMaxPerDay: 2\n',
+    );
+    for (const [i, id] of ['DEC-0001', 'DEC-0002', 'DEC-0003', 'DEC-0004', 'DEC-0005'].entries()) {
+      addDec(parent, id);
+      persistDecisionLog({ workDir: parent, runner, now: at(i * 2) });
+    }
+    expect(creates()).toBe(2);
+    expect(escalations()).toHaveLength(1);
+  });
+
+  it('reads the interval from the decisions config instead of the default', () => {
+    writeFileSync(
+      join(parent, '.ai-sdlc', 'decisions-config.yaml'),
+      'syncPrMinIntervalMinutes: 2\n',
+    );
+    addDec(parent, 'DEC-0001');
+    persistDecisionLog({ workDir: parent, runner, now: at(0) });
+    addDec(parent, 'DEC-0002');
+    // 5 minutes is inside the 15 minute default but past the configured 2.
+    expect(persistDecisionLog({ workDir: parent, runner, now: at(5) }).prUrl).toBeDefined();
+    expect(creates()).toBe(2);
   });
 });
