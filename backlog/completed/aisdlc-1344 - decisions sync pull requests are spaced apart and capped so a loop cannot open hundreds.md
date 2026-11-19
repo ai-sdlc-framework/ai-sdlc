@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1344
 title: 'Decisions sync pull requests are spaced apart and capped, so a loop cannot open hundreds'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
