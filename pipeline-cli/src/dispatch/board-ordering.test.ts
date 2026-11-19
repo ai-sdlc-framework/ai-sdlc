@@ -29,6 +29,7 @@ import {
   isOnBoard,
   listBoard,
   patchDoneVerdict,
+  peekQueueOrder,
   readInflightManifest,
   readResumeSignal,
   removeResumeSignal,
@@ -187,6 +188,14 @@ describe('claim rules', () => {
       _setMtimeForTest(writeManifest(board, mk(id, extra)), 1_000_000 + t * 1000);
     }
     expect(listBoard(board).map((e) => e.taskId)).toEqual(['T-3', 'T-2', 'T-1']);
+  });
+
+  it('peekQueueOrder returns sequenceGroup only for a grouped task (AISDLC-1330)', () => {
+    writeManifest(board, mk('T-1', { sequenceGroup: 'g' }));
+    writeManifest(board, mk('T-2'));
+    const rows = peekQueueOrder(board);
+    expect(rows.find((r) => r.taskId === 'T-1')?.sequenceGroup).toBe('g');
+    expect('sequenceGroup' in rows.find((r) => r.taskId === 'T-2')!).toBe(false);
   });
 
   it('skips a blockedBy manifest and ignores blocked/, until unblocked', () => {
