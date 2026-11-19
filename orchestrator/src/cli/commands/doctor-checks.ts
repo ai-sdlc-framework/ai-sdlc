@@ -76,7 +76,9 @@ import {
   interpretCheckIgnoreExit,
   missingRuntimeGitignorePaths,
 } from '../../runtime-gitignore.js';
+import { diagnoseLegacyWorkflows, migrateLegacyWorkflows } from './init-legacy-workflows.js';
 import {
+  AI_SDLC_GATE_WORKFLOW,
   HUSKY_PREPUSH_SIGN_SNIPPET,
   hasStaleAttestationSignReference,
   stripStaleAttestationSignBlock,
@@ -3133,11 +3135,6 @@ export function checkFeatureFlags(ctx: DoctorRunContext): DoctorCheckResult {
 /** Feature → the workflow files its init template scaffolds, keyed by an "enabled" artifact. */
 const FEATURE_WORKFLOWS: Array<{ feature: string; enabledBy: string; workflow: string }> = [
   {
-    feature: 'attestation',
-    enabledBy: '.ai-sdlc/trusted-reviewers.yaml',
-    workflow: '.github/workflows/verify-attestation.yml',
-  },
-  {
     feature: 'dor',
     enabledBy: '.ai-sdlc/dor-config.yaml',
     workflow: '.github/workflows/dor-ingress.yml',
@@ -3166,6 +3163,53 @@ export function checkFeatureWorkflows(ctx: DoctorRunContext): DoctorCheckResult 
     remediation: 'Run `ai-sdlc init --add workflows` to scaffold the missing workflow files',
     anonymizableEvidence: { missingFeatures: missing.map((m) => m.feature) },
   };
+}
+
+// ── Check: retired verifier / gate without a verdict job (AISDLC-1353) ────
+
+function legacyIo(ctx: DoctorRunContext) {
+  return {
+    read: (rel: string) => ctx.adapters.readFile(join(ctx.projectDir, rel)),
+    write: (rel: string, contents: string) =>
+      ctx.adapters.writeFile(join(ctx.projectDir, rel), contents),
+    remove: ctx.adapters.removeFile
+      ? (rel: string) => ctx.adapters.removeFile?.(join(ctx.projectDir, rel))
+      : undefined,
+  };
+}
+
+export function checkLegacyWorkflows(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'legacy-workflows';
+  const findings = diagnoseLegacyWorkflows(legacyIo(ctx).read);
+  if (findings.length === 0) {
+    return {
+      id,
+      severity: 'pass',
+      title: 'no retired attestation verifier; the gate checks the review verdict',
+    };
+  }
+  return {
+    id,
+    severity: 'fail',
+    title: findings.map((f) => f.detail).join(' | '),
+    remediation: findings.every((f) => f.pristine)
+      ? 'Run `ai-sdlc doctor --fix` (or re-run `ai-sdlc init`) to replace the old files'
+      : 'Make the listed edits by hand; `ai-sdlc doctor --fix` replaces only files that are byte-identical to the old templates and never overwrites an edited file',
+    anonymizableEvidence: { legacyWorkflows: findings.map((f) => f.kind) },
+  };
+}
+
+export function fixLegacyWorkflows(ctx: DoctorRunContext): DoctorFixResult {
+  const id = 'legacy-workflows';
+  const actions = migrateLegacyWorkflows(legacyIo(ctx), AI_SDLC_GATE_WORKFLOW);
+  if (actions.length === 0) return { id, applied: false, detail: 'nothing to replace' };
+  const done = actions.filter((a) => a.outcome !== 'reported');
+  const left = actions.filter((a) => a.outcome === 'reported');
+  const detail = [
+    ...done.map((a) => `${a.outcome} ${a.finding.path}`),
+    ...left.map((a) => `left ${a.finding.path} unchanged: ${a.finding.detail}`),
+  ].join('; ');
+  return { id, applied: done.length > 0, detail };
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────
@@ -3373,6 +3417,13 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     id: 'feature-workflows',
     description: 'Workflow files exist for every enabled feature (AISDLC-582).',
     run: checkFeatureWorkflows,
+  },
+  {
+    id: 'legacy-workflows',
+    description:
+      'No retired verify-attestation.yml and a gate with a verdict-check job (RFC-0061, AISDLC-1353).',
+    run: checkLegacyWorkflows,
+    fix: fixLegacyWorkflows,
   },
   {
     id: 'hook-env-hygiene',

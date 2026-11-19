@@ -196,7 +196,6 @@ Expected output (paths may vary):
 [ai-sdlc:init] write .ai-sdlc/dor-config.yaml
 [ai-sdlc:init] write .ai-sdlc/trusted-reviewers.yaml
 [ai-sdlc:init] write .github/workflows/ai-sdlc-gate.yml
-[ai-sdlc:init] write .github/workflows/verify-attestation.yml
 [ai-sdlc:init] write .github/workflows/ai-sdlc-review.yml
 [ai-sdlc:init] write .github/workflows/auto-enable-auto-merge.yml
 [ai-sdlc:init] write CLAUDE.md
