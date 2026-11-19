@@ -220,6 +220,8 @@ describe('loadOperationalPolicy', () => {
       forcePushMode: 'never',
       protectedBranches: [],
       openTaskPrsReady: false,
+      allowMerge: 'never',
+      mergeAuthors: [],
     });
   });
 });

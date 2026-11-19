@@ -92,7 +92,7 @@ import {
   type HumanAttentionRow,
 } from './human-attention.js';
 import type { ClearResult } from './clear.js';
-import type { LandReport } from './land-eligible.js';
+import { noteMissingLandGrant, type LandReport } from './land-eligible.js';
 import type { DispatchTickMarker } from '../usage/dispatch-turns.js';
 import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
@@ -1141,6 +1141,10 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const landAndRepair = async (): Promise<void> => {
     if (landDone || !readGithub) return;
     landDone = true;
+    if (deps.landEligible && !deps.operational.has('land-eligible-prs')) {
+      // AISDLC-1351: the pass is skipped for lack of a grant; say so once instead of silently.
+      noteMissingLandGrant(deps.boardDir);
+    }
     if (deps.landEligible && deps.operational.has('land-eligible-prs')) {
       try {
         landed = await deps.landEligible();

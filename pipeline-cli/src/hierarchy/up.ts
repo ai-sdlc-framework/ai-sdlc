@@ -12,7 +12,7 @@ import path from 'node:path';
 import { routedLaunchProfile } from '../routing/role-model.js';
 import type { LaunchProfile } from '../routing/default-table.js';
 
-import { loadOperationalPolicy } from './operational.js';
+import { loadOperationalPolicy, mergeOffLines } from './operational.js';
 import { verifiedMainRoot } from './trusted-root.js';
 import { loadPrLifecycleConfig } from './pr-lifecycle-config.js';
 import { schedulerUp } from './reconcile-scheduler.js';
@@ -485,6 +485,7 @@ export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): P
       'warning: allowForcePush resolves to never; executors cannot lease-push. Check .ai-sdlc/agent-role.yaml in the repository root',
     );
   }
+  for (const line of mergeOffLines(policy)) deps.log(`warning: ${line}`);
   ensureFreshRepoBuild(deps, opts.rebuild === true);
   const count = parseExecutorCount(opts.executors);
   if (count > 0) {

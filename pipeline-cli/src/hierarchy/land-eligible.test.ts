@@ -187,7 +187,7 @@ describe('landEligiblePrs', () => {
       throw new Error('must not be called');
     };
     const gh = fakeGh([pr(1)]);
-    expect(await landEligiblePrs(deps(gh, never, []))).toEqual({ landed: [], refused: [] });
+    expect(await landEligiblePrs(deps(gh, never, []))).toMatchObject({ landed: [], refused: [] });
     expect(gh.calls).toEqual([]);
     const bad: CommandRunner = () => ({ status: 0, stdout: 'not json', stderr: '' });
     expect((await landEligiblePrs({ ...deps(gh, never), run: bad })).error).toMatch(/unreadable/);
@@ -288,5 +288,26 @@ describe('the governed merge path', () => {
     walk(path.join(root, 'pipeline-cli', 'src'));
     // AISDLC-975 emptied the grandfather list; every arm goes through the gate.
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('an empty mergeAuthors list (AISDLC-1351)', () => {
+  it('records a note naming the key and the file, once, and never calls gh', async () => {
+    const { run, calls } = fakeGh([]);
+    const deps = {
+      boardDir: board,
+      repoRoot: '/repo',
+      run,
+      mergeAuthors: [],
+      land: async () => ({ merged: false, armed: false, reason: '' }),
+    };
+    const report = await landEligiblePrs(deps);
+    expect(calls).toEqual([]);
+    expect(report.disabled).toContain('mergeAuthors');
+    expect(report.disabled).toContain('.ai-sdlc/agent-role.yaml');
+    const note = path.join(board, 'notes', 'land-disabled.mergeAuthors.txt');
+    expect(readFileSync(note, 'utf-8')).toContain('mergeAuthors');
+    await landEligiblePrs(deps);
+    expect(readdirSync(path.join(board, 'notes'))).toEqual(['land-disabled.mergeAuthors.txt']);
   });
 });

@@ -148,7 +148,7 @@ describe('setup and init write the same files (AISDLC-1354)', () => {
     expect(r.spec.constraints.maxFilesPerChange).toBe(15);
     expect(r.spec.constraints.requireTests).toBe(true);
     expect(r.spec.constraints.blockedPaths).toEqual(['.github/workflows/**', '.ai-sdlc/**']);
-    expect(raw).toContain('# governance:');
+    expect(raw).toContain('# allowForcePush:');
   });
 
   it('init.ts holds no copy of either template and writes them only through the manifest', () => {

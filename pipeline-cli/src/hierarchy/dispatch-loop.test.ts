@@ -946,6 +946,12 @@ describe('nextWakeSec (idle hibernation)', () => {
     expect(denied.nextWakeSec).toBe(WAKE_IDLE_SEC);
   });
 
+  it('records a note naming the missing land-eligible-prs grant (AISDLC-1351)', async () => {
+    await runDispatchTick(deps({ landEligible: async () => ({ landed: [], refused: [] }) }));
+    const note = path.join(board, 'notes', 'land-disabled.operational.txt');
+    expect(readFileSync(note, 'utf-8')).toContain('land-eligible-prs');
+  });
+
   it('lands eligible PRs only when land-eligible-prs is granted (AISDLC-894)', async () => {
     let calls = 0;
     const landEligible = async () => {

@@ -2260,6 +2260,69 @@ export function checkForcePushPolicy(ctx: DoctorRunContext): DoctorCheckResult {
   };
 }
 
+// ── Merge policy (AISDLC-1351) ──────────────────────────────────────────
+
+const MERGE_POLICY_FILE = '.ai-sdlc/agent-role.yaml';
+
+/**
+ * Reports whether agent-role.yaml states the three merge keys (`allowMerge`,
+ * `mergeAuthors`, `operational`). A file with no `governance` block, or one that
+ * omits a key, fails: the board then never merges and says nothing. Any stated
+ * value passes, including `allowMerge: never`; the title says when merging is off.
+ */
+export function checkMergePolicy(ctx: DoctorRunContext): DoctorCheckResult {
+  const text = ctx.adapters.readFile(join(ctx.projectDir, MERGE_POLICY_FILE));
+  const fail = (detail: string): DoctorCheckResult => ({
+    id: 'merge-policy',
+    severity: 'fail',
+    title: `${MERGE_POLICY_FILE}: ${detail}`,
+    remediation: `State spec.governance.allowMerge (never | onGreenClean), spec.governance.mergeAuthors (list of logins) and spec.governance.operational (list, include land-eligible-prs to let the board land PRs) in ${MERGE_POLICY_FILE}.`,
+  });
+  if (text === null) {
+    // A missing file is the config-manifest check's finding; here it only warns.
+    return {
+      id: 'merge-policy',
+      severity: 'warn',
+      title: `${MERGE_POLICY_FILE} not found, so no merge setting is stated`,
+      remediation: `Run /ai-sdlc:setup to scaffold ${MERGE_POLICY_FILE}.`,
+    };
+  }
+  let gov: Record<string, unknown> | undefined;
+  try {
+    const doc = parseYaml(text) as { spec?: { governance?: unknown } } | null;
+    const g = doc?.spec?.governance;
+    if (g && typeof g === 'object' && !Array.isArray(g)) gov = g as Record<string, unknown>;
+  } catch {
+    return fail('unreadable YAML, so no merge setting can be read');
+  }
+  if (!gov) return fail('no spec.governance block, so the board never merges and says nothing');
+  const missing = ['allowMerge', 'mergeAuthors', 'operational'].filter((k) => !(k in gov));
+  if (missing.length > 0) return fail(`spec.governance does not state ${missing.join(', ')}`);
+  if (gov.allowMerge !== 'never' && gov.allowMerge !== 'onGreenClean') {
+    return fail(
+      `allowMerge is ${JSON.stringify(gov.allowMerge)}; only never or onGreenClean are read, anything else keeps never`,
+    );
+  }
+  if (!Array.isArray(gov.mergeAuthors) || !Array.isArray(gov.operational)) {
+    return fail('mergeAuthors and operational must each be a list');
+  }
+  const off: string[] = [];
+  if (gov.allowMerge === 'never') off.push('allowMerge is never');
+  if (gov.mergeAuthors.length === 0) off.push('mergeAuthors is empty');
+  if (!gov.operational.includes('land-eligible-prs')) {
+    off.push('operational lacks land-eligible-prs');
+  }
+  return {
+    id: 'merge-policy',
+    severity: 'pass',
+    title:
+      off.length === 0
+        ? `${MERGE_POLICY_FILE} states the merge settings (allowMerge: ${gov.allowMerge})`
+        : `${MERGE_POLICY_FILE} states the merge settings; merging is off (${off.join('; ')})`,
+    anonymizableEvidence: { allowMerge: gov.allowMerge, mergingOff: off.length > 0 },
+  };
+}
+
 // ── Judgment layer ──────────────────────────────────────────────────────
 
 /**
@@ -3437,6 +3500,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Effective spec.governance.allowForcePush value and whether it is the default or set in agent-role.yaml (AISDLC-710).',
     run: checkForcePushPolicy,
+  },
+  {
+    id: 'merge-policy',
+    description:
+      'agent-role.yaml states allowMerge, mergeAuthors and operational, and says when merging is off (AISDLC-1351).',
+    run: checkMergePolicy,
   },
   {
     id: 'judgment-layer',

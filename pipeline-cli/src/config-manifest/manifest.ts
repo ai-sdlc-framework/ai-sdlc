@@ -82,16 +82,37 @@ export type AgentRoleTier = 'coding' | 'research' | 'meta';
 export const AGENT_ROLE_TIERS: readonly AgentRoleTier[] = ['coding', 'research', 'meta'] as const;
 
 /**
- * Documents the governance defaults in every scaffolded agent-role.yaml (AISDLC-710).
- * Commented out on purpose: unset means the default, `allowForcePush: leaseOnOwnBranch`.
+ * The merge settings every scaffolded agent-role.yaml states (AISDLC-1351). The values are
+ * this one constant. They are `never` and empty until the operator decides what a new adopter
+ * gets, so nothing is loosened; `up`, `status`, the landing note and doctor read the resolved
+ * policy, not this constant, and say so when merging is off.
  */
-export const AGENT_ROLE_GOVERNANCE_COMMENT = `  # Governance (optional; every key defaults when unset). allowForcePush defaults
-  # to leaseOnOwnBranch: \`git push --force-with-lease\` of a dispatched task's own
-  # branch is allowed (never main/master/protected branches, never plain force).
-  # Uncomment to change it; \`never\` makes agents ask before every lease push.
-  # governance:
-  #   allowForcePush: leaseOnOwnBranch   # never | leaseOnOwnBranch
+export const AGENT_ROLE_MERGE_DEFAULTS: {
+  allowMerge: 'never' | 'onGreenClean';
+  mergeAuthors: readonly string[];
+  operational: readonly string[];
+} = {
+  allowMerge: 'never',
+  mergeAuthors: [],
+  operational: [],
+};
+
+/** Governance block of every scaffolded agent-role.yaml: the merge keys, then the commented lease-push key. */
+export function renderAgentRoleGovernance(d = AGENT_ROLE_MERGE_DEFAULTS): string {
+  const list = (key: string, items: readonly string[]): string =>
+    items.length === 0
+      ? `    ${key}: []\n`
+      : `    ${key}:\n${items.map((i) => `      - ${i}`).join('\n')}\n`;
+  return `  governance:
+    # Merge settings (AISDLC-1351). allowMerge: never | onGreenClean. With \`never\`, an empty
+    # mergeAuthors or an operational list without land-eligible-prs the board never merges;
+    # \`cli-hierarchy up\`, \`status\` and \`doctor\` say so. Set all three to let it land PRs.
+    allowMerge: ${d.allowMerge}
+${list('mergeAuthors', d.mergeAuthors)}${list('operational', d.operational)}    # allowForcePush defaults to leaseOnOwnBranch (a lease push of a dispatched
+    # task's own branch; never main/master/protected branches).
+    # allowForcePush: leaseOnOwnBranch   # never | leaseOnOwnBranch
 `;
+}
 
 const AGENT_ROLE_BACKSTORY = `  backstory: >-
     You are an AI coding agent. You work under strict constraints and every
@@ -180,7 +201,7 @@ ${t.tools}${AGENT_ROLE_TOOLS_TAIL}  constraints:
     blockedPaths:
       - .github/workflows/**
       - .ai-sdlc/**
-${AGENT_ROLE_GOVERNANCE_COMMENT}`;
+${renderAgentRoleGovernance()}`;
 }
 
 function renderAgentRoleFromAnswers(answers: Readonly<Record<string, string>>): string {

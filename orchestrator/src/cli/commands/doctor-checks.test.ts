@@ -71,6 +71,7 @@ import {
   fixConfigManifest,
   fixWorktreeHooks,
   checkForcePushPolicy,
+  checkMergePolicy,
   checkPluginInstallEntries,
   readForcePushPolicy,
   runDoctorChecks,
@@ -3047,5 +3048,47 @@ describe('checkRequiredContextsPosted (AISDLC-1352)', () => {
     const r = run(['ai-sdlc/pr-ready'], {});
     expect(r.severity).toBe('warn');
     expect(r.title).toContain('not checked');
+  });
+});
+
+describe('checkMergePolicy (AISDLC-1351)', () => {
+  const run = (yaml: string | null) => {
+    if (yaml !== null) {
+      mkdirSync(join(tmpDir, '.ai-sdlc'), { recursive: true });
+      writeFileSync(join(tmpDir, '.ai-sdlc', 'agent-role.yaml'), yaml);
+    }
+    return checkMergePolicy(makeCtx(makeAdapters()));
+  };
+  const gov = (body: string) => `spec:\n  governance:\n${body}`;
+
+  it('warns with no file and fails on unreadable YAML or no governance block', () => {
+    expect(run(null).severity).toBe('warn');
+    expect(checkMergePolicy(makeCtx(makeAdapters({ readFile: () => 'a: [' }))).severity).toBe(
+      'fail',
+    );
+    expect(run('spec:\n  role: x\n').severity).toBe('fail');
+  });
+
+  it('fails when a key is missing, malformed, or not a list', () => {
+    expect(run(gov('    allowMerge: never\n')).title).toContain('mergeAuthors, operational');
+    const bad = run(gov('    allowMerge: yes\n    mergeAuthors: []\n    operational: []\n'));
+    expect(bad.severity).toBe('fail');
+    expect(bad.title).toContain('allowMerge');
+    expect(
+      run(gov('    allowMerge: never\n    mergeAuthors: a\n    operational: []\n')).severity,
+    ).toBe('fail');
+  });
+
+  it('passes with the three keys stated, saying when merging is off', () => {
+    const never = run(gov('    allowMerge: never\n    mergeAuthors: []\n    operational: []\n'));
+    expect(never.severity).toBe('pass');
+    expect(never.title).toContain('merging is off');
+    const on = run(
+      gov(
+        '    allowMerge: onGreenClean\n    mergeAuthors: [a]\n    operational: [land-eligible-prs]\n',
+      ),
+    );
+    expect(on.severity).toBe('pass');
+    expect(on.title).not.toContain('merging is off');
   });
 });

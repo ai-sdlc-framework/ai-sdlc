@@ -163,7 +163,12 @@ export interface HierarchyDeps {
   /** Resolves the repository root `cwd` belongs to, or null (AISDLC-664.6). Absent: the verified git main checkout. */
   resolveRoot?: (cwd: string) => string | null;
   /** Loads the dispatch policy the executors will see (AISDLC-664.6). Absent: read from the verified main checkout. */
-  loadPolicy?: (root: string) => { forcePushMode: string; operational: Iterable<string> };
+  loadPolicy?: (root: string) => {
+    forcePushMode: string;
+    operational: Iterable<string>;
+    allowMerge?: string;
+    mergeAuthors?: readonly string[];
+  };
 }
 
 /**
