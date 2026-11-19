@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1319
 title: 'Budget pacer lifts its hold when usage is back inside the margin and status shows the hold'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-18'
 labels:
