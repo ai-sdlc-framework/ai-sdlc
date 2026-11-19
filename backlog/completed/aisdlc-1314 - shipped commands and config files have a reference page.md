@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1314
 title: 'Shipped commands and config files have a reference page'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-18'
 labels:
