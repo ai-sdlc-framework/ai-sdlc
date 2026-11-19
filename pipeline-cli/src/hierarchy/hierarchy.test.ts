@@ -353,6 +353,45 @@ function legacyEntry(name: string, role: 'planner' | 'operator-dispatch' | 'exec
   });
 }
 
+describe('formatStatus MODULE column (AISDLC-1358)', () => {
+  it('prints failing: <reason>', () => {
+    const lines = formatStatus({
+      rows: [
+        {
+          entry: {
+            role: 'operator-dispatch',
+            name: 'p-dispatch',
+            tmuxSession: 'x',
+            tmuxWindow: 'x',
+            model: 'sonnet',
+            permissionMode: 'bypassPermissions',
+            startedAt: '2026-10-27T11:55:00Z',
+          },
+          state: 'busy',
+          attached: false,
+          module: { state: 'failing', reason: 'Cannot find module' },
+        },
+      ],
+      board: { queued: 0, inflight: 0, done: 0, failed: 0 },
+      webhook: { running: false },
+      scheduler: { running: false },
+    } as never);
+    expect(lines.join('\n')).toContain('failing: Cannot find module');
+  });
+});
+
+describe('up records the cli bin directory (AISDLC-1358)', () => {
+  it('writes cli-bin.json with the bin directory and rewrites it on a second up', async () => {
+    deps.binPath = '/inst/one/bin/cli-hierarchy.mjs';
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    const file = path.join(boardDir, 'handoff', 'cli-bin.json');
+    expect(JSON.parse(readFileSync(file, 'utf8')).binDir).toBe('/inst/one/bin');
+    deps.binPath = '/inst/two/bin/cli-hierarchy.mjs';
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    expect(JSON.parse(readFileSync(file, 'utf8')).binDir).toBe('/inst/two/bin');
+  });
+});
+
 describe('formatStatus dynamic executors (AISDLC-1075)', () => {
   it('lists each dynamic executor with its task id and age', () => {
     const row = (taskId: string | undefined, startedAt: string) =>

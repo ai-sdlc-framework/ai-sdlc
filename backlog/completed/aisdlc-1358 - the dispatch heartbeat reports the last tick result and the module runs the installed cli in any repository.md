@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1358
 title: 'The dispatch heartbeat reports the last tick result, and the module runs the installed CLI in any repository'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
