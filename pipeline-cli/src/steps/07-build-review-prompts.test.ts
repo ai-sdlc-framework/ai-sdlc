@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, writeFileSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import {
   buildReviewPrompts,
   parseBinaryNumstat,
@@ -176,6 +176,29 @@ describe('Step 7 — buildReviewPrompts', () => {
     const marker = nonceMarkerLiteral(r.nonce as string);
     expect(r.prompts.length).toBeGreaterThan(0);
     for (const p of r.prompts) expect(p.prompt).toContain(marker);
+  });
+
+  it('AISDLC-1334: every prompt opens with an attribution block naming the task id and absolute worktree', async () => {
+    const fake = new FakeRunner()
+      .on(/^git rev-parse HEAD$/, ok(`${'b'.repeat(40)}\n`))
+      .on(/^git -c core\.quotePath=false diff /, ok('d\n'));
+    const r = await buildReviewPrompts({
+      taskId: 'AISDLC-1',
+      task,
+      branch: 'b',
+      worktreePath: tmp,
+      workDir: tmp,
+      runner: fake.toRunner(),
+      codexAvailable: false,
+    });
+    expect(r.prompts.length).toBeGreaterThan(0);
+    for (const p of r.prompts) {
+      const block = p.prompt.split('## Task\n')[0] as string;
+      expect(block).toContain('## Attribution');
+      expect(block).toContain('task id: AISDLC-1');
+      expect(block).toContain(`worktree: ${resolve(tmp)}`);
+      expect(isAbsolute(resolve(tmp))).toBe(true);
+    }
   });
 
   it('returns the resolved model per reviewer (security on opus, others on sonnet)', async () => {

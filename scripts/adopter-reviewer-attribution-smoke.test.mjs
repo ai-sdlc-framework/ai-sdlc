@@ -27,7 +27,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -99,71 +99,41 @@ describe('AISDLC-625 — adopter-environment reviewer attribution smoke test', (
     assert.equal(result.status, 0, 'plugin-bundled resolver must be executable');
   });
 
-  it('a no-attribution consumer repo, invoking the BUNDLED resolver via $CLAUDE_PLUGIN_ROOT, fails SOFT (exit 0) with a unique UNKNOWN id — not exit 1/127, not a refusal', () => {
+  it('a no-attribution consumer repo, invoking the BUNDLED resolver via $CLAUDE_PLUGIN_ROOT, exits non-zero naming cause and fix and invents no UNKNOWN id (AISDLC-1334)', () => {
     const consumerDir = consumerRepoDir();
     try {
-      // Adopter topology: no .active-task, no AI_SDLC_ACTIVE_TASK_ID, and
-      // (mkdtemp'd dir has no scripts/ subdir) no monorepo-relative script
-      // either — only the plugin-bundled copy, reached the way an adopter's
-      // plugin install exposes it.
       const env = adopterEnv({ CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT });
       const result = spawnSync('bash', [PLUGIN_RESOLVER, 'code-reviewer'], {
         cwd: consumerDir,
         env,
         encoding: 'utf-8',
       });
-
-      // The #970 regression: this used to be status 1, stdout '', a
-      // refusal on stderr. AISDLC-623 restores fail-soft — assert the
-      // restored contract explicitly, not just "didn't crash".
-      assert.equal(
-        result.status,
-        0,
-        `resolver must exit 0 in an adopter/consumer environment (fail-soft, AISDLC-623), got status=${result.status} stderr=${result.stderr}`,
-      );
-      const id = result.stdout.trim();
-      assert.match(
-        id,
-        /^UNKNOWN-code-reviewer-[0-9TZ]+-[0-9a-f]+-[0-9]+$/,
-        `expected a unique synthesized UNKNOWN-code-reviewer-... id, got '${id}'`,
-      );
-      // Must also satisfy the transcript-directory path-shape guard the
-      // caller applies before mkdir -p .ai-sdlc/transcripts/<id>.
-      assert.match(id, /^[A-Za-z0-9][A-Za-z0-9._-]*$/);
+      assert.notEqual(result.status, 0);
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /Fix:/);
+      assert.doesNotMatch(result.stdout + result.stderr, /UNKNOWN-/);
     } finally {
       rmSync(consumerDir, { recursive: true, force: true });
     }
   });
 
-  it('two separate no-attribution runs of the SAME reviewer never resolve to the same transcript id (the AISDLC-562 no-collision property, preserved under fail-soft)', () => {
-    // Use the SAME reviewer name for BOTH runs: the reviewer name is embedded
-    // in the synthesized id, so passing different names would make the ids
-    // differ trivially without exercising the timestamp/random/pid uniqueness
-    // logic at all. Same name means the ids can ONLY differ via that
-    // uniqueness suffix — which is exactly the AISDLC-562 no-collision property
-    // (two concurrent unattributed runs of the same reviewer type).
-    const dirA = consumerRepoDir();
-    const dirB = consumerRepoDir();
+  it('a reviewer starting in a consumer parent resolves from the prompt id and worktree and leaves the parent untouched (AISDLC-1334)', () => {
+    const consumerDir = consumerRepoDir();
+    const worktree = consumerRepoDir();
     try {
+      writeFileSync(join(worktree, '.active-task'), 'TASK-7\n');
       const env = adopterEnv({ CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT });
-      const a = spawnSync('bash', [PLUGIN_RESOLVER, 'code-reviewer'], {
-        cwd: dirA,
+      const result = spawnSync('bash', [PLUGIN_RESOLVER, 'code-reviewer', 'TASK-7', worktree], {
+        cwd: consumerDir,
         env,
         encoding: 'utf-8',
       });
-      const b = spawnSync('bash', [PLUGIN_RESOLVER, 'code-reviewer'], {
-        cwd: dirB,
-        env,
-        encoding: 'utf-8',
-      });
-      assert.equal(a.status, 0);
-      assert.equal(b.status, 0);
-      assert.notEqual(a.stdout.trim(), '');
-      assert.notEqual(b.stdout.trim(), '');
-      assert.notEqual(a.stdout.trim(), b.stdout.trim());
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout.trim(), 'TASK-7');
+      assert.deepEqual(readdirSync(consumerDir), []);
     } finally {
-      rmSync(dirA, { recursive: true, force: true });
-      rmSync(dirB, { recursive: true, force: true });
+      rmSync(consumerDir, { recursive: true, force: true });
+      rmSync(worktree, { recursive: true, force: true });
     }
   });
 
@@ -212,7 +182,7 @@ describe('AISDLC-625 — adopter-environment reviewer attribution smoke test', (
       assert.equal(
         result.stdout.trim(),
         '',
-        'with no plugin env vars and no monorepo-relative script, the chain correctly resolves nothing — this is the case the .md Step 0 fallback branch (inline unique-id synthesis) exists to cover',
+        'with no plugin env vars and no monorepo-relative script, the chain correctly resolves nothing — the .md Step 0 then writes no transcript (AISDLC-1334)',
       );
     } finally {
       rmSync(consumerDir, { recursive: true, force: true });

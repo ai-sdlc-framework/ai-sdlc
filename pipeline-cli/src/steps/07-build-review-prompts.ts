@@ -25,7 +25,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { BuildReviewPromptsResult, ReviewPrompt, ReviewerType, TaskSpec } from '../types.js';
 import { resolveTargetBranch } from './02-compute-branch.js';
@@ -369,6 +369,7 @@ export async function buildReviewPrompts(
       baseRef,
       prompt: buildPrompt(reviewer, {
         taskId: opts.taskId,
+        worktreePath: opts.worktreePath,
         title: opts.task.title,
         description: opts.task.description,
         acList,
@@ -445,6 +446,8 @@ export function stubBinaryHunks(
 
 interface PromptInputs {
   taskId: string;
+  /** Absolute task worktree path; reviewers start in the parent checkout and write only here (AISDLC-1334). */
+  worktreePath: string;
   title: string;
   description: string;
   acList: string;
@@ -471,6 +474,10 @@ function buildPrompt(reviewer: ReviewerType, inputs: PromptInputs): string {
 
   return (
     `You are the ${reviewer} for backlog task ${inputs.taskId}.\n\n` +
+    `## Attribution\n` +
+    `task id: ${inputs.taskId}\n` +
+    `worktree: ${resolvePath(inputs.worktreePath)}\n` +
+    `You start in the parent checkout, not this worktree. Write only under the worktree above, by absolute path; never write into your working directory.\n\n` +
     `## Task\n${inputs.title}\n\n` +
     `## Description\n${inputs.description}\n\n` +
     `## Acceptance criteria\n${inputs.acList}\n\n` +
