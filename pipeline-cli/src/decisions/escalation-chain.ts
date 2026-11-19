@@ -14,6 +14,7 @@
  * @module decisions/escalation-chain
  */
 
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 import { now } from '../clock.js';
@@ -38,6 +39,7 @@ import {
 import { loadDecisionsConfig, type DecisionsConfig } from './decisions-config.js';
 import { appendDecisionEvent, makeRoutingChangedEvent } from './event-log.js';
 import { listDecisions } from './projection.js';
+import { DECISIONS_SYNC_BRANCH } from './remote-persist.js';
 
 /** Default minutes an escalated decision may wait at a tier. */
 export const DEFAULT_ESCALATION_TIMEBOX_MINUTES = { operational: 30, design: 240 } as const;
@@ -383,6 +385,47 @@ export interface PromotedDecision {
   notified?: NotifyResult;
 }
 
+const EVENTS_DIR = '.ai-sdlc/_decisions/events';
+const MOVE_REFS = ['origin/main', `origin/${DECISIONS_SYNC_BRANCH}`];
+
+/**
+ * AISDLC-1343: tier moves (`<decisionId>><toTier>`) recorded in `routing-changed` events on
+ * `origin/main` and on the open sync branch, whether or not the file is in the local tree.
+ * A missing ref or an unreadable file is skipped.
+ */
+export function readRemoteTierMoves(workDir: string): Set<string> {
+  const moves = new Set<string>();
+  const git = (args: string[]): string =>
+    execFileSync('git', args, {
+      cwd: workDir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  for (const ref of MOVE_REFS) {
+    let names: string[];
+    try {
+      names = git(['ls-tree', '--name-only', ref, `${EVENTS_DIR}/`])
+        .split('\n')
+        .filter((n) => n.includes('__routing-changed__'));
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      try {
+        const e = JSON.parse(git(['show', `${ref}:${name}`])) as {
+          decisionId?: string;
+          toTier?: string;
+        };
+        if (e.decisionId && e.toTier) moves.add(`${e.decisionId}>${e.toTier}`);
+      } catch {
+        /* skip */
+      }
+    }
+  }
+  return moves;
+}
+
 /**
  * Move every escalated decision whose tier timebox has lapsed up one tier,
  * record the move, emit `DecisionEscalated` and tell the new tier. With
@@ -393,11 +436,15 @@ export function promoteExpiredDecisions(
   opts: { workDir: string; now?: Date; dryRun?: boolean; persist?: () => void },
 ): PromotedDecision[] {
   const { decisions } = listDecisions({ workDir: opts.workDir });
-  const due = findDueDecisions(
+  const candidates = findDueDecisions(
     decisions,
     opts.now ?? now(),
     loadDecisionsConfig({ workDir: opts.workDir }),
   );
+  if (candidates.length === 0) return [];
+  // A move that already merged counts even when its file is gone locally.
+  const moved = readRemoteTierMoves(opts.workDir);
+  const due = candidates.filter((d) => !moved.has(`${d.decision.metadata.id}>${d.toTier}`));
   if (due.length === 0) return [];
   const chain = opts.dryRun ? undefined : deps();
   const promoted: PromotedDecision[] = [];
