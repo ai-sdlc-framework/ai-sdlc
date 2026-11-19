@@ -782,6 +782,15 @@ jobs:
   enable-auto-merge:
     runs-on: ubuntu-latest
     steps:
+      - name: Check the AI_SDLC_PAT secret is set
+        env:
+          AI_SDLC_PAT: \${{ secrets.AI_SDLC_PAT }}
+        run: |
+          if [ -z "$AI_SDLC_PAT" ]; then
+            echo "::error::The AI_SDLC_PAT secret is not set. Create it under Settings > Secrets and variables > Actions > New repository secret."
+            exit 1
+          fi
+
       - name: Discover PR for this event
         id: discover
         env:

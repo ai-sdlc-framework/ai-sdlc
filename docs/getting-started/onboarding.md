@@ -409,6 +409,11 @@ gh secret set AI_SDLC_PAT
 gh secret set AI_SDLC_PAT --body-file path/to/token.txt
 ```
 
+> **First pull request:** the pull request that adds `.ai-sdlc/` to your project for the
+> first time is merged by a person. The merge policy is read only from the default branch,
+> where `.ai-sdlc/agent-role.yaml` does not exist yet, so the merge helper refuses. Every
+> later pull request goes through `cli-merge-if-eligible`.
+
 > **Shell-history hygiene:** never pass live secrets as inline arguments
 > (`--body "ghp_..."`, `ANTHROPIC_API_KEY=sk-ant-... command`) — they appear in
 > `~/.zsh_history` / `~/.bash_history`, `ps aux`, and OS audit logs. Use the

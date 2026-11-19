@@ -180,6 +180,12 @@ After scaffolding:
 2. Add an `AI_SDLC_PAT` repository secret with write access (used by `auto-enable-auto-merge.yml`).
 3. Commit and push the 4 workflow files.
 
+The first pull request that adds `.ai-sdlc/` to a project is merged by a person.
+The merge policy is read only from the default branch, and `.ai-sdlc/agent-role.yaml`
+is not there yet, so the merge helper refuses (fail-closed). Every later pull request
+goes through `cli-merge-if-eligible`. The `enable-auto-merge` job also fails with a
+line naming `AI_SDLC_PAT` until that secret exists.
+
 ## Scaffolded workflows assume Node/pnpm
 
 The scaffolded `ai-sdlc-gate.yml` has `lint`, `build-test` and `coverage` jobs that run `pnpm install --frozen-lockfile` and pnpm scripts, and the `ai-sdlc/pr-ready` rollup needs all three. `dor-ingress.yml` has the same setup and install steps. The templates are the same for every project type.
