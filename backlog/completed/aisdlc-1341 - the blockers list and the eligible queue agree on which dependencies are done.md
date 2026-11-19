@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1341
 title: 'The blockers list and the eligible queue agree on which dependencies are done'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
