@@ -17,6 +17,7 @@ import path from 'node:path';
 
 import { ensureBoardDirs, repoRootOfBoard, TASK_ID_RE, writeManifest } from './board.js';
 import { dependenciesOfTaskFile } from './enqueue.js';
+import { PARENT_DIRTY_CAUSE } from '../steps/parent-dirty.js';
 import { DEFAULT_REQUEUE_RETRY_LIMIT } from './session-reaper.js';
 import type { DispatchManifest, DispatchVerdict } from './types.js';
 
@@ -134,10 +135,12 @@ export function requeueFailed(
   // A task whose failure record names a still-open PR needs PR follow-up (finish the
   // existing PR), which is not a retry: the cap guards PR-less churn only.
   let prUrl: string | undefined;
+  let cause: string | undefined;
   try {
     const v = JSON.parse(
       readFileSync(path.join(failedDir, `${taskId}.verdict.json`), 'utf-8'),
     ) as DispatchVerdict;
+    if (typeof v.cause === 'string') cause = v.cause;
     if (typeof v.prUrl === 'string' && v.prUrl) prUrl = v.prUrl;
     else if (Number.isSafeInteger(v.prNumber) && (v.prNumber as number) > 0)
       prUrl = String(v.prNumber);
@@ -145,8 +148,10 @@ export function requeueFailed(
     prUrl = undefined;
   }
   const followUp = prUrl !== undefined && (opts.prState ?? ghPrState)(prUrl) === 'OPEN';
-  const retryCount = followUp ? prior : prior + 1;
-  if (!followUp && retryCount > retryLimit) {
+  // An environment cause (a dirty parent) is not the task's fault: it uses no retry.
+  const noRetry = followUp || cause === PARENT_DIRTY_CAUSE;
+  const retryCount = noRetry ? prior : prior + 1;
+  if (!noRetry && retryCount > retryLimit) {
     throw new Error(
       `${taskId} has already been re-queued ${prior} time(s); the limit is ${retryLimit}`,
     );

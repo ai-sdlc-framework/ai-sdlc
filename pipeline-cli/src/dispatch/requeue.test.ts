@@ -65,7 +65,11 @@ function snapshot(): Record<string, string> {
 }
 
 /** Enqueue, claim and fail a task the way an executor does. */
-function failTask(taskId: string, extra: Partial<DispatchManifest> = {}): void {
+function failTask(
+  taskId: string,
+  extra: Partial<DispatchManifest> = {},
+  cause = 'transient',
+): void {
   for (const prerequisite of extra.after ?? []) {
     if (!existsSync(path.join(board, 'done', `${prerequisite}.verdict.json`))) {
       writeVerdict(board, {
@@ -84,7 +88,7 @@ function failTask(taskId: string, extra: Partial<DispatchManifest> = {}): void {
   completeTask(board, {
     taskId,
     outcome: 'failed',
-    cause: 'transient',
+    cause,
     workerId: 'executor-a',
     now: () => new Date('2026-05-20T11:00:00.000Z'),
   });
@@ -497,5 +501,18 @@ describe('cli-dispatch requeue', () => {
     expect(r.exit).toBe(1);
     expect(r.stderr).toContain('main checkout could not be verified');
     expect(snapshot()).toEqual(before);
+  });
+});
+
+describe('requeueFailed with an environment cause (AISDLC-1346)', () => {
+  it('leaves the retry count unchanged for parent-dirty even at the limit', () => {
+    failTask('AISDLC-1346', { retryCount: 2 }, 'parent-dirty');
+    const r = requeueFailed(board, 'AISDLC-1346', { prState: () => undefined });
+    expect(r.retryCount).toBe(2);
+  });
+
+  it('still counts a transient failure', () => {
+    failTask('AISDLC-1347', { retryCount: 1 }, 'transient');
+    expect(requeueFailed(board, 'AISDLC-1347', { prState: () => undefined }).retryCount).toBe(2);
   });
 });

@@ -78,6 +78,7 @@ export const REQUEUEABLE_CAUSES: readonly string[] = [
   'spawn-rejected',
   'quota-exhausted',
   'transient',
+  'parent-dirty',
 ];
 
 /** Steps that can be run by name; each needs the grants in {@link REQUIRED_GRANTS}. */

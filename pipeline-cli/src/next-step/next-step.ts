@@ -467,7 +467,7 @@ class Machine {
 
     ctx.logger.progress('step-1', `detected ARG_FORM=backlog-task (${arg.taskId})`);
     const init = await deps.initTask(ctx, arg.taskId);
-    if (!init.ok) return this.early(arg.taskId, init.reason);
+    if (!init.ok) return this.early(arg.taskId, init.reason, init.cause);
 
     const state: NextStepState = {
       schemaVersion: 1,
@@ -533,8 +533,16 @@ class Machine {
   }
 
   /** A failure before any state exists: nothing to persist, nothing to roll back. */
-  private early(taskId: string, reason: string): StopInstruction {
-    return { action: 'stop', taskId, outcome: 'aborted', reason, prUrl: null, notes: reason };
+  private early(taskId: string, reason: string, cause?: string): StopInstruction {
+    return {
+      action: 'stop',
+      taskId,
+      outcome: 'aborted',
+      reason,
+      ...(cause ? { cause } : {}),
+      prUrl: null,
+      notes: reason,
+    };
   }
 
   // ── developer ─────────────────────────────────────────────────────

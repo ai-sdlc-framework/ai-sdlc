@@ -22,12 +22,14 @@
  *
  */
 
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { now } from '../clock.js';
 import { claimNext, writeHeartbeat } from '../dispatch/board.js';
 import { claimWithWait } from '../dispatch/claim-wait.js';
+import { changedPathsOf, PARENT_DIRTY_CAUSE, parentDirtyMessage } from '../steps/parent-dirty.js';
 import { formatResumeFeedback } from '../dispatch/resume.js';
 import type { DispatchManifest, WorkerKind } from '../dispatch/types.js';
 import { resolveCaller, type IdentityDeps } from './caller-identity.js';
@@ -91,6 +93,20 @@ function recordStart(boardDir: string, name: string, idle: boolean, queue: strin
   }
 }
 
+function gitParentChanges(cwd: string): string[] {
+  try {
+    const out = execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], {
+      cwd,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 10_000,
+    });
+    return changedPathsOf(out);
+  } catch {
+    return [];
+  }
+}
+
 /** Collaborators; every one is replaceable in tests. */
 export interface ExecutorStartDeps {
   identity: IdentityDeps;
@@ -101,6 +117,8 @@ export interface ExecutorStartDeps {
   heartbeat?: typeof writeHeartbeat;
   /** Replaces the lease-push preflight (tests). */
   preflight?: typeof claimPreflight;
+  /** Tracked files changed in the parent checkout (default: `git status`); empty when clean or unreadable. */
+  parentChanges?: (cwd: string) => string[];
   /** The session env the hook would see (default process.env). */
   env?: NodeJS.ProcessEnv;
   log?: (line: string) => void;
@@ -186,6 +204,15 @@ export async function executorStart(
     recordStart(opts.boardDir, self.name, true, queue);
     deps.log?.(`[executor] BOARD HELD: ${hold.reason} (since ${hold.since}); not claiming.`);
     return { name: self.name, project: project.project, dispatch, taskId: null, held: hold.reason };
+  }
+  // A dirty parent refuses every claim at Step 0: report once here and claim nothing.
+  const dirty = (deps.parentChanges ?? gitParentChanges)(opts.cwd);
+  if (dirty.length > 0) {
+    const reason = parentDirtyMessage(dirty);
+    if (pinnedTask) throw new Error(`cannot claim ${pinnedTask}: ${reason}`);
+    recordStart(opts.boardDir, self.name, true, queue);
+    deps.log?.(`[executor] PARENT DIRTY (${PARENT_DIRTY_CAUSE}): ${reason}`);
+    return { name: self.name, project: project.project, dispatch, taskId: null, held: reason };
   }
   const result = await (deps.claim ?? claimWithWait)(opts.boardDir, 'in-session-agent', {
     waitSec: 0,
