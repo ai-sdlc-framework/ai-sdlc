@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { landingPath } from './reconcile.js';
 import { schedulerDown, schedulerStatus } from './reconcile-scheduler.js';
+import { hostStallMs, schedulerLateMs } from './host-liveness.js';
 
 import {
   ensureBoardDirs,
@@ -70,8 +71,14 @@ import {
 } from './index.js';
 import { executorStart } from './executor-start.js';
 import { isNodeInstalled, paneNodeVersion, readNvmrc } from './node-pin.js';
+import { overContextWarnings } from './context-size.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 import { resolveSendTarget } from './tmux.js';
+
+vi.mock('./context-size.js', async (orig) => {
+  const real = await orig<typeof import('./context-size.js')>();
+  return { ...real, overContextWarnings: vi.fn(real.overContextWarnings) };
+});
 
 const NOW = new Date('2026-09-30T12:00:00.000Z');
 
@@ -3278,5 +3285,83 @@ describe('hierarchy status gh calls (AISDLC-963)', () => {
       quota: { core: 4000, graphql: 12 },
     } as Parameters<typeof formatStatus>[0]);
     expect(lines).toContain('gh calls last hour: b 9, a 2; remaining core 4000, graphql 12');
+  });
+});
+
+describe('up and status name every missing piece (AISDLC-1357)', () => {
+  const opts = { ...baseOpts, executors: 0, noPlanner: true };
+  const feedLines = () => logs.filter((l) => l.startsWith('webhook: off'));
+  const stalledAt = (sec: number, env: NodeJS.ProcessEnv = {}) => {
+    deps.env = env;
+    deps.isAlive = (p) => p === 4242;
+    writeFileSync(
+      path.join(boardDir, 'operator-dispatch.state.json'),
+      JSON.stringify({
+        schemaVersion: 'v1',
+        ingested: {},
+        rejected: {},
+        handled: [],
+        lastTickAt: new Date(NOW.getTime() - sec * 1000).toISOString(),
+      }),
+    );
+    mkdirSync(path.join(boardDir, 'queue'), { recursive: true });
+    writeFileSync(path.join(boardDir, 'queue', 'AISDLC-1.dispatch.json'), '{}');
+    return schedulerStatus(deps);
+  };
+
+  it('prints one webhook: off line without the secret, none with it', async () => {
+    await hierarchyUp(opts, deps);
+    expect(feedLines()).toHaveLength(1);
+    expect(feedLines()[0]).toContain('AI_SDLC_WEBHOOK_SECRET');
+    expect(feedLines()[0]).toContain('webhook up');
+    logs.length = 0;
+    deps.env = { AI_SDLC_WEBHOOK_SECRET: 's' };
+    await hierarchyUp(opts, deps);
+    expect(feedLines()).toHaveLength(0);
+  });
+
+  it('a throwing context read prints one warning and up still returns', async () => {
+    vi.mocked(overContextWarnings).mockImplementationOnce(() => {
+      throw new Error('boom');
+    });
+    await expect(hierarchyUp(opts, deps)).resolves.toBeDefined();
+    expect(logs.filter((l) => l === 'warning: context size not read')).toHaveLength(1);
+  });
+
+  it('a scheduler dead at the liveness check warns with the log tail and status reads off', async () => {
+    mkdirSync(path.join(boardDir, 'log'), { recursive: true });
+    writeFileSync(
+      path.join(boardDir, 'log', 'reconcile.log'),
+      'one\nCannot find module cli-dispatch\n',
+    );
+    await hierarchyUp(opts, deps);
+    const w = logs.filter((l) => l.includes('reconcile scheduler exited right after'));
+    expect(w).toHaveLength(1);
+    expect(w[0]).toContain('Cannot find module cli-dispatch');
+    expect(schedulerStatus(deps)).toEqual({ state: 'off' });
+  });
+
+  it('a live scheduler prints no warning and status reads up', async () => {
+    deps.isAlive = (p) => p === 4242;
+    await hierarchyUp(opts, deps);
+    expect(logs.some((l) => l.includes('exited right after'))).toBe(false);
+    expect(formatStatus(hierarchyStatus(deps))).toContain('scheduler: up (pid 4242)');
+  });
+
+  it('is not STALLED at 61s, 90s and 119s with queued work, and is at 125s', async () => {
+    await hierarchyUp(opts, deps);
+    for (const sec of [61, 90, 119]) {
+      expect(stalledAt(sec)).toEqual({ state: 'up', pid: 4242 });
+    }
+    expect(stalledAt(125)).toEqual({ state: 'up', pid: 4242, stalled: { ageSec: 125 } });
+  });
+
+  it('AI_SDLC_TICK_STALL_MINUTES=1 still sets the limit; the running-tick limit is twice the interval', async () => {
+    await hierarchyUp(opts, deps);
+    expect(stalledAt(61, { AI_SDLC_TICK_STALL_MINUTES: '1' })).toMatchObject({
+      stalled: { ageSec: 61 },
+    });
+    expect(hostStallMs(undefined, {})).toBe(60_000);
+    expect(schedulerLateMs({})).toBe(120_000);
   });
 });

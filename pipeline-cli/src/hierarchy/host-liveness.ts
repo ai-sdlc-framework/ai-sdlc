@@ -72,6 +72,19 @@ export function hostStallMs(intervalMs?: number, env: NodeJS.ProcessEnv = proces
   return tickStallMs(intervalMs ?? HOST_TICK_INTERVAL_MS, env);
 }
 
+/**
+ * AISDLC-1357: how late the last tick may be before `status` calls the scheduler STALLED. The scheduler
+ * steps in after {@link MISSED_TICKS} intervals and checks once per interval, so it is only late past
+ * (MISSED_TICKS + 1) intervals. `AI_SDLC_TICK_STALL_MINUTES` still overrides. The running-tick kill limit
+ * is {@link hostStallMs}, unchanged.
+ */
+export function schedulerLateMs(env: NodeJS.ProcessEnv = process.env): number {
+  const minutes = Number(env['AI_SDLC_TICK_STALL_MINUTES']);
+  return Number.isFinite(minutes) && minutes > 0
+    ? minutes * 60_000
+    : (MISSED_TICKS + 1) * HOST_TICK_INTERVAL_MS;
+}
+
 const defaultWatchdog: Pick<WatchdogDeps, 'isAlive' | 'kill'> = {
   isAlive: (pid) => {
     try {

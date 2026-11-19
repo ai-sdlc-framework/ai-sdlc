@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1357
 title: 'Up and status name every missing piece in one line each, and the scheduler is reported as running only when it is'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-19'
 labels:

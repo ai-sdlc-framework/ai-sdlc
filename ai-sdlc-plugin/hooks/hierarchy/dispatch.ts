@@ -425,15 +425,27 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
     }
     // The old loop ran the PR reconciler and the CI sweep after every tick; `cli-ci sweep` throttles itself to 15 minutes.
     const rec = await runCli(p, DISPATCH_BIN, ['reconcile', ...boardArgs(state)]);
-    if (!rec.ok) note(state, 'reconcile failed');
-    else {
+    const failures: string[] = [];
+    const firstLineOf = (r: { stderr?: string; stdout?: string }): string =>
+      ((r.stderr || r.stdout || '').split('\n').find((l) => l.trim()) ?? 'no output').slice(0, 160);
+    if (!rec.ok) {
+      note(state, 'reconcile failed');
+      failures.push(`reconcile failed: ${firstLineOf(rec)}`);
+    } else {
       // AISDLC-1095: the reconciler dedupes (routeOnce); forward only the routings new this run.
       for (const line of newRoutingLines(rec.stdout)) {
         await tellPlanner(p, state, `reconciler routed a PR to you: ${line}`);
       }
     }
     const sweep = await runCli(p, CI_BIN, ['sweep', ...boardArgs(state)]);
-    if (!sweep.ok) note(state, 'cli-ci sweep failed');
+    if (!sweep.ok) {
+      note(state, 'cli-ci sweep failed');
+      failures.push(`cli-ci sweep failed: ${firstLineOf(sweep)}`);
+    }
+    // AISDLC-1357: a failing reconcile or sweep reaches `status`; the next clean tick writes `loaded` again.
+    if (failures.length > 0) {
+      await recordHealth(p, state, { state: 'failing', reason: failures.join('; ').slice(0, 300) });
+    }
     const status = await refreshPane(p, state);
     state.tickNo = (state.tickNo ?? 0) + 1;
     const strings = (v: Any): string[] =>
