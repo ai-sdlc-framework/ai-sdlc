@@ -268,6 +268,72 @@ export interface ResolvedPluginInstall {
   source: PluginInstallSource;
 }
 
+/** One `ai-sdlc@*` entry of `~/.claude/plugins/installed_plugins.json` (AISDLC-1327). */
+export interface PluginInstallEntry {
+  scope: string;
+  projectPath?: string;
+  installPath: string;
+  version?: string;
+}
+
+/** Read the `ai-sdlc@*` install entries; `undefined` when the registry file is missing or unreadable. */
+function readPluginInstallEntries(ctx: DoctorRunContext): PluginInstallEntry[] | undefined {
+  const registry = readJson(
+    ctx,
+    join(ctx.adapters.homeDir(), '.claude', 'plugins', 'installed_plugins.json'),
+  ) as { plugins?: Record<string, unknown> } | undefined;
+  if (!registry || typeof registry.plugins !== 'object' || registry.plugins === null) {
+    return undefined;
+  }
+  const entries: PluginInstallEntry[] = [];
+  for (const [key, list] of Object.entries(registry.plugins)) {
+    if (!key.startsWith('ai-sdlc@') || !Array.isArray(list)) continue;
+    for (const raw of list) {
+      const e = raw as Record<string, unknown> | null;
+      if (!e || typeof e.installPath !== 'string') continue;
+      entries.push({
+        scope: typeof e.scope === 'string' ? e.scope : '',
+        projectPath: typeof e.projectPath === 'string' ? e.projectPath : undefined,
+        installPath: e.installPath,
+        version: typeof e.version === 'string' ? e.version : undefined,
+      });
+    }
+  }
+  return entries;
+}
+
+/**
+ * The install entry of the project: the `project`/`local` entry whose
+ * `projectPath` is the project dir or its nearest ancestor, else the `user`
+ * entry (AISDLC-1327).
+ */
+function selectPluginInstallEntry(
+  entries: PluginInstallEntry[],
+  projectDir: string,
+): PluginInstallEntry | undefined {
+  const dir = resolve(projectDir);
+  let best: PluginInstallEntry | undefined;
+  for (const e of entries) {
+    if ((e.scope !== 'project' && e.scope !== 'local') || !e.projectPath) continue;
+    const base = resolve(e.projectPath);
+    if (dir !== base && !dir.startsWith(base.endsWith('/') ? base : `${base}/`)) continue;
+    if (!best || resolve(best.projectPath!).length < base.length) best = e;
+  }
+  return best ?? entries.find((e) => e.scope === 'user');
+}
+
+function findRegisteredInstall(ctx: DoctorRunContext): ResolvedPluginInstall | undefined {
+  const entries = readPluginInstallEntries(ctx);
+  if (!entries) return undefined;
+  const entry = selectPluginInstallEntry(entries, ctx.projectDir);
+  if (!entry || !ctx.adapters.exists(entry.installPath)) return undefined;
+  return {
+    path: entry.installPath,
+    version: entry.version ?? readPluginVersion(ctx, entry.installPath),
+    source: 'marketplace',
+  };
+}
+
 /**
  * Scan `~/.claude/plugins/cache/*&#47;ai-sdlc/*` for the marketplace-installed
  * cache, picking the SEMVER-highest version directory (AISDLC-586: a lexical
@@ -310,7 +376,9 @@ function findMarketplaceInstall(ctx: DoctorRunContext): ResolvedPluginInstall | 
  *      Code when running inside a plugin context, or exported manually.
  *      This is the harness's own signal for "this is what got loaded" and
  *      always wins when present.
- *   2. The marketplace cache (`~/.claude/plugins/cache/*&#47;ai-sdlc/*`),
+ *   2. The install entry of the project in
+ *      `~/.claude/plugins/installed_plugins.json` (AISDLC-1327), then, as the
+ *      last resort, the marketplace cache (`~/.claude/plugins/cache/*&#47;ai-sdlc/*`),
  *      SEMVER-highest version directory. This is the real install for the
  *      overwhelming majority of operators and adopters.
  *   3. `<projectDir>/node_modules/ai-sdlc-plugin` — an adopter that vendored
@@ -332,7 +400,7 @@ export function resolvePluginInstall(ctx: DoctorRunContext): ResolvedPluginInsta
     return { path: envRoot, version: readPluginVersion(ctx, envRoot), source: 'env' };
   }
 
-  const marketplace = findMarketplaceInstall(ctx);
+  const marketplace = findRegisteredInstall(ctx) ?? findMarketplaceInstall(ctx);
   if (marketplace) return marketplace;
 
   const nodeModulesDir = join(projectDir, 'node_modules', 'ai-sdlc-plugin');
@@ -725,6 +793,63 @@ export function checkReviewerAttributionResolver(ctx: DoctorRunContext): DoctorC
     remediation:
       'Reinstall or update the plugin: /plugin uninstall ai-sdlc && /plugin install ai-sdlc',
     anonymizableEvidence: { installSource: install.source, resolverPath },
+  };
+}
+
+// ── Check: stale plugin install entries (AISDLC-1327) ─────────────────────
+
+/**
+ * Read-only: reports `ai-sdlc@*` install entries pinned below the newest
+ * cached version, and fails when the current project's entry points at a
+ * missing folder. It never deletes a cache folder or edits the registry.
+ */
+export function checkPluginInstallEntries(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'plugin-install-entries';
+  const entries = readPluginInstallEntries(ctx);
+  if (!entries) {
+    return { id, severity: 'pass', title: 'no plugin install registry found' };
+  }
+
+  const current = selectPluginInstallEntry(entries, ctx.projectDir);
+  if (current && !ctx.adapters.exists(current.installPath)) {
+    return {
+      id,
+      severity: 'fail',
+      title: `install entry of this project points at a missing folder ${current.installPath}`,
+      remediation: 'Reinstall the plugin: /plugin uninstall ai-sdlc && /plugin install ai-sdlc',
+      anonymizableEvidence: { installPath: current.installPath },
+    };
+  }
+
+  const newest = findMarketplaceInstall(ctx)?.version;
+  if (!newest) {
+    return {
+      id,
+      severity: 'pass',
+      title: 'no cached plugin version to compare install entries to',
+    };
+  }
+  const stale = entries.filter((e) => {
+    const v = e.version ?? basename(e.installPath);
+    return compareSemver(v, newest) < 0;
+  });
+  if (stale.length === 0) {
+    return {
+      id,
+      severity: 'pass',
+      title: `every install entry is at the newest version (v${newest})`,
+    };
+  }
+  const described = stale.map(
+    (e) => `${e.projectPath ?? `(${e.scope})`} at v${e.version ?? basename(e.installPath)}`,
+  );
+  return {
+    id,
+    severity: 'warn',
+    title: `install entries pinned below the newest cached v${newest}: ${described.join('; ')}`,
+    remediation:
+      'Update the plugin in each listed project (/plugin update ai-sdlc); doctor never deletes cache folders or edits the registry',
+    anonymizableEvidence: { newest, staleCount: stale.length },
   };
 }
 
@@ -3029,6 +3154,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'WARNs when a repo-local dev checkout and a marketplace install coexist and disagree on version (AISDLC-586).',
     run: checkPluginInstallAmbiguity,
+  },
+  {
+    id: 'plugin-install-entries',
+    description:
+      'WARNs on plugin install entries pinned below the newest cached version; FAILs when the project entry points at a missing folder (AISDLC-1327).',
+    run: checkPluginInstallEntries,
   },
   {
     id: 'attestation-governance',

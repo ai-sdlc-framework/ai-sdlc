@@ -343,6 +343,41 @@ fi
 # ── Topology 4: Plugin cache probe ──────────────────────────────────────────
 # Walk ~/.claude/plugins/cache/<marketplace>/ai-sdlc/<version>/
 CACHE_ROOT="${HOME}/.claude/plugins/cache"
+
+# AISDLC-1327: ask the install entry of this project first. The registry
+# records per project which version runs; the cache walk below is the last resort.
+REGISTRY_FILE="${HOME}/.claude/plugins/installed_plugins.json"
+REGISTRY_INSTALL=""
+if [ -f "$REGISTRY_FILE" ] && command -v node >/dev/null 2>&1; then
+  REGISTRY_INSTALL="$(node -e '
+    const fs = require("fs"), path = require("path");
+    try {
+      const reg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const dir = path.resolve(process.argv[2]);
+      let best, user;
+      for (const [k, list] of Object.entries(reg.plugins || {})) {
+        if (!k.startsWith("ai-sdlc@") || !Array.isArray(list)) continue;
+        for (const e of list) {
+          if (!e || typeof e.installPath !== "string") continue;
+          if ((e.scope === "project" || e.scope === "local") && typeof e.projectPath === "string") {
+            const base = path.resolve(e.projectPath);
+            const inside = dir === base || dir.startsWith(base.endsWith("/") ? base : base + "/");
+            if (inside && (!best || path.resolve(best.projectPath).length < base.length)) best = e;
+          } else if (e.scope === "user" && !user) user = e;
+        }
+      }
+      const pick = best || user;
+      if (pick && fs.existsSync(pick.installPath)) process.stdout.write(pick.installPath);
+    } catch (_) {}
+  ' "$REGISTRY_FILE" "$(pwd)" 2>/dev/null || true)"
+fi
+if [ -n "$REGISTRY_INSTALL" ] && _is_usable "${REGISTRY_INSTALL%/}/$PIPELINE_CLI_REL"; then
+  echo "resolve-pipeline-cli.sh: using install entry of this project at $REGISTRY_INSTALL" >&2
+  printf '%s' "${REGISTRY_INSTALL%/}/$PIPELINE_CLI_REL"
+  exit 0
+fi
+[ -d "$CACHE_ROOT" ] && echo "resolve-pipeline-cli.sh: no install entry matched this project; walking the plugin cache (last resort)" >&2
+
 if [ -d "$CACHE_ROOT" ]; then
   # Collect all candidates; sort by version (highest first via sort -rV).
   BEST_CANDIDATE=""
