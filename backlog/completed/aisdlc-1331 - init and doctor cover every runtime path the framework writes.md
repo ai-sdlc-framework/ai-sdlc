@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1331
 title: 'Init and doctor cover every runtime path the framework writes'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
