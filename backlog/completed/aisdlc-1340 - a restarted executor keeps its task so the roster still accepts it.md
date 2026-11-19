@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1340
 title: 'A restarted executor keeps its task so the roster still accepts it'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
