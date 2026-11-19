@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1336
 title: 'The first pull request of a new adopter is explained and the auto-merge workflow names its missing secret'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
