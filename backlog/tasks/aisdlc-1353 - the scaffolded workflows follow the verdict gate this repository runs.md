@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1353
 title: 'The scaffolded workflows follow the verdict gate this repository runs'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-19'
 labels:

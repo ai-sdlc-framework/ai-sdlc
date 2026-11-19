@@ -448,7 +448,7 @@ describe('init — AISDLC-143 wizard scaffolding', () => {
 
     // Attestation
     expect(existsSync(join(tmpDir, '.ai-sdlc', 'trusted-reviewers.yaml'))).toBe(true);
-    expect(existsSync(join(tmpDir, '.github', 'workflows', 'verify-attestation.yml'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.github', 'workflows', 'verify-attestation.yml'))).toBe(false);
     expect(existsSync(join(tmpDir, '.ai-sdlc', 'attestations', '.gitkeep'))).toBe(false);
     expect(existsSync(join(tmpDir, '.husky', 'pre-push'))).toBe(true);
 

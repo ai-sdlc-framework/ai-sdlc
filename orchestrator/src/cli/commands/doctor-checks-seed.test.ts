@@ -276,13 +276,17 @@ describe('check 10: feature workflows', () => {
     put('.ai-sdlc/dor-config.yaml', VALID_DOR);
     const r = checkFeatureWorkflows(ctxOf());
     expect(r.severity).toBe('warn');
-    expect(r.title).toContain('verify-attestation.yml');
+    expect(r.title).not.toContain('verify-attestation.yml');
     expect(r.title).toContain('dor-ingress.yml');
     expect(r.remediation).toMatch(/init --add workflows/);
   });
   it('passes when the workflow files exist', () => {
     put('.ai-sdlc/trusted-reviewers.yaml', 'reviewers: []\n');
-    put('.github/workflows/verify-attestation.yml', 'name: v\n');
+    expect(checkFeatureWorkflows(ctxOf()).severity).toBe('pass');
+  });
+  it('does not warn when trusted-reviewers.yaml exists and verify-attestation.yml does not (AISDLC-1353)', () => {
+    put('.ai-sdlc/trusted-reviewers.yaml', 'reviewers: []\n');
+    expect(existsSync(join(tmpDir, '.github/workflows/verify-attestation.yml'))).toBe(false);
     expect(checkFeatureWorkflows(ctxOf()).severity).toBe('pass');
   });
 });

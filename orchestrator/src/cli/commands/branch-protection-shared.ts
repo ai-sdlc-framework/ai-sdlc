@@ -96,6 +96,12 @@ export const PR_READY_CONTEXT = 'ai-sdlc/pr-ready';
 export const CODECOV_PATCH_CONTEXT = 'codecov/patch';
 
 /**
+ * Approving reviews branch protection requires (DEC-0014). One named value so the
+ * setup summary and the protection body cannot drift. The operator owns the number.
+ */
+export const REQUIRED_APPROVING_REVIEW_COUNT = 1;
+
+/**
  * Build the recommended branch-protection ruleset for AI-SDLC adopters
  * (AISDLC-1352). Only contexts the repository's own workflows will post are
  * required: `ai-sdlc/pr-ready` (the gate aggregator) always, `codecov/patch`
@@ -115,7 +121,7 @@ export function buildBranchProtectionBody(contexts: readonly string[]) {
     required_pull_request_reviews: {
       dismiss_stale_reviews: true,
       require_code_owner_reviews: false,
-      required_approving_review_count: 1,
+      required_approving_review_count: REQUIRED_APPROVING_REVIEW_COUNT,
     },
     restrictions: null,
     allow_force_pushes: false,
