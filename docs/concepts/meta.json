@@ -4,6 +4,8 @@
     "index",
     "dor-gate",
     "session-hierarchy",
+    "pr-lifecycle",
+    "workflow-engine",
     "two-tier-pipeline",
     "cross-harness-review",
     "staged-review",

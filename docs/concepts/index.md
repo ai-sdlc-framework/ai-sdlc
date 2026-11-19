@@ -11,6 +11,8 @@ Operator-facing overviews of the framework's pillars and the RFCs behind them. E
 |---------|--------|-----|--------|
 | [Definition-of-Ready gate](./dor-gate.md) | Decision engine | [RFC-0011](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/spec/rfcs/RFC-0011-definition-of-ready-gate.md) | Implemented |
 | [Session hierarchy](./session-hierarchy.md) | Dispatch | [RFC-0051](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/spec/rfcs/RFC-0051-session-hierarchy-parallel-dispatch.md) | Implemented; amended by RFC-0058 and RFC-0059 |
+| [PR lifecycle](./pr-lifecycle.md) | Dispatch | [RFC-0054](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/spec/rfcs/RFC-0054-pr-lifecycle-event-driven-dispatch.md) | Signed off |
+| [Workflow engine](./workflow-engine.md) | Pipeline runtime | [RFC-0056](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/spec/rfcs/RFC-0056-composable-workflow-graph.md) | Signed off, phases 1 to 4 shipped |
 | [Two-tier pipeline architecture](./two-tier-pipeline.md) | Pipeline runtime | [RFC-0012](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md) | Implemented |
 | [Cross-harness review](./cross-harness-review.md) | Review | [RFC-0010 §13](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md) | Draft |
 | [Staged review pipeline](./staged-review.md) | Review | [RFC-0052](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/spec/rfcs/RFC-0052-staged-review-pipeline.md) | Signed off, in progress |
