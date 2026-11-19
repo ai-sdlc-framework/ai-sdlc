@@ -671,6 +671,27 @@ describe('board identity (AISDLC-1349)', () => {
     expect(spawner).toHaveBeenCalledTimes(1);
   });
 
+  it('the default identity probe asks /health through run and parses the answer', () => {
+    record({ repo: 'o/a' });
+    const via = (r: unknown): HierarchyDeps =>
+      ({
+        ...hd(undefined),
+        probeWebhookIdentity: undefined,
+        run: () => r,
+      }) as unknown as HierarchyDeps;
+    const ok = JSON.stringify({ status: 'ok', repo: 'o/a', boardDir: dir });
+    expect(webhookStatus(via({ status: 0, stdout: ok }))).toMatchObject({ state: 'up' });
+    const foreign = JSON.stringify({ repo: null, boardDir: '/x' });
+    expect(webhookStatus(via({ status: 0, stdout: foreign }))).toMatchObject({
+      reason: 'foreign listener',
+    });
+    expect(webhookStatus(via({ status: 1, stdout: '' }))).toMatchObject({ state: 'off' });
+    expect(webhookStatus(via({ status: 0, stdout: 'not json' }))).toMatchObject({ state: 'off' });
+    expect(webhookStatus(via({ status: 0, stdout: '{"status":"ok"}' }))).toMatchObject({
+      state: 'off',
+    });
+  });
+
   it('events of another repository do not count as this board last event', () => {
     record({ repo: 'o/a' });
     mkdirSync(path.join(dir, 'events'), { recursive: true });
