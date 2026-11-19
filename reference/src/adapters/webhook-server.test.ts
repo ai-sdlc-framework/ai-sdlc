@@ -30,6 +30,13 @@ describe('WebhookServer', () => {
     expect(body.providers).toBe(0);
   });
 
+  it('merges healthInfo into the health answer', async () => {
+    server = createWebhookServer({ port: 0, healthInfo: () => ({ repo: 'o/a', boardDir: '/b' }) });
+    await server.start();
+    const body = await (await fetch(`http://127.0.0.1:${server.port}/health`)).json();
+    expect(body).toMatchObject({ status: 'ok', repo: 'o/a', boardDir: '/b' });
+  });
+
   it('returns 405 for non-POST on webhook routes', async () => {
     server = createWebhookServer({ port: 0 });
     server.registerProvider({

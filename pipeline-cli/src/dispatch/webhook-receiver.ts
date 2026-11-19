@@ -78,6 +78,25 @@ function recordRefusal(boardDir: string, at: Date): void {
   }
 }
 
+/** Signed deliveries for another repository, refused (AISDLC-1349). */
+export const FOREIGN_FILE = 'webhook-foreign.json';
+
+function recordForeign(boardDir: string, repo: string, at: Date): void {
+  try {
+    const file = path.join(boardDir, FOREIGN_FILE);
+    let count = 0;
+    try {
+      count = Number(JSON.parse(readFileSync(file, 'utf-8')).count) || 0;
+    } catch {
+      /* first foreign delivery */
+    }
+    mkdirSync(boardDir, { recursive: true });
+    writeFileSync(file, JSON.stringify({ at: at.toISOString(), count: count + 1, repo }) + '\n');
+  } catch {
+    /* health bookkeeping must not break the receiver */
+  }
+}
+
 const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const SHA_RE = /^[0-9a-f]{7,64}$/;
 const DELIVERY_RE = /^[A-Za-z0-9-]{1,100}$/;
@@ -147,6 +166,11 @@ export interface ReceiverOptions {
   boardDir: string;
   /** 0 picks a free port. */
   port: number;
+  /**
+   * `owner/repo` this board serves. A delivery for another repository is refused and recorded.
+   * Absent when unresolvable: every delivery is accepted and status reads the repository as unknown.
+   */
+  repo?: string;
   debounceMs?: number;
   now?: () => Date;
   /** Replaces the wake-file touch (tests). */
@@ -169,7 +193,11 @@ export function touchWakeFile(boardDir: string): void {
 }
 
 export function createReceiver(opts: ReceiverOptions): Receiver {
-  const server: WebhookServer = createWebhookServer({ port: opts.port, host: '127.0.0.1' });
+  const server: WebhookServer = createWebhookServer({
+    port: opts.port,
+    host: '127.0.0.1',
+    healthInfo: () => ({ repo: opts.repo ?? null, boardDir: path.resolve(opts.boardDir) }),
+  });
   const eventsDir = path.join(opts.boardDir, 'events');
   const debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS;
   const now = opts.now ?? clockNow;
@@ -206,6 +234,10 @@ export function createReceiver(opts: ReceiverOptions): Receiver {
       if (!deliveryId || !DELIVERY_RE.test(deliveryId)) return;
       const target = extractTarget(kind, payload);
       if (!target) return;
+      if (opts.repo && target.repo.toLowerCase() !== opts.repo.toLowerCase()) {
+        recordForeign(opts.boardDir, target.repo, now());
+        return;
+      }
       const record: EventRecord = {
         ...target,
         kind,

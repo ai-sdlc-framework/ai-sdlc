@@ -22,6 +22,8 @@ export interface WebhookServerConfig {
   port: number;
   /** Hostname to bind to (defaults to '0.0.0.0'). */
   host?: string;
+  /** Extra fields merged into the `/health` answer (identity of the instance). */
+  healthInfo?: () => Record<string, unknown>;
 }
 
 export interface WebhookServer {
@@ -68,7 +70,9 @@ export function createWebhookServer(config: WebhookServerConfig): WebhookServer 
     // Health check endpoint
     if (path === '/health' && method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', providers: providers.length }));
+      res.end(
+        JSON.stringify({ ...config.healthInfo?.(), status: 'ok', providers: providers.length }),
+      );
       return;
     }
 

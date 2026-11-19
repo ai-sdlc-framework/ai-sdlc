@@ -9,12 +9,13 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import path from 'node:path';
 import process from 'node:process';
 
-import { createReceiver, REFUSED_FILE } from '../dispatch/webhook-receiver.js';
+import { createReceiver, FOREIGN_FILE, REFUSED_FILE } from '../dispatch/webhook-receiver.js';
 import { DEFAULT_WEBHOOK_PORT, loadPrLifecycleConfig } from './pr-lifecycle-config.js';
 import { eventEntries } from './pr-snapshot.js';
 import type { HierarchyDeps } from './types.js';
 import {
   ForwarderPersistError,
+  resolveRepo,
   forwarderAgentAlive,
   forwarderLabel,
   forwarderPersistence,
@@ -30,7 +31,11 @@ const STATE_FILE = 'webhook.json';
 /** What `status` reports about the receiver. */
 export type WebhookStatus =
   | { state: 'up'; port: number; pid: number }
-  | { state: 'off'; reason: 'no secret' | 'not running' | 'port collision'; detail?: string };
+  | {
+      state: 'off';
+      reason: 'no secret' | 'not running' | 'port collision' | 'foreign listener';
+      detail?: string;
+    };
 
 /** What feeds the receiver: `gh webhook forward`, a tunnel, or nothing known (AISDLC-1157). */
 export interface WebhookFeed {
@@ -45,6 +50,8 @@ const FEED_KINDS: readonly string[] = ['gh-forward', 'tunnel', 'none'];
 interface WebhookState {
   pid: number;
   port: number;
+  /** `owner/repo` the receiver serves; absent when it could not be resolved. */
+  repo?: string;
   feed?: WebhookFeed;
 }
 
@@ -84,6 +91,7 @@ export function readState(boardDir: string): WebhookState | undefined {
       ? {
           pid: s.pid,
           port: s.port,
+          ...(typeof s.repo === 'string' && s.repo ? { repo: s.repo } : {}),
           ...(s.feed && FEED_KINDS.includes(s.feed.kind) ? { feed: s.feed } : {}),
         }
       : undefined;
@@ -92,12 +100,55 @@ export function readState(boardDir: string): WebhookState | undefined {
   }
 }
 
-/** Whether a live receiver is recorded, and whether a secret is set. */
+export interface WebhookIdentity {
+  repo: string | null;
+  boardDir: string;
+}
+
+/** Ask 127.0.0.1:<port>/health who answers, through `deps.run`; undefined when nothing valid answers. */
+function defaultProbeIdentity(deps: HierarchyDeps, port: number): WebhookIdentity | undefined {
+  const script =
+    `require('http').get({host:'127.0.0.1',port:${port},path:'/health',timeout:1000},r=>{` +
+    `let b='';r.on('data',c=>b+=c);r.on('end',()=>{process.stdout.write(b);process.exit(0)})})` +
+    `.on('error',()=>process.exit(1)).on('timeout',()=>process.exit(1));` +
+    `setTimeout(()=>process.exit(1),1500)`;
+  try {
+    const r = deps.run(process.execPath, ['-e', script], { cwd: deps.cwd });
+    if (r?.status !== 0) return undefined;
+    const j = JSON.parse(r.stdout ?? '') as { repo?: unknown; boardDir?: unknown };
+    if (typeof j.boardDir !== 'string') return undefined;
+    return { repo: typeof j.repo === 'string' ? j.repo : null, boardDir: j.boardDir };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Why the listener on `port` is not this board's receiver; undefined when it is. */
+function identityProblem(
+  deps: HierarchyDeps,
+  port: number,
+  probe?: (port: number) => WebhookIdentity | undefined,
+): { reason: string; repo: string | null } | undefined {
+  const id = (probe ?? deps.probeWebhookIdentity ?? ((p) => defaultProbeIdentity(deps, p)))(port);
+  if (!id) return { reason: `port ${port} does not answer /health as a receiver`, repo: null };
+  if (path.resolve(id.boardDir) !== path.resolve(deps.boardDir)) {
+    return {
+      reason: `port ${port} answers as another board's receiver (repository ${id.repo ?? 'unknown'}, board ${id.boardDir})`,
+      repo: id.repo,
+    };
+  }
+  return undefined;
+}
+
+/** Whether a live receiver of this board is recorded, and whether a secret is set. */
 export function webhookStatus(deps: HierarchyDeps): WebhookStatus {
   if (!deps.env[WEBHOOK_SECRET_ENV]) return { state: 'off', reason: 'no secret' };
   const s = readState(deps.boardDir);
-  if (s && (deps.isAlive ?? defaultIsAlive)(s.pid))
-    return { state: 'up', port: s.port, pid: s.pid };
+  if (s && (deps.isAlive ?? defaultIsAlive)(s.pid)) {
+    const problem = identityProblem(deps, s.port);
+    if (!problem) return { state: 'up', port: s.port, pid: s.pid };
+    return { state: 'off', reason: 'foreign listener', detail: problem.reason };
+  }
   const collision = readCollision(deps.boardDir);
   if (collision) return { state: 'off', reason: 'port collision', detail: collision };
   return { state: 'off', reason: 'not running' };
@@ -221,10 +272,14 @@ export interface WebhookSignals {
   hookDelivery?: 'ok' | 'failing';
   /** Deliveries refused for a bad signature since the last accepted event (AISDLC-1285). */
   refusedDeliveries?: number;
+  /** Signed deliveries refused because they name another repository (AISDLC-1349). */
+  foreignDeliveries?: { count: number; repo: string };
 }
 
 export interface WebhookHealth {
   class: WebhookClass;
+  /** `owner/repo` this board's receiver serves; absent when unknown. */
+  repo?: string;
   signals: WebhookSignals;
   /** When this reading was taken; the tick keeps the episode start. */
   since: string;
@@ -276,6 +331,8 @@ export interface WebhookHealthOptions {
   /** Override the thresholds (defaults from `.ai-sdlc/pr-lifecycle.yaml`). */
   staleAfterMinutes?: number;
   downAfterMinutes?: number;
+  /** Answers who listens on the port (`/health`); default asks over HTTP through `deps.run`. */
+  probeIdentity?: (port: number) => WebhookIdentity | undefined;
   /** Answers whether the port accepts a connection; default probes with a short-lived node process. */
   probePort?: (port: number) => boolean;
 }
@@ -297,6 +354,17 @@ function readRefused(boardDir: string): { at: string; count: number } | undefine
   try {
     const r = JSON.parse(readFileSync(path.join(boardDir, REFUSED_FILE), 'utf-8'));
     return typeof r.at === 'string' && typeof r.count === 'number' ? r : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readForeign(boardDir: string): { count: number; repo: string } | undefined {
+  try {
+    const r = JSON.parse(readFileSync(path.join(boardDir, FOREIGN_FILE), 'utf-8'));
+    return typeof r.repo === 'string' && typeof r.count === 'number' && r.count > 0
+      ? { count: r.count, repo: r.repo }
+      : undefined;
   } catch {
     return undefined;
   }
@@ -333,11 +401,17 @@ export function webhookHealth(deps: HierarchyDeps, opts: WebhookHealthOptions = 
   const downMin = opts.downAfterMinutes ?? cfg.downAfterMinutes;
   const nowMs = deps.now().getTime();
   const state = readState(deps.boardDir);
-  const receiver = !!state && (deps.isAlive ?? defaultIsAlive)(state.pid);
+  const pidAlive = !!state && (deps.isAlive ?? defaultIsAlive)(state.pid);
   const port =
-    receiver && state ? (opts.probePort ?? ((p) => defaultProbePort(deps, p)))(state.port) : false;
+    pidAlive && state ? (opts.probePort ?? ((p) => defaultProbePort(deps, p)))(state.port) : false;
+  const problem =
+    pidAlive && state && port ? identityProblem(deps, state.port, opts.probeIdentity) : undefined;
+  const receiver = pidAlive && !problem;
+  const repo = state?.repo;
 
-  const events = existsSync(path.join(deps.boardDir, 'events')) ? eventEntries(deps.boardDir) : [];
+  const events = (
+    existsSync(path.join(deps.boardDir, 'events')) ? eventEntries(deps.boardDir) : []
+  ).filter((e) => !repo || e.repo === null || e.repo.toLowerCase() === repo.toLowerCase());
   const newest = events.reduce((m, e) => Math.max(m, e.mtimeMs), 0);
   const ageMin = newest > 0 ? Math.max(0, Math.floor((nowMs - newest) / 60_000)) : null;
 
@@ -360,6 +434,7 @@ export function webhookHealth(deps: HierarchyDeps, opts: WebhookHealthOptions = 
     lastEventAgeMin: ageMin,
     ...(newest > 0 ? { lastEventAt: new Date(newest).toISOString() } : {}),
     ...(state ? { receiverPort: state.port } : {}),
+    ...(readForeign(deps.boardDir) ? { foreignDeliveries: readForeign(deps.boardDir) } : {}),
     prActivityWithoutEvent: withoutEvent,
     prActivity: recent.length > 0,
     quiet: recent.length === 0,
@@ -369,7 +444,10 @@ export function webhookHealth(deps: HierarchyDeps, opts: WebhookHealthOptions = 
 
   const reasons: string[] = [];
   let cls: WebhookClass = 'healthy';
-  if (!receiver) {
+  if (problem) {
+    cls = 'down';
+    reasons.push(problem.reason);
+  } else if (!receiver) {
     cls = 'down';
     reasons.push('receiver process is not running');
   } else if (!port) {
@@ -402,7 +480,13 @@ export function webhookHealth(deps: HierarchyDeps, opts: WebhookHealthOptions = 
       `${refused.count} delivery(ies) refused for a bad signature since ${refused.at}: the forwarder secret does not match AI_SDLC_WEBHOOK_SECRET (secret mismatch)`,
     );
   }
-  return { class: cls, signals, since: deps.now().toISOString(), reasons };
+  return {
+    class: cls,
+    ...(repo ? { repo } : {}),
+    signals,
+    since: deps.now().toISOString(),
+    reasons,
+  };
 }
 
 /** `5m`, `3h` or `2d`; `never` for no event. */
@@ -419,14 +503,25 @@ function ageText(min: number | null): string {
 export function formatWebhookStatus(w: WebhookStatus, health?: WebhookHealth): string {
   if (w.state !== 'up') {
     if (w.reason === 'port collision') return `webhook: collision (${w.detail ?? 'port held'})`;
+    if (w.reason === 'foreign listener') return `webhook: down (${w.detail ?? w.reason})`;
     return health && health.class === 'down' && health.signals.receiver === false
       ? `webhook: down (${health.reasons[0] ?? w.reason})`
       : `webhook: off (${w.reason})`;
   }
   const h = health;
   return h
-    ? `webhook: ${h.class} (port ${w.port}, last event ${ageText(h.signals.lastEventAgeMin)}, feed ${h.signals.feed}, target ${webhookTargetUrl(w.port)})`
+    ? `webhook: ${h.class} (port ${w.port}, repo ${h.repo ?? 'unknown'}, last event ${ageText(h.signals.lastEventAgeMin)}, feed ${h.signals.feed}, target ${webhookTargetUrl(w.port)})`
     : `webhook: running (port ${w.port}, target ${webhookTargetUrl(w.port)}, health not read)`;
+}
+
+/** The refused-foreign-delivery line; empty when there are none (AISDLC-1349). */
+export function formatWebhookForeign(health?: WebhookHealth): string[] {
+  const f = health?.signals.foreignDeliveries;
+  return f
+    ? [
+        `webhook: ${f.count} delivery(ies) refused for repository ${f.repo} (this board serves ${health?.repo ?? 'an unknown repository'}); a forwarder is posting to the wrong port`,
+      ]
+    : [];
 }
 
 /** The `persisted:` status line (AISDLC-1256). */
@@ -540,8 +635,15 @@ export async function webhookServe(
 ): Promise<void> {
   const secret = deps.env[WEBHOOK_SECRET_ENV];
   if (!secret) throw new Error(`${WEBHOOK_SECRET_ENV} is not set`);
+  let repo: string | undefined;
+  try {
+    repo = resolveRepo(deps);
+  } catch {
+    /* unresolvable: accept every delivery; status reads the repository as unknown */
+  }
   const receiver = createReceiver({
     secret,
+    ...(repo ? { repo } : {}),
     boardDir: deps.boardDir,
     port: resolvePort(deps, portFlag),
     debounceMs: loadPrLifecycleConfig(deps.cwd).webhook.debounceMs,
@@ -562,7 +664,12 @@ export async function webhookServe(
   mkdirSync(deps.boardDir, { recursive: true });
   writeFileSync(
     stateFile(deps.boardDir),
-    JSON.stringify({ pid: process.pid, port: receiver.port, ...(feed ? { feed } : {}) }) + '\n',
+    JSON.stringify({
+      pid: process.pid,
+      port: receiver.port,
+      ...(repo ? { repo } : {}),
+      ...(feed ? { feed } : {}),
+    }) + '\n',
   );
   deps.log(`webhook listening on 127.0.0.1:${receiver.port}`);
   await new Promise<void>((resolve) => {

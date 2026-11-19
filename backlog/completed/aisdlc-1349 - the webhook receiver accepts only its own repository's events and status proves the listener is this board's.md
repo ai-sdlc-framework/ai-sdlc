@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1349
 title: "The webhook receiver accepts only its own repository's events, and status proves the listener is this board's"
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:

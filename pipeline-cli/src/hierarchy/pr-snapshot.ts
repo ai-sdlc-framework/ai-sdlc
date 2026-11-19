@@ -77,10 +77,16 @@ function readJson<T>(file: string): T | undefined {
 /** Event record names: `<repo>#<pr>@<sha>:<kind>:<delivery>.json`, URI encoded. */
 export function eventEntries(
   boardDir: string,
-): { pr: number | null; id: string; mtimeMs: number; file: string }[] {
+): { pr: number | null; repo: string | null; id: string; mtimeMs: number; file: string }[] {
   const dir = eventsDir(boardDir);
   if (!existsSync(dir)) return [];
-  const out: { pr: number | null; id: string; mtimeMs: number; file: string }[] = [];
+  const out: {
+    pr: number | null;
+    repo: string | null;
+    id: string;
+    mtimeMs: number;
+    file: string;
+  }[] = [];
   for (const f of readdirSync(dir)) {
     if (!f.endsWith('.json')) continue;
     let key: string;
@@ -96,7 +102,14 @@ export function eventEntries(
     } catch {
       continue;
     }
-    out.push({ pr: m && m[1] !== 'none' ? Number(m[1]) : null, id: key, mtimeMs, file: f });
+    const repo = /^([^#]+)#/.exec(key)?.[1] ?? null;
+    out.push({
+      pr: m && m[1] !== 'none' ? Number(m[1]) : null,
+      repo,
+      id: key,
+      mtimeMs,
+      file: f,
+    });
   }
   return out;
 }

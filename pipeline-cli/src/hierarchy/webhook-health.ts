@@ -184,11 +184,12 @@ export function runWebhookHealthTick(deps: WebhookHealthTickDeps): WebhookHealth
 
   const changed = h.class !== state.class;
   const reasonText = h.reasons.join('; ');
+  const repoTag = h.repo ? ` (${h.repo})` : '';
   if (escalate) {
     const id = deps.escalate?.({
       since: next.since!,
       class: h.class,
-      summary: `Webhook health ${h.class}: ${reasonText}`,
+      summary: `Webhook health ${h.class}${repoTag}: ${reasonText}`,
       body: formatWebhookEscalationBody(
         h,
         deps.repair?.eligible(h)
@@ -202,7 +203,7 @@ export function runWebhookHealthTick(deps: WebhookHealthTickDeps): WebhookHealth
     });
     next.escalated = true;
     if (id) next.decisionId = id;
-    deps.notify?.(`Webhook ${h.class}: ${reasonText}`);
+    deps.notify?.(`Webhook ${h.class}${repoTag}: ${reasonText}`);
   }
   writeState(deps.boardDir, next);
   return {
