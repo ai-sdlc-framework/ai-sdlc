@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.43.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.42.0...pipeline-cli-v0.43.0) (2026-11-19)
+
+
+### Features
+
+* **conformance:** parity manifest of the reference checked by Python and Go suites (AISDLC-1305) ([#2781](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2781)) ([91d79f5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/91d79f5e26683dcfc4d7785708becf8ecc6f056b))
+* **hooks:** protect build and agent files, ignore untrusted allowlist (AISDLC-1276) ([#2677](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2677)) ([1ffab4a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1ffab4a1a4cb4fcfa0d5e106af86e88cc8ead478))
+* **pipeline-cli:** add fetch container for sandbox dependencies (AISDLC-1291) ([#2713](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2713)) ([28a4fb3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/28a4fb33a703c9a3a03d049dab5e065ed5ba43a7))
+* **pipeline-cli:** cap untrusted PR gate model spend, gate on approval (AISDLC-1266) ([#2646](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2646)) ([de0ae8e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/de0ae8ed26aa0eb2ef4e49ff8db1def1aa69aa69))
+* **pipeline-cli:** check untrusted branch for protected paths before push (AISDLC-1275) ([#2674](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2674)) ([04b322c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/04b322c7c63c90a48447e14ccd8d58c7d05135e0))
+* **pipeline-cli:** gate outsider issues and fence issue text (AISDLC-1269) ([#2655](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2655)) ([7770e5d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7770e5d293ba40544e2fb1df7095b4f3e915dac4))
+* **pipeline-cli:** isolate untrusted-run agent from host credentials (AISDLC-1277) ([#2675](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2675)) ([e939db1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e939db16efca8851b125ac8e8ca3064856d7643c))
+* **pipeline-cli:** per-project webhook port selection and forwarder URL (AISDLC-1254) ([#2625](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2625)) ([0590862](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0590862831be344e9ee9d537f89a7498ada83784))
+* **pipeline-cli:** per-repo verification commands override (AISDLC-1263) ([#2632](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2632)) ([7a67b6f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7a67b6f922caec19b6c067b71fbe30a4ac37c9f7))
+* **pipeline-cli:** restart --all restarts scheduler and webhook (AISDLC-1272) ([#2659](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2659)) ([3b2dce9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3b2dce928cf5daec490160eb0d5f7ada11522454))
+* **pipeline-cli:** run python and go suites in the untrusted PR gate by changed path (AISDLC-1293) ([#2719](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2719)) ([d8f73eb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d8f73ebe0030f77bcd75ce27a0535e021035baab))
+* **pipeline-cli:** run the untrusted developer agent in a container (AISDLC-1278) ([#2676](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2676)) ([9ba950c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9ba950ccbb04ab08327ddf1e38fcf15474a82aab))
+* **spec:** gate published pages for implemented RFCs (AISDLC-1316) ([#2830](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2830)) ([7ddb7d6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7ddb7d64ff0386e6a686a500a942735d719b68bd))
+* webhook feed repairs itself before opening a decision (AISDLC-1299) ([#2756](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2756)) ([048217d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/048217de1458086f6ff5462251cd02bd42a2d768))
+
+
+### Bug Fixes
+
+* **ci:** no green gate status without a review; fork heads need a clean-room verdict (AISDLC-1268) ([#2645](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2645)) ([20dca52](https://github.com/ai-sdlc-framework/ai-sdlc/commit/20dca528fcf437f51fd7e3107be6335a4d19eecc))
+* **ci:** throttle sweep on default board and remember refused cancels (AISDLC-1298) ([#2749](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2749)) ([60f7013](https://github.com/ai-sdlc-framework/ai-sdlc/commit/60f70136e2270be6f60e62b84f8f00cbbae15516))
+* **hooks:** write subagent markers to the task worktree (AISDLC-1260) ([#2628](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2628)) ([abdea96](https://github.com/ai-sdlc-framework/ai-sdlc/commit/abdea968e330eabae9f8a3d1fdb45e19e20cd562))
+* **orchestrator:** drop removed attestation-sign script from adopter pre-push hook (AISDLC-1261) ([#2633](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2633)) ([c2bf663](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c2bf6638c947662b82ec64a526e08be9f89b6930))
+* **orchestrator:** scaffold pipeline without deprecated spec.stages (AISDLC-1281) ([#2714](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2714)) ([12962a1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/12962a13ebf6f84ee09146ab86aa63e5084e8522))
+* **pipeline-cli:** accept SDK version constants and keep sdk-go below 1.0 (AISDLC-1342) ([#2833](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2833)) ([a6ca918](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a6ca918ad392c0c90f9f83073df18fbceca5356e))
+* **pipeline-cli:** add acceptance criteria to bug form and drop /dor-recheck (AISDLC-1287) ([#2717](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2717)) ([0026f54](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0026f542b6b1810a2a2fac8817eb837b3a0f211e))
+* **pipeline-cli:** bound tick tmux calls and watchdog stalled scheduler ticks (AISDLC-1255) ([#2667](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2667)) ([0944807](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0944807d43a76da023d28151b7b66e53bd0937e9))
+* **pipeline-cli:** budget pacer lifts its hold inside the margin and status shows HOLD (AISDLC-1319) ([#2811](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2811)) ([64ff2e4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/64ff2e4a39e82485f1c7ac9b825efc6ace49e32b))
+* **pipeline-cli:** circular held class needs a real dependency cycle (AISDLC-1273) ([#2664](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2664)) ([0991544](https://github.com/ai-sdlc-framework/ai-sdlc/commit/099154484cc9058c74720557fe081ee79ed2e4ae))
+* **pipeline-cli:** clean-room record satisfies the merge gate coverage check (AISDLC-1321) ([#2816](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2816)) ([2f99c45](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2f99c45724620c6f3fa3793115701b9b4f6f93a9))
+* **pipeline-cli:** find plugin scripts from the installed plugin (AISDLC-1328) ([#2823](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2823)) ([d52c91b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d52c91b2dd775afb0864c5b79c1e7c7a808caf0b))
+* **pipeline-cli:** forwarder agent runs real gh and health reads running, not loaded (AISDLC-1285) ([#2706](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2706)) ([f891651](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f891651bed96fc6c8dbb90a254f4a954fa39cb15))
+* **pipeline-cli:** keep the tail of suite output and print it on self-test failure (AISDLC-1312) ([#2778](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2778)) ([db9624d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/db9624d72fbc4d605bff26d503b539ac369f317a))
+* **pipeline-cli:** load js-yaml statically and fail closed on gate config errors (AISDLC-1265) ([#2652](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2652)) ([ac204c8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ac204c87ce789cdb1b742e8349967f9d3af292c5))
+* **pipeline-cli:** make fetch container /tmp executable for install scripts (AISDLC-1294) ([#2732](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2732)) ([708125e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/708125e914ccc7bc3395377c07f74e5d62822ed6))
+* **pipeline-cli:** put prepared pnpm on PATH in sandbox fetch container (AISDLC-1300) ([#2761](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2761)) ([23736fa](https://github.com/ai-sdlc-framework/ai-sdlc/commit/23736fadd8a2c7e42441e9f0c03ba3ddcce94691))
+* **pipeline-cli:** re-add global URL-scoped credential helpers in trusted push (AISDLC-1262) ([#2637](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2637)) ([da91695](https://github.com/ai-sdlc-framework/ai-sdlc/commit/da91695a9589806c7a7ccde58336230c144a1a7e))
+* **pipeline-cli:** recover webhook forwarder from launchctl bootstrap error 5 (AISDLC-1256) ([#2673](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2673)) ([4bc42bb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4bc42bb71c11d509d4ad3d3b73ad4106d3be45d4))
+* **pipeline-cli:** restart verifies roster against the new tmux window (AISDLC-1258) ([#2665](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2665)) ([285060e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/285060ebb0d26d2a75aa1fa2fa8bde90a13097f6))
+* **pipeline-cli:** retire failed verdict only for own code PR (AISDLC-1297) ([#2759](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2759)) ([4799de7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4799de7aadf959f1e5ad0f65f87a01980b23b93c))
+* **pipeline-cli:** sandbox run container gets pnpm, a built tree and package scope (AISDLC-1296) ([#2738](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2738)) ([63db215](https://github.com/ai-sdlc-framework/ai-sdlc/commit/63db21595eec201c4621b73e67d274b05bfe2655))
+* **pipeline-cli:** sandbox test result gates untrusted PR approval (AISDLC-1267) ([#2654](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2654)) ([2a8547c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2a8547ce13ca4f0f60144ab6b4835cd843dfc415))
+* **pipeline-cli:** skip embedded and quoted urls in gate 3 extraction (AISDLC-1264) ([#2670](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2670)) ([c1a0d25](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c1a0d25ec1c4f5bd79cfc8b383b0702176fbbc53))
+* **pipeline-cli:** start one task per sequence group (AISDLC-1330) ([#2835](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2835)) ([4deb3af](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4deb3afddf01ba05b36da7d18e1c7b5c2be3035b))
+* **pipeline-cli:** step 10.5 commits the task-file status flip before rebase (AISDLC-1257) ([#2666](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2666)) ([7f35af0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7f35af0d5218fb0f0989eb6de7004f006981e849))
+* **pipeline-cli:** untrusted PR gate comment says why each path was blocked (AISDLC-1288) ([#2718](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2718)) ([44a8c8a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/44a8c8a8ca5d9c2defc44bdd557835932e4f0f45))
+* **pipeline-cli:** upstream OQ gate counts only open questions and lists file:line (AISDLC-1320) ([#2814](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2814)) ([90b881a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/90b881a30c71d84aad13aebb0edf7cb6edf53c3d))
+* **pipeline-cli:** verdict record counts only for its own pull request (AISDLC-1270) ([#2661](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2661)) ([31594ba](https://github.com/ai-sdlc-framework/ai-sdlc/commit/31594ba8f75d8b2e53ccf3163f64151966f93a86))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.43.0
+
 ## [0.42.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.41.0...pipeline-cli-v0.42.0) (2026-11-09)
 
 

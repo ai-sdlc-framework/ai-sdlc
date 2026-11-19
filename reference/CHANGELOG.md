@@ -1,5 +1,17 @@
 # @ai-sdlc/reference
 
+## [0.43.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.42.0...reference-v0.43.0) (2026-11-19)
+
+
+### Features
+
+* **spec:** gate published pages for implemented RFCs (AISDLC-1316) ([#2830](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2830)) ([7ddb7d6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7ddb7d64ff0386e6a686a500a942735d719b68bd))
+
+
+### Bug Fixes
+
+* **spec:** make deprecated Pipeline spec.stages optional (AISDLC-1280) ([#2692](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2692)) ([5bcacd6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5bcacd62cb70435acc9984158de762bade3c989a))
+
 ## [0.42.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.41.0...reference-v0.42.0) (2026-11-09)
 
 

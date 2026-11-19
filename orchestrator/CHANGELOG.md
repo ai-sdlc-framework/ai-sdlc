@@ -5,6 +5,36 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.43.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.42.0...orchestrator-v0.43.0) (2026-11-19)
+
+
+### Features
+
+* **orchestrator:** init warns when pnpm workflows are scaffolded without package.json (AISDLC-1284) ([#2725](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2725)) ([7e17333](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7e17333ca4ea51ee06d67ebb6231b4259a6c7175))
+* **pipeline-cli:** per-repo verification commands override (AISDLC-1263) ([#2632](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2632)) ([7a67b6f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7a67b6f922caec19b6c067b71fbe30a4ac37c9f7))
+
+
+### Bug Fixes
+
+* **hooks:** write subagent markers to the task worktree (AISDLC-1260) ([#2628](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2628)) ([abdea96](https://github.com/ai-sdlc-framework/ai-sdlc/commit/abdea968e330eabae9f8a3d1fdb45e19e20cd562))
+* **orchestrator:** doctor and init remove stale pre-push signer block (AISDLC-1325) ([#2817](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2817)) ([4a9cf3d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4a9cf3d657bc95fa06c938603d9967730598f7c2))
+* **orchestrator:** drop removed attestation-sign script from adopter pre-push hook (AISDLC-1261) ([#2633](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2633)) ([c2bf663](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c2bf6638c947662b82ec64a526e08be9f89b6930))
+* **orchestrator:** health reports invalid or missing config (AISDLC-1279) ([#2688](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2688)) ([7d36dcc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7d36dccd51834ab0e14c1b3cfde8566d940b55df))
+* **orchestrator:** init and doctor cover every runtime path the framework writes (AISDLC-1331) ([#2826](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2826)) ([9a94be1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9a94be18e44d5ae2eaa3bea2aa513d31678e828c))
+* **orchestrator:** init and doctor protect the target branch, not literal main (AISDLC-1283) ([#2724](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2724)) ([1242ac1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1242ac191aa11b70e6d3afc53cb5d510725e8e19))
+* **orchestrator:** init next steps list real paths and skipped protection (AISDLC-1282) ([#2720](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2720)) ([803c771](https://github.com/ai-sdlc-framework/ai-sdlc/commit/803c7712a0341be094c41ceae3786777e3e93b3a))
+* **orchestrator:** scaffold pipeline without deprecated spec.stages (AISDLC-1281) ([#2714](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2714)) ([12962a1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/12962a13ebf6f84ee09146ab86aa63e5084e8522))
+* **pipeline-cli:** keep the tail of suite output and print it on self-test failure (AISDLC-1312) ([#2778](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2778)) ([db9624d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/db9624d72fbc4d605bff26d503b539ac369f317a))
+* **spec:** make deprecated Pipeline spec.stages optional (AISDLC-1280) ([#2692](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2692)) ([5bcacd6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5bcacd62cb70435acc9984158de762bade3c989a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/pipeline-cli bumped to 0.43.0
+    * @ai-sdlc/reference bumped to 0.43.0
+
 ## [0.42.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.41.0...orchestrator-v0.42.0) (2026-11-09)
 
 
