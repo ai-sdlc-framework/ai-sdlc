@@ -192,7 +192,11 @@ function selectPort(deps: HierarchyDeps, flag: string | undefined): number {
 }
 
 /** Health class of the webhook path (AISDLC-1157). */
-export type WebhookClass = 'healthy' | 'degraded' | 'down';
+/**
+ * `unverified`: the receiver is up but no event was ever delivered and nothing says it should
+ * have been (AISDLC-1345). It is not `healthy`, and it neither opens nor closes a decision.
+ */
+export type WebhookClass = 'healthy' | 'unverified' | 'degraded' | 'down';
 
 /** The five signals the class is computed from. */
 export interface WebhookSignals {
@@ -201,6 +205,10 @@ export interface WebhookSignals {
   port: boolean | null;
   /** Minutes since the newest event file; null when there is none. */
   lastEventAgeMin: number | null;
+  /** When the newest event file arrived (ISO); absent when there is none. */
+  lastEventAt?: string;
+  /** The port the receiver recorded; absent when none is recorded. */
+  receiverPort?: number;
   /** A PR changed head or state within `staleAfterMinutes` and no event names it. */
   prActivityWithoutEvent: boolean;
   /** A PR changed within `staleAfterMinutes`. */
@@ -350,6 +358,8 @@ export function webhookHealth(deps: HierarchyDeps, opts: WebhookHealthOptions = 
     receiver,
     port: receiver ? port : false,
     lastEventAgeMin: ageMin,
+    ...(newest > 0 ? { lastEventAt: new Date(newest).toISOString() } : {}),
+    ...(state ? { receiverPort: state.port } : {}),
     prActivityWithoutEvent: withoutEvent,
     prActivity: recent.length > 0,
     quiet: recent.length === 0,
@@ -380,10 +390,14 @@ export function webhookHealth(deps: HierarchyDeps, opts: WebhookHealthOptions = 
     cls = 'degraded';
     reasons.push('the forwarder is not running while the receiver is up');
   }
+  if (cls === 'healthy' && newest === 0) {
+    cls = 'unverified';
+    reasons.push('no event has been delivered yet, so the feed is unverified');
+  }
   const refused = readRefused(deps.boardDir);
   if (refused && Date.parse(refused.at) > newest) {
     signals.refusedDeliveries = refused.count;
-    if (cls === 'healthy') cls = 'degraded';
+    if (cls === 'healthy' || cls === 'unverified') cls = 'degraded';
     reasons.push(
       `${refused.count} delivery(ies) refused for a bad signature since ${refused.at}: the forwarder secret does not match AI_SDLC_WEBHOOK_SECRET (secret mismatch)`,
     );

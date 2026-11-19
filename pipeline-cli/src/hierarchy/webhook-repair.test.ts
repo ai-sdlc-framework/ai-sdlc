@@ -233,6 +233,7 @@ describe('webhook self-repair (AISDLC-1299)', () => {
     }
     const closeEpisode = vi.fn();
     const healthy = { ...reading(), class: 'healthy' as const, reasons: [] };
+    healthy.signals = { ...healthy.signals, lastEventAt: s.deps.now().toISOString() };
     runWebhookHealthTick({
       boardDir: dir,
       now: s.deps.now,

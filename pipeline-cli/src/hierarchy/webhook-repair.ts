@@ -116,7 +116,13 @@ export function makeWebhookRepair(
   return {
     eligible: (h) => {
       if (platform !== 'darwin' || !feedAgent()) return false;
-      if (h.class === 'healthy' || !h.signals.receiver || h.signals.port === false) return false;
+      if (
+        h.class === 'healthy' ||
+        h.class === 'unverified' ||
+        !h.signals.receiver ||
+        h.signals.port === false
+      )
+        return false;
       if (h.signals.feed !== 'gh-forward') return false;
       const silent = h.reasons.some((r) => r.startsWith('no event for'));
       return h.signals.forwarder === 'dead' || silent;
