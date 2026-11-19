@@ -292,6 +292,7 @@ export async function hierarchyRestart(
       model: entry.model,
       permissionMode: entry.permissionMode,
       prompt: ROLE_PROMPT[entry.role],
+      ...(entry.taskId ? { taskId: entry.taskId } : {}),
       ...(entry.launchProfile ? withProfile(resolveProfile(deps, entry.launchProfile)) : {}),
     },
     project,
@@ -307,7 +308,9 @@ export async function hierarchyRestart(
       `${launched.failure}; '${entry.name}' was stopped and dropped from the roster. Run cli-hierarchy up to start it again`,
     );
   }
-  const next = launched.entry;
+  const next: RosterEntry = entry.taskId
+    ? { ...launched.entry, taskId: entry.taskId }
+    : launched.entry;
   replaceEntry(deps, entry.name, next);
   verifyRestarted(deps, next);
   deps.emit?.({
