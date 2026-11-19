@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1315
 title: 'Every published page is in its section''s navigation'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-18'
 labels:
