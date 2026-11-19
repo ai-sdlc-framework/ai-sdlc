@@ -67,6 +67,7 @@ Checks currently implemented (see `DOCTOR_CHECKS` in `doctor-checks.ts`):
 | `plugin-version` | Installed plugin version vs. latest published | `ai-sdlc-plugin/hooks/check-plugin-version.js --print` (`--deps` prints only the runtime dependency lines, with no network call, AISDLC-1271) |
 | `runtime-deps-pins` | `runtimeDependencies` pins resolve to what's installed; flags `^0.x` caret traps (AISDLC-574) | `ai-sdlc-plugin/scripts/check-stale-runtime-deps.mjs` (AISDLC-580) |
 | `manifests-agree` | `plugin.json` and `.claude-plugin/plugin.json` agree on version + pins (AISDLC-558) | — |
+| `plugin-install-entries` | WARNs on plugin install entries pinned below the newest cached version; FAILs when the project entry points at a missing folder; read-only, no fix (AISDLC-1327) | — |
 | `attestation-governance` | Attestation required-but-unconfigured; branch protection requiring `ai-sdlc/attestation` directly (AISDLC-388 misconfiguration) | `checkAttestationGovernance` (AISDLC-560) |
 | `marketplace-catalog-drift` | Marketplace catalog cache lags the source-of-truth version — the `/plugin` "already at latest" false negative | — |
 | `npm-dist-tag-reachability` | Every `runtimeDependencies` pin actually resolves on the configured npm registry | — |

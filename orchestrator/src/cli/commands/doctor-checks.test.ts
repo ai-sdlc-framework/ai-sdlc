@@ -70,6 +70,7 @@ import {
   fixConfigManifest,
   fixWorktreeHooks,
   checkForcePushPolicy,
+  checkPluginInstallEntries,
   readForcePushPolicy,
   runDoctorChecks,
   runDoctorFixes,
@@ -2855,5 +2856,134 @@ describe('hook-env-hygiene check', () => {
       },
     });
     expect(checkHookEnvHygiene(makeCtx(adapters, repoRoot)).severity).toBe('pass');
+  });
+});
+
+describe('AISDLC-1327: plugin install entries', () => {
+  function layout(entries: unknown[] | null, versions = ['1.0.0', '2.0.0']) {
+    const home = join(tmpDir, '__home__');
+    const cache = join(home, '.claude', 'plugins', 'cache', 'mp', 'ai-sdlc');
+    for (const v of versions) {
+      mkdirSync(join(cache, v), { recursive: true });
+      writeFileSync(join(cache, v, 'plugin.json'), JSON.stringify({ version: v }));
+    }
+    const registry = join(home, '.claude', 'plugins', 'installed_plugins.json');
+    if (entries) {
+      writeFileSync(registry, JSON.stringify({ version: 2, plugins: { 'ai-sdlc@mp': entries } }));
+    }
+    const adapters = makeAdapters({
+      listDir: (p) => {
+        try {
+          return readdirSync(p);
+        } catch {
+          return [];
+        }
+      },
+    });
+    return { cache, registry, ctx: makeCtx(adapters, join(tmpDir, 'proj', 'sub')) };
+  }
+
+  it('resolvePluginInstall prefers the matching project entry over the user entry', () => {
+    const { cache, ctx } = layout([
+      {
+        scope: 'user',
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/2.0.0'),
+      },
+      {
+        scope: 'project',
+        projectPath: join(tmpDir, 'proj'),
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/1.0.0'),
+        version: '1.0.0',
+      },
+    ]);
+    expect(resolvePluginInstall(ctx)?.path).toBe(join(cache, '1.0.0'));
+  });
+
+  it('falls back to the user entry when no project entry matches', () => {
+    const { cache, ctx } = layout([
+      {
+        scope: 'project',
+        projectPath: '/elsewhere',
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/2.0.0'),
+      },
+      {
+        scope: 'user',
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/1.0.0'),
+      },
+    ]);
+    expect(resolvePluginInstall(ctx)?.path).toBe(join(cache, '1.0.0'));
+  });
+
+  it('takes the nearest ancestor when two project entries match', () => {
+    const { cache, ctx } = layout([
+      {
+        scope: 'project',
+        projectPath: tmpDir,
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/2.0.0'),
+      },
+      {
+        scope: 'local',
+        projectPath: join(tmpDir, 'proj'),
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/1.0.0'),
+      },
+    ]);
+    expect(resolvePluginInstall(ctx)?.path).toBe(join(cache, '1.0.0'));
+  });
+
+  it('check warns for a stale entry naming its project path and version', () => {
+    const { ctx } = layout([
+      {
+        scope: 'project',
+        projectPath: '/old/project',
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/1.0.0'),
+        version: '1.0.0',
+      },
+    ]);
+    const r = checkPluginInstallEntries(ctx);
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('/old/project');
+    expect(r.title).toContain('v1.0.0');
+  });
+
+  it('check fails when the project entry points at a missing folder', () => {
+    const { ctx } = layout([
+      { scope: 'project', projectPath: join(tmpDir, 'proj'), installPath: join(tmpDir, 'gone') },
+    ]);
+    expect(checkPluginInstallEntries(ctx).severity).toBe('fail');
+  });
+
+  it('check passes without a registry file and when every entry is newest', () => {
+    expect(checkPluginInstallEntries(layout(null).ctx).severity).toBe('pass');
+    const { ctx } = layout([
+      {
+        scope: 'user',
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/2.0.0'),
+        version: '2.0.0',
+      },
+    ]);
+    const r = checkPluginInstallEntries(ctx);
+    expect(r.severity).toBe('pass');
+  });
+
+  it('writes nothing: cache folders and registry stay byte-identical after check and fix', () => {
+    const { cache, registry, ctx } = layout([
+      {
+        scope: 'project',
+        projectPath: '/old/project',
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/1.0.0'),
+        version: '1.0.0',
+      },
+    ]);
+    const before = readFileSync(registry, 'utf-8');
+    checkPluginInstallEntries(ctx);
+    const check = DOCTOR_CHECKS.find((c) => c.id === 'plugin-install-entries')!;
+    expect(check.fix).toBeUndefined();
+    runDoctorFixes(ctx, [check]);
+    expect(readFileSync(registry, 'utf-8')).toBe(before);
+    expect(readdirSync(cache).sort()).toEqual(['1.0.0', '2.0.0']);
+  });
+
+  it('is registered in the doctor registry', () => {
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('plugin-install-entries');
   });
 });

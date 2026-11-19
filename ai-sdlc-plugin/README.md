@@ -102,7 +102,13 @@ Slash command bodies invoke `@ai-sdlc/pipeline-cli` CLIs and plugin-internal scr
 1. $CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin exists → use it
 2. $CLAUDE_PLUGIN_DIR set but deps missing → self-heal via install-runtime-deps.sh
 3. $CLAUDE_PLUGIN_ROOT/node_modules/@ai-sdlc/pipeline-cli/bin exists → use it
-4. ~/.claude/plugins/cache/*/ai-sdlc/*/node_modules/... exists → use highest version
+4. Plugin cache (AISDLC-1327), in this order:
+   a. the install entry of this project in ~/.claude/plugins/installed_plugins.json
+      (key starts with `ai-sdlc@`; the `project`/`local` entry whose projectPath is the
+      project dir or its nearest ancestor, else the `user` entry; used only when its
+      installPath exists)
+   b. last resort, stderr says no install entry matched:
+      ~/.claude/plugins/cache/*/ai-sdlc/*/node_modules/... → use highest version
 5. $(pwd)/pipeline-cli/bin exists → use it (dogfood monorepo)
 6. Self-location fallback: neither env var set → self-heal against the dir
    this script itself lives in, then retry (AISDLC-557, last resort)
