@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1317
 title: 'RFC registry and RFC headers state one status'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-18'
 labels:

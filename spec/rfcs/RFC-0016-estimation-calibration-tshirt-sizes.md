@@ -36,7 +36,7 @@ runtimeEvidence:
 # RFC-0016: Estimation Calibration with T-Shirt Sizes
 
 **Document type:** Normative
-**Status:** Ready for Product owner sign-off (Engineering + Operator signed off 2026-05-03; 8 open questions resolved per §15)
+**Status:** Implemented. Previously: Ready for Product owner sign-off (Engineering + Operator signed off 2026-05-03; 8 open questions resolved per §15)
 **Lifecycle:** Ready for Review
 **Author:** Dominique Legault (with Claude assist)
 **Created:** 2026-05-01
