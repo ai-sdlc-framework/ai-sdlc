@@ -310,7 +310,15 @@ describe('doctorCommand — CLI action (end-to-end via the command builder, AISD
   it('--format json prints results + summary; exits 0 when nothing fails (plugin/gh unavailable = warn, not fail)', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
-    const program = buildProgram(() => baseAdapters());
+    // the runtime-gitignore check fails on an unignored path (AISDLC-1331): git says ignored
+    const program = buildProgram(() =>
+      baseAdapters({
+        runCommand: (_cmd, args) => ({
+          stdout: '',
+          exitCode: args.includes('check-ignore') && args.includes('-q') ? 0 : 1,
+        }),
+      }),
+    );
     await program.parseAsync(['--format', 'json', 'doctor'], { from: 'user' });
 
     expect(logSpy).toHaveBeenCalledTimes(1);

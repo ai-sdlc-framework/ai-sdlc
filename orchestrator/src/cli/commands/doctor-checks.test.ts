@@ -49,6 +49,7 @@ import {
   parseEtimeSeconds,
   checkJudgmentLayer,
   checkRuntimeGitignore,
+  fixRuntimeGitignore,
   checkHierarchyLaunchEnv,
   checkVscodeHierarchyTerminals,
   fixVscodeHierarchyTerminals,
@@ -81,6 +82,7 @@ import {
 } from './doctor-checks.js';
 import { SPAWN_FAILED_EXIT_CODE, buildProductionDoctorAdapters } from './doctor.js';
 import { cleanGitEnv } from '../../runtime/git-env.js';
+import { RUNTIME_GITIGNORE_PATHS } from '../../runtime-gitignore.js';
 import { setClock } from '../../clock.js';
 
 let tmpDir: string;
@@ -1325,65 +1327,49 @@ describe('checkRuntimeGitignore', () => {
   const gitSays = (exitCode: number) =>
     makeAdapters({ runCommand: () => ({ stdout: '', exitCode }) });
 
-  it('warns when .gitignore lacks the artifacts entry, and names the fix', () => {
-    writeFileSync(join(tmpDir, '.gitignore'), 'node_modules/\n.ai-sdlc/state/\n');
+  const ALL = RUNTIME_GITIGNORE_PATHS.join('\n') + '\n';
+  const OLD_BLOCK =
+    '# ai-sdlc:runtime-gitignore\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n.ai-sdlc/artifacts/\n.ai-sdlc/subagent-sessions/\n';
+
+  it('fails on the old five-entry block and names each missing entry', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), OLD_BLOCK);
     const r = checkRuntimeGitignore(makeCtx(noGit()));
-    expect(r.severity).toBe('warn');
-    expect(r.title).toContain('.ai-sdlc/artifacts/');
-    expect(r.remediation).toContain('.ai-sdlc/artifacts/');
-    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: true });
+    expect(r.severity).toBe('fail');
+    for (const entry of RUNTIME_GITIGNORE_PATHS.slice(5)) expect(r.title).toContain(entry);
+    expect(r.title).toContain('.ai-sdlc/dispatch/');
+    expect(r.title).toContain('.ai-sdlc/transcripts/');
+    expect(r.title).not.toContain('.ai-sdlc/state.db,');
+    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: true, missingCount: 13 });
   });
 
-  it('warns when there is no .gitignore at all', () => {
+  it('fails when there is no .gitignore at all', () => {
     const r = checkRuntimeGitignore(makeCtx(noGit()));
-    expect(r.severity).toBe('warn');
+    expect(r.severity).toBe('fail');
     expect(r.title).toMatch(/no \.gitignore found/);
-    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: false });
+    expect(r.anonymizableEvidence).toMatchObject({ gitignorePresent: false });
   });
 
-  it('is quiet when the entry is present', () => {
-    writeFileSync(join(tmpDir, '.gitignore'), '# ai-sdlc:runtime-gitignore\n.ai-sdlc/artifacts/\n');
+  it('passes when every entry is written', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), `# ai-sdlc:runtime-gitignore\n${ALL}`);
     const r = checkRuntimeGitignore(makeCtx(noGit()));
     expect(r.severity).toBe('pass');
     expect(r.remediation).toBeUndefined();
   });
 
-  it.each(['.ai-sdlc/artifacts', '/.ai-sdlc/artifacts/', '.ai-sdlc/artifacts/  '])(
-    'accepts the equivalent spelling %j',
-    (line) => {
-      writeFileSync(join(tmpDir, '.gitignore'), `${line}\n`);
+  it.each(['.ai-sdlc/*\n.active-task\n.worktrees/', '.ai-sdlc/\n.active-task\n.worktrees/'])(
+    'passes when broader lines cover every entry (%j)',
+    (text) => {
+      writeFileSync(join(tmpDir, '.gitignore'), `${text}\n`);
       expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
     },
   );
 
-  it('does not count a different directory or a comment as covering the entry', () => {
-    writeFileSync(join(tmpDir, '.gitignore'), '# .ai-sdlc/artifacts/\n.ai-sdlc/artifacts-old/\n');
-    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
+  it('does not count a comment as covering an entry', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), `# ${ALL.split('\n').join('\n# ')}\n`);
+    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('fail');
   });
 
-  it('warns when a later line negates the entry, or the entry is indented', () => {
-    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n!.ai-sdlc/artifacts/\n');
-    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
-    writeFileSync(join(tmpDir, '.gitignore'), '  .ai-sdlc/artifacts/\n');
-    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
-  });
-
-  it.each(['artifacts/', '.ai-sdlc/', '.ai-sdlc/*', '**/artifacts/', '.ai-sdlc/artifacts/*'])(
-    'text fallback: a broader line %j already ignores the directory',
-    (line) => {
-      writeFileSync(join(tmpDir, '.gitignore'), `${line}\n`);
-      expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
-    },
-  );
-
-  it('text fallback: `.ai-sdlc/*` then `!.ai-sdlc/artifacts` re-includes it, but `.ai-sdlc/` then the same `!` cannot', () => {
-    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/*\n!.ai-sdlc/artifacts\n');
-    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
-    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/\n!.ai-sdlc/artifacts\n');
-    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
-  });
-
-  it('asks git about the project directory and trusts a yes over the text', () => {
+  it('asks git about every entry and trusts a yes over the text', () => {
     writeFileSync(join(tmpDir, '.gitignore'), 'node_modules/\n');
     const calls: string[][] = [];
     const adapters = makeAdapters({
@@ -1393,26 +1379,53 @@ describe('checkRuntimeGitignore', () => {
       },
     });
     expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('pass');
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(RUNTIME_GITIGNORE_PATHS.length);
     expect(calls[0].slice(0, 3)).toEqual(['git', '-C', tmpDir]);
     expect(calls[0]).toContain('check-ignore');
-    expect(calls[0].at(-1)).toBe('.ai-sdlc/artifacts/probe');
   });
 
-  it('trusts git saying not ignored over text that looks covered (a nested rule re-includes it)', () => {
-    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
-    expect(checkRuntimeGitignore(makeCtx(gitSays(1))).severity).toBe('warn');
+  it('trusts git saying not ignored over text that looks covered', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), ALL);
+    expect(checkRuntimeGitignore(makeCtx(gitSays(1))).severity).toBe('fail');
   });
 
   it.each([128, SPAWN_FAILED_EXIT_CODE])(
     'falls back to the text when git cannot answer (exit %i)',
     (code) => {
-      writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
+      writeFileSync(join(tmpDir, '.gitignore'), ALL);
       expect(checkRuntimeGitignore(makeCtx(gitSays(code))).severity).toBe('pass');
       writeFileSync(join(tmpDir, '.gitignore'), 'dist/\n');
-      expect(checkRuntimeGitignore(makeCtx(gitSays(code))).severity).toBe('warn');
+      expect(checkRuntimeGitignore(makeCtx(gitSays(code))).severity).toBe('fail');
     },
   );
+
+  it('fix adds the missing entries under the same sentinel block, then passes, and a second fix changes nothing', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), `node_modules/\n\n${OLD_BLOCK}`);
+    const ctx = makeCtx(noGit());
+    const first = fixRuntimeGitignore(ctx);
+    expect(first.applied).toBe(true);
+    const after = readFileSync(join(tmpDir, '.gitignore'), 'utf-8');
+    expect(after.split('# ai-sdlc:runtime-gitignore').length).toBe(2);
+    expect(after).toContain('.ai-sdlc/dispatch/');
+    expect(checkRuntimeGitignore(ctx).severity).toBe('pass');
+    const second = fixRuntimeGitignore(ctx);
+    expect(second.applied).toBe(false);
+    expect(readFileSync(join(tmpDir, '.gitignore'), 'utf-8')).toBe(after);
+  });
+
+  it('fix creates a sentinel block when there is none, and from no .gitignore', () => {
+    const ctx = makeCtx(noGit());
+    expect(fixRuntimeGitignore(ctx).applied).toBe(true);
+    expect(readFileSync(join(tmpDir, '.gitignore'), 'utf-8')).toBe(
+      `# ai-sdlc:runtime-gitignore\n${ALL}`,
+    );
+    writeFileSync(join(tmpDir, '.gitignore'), 'dist/\n');
+    expect(fixRuntimeGitignore(ctx).applied).toBe(true);
+    expect(readFileSync(join(tmpDir, '.gitignore'), 'utf-8')).toBe(
+      `dist/\n# ai-sdlc:runtime-gitignore\n${ALL}`,
+    );
+    expect(checkRuntimeGitignore(ctx).severity).toBe('pass');
+  });
 
   it('with the production adapter and no git binary on PATH, falls back to the text (no exit status at all)', () => {
     const savedPath = process.env.PATH;
@@ -1420,10 +1433,10 @@ describe('checkRuntimeGitignore', () => {
     try {
       const adapters = makeAdapters({ runCommand: buildProductionDoctorAdapters().runCommand });
       expect(adapters.runCommand('git', ['--version']).exitCode).toBe(SPAWN_FAILED_EXIT_CODE);
-      writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
+      writeFileSync(join(tmpDir, '.gitignore'), ALL);
       expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('pass');
       writeFileSync(join(tmpDir, '.gitignore'), 'dist/\n');
-      expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('warn');
+      expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('fail');
     } finally {
       process.env.PATH = savedPath;
     }
@@ -1680,7 +1693,16 @@ describe('DOCTOR_CHECKS registry', () => {
 
 describe('runDoctorChecks + summarizeDoctorResults', () => {
   it('a known-good project (no plugin dir, no attestation artifacts, clean gh) reports zero fails', () => {
-    const results = runDoctorChecks(makeCtx(makeAdapters()));
+    const results = runDoctorChecks(
+      makeCtx(
+        makeAdapters({
+          runCommand: (_cmd, args) => ({
+            stdout: '',
+            exitCode: args.includes('check-ignore') && args.includes('-q') ? 0 : 1,
+          }),
+        }),
+      ),
+    );
     const summary = summarizeDoctorResults(results);
     expect(summary.fail).toBe(0);
     expect(summary.total).toBe(results.length);
@@ -1702,6 +1724,8 @@ describe('runDoctorChecks + summarizeDoctorResults', () => {
       makeCtx(
         makeAdapters({
           runCommand: (cmd, args) => {
+            if (args.includes('check-ignore') && args.includes('-q'))
+              return { stdout: '', exitCode: 0 };
             if (cmd === 'gh' && args[0] === 'repo') return { stdout: 'acme/widgets', exitCode: 0 };
             if (cmd === 'gh' && args[0] === 'api') {
               return {
