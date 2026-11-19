@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1325
 title: 'Doctor and init remove a stale pre-push signer block in every project, with or without the attestation workflow'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:

@@ -1845,6 +1845,20 @@ export async function applyFeatureSelection(
     }
   }
 
+  // AISDLC-1325: a pre-1261 signer block is a defect whether or not the
+  // attestation feature is selected; strip it from the resolved hook.
+  if (!selection.attestation && !flags.dryRun) {
+    const { path: hookPath, relPath: hookRelPath } = resolveHookTarget(projectDir, adapters);
+    const existingHook = adapters.readTextFile(hookPath);
+    if (existingHook != null && hasStaleAttestationSignReference(existingHook)) {
+      const stripped = stripStaleAttestationSignBlock(existingHook);
+      if (stripped !== existingHook) {
+        adapters.writeFile(hookPath, stripped);
+        adapters.log(`  rewrote ${hookRelPath} (removed stale attestation-sign block)`);
+      }
+    }
+  }
+
   // Branch protection (always last — depends on the gate workflow being
   // present so the required check exists when the rule is applied).
   if (selection.branchProtection && flags.noBranchProtection) {

@@ -191,6 +191,35 @@ describe('check 8: husky pre-push gate', () => {
     expect(text).not.toContain('check-attestation-sign');
     expect(checkHuskyPrePushGate(ctxOf()).severity).toBe('pass');
   });
+  describe('without the attestation workflow (AISDLC-1325)', () => {
+    const STALE =
+      '# ai-sdlc:attestation-sign-block\nbash "$H/scripts/check-attestation-sign.sh"\n# end ai-sdlc:attestation-sign-block\n';
+    it('fails on a stale block and --fix removes it byte for byte', () => {
+      put('.husky/pre-push', `#!/bin/sh\necho keep\n${STALE}echo tail\n`);
+      const r = checkHuskyPrePushGate(ctxOf());
+      expect(r.severity).toBe('fail');
+      expect(r.remediation).toContain('ai-sdlc doctor --fix');
+      expect(fixHuskyPrePushGate(ctxOf()).applied).toBe(true);
+      expect(readFileSync(join(tmpDir, '.husky/pre-push'), 'utf-8')).toBe(
+        '#!/bin/sh\necho keep\necho tail\n',
+      );
+      expect(checkHuskyPrePushGate(ctxOf()).severity).toBe('pass');
+    });
+    it('passes with no stale block and the fix creates no hook', () => {
+      mkdirSync(join(tmpDir, '.husky'));
+      expect(checkHuskyPrePushGate(ctxOf()).severity).toBe('pass');
+      expect(fixHuskyPrePushGate(ctxOf()).applied).toBe(false);
+      expect(existsSync(join(tmpDir, '.husky/pre-push'))).toBe(false);
+    });
+    it('does not apply when the stale reference sits outside the block', () => {
+      put('.husky/pre-push', 'bash scripts/check-attestation-sign.sh\n');
+      expect(fixHuskyPrePushGate(ctxOf()).applied).toBe(false);
+    });
+    it('does not apply when the stale block is only in .git/hooks', () => {
+      put('.git/hooks/pre-push', STALE);
+      expect(fixHuskyPrePushGate(ctxOf()).applied).toBe(false);
+    });
+  });
   it('--fix refuses when the stale reference sits outside the ai-sdlc block', () => {
     put('.github/workflows/verify-attestation.yml', 'name: v\n');
     put('.husky/pre-push', 'bash scripts/check-attestation-sign.sh\n');
