@@ -24,6 +24,7 @@
     "tui": "AI_SDLC_TUI=experimental node pipeline-cli/bin/cli-tui.mjs",
     "validate-schemas": "pnpm -C reference validate-schemas",
     "smoke:first-run": "node scripts/first-run-smoke.mjs",
+    "smoke:bootstrap": "node scripts/bootstrap-smoke.mjs",
     "canary:pipeline": "node scripts/pipeline-canary.mjs",
     "test:pipeline-canary-gate": "node --import ./vitest.git-env.setup.mjs --test scripts/pipeline-canary.test.mjs",
     "test:first-run-smoke-gate": "node --import ./vitest.git-env.setup.mjs --test scripts/first-run-smoke.test.mjs",
