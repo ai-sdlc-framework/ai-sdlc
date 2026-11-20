@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1361
 title: 'One bootstrap test takes a scratch repository from setup to a merged pull request and fails when any stage is skipped'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
