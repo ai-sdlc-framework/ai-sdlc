@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1356
 title: 'Doctor fails on a missing prerequisite instead of staying quiet'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
