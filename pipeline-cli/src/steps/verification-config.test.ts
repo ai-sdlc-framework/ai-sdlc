@@ -60,6 +60,32 @@ describe('scaffoldVerification', () => {
       'verification:',
     );
   });
+  it.each([
+    ['package-lock.json', 'npm test'],
+    ['yarn.lock', 'yarn test'],
+    ['bun.lockb', 'bun run test'],
+    ['pnpm-lock.yaml', 'pnpm test'],
+  ])('uses the package manager of %s', (lock, test) => {
+    const root = tmp();
+    writeFileSync(join(root, 'package.json'), '{}');
+    writeFileSync(join(root, lock), '');
+    scaffoldVerification(root);
+    expect(loadVerification(root).test).toBe(test);
+  });
+  it('reads the packageManager field without a lockfile, else pnpm', () => {
+    const a = tmp();
+    writeFileSync(join(a, 'package.json'), '{"packageManager":"yarn@4.1.0"}');
+    scaffoldVerification(a);
+    expect(loadVerification(a).lint).toBe('yarn lint');
+    const b = tmp();
+    writeFileSync(join(b, 'package.json'), '{}');
+    scaffoldVerification(b);
+    expect(loadVerification(b)).toEqual(DEFAULT_VERIFICATION);
+    const c = tmp();
+    writeFileSync(join(c, 'package.json'), '{"packageManager":"npm@10"}');
+    scaffoldVerification(c);
+    expect(loadVerification(c).build).toBe('npm run build');
+  });
   it('writes nothing for an unrecognised repo', () => {
     const root = tmp();
     expect(scaffoldVerification(root)).toBeUndefined();

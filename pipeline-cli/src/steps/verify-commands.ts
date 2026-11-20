@@ -299,7 +299,11 @@ export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyR
     let commands = opts.commands;
     let affected: string[] | undefined;
     if (before.headSha && commands.includes('pnpm test')) {
-      if (opts.narrowFrom) affected = await affectedPackages(runner, opts.cwd, opts.narrowFrom);
+      // Only a repo with the framework's own script gets the chain and patch gate (AISDLC-1360).
+      const hasFrameworkScripts = existsSync(join(opts.cwd, 'scripts/list-coverage-packages.mjs'));
+      if (opts.narrowFrom && hasFrameworkScripts) {
+        affected = await affectedPackages(runner, opts.cwd, opts.narrowFrom);
+      }
       commands = expandVerifyCommands(
         commands,
         await coveragePackages(runner, opts.cwd),

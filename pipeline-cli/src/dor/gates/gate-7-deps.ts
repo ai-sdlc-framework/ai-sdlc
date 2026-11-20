@@ -38,16 +38,17 @@
  */
 
 import type { GateEvaluation, IssueInput } from '../types.js';
+import { taskIdSource } from '../task-prefix.js';
 
 /**
  * Tracked-work identifier shapes recognised as dependency targets.
  * Mirrors the resolver kinds Gate 3 understands.
  */
-const TRACKED_WORK_ID =
+const trackedWorkId = (workDir?: string): string =>
   // AISDLC-NN(.NN) | RFC-NNNN | (gh)#NN | org/repo#NN | https://… | repo-relative file path
   // (file paths MUST contain at least one slash OR end in a recognised code/spec extension
   // to avoid matching bare version-like tokens — `after 1.2 ships` previously matched `1.2`)
-  String.raw`(?:AISDLC-\d+(?:\.\d+)?|RFC-\d{4}|(?:gh)?#\d+|[\w.-]+\/[\w.-]+#\d+|https?:\/\/[^\s)]+|[\w.-]+\/[\w./-]+\.[a-zA-Z0-9]+|[\w./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|yaml|yml|md|sh|py|go|rs|toml|sql))`;
+  String.raw`(?:${taskIdSource(workDir)}|RFC-\d{4}|(?:gh)?#\d+|[\w.-]+\/[\w.-]+#\d+|https?:\/\/[^\s)]+|[\w.-]+\/[\w./-]+\.[a-zA-Z0-9]+|[\w./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|json|yaml|yml|md|sh|py|go|rs|toml|sql))`;
 
 /**
  * Dependency phrases that can introduce a tracked-work id. Kept narrow
@@ -88,17 +89,20 @@ const DEP_PHRASE = String.raw`(?:requires|required\s+by|depends\s+on|blocked\s+b
  *   "depends on the auth rewrite"
  *   "blocked by the search refactor"
  */
-const DEP_PHRASE_WITH_REF_RE = new RegExp(
-  String.raw`\b${DEP_PHRASE}` +
-    // Optional connector words between phrase and id — keep tight:
-    // 0-3 short tokens (articles, prepositions, simple gerunds), each
-    // separated by whitespace.
-    String.raw`(?:\s+(?:the|a|an|on|to|that|completed|done|finished|merged|landed|shipped|landing|shipping|merging|finishing))*\s+` +
-    String.raw`(${TRACKED_WORK_ID})`,
-  'gi',
-);
+const depPhraseWithRefRe = (workDir?: string): RegExp =>
+  new RegExp(
+    String.raw`\b${DEP_PHRASE}` +
+      // Optional connector words between phrase and id — keep tight:
+      // 0-3 short tokens (articles, prepositions, simple gerunds), each
+      // separated by whitespace.
+      String.raw`(?:\s+(?:the|a|an|on|to|that|completed|done|finished|merged|landed|shipped|landing|shipping|merging|finishing))*\s+` +
+      String.raw`(${trackedWorkId(workDir)})`,
+    'gi',
+  );
 
-const TRACKED_WORK_ID_RE = new RegExp(TRACKED_WORK_ID, 'i');
+const DEP_PHRASE_WITH_REF_RE = depPhraseWithRefRe();
+
+const TRACKED_WORK_ID_RE = new RegExp(trackedWorkId(), 'i');
 
 /**
  * Extract the raw string items of a YAML frontmatter list field, in
@@ -184,6 +188,7 @@ export function findInvisibleDependencies(
   input: IssueInput,
 ): Array<{ phrase: string; sentence: string; ref: string }> {
   const haystack = input.body;
+  const depRe = depPhraseWithRefRe(input.workDir);
   const sentences = splitIntoSentences(haystack);
   // Normalise the extracted body reference to the bare tracked-work id
   // (already the case — the regex capture group IS the id, never the
@@ -198,9 +203,8 @@ export function findInvisibleDependencies(
 
   const out: Array<{ phrase: string; sentence: string; ref: string }> = [];
   for (const sentence of sentences) {
-    DEP_PHRASE_WITH_REF_RE.lastIndex = 0;
     let m: RegExpExecArray | null;
-    while ((m = DEP_PHRASE_WITH_REF_RE.exec(sentence)) !== null) {
+    while ((m = depRe.exec(sentence)) !== null) {
       const ref = (m[1] ?? '').trim();
       if (!ref) continue;
       // If the captured tracked-work id appears in the explicit

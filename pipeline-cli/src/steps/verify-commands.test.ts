@@ -321,6 +321,8 @@ describe('verify narrowing (AISDLC-1188, DEC-0372)', () => {
       mkdirSync(join(dir, p, 'src'), { recursive: true });
       writeFileSync(join(dir, p, 'package.json'), '{}');
     }
+    mkdirSync(join(dir, 'scripts'), { recursive: true });
+    writeFileSync(join(dir, 'scripts', 'list-coverage-packages.mjs'), '');
     const recordFile = join(dir, 'record.json');
     if (record !== undefined) {
       writeFileSync(recordFile, typeof record === 'string' ? record : JSON.stringify(record));
@@ -354,6 +356,26 @@ describe('verify narrowing (AISDLC-1188, DEC-0372)', () => {
       runner: m.fr.toRunner(),
       ...(narrow ? { narrowFrom: m.recordFile } : {}),
     });
+
+  it('leaves commands unchanged on a narrowed round without the framework script', async () => {
+    const m = mk(good);
+    rmSync(join(m.dir, 'scripts'), { recursive: true, force: true });
+    const fr = new FakeRunner()
+      .on(/rev-parse HEAD\^\{tree\}/, ok('tree1\n'))
+      .on(/rev-parse HEAD/, ok('head2\n'))
+      .on(/status --porcelain/, ok(''))
+      .on(/list-coverage-packages/, fail('Cannot find module', 1))
+      .on(/^pnpm ls /, ok(JSON.stringify([{ path: join(m.dir, 'pipeline-cli') }])));
+    const r = await runVerifyCommands({
+      commands: defaults,
+      cwd: m.dir,
+      runner: fr.toRunner(),
+      narrowFrom: m.recordFile,
+    });
+    expect(r.scope).toBe('full');
+    expect(shellCmds(fr)).toEqual(defaults);
+    rmSync(m.dir, { recursive: true, force: true });
+  });
 
   it('first run is full even with a passing record present', async () => {
     const m = mk(good);
