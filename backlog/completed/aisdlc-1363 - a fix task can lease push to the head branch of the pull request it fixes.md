@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1363
 title: 'A fix task can lease push to the head branch of the pull request it fixes'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
