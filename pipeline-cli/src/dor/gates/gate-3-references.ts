@@ -18,6 +18,7 @@
  */
 
 import { defaultRunner } from '../../runtime/exec.js';
+import { taskIdSource } from '../task-prefix.js';
 import { extractReferences, resolveReference } from '../resolvers/index.js';
 import type { GateEvaluation, IssueInput, ResolverOpts, Resolver } from '../types.js';
 
@@ -41,8 +42,6 @@ export interface Gate3Opts {
 function normalizeCreate(raw: string): string {
   return raw.trim().replace(/^\.\//, '');
 }
-
-const TASK_ID_RE = /^AISDLC-\d+(?:\.\d+)?$/i;
 
 export async function evaluateGate3(
   input: IssueInput,
@@ -81,6 +80,7 @@ export async function evaluateGate3(
     timeoutMs: opts.timeoutMs,
   };
 
+  const taskIdRe = new RegExp(`^${taskIdSource(workDir)}$`, 'i');
   const failures: Array<{ raw: string; reason: string | undefined }> = [];
   const pending: Array<{ ref: string; where: string }> = [];
   const pendingMap: Record<string, string> = {};
@@ -91,7 +91,7 @@ export async function evaluateGate3(
     if (creates.has(normalizeCreate(ref.raw))) continue;
     const result = await resolveReference(ref, resolverOpts, opts.resolvers);
     const raw = ref.raw.trim();
-    const where = TASK_ID_RE.test(raw) ? pendingMap[raw.toUpperCase()] : undefined;
+    const where = taskIdRe.test(raw) ? pendingMap[raw.toUpperCase()] : undefined;
     if (!result.resolved && where !== undefined) {
       pending.push({ ref: raw, where });
     } else if (!result.resolved) {

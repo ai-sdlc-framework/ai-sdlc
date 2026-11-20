@@ -27,6 +27,7 @@
  * `gate-5-surface.test.ts` for the explicit regression coverage.
  */
 
+import { taskIdSource } from '../task-prefix.js';
 import type { GateEvaluation, IssueInput, ProjectShardManifest } from '../types.js';
 
 const SURFACE_PATTERNS: Array<{ name: string; re: RegExp }> = [
@@ -42,15 +43,18 @@ const SURFACE_PATTERNS: Array<{ name: string; re: RegExp }> = [
     re: /(?<![\w/])\/(?:api|v\d+|app|admin|dashboard|auth|users|search|graphql|mcp)\/[\w/{}:.-]+/,
   },
   { name: 'rfc-ref', re: /\bRFC-\d{4}\b/ },
-  { name: 'aisdlc-ref', re: /\bAISDLC-\d+(?:\.\d+)?\b/ },
   { name: 'workspace-package', re: /@[\w-]+\/[\w-]+/ },
   { name: 'database-table', re: /\b(?:table|column|schema)\s+`?[a-zA-Z_][\w]*`?\b/i },
   { name: 'github-workflow', re: /\.github\/workflows\/[\w.-]+\.ya?ml/ },
 ];
 
-export function findSurfaceSignals(text: string): string[] {
+export function findSurfaceSignals(text: string, workDir?: string): string[] {
   const hits: string[] = [];
-  for (const { name, re } of SURFACE_PATTERNS) {
+  const patterns = [
+    ...SURFACE_PATTERNS,
+    { name: 'aisdlc-ref', re: new RegExp(String.raw`\b${taskIdSource(workDir)}\b`, 'i') },
+  ];
+  for (const { name, re } of patterns) {
     if (re.test(text)) hits.push(name);
   }
   return hits;
@@ -102,7 +106,7 @@ function buildShardClarification(shards: readonly string[], manifestRef?: string
 
 export function evaluateGate5(input: IssueInput): GateEvaluation {
   const haystack = `${input.title}\n${input.body}`;
-  const signals = findSurfaceSignals(haystack);
+  const signals = findSurfaceSignals(haystack, input.workDir);
 
   if (signals.length === 0) {
     return {

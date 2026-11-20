@@ -206,7 +206,7 @@ verification:
 
 - No file (or no `verification:` block): the pnpm defaults apply (`pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check`).
 - An omitted key is skipped; Step 10 and the PR body print `skipped (not configured)` for it.
-- `ai-sdlc init` writes the file with detected defaults: `package.json` gives the pnpm defaults, `pyproject.toml` gives the `uv` commands above. It never overwrites an existing file, and writes nothing when neither manifest exists.
+- `ai-sdlc init` writes the file with detected defaults: `package.json` gives the commands of the package manager it uses (lockfile first: `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `bun.lockb` or `bun.lock`; then the `packageManager` field; pnpm when neither says), `pyproject.toml` gives the `uv` commands above. It never overwrites an existing file, and writes nothing when neither manifest exists.
 - The resolver is `resolveVerification` in `pipeline-cli/src/steps/verify-defaults.ts`.
 
 ## Verifying the install
@@ -272,3 +272,7 @@ disable attestation verification; etc.
 - The `init-features.ts` source — for adopters extending the wizard
   with custom features (the `FeatureTemplateSet` interface is the
   extension point).
+
+## Task prefix
+
+The readiness gates (3, 5 and 7) and the file-existence resolver build their task-id pattern from `task_prefix` in `backlog/config.yml` (AISDLC-1360); without it they use `AISDLC`.
