@@ -114,8 +114,9 @@ Include those lines in the doctor output.
 
 The `config-manifest` check lists every missing entry of the required-config
 manifest with the same wording as the `/ai-sdlc execute` Step 1 preflight, and
-`--fix` scaffolds the entries that need no operator input (review policy,
-reviewer set, agent role). The keyring and pipeline need `/ai-sdlc init`.
+`--fix` scaffolds the entries that need no operator input (review-policy,
+agent-role). Without `.ai-sdlc/review-config.yaml` the built-in default reviewer
+selection applies; the `review-config` check says which is in effect. The keyring and pipeline need `/ai-sdlc init`.
 
 ## Output
 

@@ -48,12 +48,17 @@ describe('checkDispatchBoard', () => {
     expect(DOCTOR_CHECKS.some((c) => c.id === 'dispatch-board')).toBe(true);
   });
 
-  it('is quiet when there is no board, or no way to list files', () => {
+  it('warns when there is no board, or no way to list files', () => {
     rmSync(board, { recursive: true });
-    expect(run()).toEqual({});
+    const none = checkDispatchBoard({ projectDir: dir, adapters: buildProductionCheckAdapters() });
+    expect(none).toHaveLength(1);
+    expect(none[0]?.severity).toBe('warn');
+    expect(none[0]?.remediation).toContain('cli-hierarchy up');
     const adapters = { ...buildProductionCheckAdapters(), listFiles: undefined };
     mkdirSync(board, { recursive: true });
-    expect(checkDispatchBoard({ projectDir: dir, adapters })).toEqual([]);
+    const unread = checkDispatchBoard({ projectDir: dir, adapters });
+    expect(unread[0]?.severity).toBe('warn');
+    expect(unread[0]?.title).toContain('not read');
   });
 
   it('passes all four invariants on a healthy board', () => {

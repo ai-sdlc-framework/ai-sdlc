@@ -132,6 +132,10 @@ export interface DoctorCheckAdapters extends DoctorAdapters {
   listFiles?: (path: string) => string[];
   /** Modification time of a file in milliseconds; `null` if missing. Optional so older fixtures compile. */
   fileMtimeMs?: (path: string) => number | null;
+  /** Whether a process is alive (`kill -0`). Optional so older fixtures compile; absent means dead. */
+  isPidAlive?: (pid: number) => boolean;
+  /** Running Node version, e.g. `22.23.2`. Optional; production = `process.versions.node`. */
+  nodeVersion?: () => string;
   /** Production = `node:os.homedir()`. Injectable for hermetic tests. */
   homeDir: () => string;
   /** Production = `process.env`. Injectable so tests don't depend on the real environment. */
@@ -179,6 +183,15 @@ export function buildProductionCheckAdapters(): DoctorCheckAdapters {
         return null;
       }
     },
+    isPidAlive: (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    nodeVersion: () => process.versions.node,
     homeDir: () => homedir(),
     env: process.env,
   };
@@ -1296,7 +1309,15 @@ const VITEST_WORKER_COMMAND = /\(vitest(?: \d+)?\)|[\\/]vitest[\\/]dist[\\/]work
  */
 export function checkOrphanedVitestWorkers(ctx: DoctorRunContext): DoctorCheckResult[] {
   const ps = ctx.adapters.runCommand('ps', ['-axo', 'pid=,ppid=,etime=,command=']);
-  if (ps.exitCode !== 0) return [];
+  if (ps.exitCode !== 0)
+    return [
+      {
+        id: 'orphaned-vitest-workers',
+        severity: 'warn',
+        title: 'the process table was not read (`ps` failed)',
+        remediation: 'Run `ps -axo pid=,ppid=,etime=,command=` to see the error.',
+      },
+    ];
   const orphans: number[] = [];
   for (const line of ps.stdout.split('\n')) {
     const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line);
@@ -1306,7 +1327,10 @@ export function checkOrphanedVitestWorkers(ctx: DoctorRunContext): DoctorCheckRe
     const age = parseEtimeSeconds(etime);
     if (age !== undefined && age > ORPHAN_MIN_AGE_SECONDS) orphans.push(Number(pid));
   }
-  if (orphans.length === 0) return [];
+  if (orphans.length === 0)
+    return [
+      { id: 'orphaned-vitest-workers', severity: 'pass', title: 'no orphaned vitest workers' },
+    ];
   return [
     {
       id: 'orphaned-vitest-workers',
@@ -1424,9 +1448,19 @@ function findWorktreesWithoutHooks(ctx: DoctorRunContext): string[] {
  */
 export function checkWorktreeHooks(ctx: DoctorRunContext): DoctorCheckResult[] {
   const main = readHooksState(ctx, ctx.projectDir);
-  if (!main.hasPrePush) return [];
+  if (!main.hasPrePush)
+    return [
+      {
+        id: 'worktree-hooks',
+        severity: 'pass',
+        title: 'not applicable: the main checkout has no pre-push hook',
+      },
+    ];
   const affected = findWorktreesWithoutHooks(ctx);
-  if (affected.length === 0) return [];
+  if (affected.length === 0)
+    return [
+      { id: 'worktree-hooks', severity: 'pass', title: 'every worktree has its pre-push hook' },
+    ];
   const names = affected.map((wt) => basename(wt));
   return [
     {
@@ -1496,14 +1530,30 @@ export function checkCiQueue(ctx: DoctorRunContext): DoctorCheckResult[] {
     '--limit',
     '500',
   ]);
-  if (r.exitCode !== 0) return [];
+  if (r.exitCode !== 0)
+    return [
+      {
+        id: 'ci-queue',
+        severity: 'warn',
+        title: 'the GitHub Actions queue was not read: `gh run list` failed',
+        remediation: 'Run `gh auth login` and check the repository remote.',
+      },
+    ];
   let runs: unknown;
   try {
     runs = JSON.parse(r.stdout);
   } catch {
-    return [];
+    runs = undefined;
   }
-  if (!Array.isArray(runs)) return [];
+  if (!Array.isArray(runs))
+    return [
+      {
+        id: 'ci-queue',
+        severity: 'warn',
+        title: 'the GitHub Actions queue was not read: unexpected gh output',
+        remediation: 'Run `gh run list` to see the error.',
+      },
+    ];
   const times = (runs as Array<{ createdAt?: unknown }>)
     .map((x) => (typeof x.createdAt === 'string' ? Date.parse(x.createdAt) : NaN))
     .filter((t) => !Number.isNaN(t));
@@ -1513,7 +1563,8 @@ export function checkCiQueue(ctx: DoctorRunContext): DoctorCheckResult[] {
       : Math.max(0, Math.floor((clockNow().getTime() - Math.min(...times)) / 60_000));
   const tooMany = runs.length > CI_QUEUE_MAX_QUEUED;
   const tooOld = oldestMin > CI_QUEUE_MAX_OLDEST_MINUTES;
-  if (!tooMany && !tooOld) return [];
+  if (!tooMany && !tooOld)
+    return [{ id: 'ci-queue', severity: 'pass', title: 'GitHub Actions queue is healthy' }];
   return [
     {
       id: 'ci-queue',
@@ -1533,19 +1584,42 @@ export function checkCiQueue(ctx: DoctorRunContext): DoctorCheckResult[] {
  */
 export function checkHierarchyModule(ctx: DoctorRunContext): DoctorCheckResult[] {
   const board = join(ctx.projectDir, '.ai-sdlc', 'dispatch');
+  const id = 'hierarchy-module';
   const raw = ctx.adapters.readFile(join(board, 'hierarchy.json'));
-  if (raw === null) return [];
+  if (raw === null) {
+    return [
+      {
+        id,
+        severity: 'warn',
+        title: 'not set up yet: no hierarchy roster (.ai-sdlc/dispatch/hierarchy.json)',
+        remediation: 'Run `cli-hierarchy up` to start the dispatch host.',
+      },
+    ];
+  }
   let sessions: unknown;
   try {
     sessions = (JSON.parse(raw) as { sessions?: unknown }).sessions;
   } catch {
-    return [];
+    sessions = undefined;
   }
-  if (!Array.isArray(sessions)) return [];
+  if (!Array.isArray(sessions)) {
+    return [
+      {
+        id,
+        severity: 'fail',
+        title:
+          'the hierarchy roster (.ai-sdlc/dispatch/hierarchy.json) is unreadable or has no sessions list',
+        remediation:
+          'Inspect or delete the file, then run `cli-hierarchy down` and `cli-hierarchy up`.',
+      },
+    ];
+  }
   const bad: string[] = [];
+  let running = 0;
   for (const e of sessions as Array<Record<string, unknown>>) {
     if (e.role !== 'operator-dispatch' || e.status !== 'running') continue;
     if (typeof e.name !== 'string') continue;
+    running++;
     let h: { state?: unknown; reason?: unknown; at?: unknown } = {};
     try {
       const text = ctx.adapters.readFile(join(board, 'handoff', `module-${e.name}.json`));
@@ -1561,7 +1635,19 @@ export function checkHierarchyModule(ctx: DoctorRunContext): DoctorCheckResult[]
     else if (Number.isNaN(at) || clockNow().getTime() - at > 120_000)
       bad.push(`${e.name} stale (no heartbeat)`);
   }
-  if (bad.length === 0) return [];
+  if (running === 0) {
+    return [
+      {
+        id,
+        severity: 'warn',
+        title: 'the roster has no running dispatch session, so nothing ticks or wakes',
+        remediation: 'Run `cli-hierarchy up` to start the dispatch host.',
+      },
+    ];
+  }
+  if (bad.length === 0) {
+    return [{ id, severity: 'pass', title: 'the dispatch host hierarchy hooks module is loaded' }];
+  }
   return [
     {
       id: 'hierarchy-module',
@@ -1583,14 +1669,30 @@ export function checkHierarchyModule(ctx: DoctorRunContext): DoctorCheckResult[]
  */
 export function checkHierarchyLaunchEnv(ctx: DoctorRunContext): DoctorCheckResult[] {
   const raw = ctx.adapters.readFile(join(ctx.projectDir, '.ai-sdlc', 'dispatch', 'hierarchy.json'));
-  if (raw === null) return [];
+  if (raw === null)
+    return [
+      {
+        id: 'hierarchy-launch-env',
+        severity: 'warn',
+        title: 'not set up yet: no hierarchy roster',
+        remediation: 'Run `cli-hierarchy up`.',
+      },
+    ];
   let sessions: unknown;
   try {
     sessions = (JSON.parse(raw) as { sessions?: unknown }).sessions;
   } catch {
-    return [];
+    sessions = undefined;
   }
-  if (!Array.isArray(sessions)) return [];
+  if (!Array.isArray(sessions))
+    return [
+      {
+        id: 'hierarchy-launch-env',
+        severity: 'warn',
+        title: 'the hierarchy roster has no sessions list, so launch env was not checked',
+        remediation: 'Run `cli-hierarchy up`.',
+      },
+    ];
   const bare: string[] = [];
   for (const e of sessions as Array<Record<string, unknown>>) {
     const { name, role, tmuxSession, tmuxWindow } = e;
@@ -1616,7 +1718,14 @@ export function checkHierarchyLaunchEnv(ctx: DoctorRunContext): DoctorCheckResul
       bare.push(`${name as string} (${role as string})`);
     }
   }
-  if (bare.length === 0) return [];
+  if (bare.length === 0)
+    return [
+      {
+        id: 'hierarchy-launch-env',
+        severity: 'pass',
+        title: 'every running session carries its hierarchy env',
+      },
+    ];
   return [
     {
       id: 'hierarchy-launch-env',
@@ -1687,7 +1796,14 @@ function vscodeWindowRecords(ctx: DoctorRunContext): VscodeWindowRecord[] {
  */
 export function checkVscodeHierarchyTerminals(ctx: DoctorRunContext): DoctorCheckResult[] {
   const id = 'vscode-hierarchy-terminals';
-  if (ctx.adapters.env['TERM_PROGRAM'] !== 'vscode') return [];
+  if (ctx.adapters.env['TERM_PROGRAM'] !== 'vscode')
+    return [
+      {
+        id: 'vscode-hierarchy-terminals',
+        severity: 'pass',
+        title: 'not applicable: not a VS Code terminal',
+      },
+    ];
   const installed = installedVscodeExtension(ctx);
   if (!installed) {
     return [
@@ -1785,7 +1901,15 @@ export function fixVscodeHierarchyTerminals(ctx: DoctorRunContext): DoctorFixRes
  */
 export function checkStaleRepoBuild(ctx: DoctorRunContext): DoctorCheckResult[] {
   const script = join(ctx.projectDir, 'ai-sdlc-plugin', 'scripts', 'resolve-pipeline-cli.sh');
-  if (!ctx.adapters.exists(script)) return [];
+  if (!ctx.adapters.exists(script)) {
+    return [
+      {
+        id: 'stale-repo-build',
+        severity: 'pass',
+        title: 'not applicable: installed pipeline-cli is used',
+      },
+    ];
+  }
   const r = ctx.adapters.runCommand('bash', [
     '-c',
     'cd "$1" && bash "$2" --strict',
@@ -1793,7 +1917,15 @@ export function checkStaleRepoBuild(ctx: DoctorRunContext): DoctorCheckResult[] 
     ctx.projectDir,
     script,
   ]);
-  if (r.exitCode === 0) return [];
+  if (r.exitCode === 0) {
+    return [
+      {
+        id: 'stale-repo-build',
+        severity: 'pass',
+        title: "this repo's pipeline-cli build is fresh",
+      },
+    ];
+  }
   return [
     {
       id: 'stale-repo-build',
@@ -1817,7 +1949,10 @@ const LEASE_PREFLIGHT_SCRIPT =
  */
 export function checkLeasePushPreflight(ctx: DoctorRunContext): DoctorCheckResult[] {
   const taskId = ctx.taskId;
-  if (!taskId) return [];
+  if (!taskId)
+    return [
+      { id: 'lease-push-preflight', severity: 'pass', title: 'not applicable: no --task given' },
+    ];
   const id = 'lease-push-preflight';
   const worktree = join(ctx.projectDir, '.worktrees', taskId.toLowerCase());
   const module = join(ctx.projectDir, 'ai-sdlc-plugin', 'hooks', 'lib', 'trusted-policy.js');
@@ -1899,7 +2034,26 @@ const DISPATCH_VERDICT_GRACE_MS = 10 * 60 * 1000;
 export function checkDispatchBoard(ctx: DoctorRunContext): DoctorCheckResult[] {
   const board = join(ctx.projectDir, '.ai-sdlc', 'dispatch');
   const { listFiles, fileMtimeMs } = ctx.adapters;
-  if (!ctx.adapters.exists(board) || !listFiles) return [];
+  if (!ctx.adapters.exists(board)) {
+    return [
+      {
+        id: 'dispatch-board',
+        severity: 'warn',
+        title: 'not set up yet: no dispatch board (.ai-sdlc/dispatch)',
+        remediation: 'Run `cli-hierarchy up` to create the board.',
+      },
+    ];
+  }
+  if (!listFiles) {
+    return [
+      {
+        id: 'dispatch-board',
+        severity: 'warn',
+        title: 'the dispatch board was not read: this host has no directory-listing adapter',
+        remediation: 'Run `cli-dispatch status` to inspect the board directly.',
+      },
+    ];
+  }
   const nowMs = clockNow().getTime();
   const readManifests = (sub: string): Array<{ file: string; m: Record<string, unknown> }> =>
     listFiles(join(board, sub))
@@ -2065,9 +2219,19 @@ export function checkParentCheckoutState(ctx: DoctorRunContext): DoctorCheckResu
     '--short',
     'HEAD',
   ]);
-  if (branch.exitCode !== 0 || branch.stdout.trim() !== 'main') return [];
+  if (branch.exitCode !== 0 || branch.stdout.trim() !== 'main')
+    return [
+      {
+        id: 'parent-checkout-state',
+        severity: 'pass',
+        title: 'not applicable: the parent checkout is not on main',
+      },
+    ];
   const paths = readDivergedPaths(ctx);
-  if (paths.length === 0) return [];
+  if (paths.length === 0)
+    return [
+      { id: 'parent-checkout-state', severity: 'pass', title: 'parent checkout matches HEAD' },
+    ];
   const shown = paths.slice(0, 5).join(', ');
   const staleCommit = findProvableStaleIndexCommit(ctx);
   if (staleCommit !== null) {
@@ -3276,6 +3440,128 @@ export function fixLegacyWorkflows(ctx: DoctorRunContext): DoctorFixResult {
   return { id, applied: done.length > 0, detail };
 }
 
+// ── Prerequisite checks (AISDLC-1356): a missing prerequisite says so ─────
+
+/** `gh auth status` must exit 0; the CI queue and merge paths silently need it. */
+export function checkGhAuth(ctx: DoctorRunContext): DoctorCheckResult {
+  const r = ctx.adapters.runCommand('gh', ['auth', 'status']);
+  if (r.exitCode === 0) return { id: 'gh-auth', severity: 'pass', title: 'gh is authenticated' };
+  return {
+    id: 'gh-auth',
+    severity: 'fail',
+    title: 'gh is not authenticated (or not installed): PR, CI and merge steps cannot run',
+    remediation: 'Run `gh auth login`.',
+  };
+}
+
+export function checkBacklogTasks(ctx: DoctorRunContext): DoctorCheckResult {
+  const dir = join(ctx.projectDir, 'backlog', 'tasks');
+  if (ctx.adapters.exists(dir)) {
+    return { id: 'backlog-tasks', severity: 'pass', title: 'backlog/tasks/ exists' };
+  }
+  return {
+    id: 'backlog-tasks',
+    severity: 'warn',
+    title: 'backlog/tasks/ is missing: there is nowhere for tasks to live',
+    remediation: 'Run `mkdir -p backlog/tasks` (or `ai-sdlc doctor --fix`).',
+  };
+}
+
+export function fixBacklogTasks(ctx: DoctorRunContext): DoctorFixResult {
+  const dir = join(ctx.projectDir, 'backlog', 'tasks');
+  if (ctx.adapters.exists(dir)) {
+    return { id: 'backlog-tasks', applied: false, detail: 'backlog/tasks/ already exists' };
+  }
+  ctx.adapters.writeFile(join(dir, '.gitkeep'), '');
+  return { id: 'backlog-tasks', applied: true, detail: 'created backlog/tasks/' };
+}
+
+/** Webhook secret and a recorded feed; advisory only, never a failure. */
+export function checkWebhookConfig(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'webhook-config';
+  const missing: string[] = [];
+  if (!ctx.adapters.env.AI_SDLC_WEBHOOK_SECRET) missing.push('AI_SDLC_WEBHOOK_SECRET is not set');
+  const state = readJson(ctx, join(ctx.projectDir, '.ai-sdlc', 'dispatch', 'webhook.json')) as
+    { feed?: { kind?: string } } | undefined;
+  if (!state?.feed || !state.feed.kind) {
+    missing.push('webhook.json records no feed');
+  }
+  if (missing.length === 0) {
+    return { id, severity: 'pass', title: 'webhook secret set and a feed is recorded' };
+  }
+  return {
+    id,
+    severity: 'warn',
+    title: `webhook delivery is not configured: ${missing.join('; ')}`,
+    remediation:
+      'Export AI_SDLC_WEBHOOK_SECRET and run `cli-hierarchy up --feed gh-forward` (polling still works without it).',
+  };
+}
+
+export function checkSchedulerAlive(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'scheduler-alive';
+  const state = readJson(
+    ctx,
+    join(ctx.projectDir, '.ai-sdlc', 'dispatch', 'reconcile-scheduler.json'),
+  ) as { pid?: unknown } | undefined;
+  const pid = typeof state?.pid === 'number' ? state.pid : undefined;
+  if (pid !== undefined && ctx.adapters.isPidAlive?.(pid)) {
+    return { id, severity: 'pass', title: `reconcile scheduler is running (pid ${pid})` };
+  }
+  return {
+    id,
+    severity: 'warn',
+    title:
+      pid === undefined
+        ? 'no reconcile scheduler is recorded'
+        : `the recorded reconcile scheduler (pid ${pid}) is not running`,
+    remediation: 'Run `cli-hierarchy up` to start it.',
+  };
+}
+
+/** `.nvmrc` must be installed under nvm (the rule `up` applies) and Node must meet `engines`. */
+export function checkNodeVersion(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'node-version';
+  const problems: string[] = [];
+  let fix: string | undefined;
+  const nvmrc = ctx.adapters.readFile(join(ctx.projectDir, '.nvmrc'));
+  const wanted = nvmrc === null ? undefined : (nvmrc.split('\n')[0] ?? '').trim().replace(/^v/, '');
+  if (wanted && /^\d+(\.\d+){0,2}$/.test(wanted)) {
+    const nvmDir = ctx.adapters.env.NVM_DIR || join(ctx.adapters.homeDir(), '.nvm');
+    const installed = ctx.adapters
+      .listDir(join(nvmDir, 'versions', 'node'))
+      .map((d) => d.replace(/^v/, ''));
+    if (!installed.some((v) => v === wanted || v.startsWith(`${wanted}.`))) {
+      problems.push(`.nvmrc names Node ${wanted}, which is not installed under nvm`);
+      fix = `nvm install ${wanted}`;
+    }
+  }
+  const pkg = readJson(ctx, join(ctx.projectDir, 'package.json')) as
+    { engines?: { node?: string } } | undefined;
+  const rawFloor = /^>=\s*(\d+(?:\.\d+){0,2})/.exec(pkg?.engines?.node ?? '')?.[1];
+  const floor = rawFloor?.split('.').concat(['0', '0']).slice(0, 3).join('.');
+  const running = ctx.adapters.nodeVersion?.();
+  if (floor && running && compareSemver(running, floor) < 0) {
+    problems.push(`running Node ${running} is below the floor ${floor} (package.json engines)`);
+    fix ??= `nvm install ${floor}`;
+  }
+  if (problems.length === 0) {
+    return { id, severity: 'pass', title: 'Node version meets the repo requirements' };
+  }
+  return { id, severity: 'fail', title: problems.join('; '), remediation: `Run \`${fix}\`.` };
+}
+
+export function checkReviewConfig(ctx: DoctorRunContext): DoctorCheckResult {
+  const present = ctx.adapters.exists(join(ctx.projectDir, '.ai-sdlc', 'review-config.yaml'));
+  return {
+    id: 'review-config',
+    severity: 'pass',
+    title: present
+      ? '.ai-sdlc/review-config.yaml is present'
+      : '.ai-sdlc/review-config.yaml is absent: the built-in default reviewer selection applies',
+  };
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────
 
 /**
@@ -3518,6 +3804,38 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Table of registered capabilities; fails when a capability required in .ai-sdlc/capabilities.yaml is degraded or never observed (RFC-0049).',
     run: checkCapabilityLiveness,
+  },
+  {
+    id: 'gh-auth',
+    description: '`gh auth status` exits 0 (AISDLC-1356).',
+    run: checkGhAuth,
+  },
+  {
+    id: 'backlog-tasks',
+    description: 'backlog/tasks/ exists; --fix creates it (AISDLC-1356).',
+    run: checkBacklogTasks,
+    fix: fixBacklogTasks,
+  },
+  {
+    id: 'webhook-config',
+    description: 'Webhook secret is set and webhook.json records a feed (AISDLC-1356).',
+    run: checkWebhookConfig,
+  },
+  {
+    id: 'scheduler-alive',
+    description: 'The recorded reconcile scheduler pid is alive (AISDLC-1356).',
+    run: checkSchedulerAlive,
+  },
+  {
+    id: 'node-version',
+    description: '.nvmrc is installed under nvm and Node meets package.json engines (AISDLC-1356).',
+    run: checkNodeVersion,
+  },
+  {
+    id: 'review-config',
+    description:
+      'Whether review-config.yaml is present or the built-in default applies (AISDLC-1356).',
+    run: checkReviewConfig,
   },
 ];
 
