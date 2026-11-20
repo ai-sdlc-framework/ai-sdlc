@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1360
 title: 'The verify step uses the package manager of the repository, and the readiness gates accept the task prefix of the adopter'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-19'
 labels:
