@@ -67,6 +67,7 @@ import { spawnSync } from 'node:child_process';
 import { launchUsageIngestDetached } from '../usage/launch.js';
 import os from 'node:os';
 import path from 'node:path';
+import { pipelineCliBin } from '../bin-dir.js';
 import { fileURLToPath } from 'node:url';
 import { hotfixTaskId, hotfixTaskMarkdown } from '../hierarchy/canary.js';
 import { runLoopCanaryCommand } from '../hierarchy/loop-canary-run.js';
@@ -556,6 +557,31 @@ export function defaultHierarchyDeps(flags: Record<string, string>): HierarchyDe
   };
 }
 
+/** AISDLC-1359: args of the finish verify; the bin is the installed one, not `<repo>/pipeline-cli`. */
+export function finishVerifyArgs(headSha: string, baseSha: string): string[] {
+  return [pipelineCliBin('cli-attestation.mjs'), 'verify', '--head', headSha, '--base', baseSha];
+}
+
+/** AISDLC-1359: options for the tick's usage ingest; the bin is the installed one. */
+export function usageIngestOptions(repoRoot: string): { binPath: string; cwd: string } {
+  return { binPath: pipelineCliBin('cli-usage.mjs'), cwd: repoRoot };
+}
+
+/** AISDLC-1359: the pre-spawn reconcile pass; one warning line when the bin is missing. */
+export function reconcileBeforeSpawn(
+  run: HierarchyDeps['run'],
+  boardDir: string,
+  repoRoot: string,
+  log: (line: string) => void,
+  bin: string = pipelineCliBin('cli-dispatch.mjs'),
+): void {
+  if (!existsSync(bin)) {
+    log(`warning: reconcile skipped, ${bin} is missing`);
+    return;
+  }
+  run(process.execPath, [bin, 'reconcile', '--board-dir', boardDir], { cwd: repoRoot });
+}
+
 /**
  * First argument after the subcommand that is neither a `--flag` nor a flag's
  * value (`parseArgv` treats every non-flag token as a value or drops it).
@@ -761,18 +787,7 @@ export async function runHierarchyCli(
         verify:
           extras.verifyAttestation ??
           (({ worktree, headSha, baseSha }) => {
-            const r = deps.run(
-              'node',
-              [
-                path.join(repoRoot, 'pipeline-cli', 'bin', 'cli-attestation.mjs'),
-                'verify',
-                '--head',
-                headSha,
-                '--base',
-                baseSha,
-              ],
-              { cwd: worktree },
-            );
+            const r = deps.run('node', finishVerifyArgs(headSha, baseSha), { cwd: worktree });
             const out = r?.stdout ?? '';
             const ok = r?.status === 0 && /^status=valid$/m.test(out);
             const reason = /^reason=(.*)$/m.exec(out)?.[1] ?? (r?.stderr ?? '').split('\n')[0];
@@ -1456,10 +1471,7 @@ export async function runHierarchyCli(
             extras.usageIngest ??
             (() => {
               // AISDLC-1191: spaced against the Stop hook and single-instance (see usage/launch.ts).
-              launchUsageIngestDetached({
-                binPath: path.join(repoRoot, 'pipeline-cli', 'bin', 'cli-usage.mjs'),
-                cwd: repoRoot,
-              });
+              launchUsageIngestDetached(usageIngestOptions(repoRoot));
             }),
           // AISDLC-981: the tick owns the parent; the open-PR list is the wake's snapshot.
           parentUpkeep:
@@ -1533,13 +1545,7 @@ export async function runHierarchyCli(
           // AISDLC-1189: one reconcile pass before the spawn step, so repairs queue ahead of new tasks.
           reconcileNow:
             extras.reconcileNow ??
-            (() => {
-              const bin = path.join(repoRoot, 'pipeline-cli', 'bin', 'cli-dispatch.mjs');
-              if (!existsSync(bin)) return;
-              deps.run(process.execPath, [bin, 'reconcile', '--board-dir', deps.boardDir], {
-                cwd: repoRoot,
-              });
-            }),
+            (() => reconcileBeforeSpawn(deps.run, deps.boardDir, repoRoot, deps.log)),
           // AISDLC-1023: a red pipeline canary files its hotfix through cli-file.
           fileHotfix: ({ sha, detail }) => {
             const id = hotfixTaskId(sha);

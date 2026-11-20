@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1359
 title: 'Pipeline code and hook messages name the installed CLI, not a path inside this repository'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-19'
 labels:
