@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1347
 title: 'The release cache rebuild step fails when the install failed and waits out registry lag'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-19'
 labels:

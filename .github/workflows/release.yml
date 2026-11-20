@@ -129,20 +129,40 @@ jobs:
       # Retries because the registry can lag a few minutes behind `publish`.
       - name: Rebuild plugin cache from the published runtime
         run: |
+          # AISDLC-1347: pass only when the install exited 0 AND every pinned
+          # runtime dependency is present. The stale check fails open (empty
+          # output on "could not tell"), so it can never prove convergence
+          # alone. 24 tries x 30s = ~12 min covers observed registry lag.
+          TRIES=24
+          PAUSE=30
           CACHE_DIR="$(mktemp -d)"
           cp -R ai-sdlc-plugin/. "$CACHE_DIR/"
-          for attempt in 1 2 3 4 5; do
+          for attempt in $(seq 1 "$TRIES"); do
             # The step shell is bash -e: an ETARGET from a registry that has
             # not propagated yet must retry, not abort.
-            bash "$CACHE_DIR/scripts/install-runtime-deps.sh" "$CACHE_DIR" --force || echo "[release] attempt $attempt: install failed (registry lag?)"
-            STALE="$(node "$CACHE_DIR/scripts/check-stale-runtime-deps.mjs" "$CACHE_DIR")"
-            if [ -z "$STALE" ]; then
-              echo "[release] plugin cache rebuilt; no stale runtime dependency"
-              exit 0
+            INSTALL_OK=1
+            bash "$CACHE_DIR/scripts/install-runtime-deps.sh" "$CACHE_DIR" --force || INSTALL_OK=0
+            if [ "$INSTALL_OK" = 0 ]; then
+              echo "[release] attempt $attempt: install failed (registry lag?)"
+            else
+              MISSING="$(node -e '
+                const fs = require("fs"), path = require("path");
+                const d = process.argv[1];
+                const deps = JSON.parse(fs.readFileSync(path.join(d, "plugin.json"), "utf8")).runtimeDependencies || {};
+                for (const n of Object.keys(deps)) {
+                  if (!fs.existsSync(path.join(d, "node_modules", n, "package.json"))) console.log(n);
+                }
+              ' "$CACHE_DIR")"
+              STALE="$(node "$CACHE_DIR/scripts/check-stale-runtime-deps.mjs" "$CACHE_DIR")"
+              if [ -z "$MISSING" ] && [ -z "$STALE" ]; then
+                echo "[release] plugin cache rebuilt; no stale runtime dependency"
+                exit 0
+              fi
+              echo "[release] attempt $attempt: not converged after rebuild"
+              [ -n "$MISSING" ] && echo "missing: $MISSING"
+              [ -n "$STALE" ] && echo "stale: $STALE"
             fi
-            echo "[release] attempt $attempt: stale after rebuild:"
-            echo "$STALE"
-            sleep 30
+            sleep "$PAUSE"
           done
           echo "::error::plugin cache still lags the published runtime"
           exit 1
