@@ -15,7 +15,12 @@ import type { LaunchProfile } from '../routing/default-table.js';
 import { loadOperationalPolicy, mergeOffLines } from './operational.js';
 import { verifiedMainRoot } from './trusted-root.js';
 import { loadPrLifecycleConfig } from './pr-lifecycle-config.js';
-import { schedulerUp } from './reconcile-scheduler.js';
+import {
+  SCHEDULER_LIVENESS_MS,
+  schedulerLivenessWarning,
+  schedulerStatus,
+  schedulerUp,
+} from './reconcile-scheduler.js';
 import { logNoFeed, webhookUp } from './webhook.js';
 import { attachEntry } from './attach.js';
 import { findStartedSession, readSessionRegistry, reconcileStartingEntries } from './registry.js';
@@ -694,9 +699,22 @@ export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): P
 
   // The consumer of the webhook wake file; runs whether or not a secret is set (AISDLC-932).
   try {
+    const wasUp = schedulerStatus(deps).state === 'up';
     schedulerUp(deps, deps.spawnScheduler);
+    if (!wasUp) {
+      await deps.sleep(SCHEDULER_LIVENESS_MS);
+      const w = schedulerLivenessWarning(deps);
+      if (w) deps.log(`warning: ${w}`);
+    }
   } catch (err) {
     deps.log(`warning: reconcile scheduler not started: ${(err as Error).message}`);
+  }
+
+  // Poll-only mode when no secret is set is valid (AISDLC-880), but say so (AISDLC-1357).
+  if (!deps.env.AI_SDLC_WEBHOOK_SECRET) {
+    deps.log(
+      'webhook: off (board polls only); set AI_SDLC_WEBHOOK_SECRET and run `cli-hierarchy webhook up` for push wakes',
+    );
   }
 
   if (opts.vscodeTasks) {
@@ -718,7 +736,6 @@ export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): P
     }
   }
 
-  // Poll-only mode when no secret is set; this is not an error (AISDLC-880).
   if (deps.env.AI_SDLC_WEBHOOK_SECRET) {
     try {
       webhookUp(deps);
@@ -736,7 +753,8 @@ export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): P
   try {
     for (const line of overContextWarnings(deps, roster.sessions)) deps.log(line);
   } catch {
-    /* a context read must never fail up */
+    // A context read never fails up, but it says it was skipped (AISDLC-1357).
+    deps.log('warning: context size not read');
   }
 
   let attachExitCode: number | undefined;

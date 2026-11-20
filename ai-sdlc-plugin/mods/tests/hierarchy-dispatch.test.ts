@@ -20,6 +20,7 @@ const EMPTY_TICK = { blockers: [], ingested: [], verdicts: [], escalations: [], 
 function setup(
   tickResult: unknown = EMPTY_TICK,
   opts: { binDir?: string; tickFails?: boolean } = {},
+  failSubs: Set<string> = new Set(),
 ) {
   const handlers = registerStrict({});
   const kv = new Map<string, any>();
@@ -81,6 +82,8 @@ function setup(
         const sub = a[2];
         if (a[1] === '-e' && String(a[2]).includes('.binDir'))
           return { exitCode: 0, stdout: opts.binDir ?? '' };
+        if (typeof sub === 'string' && failSubs.has(sub))
+          return { exitCode: 1, stdout: '', stderr: `${sub} exploded\n  at x` };
         if (sub === 'tick' && failTick)
           return { exitCode: 1, stdout: '', stderr: 'Cannot find module x\n    at foo' };
         if (sub === 'tick') {
@@ -104,6 +107,7 @@ function setup(
     runs,
     setTick: (v: unknown) => (tickOut = v),
     setFail: (v: boolean) => (failTick = v),
+    failSubs,
     stores,
     argvs,
     start: async () => {
@@ -413,6 +417,32 @@ describe('dispatch host (AISDLC-1035)', () => {
     expect(classify('to planner: hi')).toEqual({ kind: 'planner', text: 'hi' });
     expect(classify('verdict without id')).toMatchObject({ kind: 'unknown' });
     expect(renderBoard(null, [], [])).toContain('(no sessions)');
+  });
+});
+
+describe('reconcile and sweep failures reach the heartbeat (AISDLC-1357)', () => {
+  const lastHealth = (s: ReturnType<typeof setup>): any =>
+    s.stores.filter(([k]) => k.startsWith('hierarchy/health/')).at(-1)?.[1];
+
+  it('records each failure with its first error line and a later success clears it', async () => {
+    const s = setup();
+    await s.start();
+    s.failSubs.add('reconcile');
+    await s.timer();
+    expect(lastHealth(s)).toMatchObject({
+      state: 'failing',
+      reason: 'reconcile failed: reconcile exploded',
+    });
+    s.failSubs.clear();
+    s.failSubs.add('sweep');
+    await s.timer();
+    expect(lastHealth(s)).toMatchObject({
+      state: 'failing',
+      reason: 'cli-ci sweep failed: sweep exploded',
+    });
+    s.failSubs.clear();
+    await s.timer();
+    expect(lastHealth(s).state).toBe('loaded');
   });
 });
 

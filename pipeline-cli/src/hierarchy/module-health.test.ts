@@ -186,3 +186,16 @@ describe('readModuleRotatePending (AISDLC-1159)', () => {
     expect(readModuleRotatePending([dir], 'p-plan')).toBe(false);
   });
 });
+
+describe('readModuleHealth failure entry (AISDLC-1357)', () => {
+  it('returns a failing record with its reason and formats it for the MODULE column', () => {
+    const b = board();
+    writeFileSync(
+      moduleHealthPath(b, 'p-dispatch'),
+      JSON.stringify({ state: 'failing', reason: 'reconcile failed: boom', at: NOW.toISOString() }),
+    );
+    const h = readModuleHealth(b, dispatch, NOW, []);
+    expect(h).toMatchObject({ state: 'failing', reason: 'reconcile failed: boom' });
+    expect(formatModuleHealth(h)).toBe('failing: reconcile failed: boom');
+  });
+});

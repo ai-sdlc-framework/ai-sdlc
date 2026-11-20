@@ -117,7 +117,7 @@ malformed argument). `--help`, `-h` or `help` prints the usage and exits 0.
 Start the planner and the dispatch session, each in its own detached tmux session, and write
 the roster. No executor is started: dispatch spawns one executor per task with [`spawn`](#spawn)
 (RFC-0059, AISDLC-1075). Idempotent: sessions already running are left alone and
-only the missing ones are started. It also starts the reconcile scheduler (`cli-dispatch reconcile --watch`, which polls `<board>/.reconcile-wake`) as a detached process and records its pid in `<board>/reconcile-scheduler.json`; a second `up` with a live scheduler starts no other.
+only the missing ones are started. It also starts the reconcile scheduler (`cli-dispatch reconcile --watch`, which polls `<board>/.reconcile-wake`) as a detached process and records its pid in `<board>/reconcile-scheduler.json`; a second `up` with a live scheduler starts no other. `up` then ends with one line per missing piece (AISDLC-1357): `webhook: off` when no secret is set, a scheduler warning with the log tail when the process is gone 1.5 s after the spawn, and `warning: context size not read` when that read throws. `scheduler: STALLED` needs work queued and a last tick older than 120 s (the step-in time of three missed intervals plus one check interval); `AI_SDLC_TICK_STALL_MINUTES` still overrides. A failing reconcile or sweep writes a `failing: <first error line>` heartbeat that shows in the MODULE column until the next clean tick.
 
 ```bash
 cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
