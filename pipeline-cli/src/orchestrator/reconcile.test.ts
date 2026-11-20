@@ -20,6 +20,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { pipelineCliBin } from '../bin-dir.js';
 import { ensureBoardDirs, writeVerdict } from '../dispatch/board.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 
@@ -395,6 +396,29 @@ describe('runReconcile — orchestration', () => {
     expect(stepNames).not.toContain('emit-leaf:test-reviewer');
     // Exactly 2 emit-leaf steps, not 3 — the reviewer count is not hardcoded.
     expect(stepNames.filter((n) => n.startsWith('emit-leaf:'))).toHaveLength(2);
+  });
+
+  // AISDLC-1359 — the default bin is module-derived; an explicit option still wins.
+  it('defaults cliAttestationBin to the module bin dir, and an explicit option wins', () => {
+    const run = (extra: { cliAttestationBin?: string }): string | undefined => {
+      writeDevVerdict(boardDir);
+      const { spawn, calls } = makeSpawnRecorder();
+      runReconcile({
+        workDir,
+        taskId,
+        boardDir,
+        worktreePath,
+        spawn,
+        reviewers: RECONCILE_REVIEWERS_MERGED,
+        ...extra,
+      });
+      return calls.find((c) => c.args[1] === 'emit-leaf')?.args[0];
+    };
+    const dflt = run({});
+    expect(dflt).toBe(pipelineCliBin('cli-attestation.mjs'));
+    expect(existsSync(dflt as string)).toBe(true);
+    expect(dflt?.startsWith(workDir)).toBe(false);
+    expect(run({ cliAttestationBin: '/custom/bin.mjs' })).toBe('/custom/bin.mjs');
   });
 
   // AISDLC-722 — with no explicit `reviewers`, the set is derived from the diff.

@@ -67,6 +67,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { cliCommand } = require('./cli-command');
 
 const STRICT_DEFAULTS = Object.freeze({
   allowMerge: 'never',
@@ -366,10 +367,10 @@ function resolveGovernanceFromYaml(yamlText) {
 // raw merge subcommand and the API merge routes skip the cli-merge-if-eligible
 // gate; branch protection and the pr-ready rollup are the server-side controls
 // (AISDLC-1014, DEC-0267), not a local command-text hook.
-const ONGREENCLEAN_MERGE_TEXT =
+const onGreenCleanMergeText = () =>
   "**Merge:** this repository's `.ai-sdlc/agent-role.yaml` sets `governance.allowMerge: onGreenClean`. " +
   'Merges and auto-merge arming go ONLY through ' +
-  '`node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog [--arm]`, ' +
+  `\`${cliCommand('cli-merge-if-eligible.mjs')} <pr> --source-kind backlog [--arm]\`, ` +
   'once all required checks are green, `mergeStateStatus == CLEAN` and the source is trusted. ' +
   'Never run the raw merge subcommand directly (any form, `--auto` included).';
 
@@ -379,7 +380,7 @@ const NEVER_MERGE_TEXT =
   'Never run the raw merge subcommand directly (any form, `--auto` included).';
 
 function renderMergeRuleText(resolved) {
-  return resolved.allowMerge === 'onGreenClean' ? ONGREENCLEAN_MERGE_TEXT : NEVER_MERGE_TEXT;
+  return resolved.allowMerge === 'onGreenClean' ? onGreenCleanMergeText() : NEVER_MERGE_TEXT;
 }
 
 function renderClosePrIssueRuleText(resolved) {
