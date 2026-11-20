@@ -64,6 +64,7 @@ const {
 } = require('./lib/governance-resolver');
 const { cliCommand } = require('./lib/cli-command');
 const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guard');
+const { readFixPrHead } = require('./lib/fix-pr-head');
 const { evaluateVerdictFence } = require('./lib/verdict-ref-fence');
 const { evaluateResumedRoundPush } = require('./lib/resumed-round-fence');
 const {
@@ -212,6 +213,7 @@ function loadLeasePolicy(rawCommand) {
       cwd,
       command: target.command,
       top: wt.top,
+      mainRoot: wt.mainRoot,
       claimTaskId: wt.claimTaskId || null,
     };
   } catch {
@@ -545,12 +547,18 @@ function enforceBash(command) {
       leasePushAllowed = verdict.decision === 'allow';
     } else if (lease.mode === 'leaseOnOwnBranch') {
       const top = lease.top;
+      const taskId = top ? readTaskId(top) || lease.claimTaskId || null : null;
+      // AISDLC-1363 (DEC-0421): the PR head branch a fix task was filed against, from the
+      // inflight manifest in the main checkout only.
+      const fixPr = taskId && lease.mainRoot ? readFixPrHead(lease.mainRoot, taskId) : null;
       const verdict = evaluateLeasePush(lease.command, {
+        fixPrBranch: fixPr ? fixPr.prHeadRef : null,
+        fixesPr: fixPr ? fixPr.fixesPr : null,
         ownRef: gitOut(['symbolic-ref', '-q', 'HEAD'], lease.cwd),
         protectedBranches: lease.protectedBranches,
         remotes: (gitOut(['remote'], lease.cwd) || '').split('\n').filter(Boolean),
         aliasLookup: (name) => gitOut(['config', '--get', `alias.${name}`], lease.cwd),
-        taskId: top ? readTaskId(top) || lease.claimTaskId || null : null,
+        taskId,
         worktreeName: top ? basename(top) : null,
         role: process.env.AI_SDLC_HIERARCHY_ROLE,
         refAliasState: (name) => refAliasState(name, lease.cwd),

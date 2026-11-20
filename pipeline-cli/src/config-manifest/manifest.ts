@@ -109,8 +109,9 @@ export function renderAgentRoleGovernance(d = AGENT_ROLE_MERGE_DEFAULTS): string
     # \`cli-hierarchy up\`, \`status\` and \`doctor\` say so. Set all three to let it land PRs.
     allowMerge: ${d.allowMerge}
 ${list('mergeAuthors', d.mergeAuthors)}${list('operational', d.operational)}    # allowForcePush defaults to leaseOnOwnBranch (a lease push of a dispatched
-    # task's own branch; never main/master/protected branches).
-    # allowForcePush: leaseOnOwnBranch   # never | leaseOnOwnBranch
+    # task's own branch, or the head branch of the PR a fix task was filed to fix;
+    # never main/master/protected branches).
+    # allowForcePush: leaseOnOwnBranch   # never | leaseOnOwnBranch | lease
 `;
 }
 

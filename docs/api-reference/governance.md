@@ -82,7 +82,7 @@ spec:
   governance:
     preset: strict            # or: operator-trusted (sugar, see below)
     allowMerge: never          # never | onGreenClean
-    allowForcePush: leaseOnOwnBranch  # never | leaseOnOwnBranch (default when unset; booleans: true = leaseOnOwnBranch, false = never)
+    allowForcePush: leaseOnOwnBranch  # never | leaseOnOwnBranch | lease (leaseOnOwnBranch is the default when unset; booleans: true = leaseOnOwnBranch, false = never)
     allowClosePrIssue: false
     allowBranchDelete: false
     allowResetHard: false
