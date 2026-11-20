@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1362
 title: 'The scaffolded gate workflow uses the package manager of the repository'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-19'
 labels:

@@ -16,6 +16,8 @@ import {
   type VerificationCommands,
 } from './verify-defaults.js';
 
+export { detectPackageManager, type PackageManager } from './verify-defaults.js';
+
 export function loadVerification(projectRoot: string): VerificationCommands {
   if (!projectRoot) return resolveVerification(undefined);
   const file = join(projectRoot, VERIFICATION_CONFIG_PATH);

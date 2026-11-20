@@ -186,9 +186,9 @@ is not there yet, so the merge helper refuses (fail-closed). Every later pull re
 goes through `cli-merge-if-eligible`. The `enable-auto-merge` job also fails with a
 line naming `AI_SDLC_PAT` until that secret exists.
 
-## Scaffolded workflows assume Node/pnpm
+## Scaffolded workflows follow the package manager
 
-The scaffolded `ai-sdlc-gate.yml` has `lint`, `build-test` and `coverage` jobs that run `pnpm install --frozen-lockfile` and pnpm scripts, and the `ai-sdlc/pr-ready` rollup needs all three. `dor-ingress.yml` has the same setup and install steps. The templates are the same for every project type.
+When `package.json` exists, init writes the setup, install and script steps of the repository's package manager into `ai-sdlc-gate.yml` and `dor-ingress.yml` (lockfile first, then the `packageManager` field, pnpm when neither says; npm uses `npm ci`, yarn uses `--immutable` with `.yarnrc.yml` or yarn 2+, bun uses `oven-sh/setup-bun`) and prints the manager. It also prints a line when `package.json` has no `test:coverage` script, because the Coverage job fails without it. The text below describes the pnpm template, which a pnpm repository and a repository without `package.json` get unchanged. The scaffolded `ai-sdlc-gate.yml` has `lint`, `build-test` and `coverage` jobs that run `pnpm install --frozen-lockfile` and pnpm scripts, and the `ai-sdlc/pr-ready` rollup needs all three. `dor-ingress.yml` has the same setup and install steps. The templates are the same for every project type.
 
 A repository without `package.json` (for example a Python project) must replace the pnpm setup, install and script steps in those jobs with its own commands (for example the `uv` commands in `.ai-sdlc/verification.yaml`), or the jobs fail and `ai-sdlc/pr-ready` never goes green. When init scaffolds these workflows into a repository without `package.json`, it prints a note naming each affected workflow.
 
