@@ -190,6 +190,10 @@ jobs:
                build
       - name: First-run smoke
         run: node scripts/first-run-smoke.mjs
+      # AISDLC-1361: setup to a merged pull request against a stateful fake gh; fails when any
+      # of its nine stages is skipped.
+      - name: Bootstrap smoke (setup to merged pull request)
+        run: node scripts/bootstrap-smoke.mjs
 
   security-findings:
     # AISDLC-940: nightly only. Lists open CodeQL, Dependabot and Scorecard alerts

@@ -134,8 +134,12 @@ function sh(cmd, args, opts) {
   });
 }
 
-function buildSandbox() {
-  const base = mkdtempSync(join(tmpdir(), 'ai-sdlc-first-run-'));
+/**
+ * The scratch repository, bare origin and isolated HOME. `ghScript` replaces the offline `gh`
+ * on PATH (the bootstrap smoke installs a stateful fake, AISDLC-1361).
+ */
+export function buildSandbox({ ghScript, prefix = 'ai-sdlc-first-run-' } = {}) {
+  const base = mkdtempSync(join(tmpdir(), prefix));
   const home = join(base, 'home');
   const bin = join(base, 'bin');
   const work = join(base, 'work');
@@ -152,7 +156,8 @@ function buildSandbox() {
   // gh call fails offline.
   writeFileSync(
     join(bin, 'gh'),
-    '#!/bin/sh\nif [ "$1" = "auth" ] && [ "$2" = "status" ]; then exit 0; fi\necho "gh: offline (first-run smoke)" >&2\nexit 1\n',
+    ghScript ??
+      '#!/bin/sh\nif [ "$1" = "auth" ] && [ "$2" = "status" ]; then exit 0; fi\necho "gh: offline (first-run smoke)" >&2\nexit 1\n',
   );
   chmodSync(join(bin, 'npm'), 0o755);
   chmodSync(join(bin, 'gh'), 0o755);
@@ -182,7 +187,7 @@ function buildSandbox() {
   return { base, home, work, env };
 }
 
-function commitAll(sb, message) {
+export function commitAll(sb, message) {
   sh('git', ['-C', sb.work, 'add', '-A'], { env: sb.env });
   sh('git', ['-C', sb.work, 'commit', '-q', '-m', message], { env: sb.env });
   sh('git', ['-C', sb.work, 'push', '-q', 'origin', 'main'], { env: sb.env });
