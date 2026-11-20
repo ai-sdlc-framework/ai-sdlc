@@ -148,7 +148,12 @@ function buildSandbox() {
     join(bin, 'npm'),
     '#!/bin/sh\necho "npm ERR! network ENOTFOUND registry.npmjs.org (first-run smoke runs offline)" >&2\nexit 1\n',
   );
-  writeFileSync(join(bin, 'gh'), '#!/bin/sh\necho "gh: offline (first-run smoke)" >&2\nexit 1\n');
+  // `gh auth status` succeeds so doctor's gh-auth check sees a signed-in CLI; every other
+  // gh call fails offline.
+  writeFileSync(
+    join(bin, 'gh'),
+    '#!/bin/sh\nif [ "$1" = "auth" ] && [ "$2" = "status" ]; then exit 0; fi\necho "gh: offline (first-run smoke)" >&2\nexit 1\n',
+  );
   chmodSync(join(bin, 'npm'), 0o755);
   chmodSync(join(bin, 'gh'), 0o755);
 

@@ -315,7 +315,8 @@ describe('doctorCommand — CLI action (end-to-end via the command builder, AISD
       baseAdapters({
         runCommand: (_cmd, args) => ({
           stdout: '',
-          exitCode: args.includes('check-ignore') && args.includes('-q') ? 0 : 1,
+          exitCode:
+            (args.includes('check-ignore') && args.includes('-q')) || args[0] === 'auth' ? 0 : 1,
         }),
       }),
     );

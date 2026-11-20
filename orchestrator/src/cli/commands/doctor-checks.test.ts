@@ -56,6 +56,14 @@ import {
   fixVscodeHierarchyTerminals,
   checkHierarchyModule,
   checkStaleRepoBuild,
+  type DoctorCheckResult,
+  checkGhAuth,
+  checkBacklogTasks,
+  fixBacklogTasks,
+  checkWebhookConfig,
+  checkSchedulerAlive,
+  checkNodeVersion,
+  checkReviewConfig,
   checkLeasePushPreflight,
   checkCiQueue,
   checkWorktreeHooks,
@@ -1595,8 +1603,8 @@ describe('checkCiQueue (AISDLC-799)', () => {
   const ctxWith = (stdout: string, exitCode = 0) =>
     makeCtx(makeAdapters({ runCommand: () => ({ stdout, exitCode }) }));
 
-  it('is quiet below both thresholds', () => {
-    expect(checkCiQueue(ctxWith(queued(40, '2026-10-10T20:50:00Z')))).toEqual([]);
+  it('answers without a finding below both thresholds', () => {
+    expectAnswered(checkCiQueue(ctxWith(queued(40, '2026-10-10T20:50:00Z'))));
   });
 
   it('warns when more than 40 runs are queued', () => {
@@ -1613,19 +1621,19 @@ describe('checkCiQueue (AISDLC-799)', () => {
     expect(r[0].title).toContain('oldest queued 20 min');
   });
 
-  it('is quiet at exactly 15 minutes and when nothing is queued', () => {
-    expect(checkCiQueue(ctxWith(queued(1, '2026-10-10T20:45:00Z')))).toEqual([]);
-    expect(checkCiQueue(ctxWith('[]'))).toEqual([]);
+  it('answers without a finding at exactly 15 minutes and when nothing is queued', () => {
+    expectAnswered(checkCiQueue(ctxWith(queued(1, '2026-10-10T20:45:00Z'))));
+    expectAnswered(checkCiQueue(ctxWith('[]')));
   });
 
   it('ignores entries without a parseable createdAt', () => {
-    expect(checkCiQueue(ctxWith(JSON.stringify([{ createdAt: 5 }, {}])))).toEqual([]);
+    expectAnswered(checkCiQueue(ctxWith(JSON.stringify([{ createdAt: 5 }, {}]))));
   });
 
-  it('is quiet when gh fails or returns unusable output', () => {
-    expect(checkCiQueue(ctxWith('', 1))).toEqual([]);
-    expect(checkCiQueue(ctxWith('not json'))).toEqual([]);
-    expect(checkCiQueue(ctxWith('{}'))).toEqual([]);
+  it('answers without a finding when gh fails or returns unusable output', () => {
+    expectAnswered(checkCiQueue(ctxWith('', 1)));
+    expectAnswered(checkCiQueue(ctxWith('not json')));
+    expectAnswered(checkCiQueue(ctxWith('{}')));
   });
 
   it('is registered and report-only', () => {
@@ -1694,6 +1702,12 @@ describe('DOCTOR_CHECKS registry', () => {
   });
 });
 
+/** A check that has nothing to report still answers, and never fails. */
+function expectAnswered(results: DoctorCheckResult[]): void {
+  expect(results.length).toBeGreaterThan(0);
+  expect(results.some((r) => r.severity === 'fail')).toBe(false);
+}
+
 describe('runDoctorChecks + summarizeDoctorResults', () => {
   it('a known-good project (no plugin dir, no attestation artifacts, clean gh) reports zero fails', () => {
     const results = runDoctorChecks(
@@ -1701,7 +1715,8 @@ describe('runDoctorChecks + summarizeDoctorResults', () => {
         makeAdapters({
           runCommand: (_cmd, args) => ({
             stdout: '',
-            exitCode: args.includes('check-ignore') && args.includes('-q') ? 0 : 1,
+            exitCode:
+              (args.includes('check-ignore') && args.includes('-q')) || args[0] === 'auth' ? 0 : 1,
           }),
         }),
       ),
@@ -1729,6 +1744,7 @@ describe('runDoctorChecks + summarizeDoctorResults', () => {
           runCommand: (cmd, args) => {
             if (args.includes('check-ignore') && args.includes('-q'))
               return { stdout: '', exitCode: 0 };
+            if (cmd === 'gh' && args[0] === 'auth') return { stdout: '', exitCode: 0 };
             if (cmd === 'gh' && args[0] === 'repo') return { stdout: 'acme/widgets', exitCode: 0 };
             if (cmd === 'gh' && args[0] === 'api') {
               return {
@@ -1817,7 +1833,7 @@ describe('checkOrphanedVitestWorkers', () => {
     expect(parseEtimeSeconds('garbage')).toBeUndefined();
   });
 
-  it('is quiet when there are no orphans', () => {
+  it('answers without a finding when there are no orphans', () => {
     const adapters = makeAdapters({
       runCommand: () =>
         psOut([
@@ -1826,7 +1842,7 @@ describe('checkOrphanedVitestWorkers', () => {
           '  300     1 00:30 node (vitest 3)', // orphan but younger than 2 minutes
         ]),
     });
-    expect(checkOrphanedVitestWorkers(makeCtx(adapters))).toEqual([]);
+    expectAnswered(checkOrphanedVitestWorkers(makeCtx(adapters)));
   });
 
   it('warns on vitest workers with ppid 1 older than 2 minutes and prints the kill command', () => {
@@ -1851,7 +1867,7 @@ describe('checkOrphanedVitestWorkers', () => {
           makeAdapters({ runCommand: () => psOut([`  500     1 ${etime} node (vitest 1)`]) }),
         ),
       );
-    expect(at('02:00')).toEqual([]);
+    expectAnswered(at('02:00'));
     expect(at('02:01')).toHaveLength(1);
   });
 
@@ -1868,9 +1884,9 @@ describe('checkOrphanedVitestWorkers', () => {
     expect(r.remediation).toMatch(/kill 602$/);
   });
 
-  it('is quiet when ps fails', () => {
+  it('answers without a finding when ps fails', () => {
     const adapters = makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 1 }) });
-    expect(checkOrphanedVitestWorkers(makeCtx(adapters))).toEqual([]);
+    expectAnswered(checkOrphanedVitestWorkers(makeCtx(adapters)));
   });
 
   it('is registered', () => {
@@ -1946,20 +1962,20 @@ describe('worktree-hooks check', () => {
     expect(results[0].title).toContain(join(tmpDir, HOOKS_REL));
   });
 
-  it('is quiet when every worktree has its hook', () => {
+  it('answers without a finding when every worktree has its hook', () => {
     writeHook(tmpDir);
     addWorktree('aisdlc-1', { hook: true });
-    expect(checkWorktreeHooks(makeCtx(makeHookAdapters()))).toEqual([]);
+    expectAnswered(checkWorktreeHooks(makeCtx(makeHookAdapters())));
   });
 
-  it('is quiet when the main checkout has no pre-push hook (none expected)', () => {
+  it('answers without a finding when the main checkout has no pre-push hook (none expected)', () => {
     addWorktree('aisdlc-1');
-    expect(checkWorktreeHooks(makeCtx(makeHookAdapters()))).toEqual([]);
+    expectAnswered(checkWorktreeHooks(makeCtx(makeHookAdapters())));
   });
 
-  it('is quiet when git cannot resolve the hooks directory', () => {
+  it('answers without a finding when git cannot resolve the hooks directory', () => {
     addWorktree('aisdlc-1');
-    expect(checkWorktreeHooks(makeCtx(makeAdapters()))).toEqual([]);
+    expectAnswered(checkWorktreeHooks(makeCtx(makeAdapters())));
   });
 
   it('--fix runs prepare only where node_modules exists and reports the skipped worktree', () => {
@@ -2038,14 +2054,14 @@ describe('parent-checkout-state check', () => {
     expect(results[0].remediation).toContain('reset --hard origin/main');
   });
 
-  it('is quiet when the checkout is clean', () => {
-    expect(checkParentCheckoutState(makeCtx(gitAdapters({})))).toEqual([]);
+  it('answers without a finding when the checkout is clean', () => {
+    expectAnswered(checkParentCheckoutState(makeCtx(gitAdapters({}))));
   });
 
-  it('is quiet when not on main (feature worktrees have local changes)', () => {
-    expect(
+  it('answers without a finding when not on main (feature worktrees have local changes)', () => {
+    expectAnswered(
       checkParentCheckoutState(makeCtx(gitAdapters({ branch: 'feat/x', staged: 'a.ts\n' }))),
-    ).toEqual([]);
+    );
   });
 
   it('is registered and report-only', () => {
@@ -2296,14 +2312,14 @@ describe('hierarchy-launch-env check', () => {
     expect(results[0].remediation).toContain('cli-hierarchy down --role <role>');
   });
 
-  it('is quiet when every running session carries the env, has no roster, or tmux cannot say', () => {
+  it('answers without a finding when every running session carries the env, has no roster, or tmux cannot say', () => {
     const good =
       'AI_SDLC_HIERARCHY_SESSION=p-executor-alpha AI_SDLC_HIERARCHY_ROLE=executor claude';
     const both = { 'p-executor-alpha': good, 'p-executor-beta': good.replace('alpha', 'beta') };
-    expect(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, JSON.stringify(roster))))).toEqual([]);
-    expect(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, null)))).toEqual([]);
-    expect(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, 'not json')))).toEqual([]);
-    expect(checkHierarchyLaunchEnv(makeCtx(adaptersFor({}, JSON.stringify(roster))))).toEqual([]);
+    expectAnswered(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, JSON.stringify(roster)))));
+    expectAnswered(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, null))));
+    expectAnswered(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, 'not json'))));
+    expectAnswered(checkHierarchyLaunchEnv(makeCtx(adaptersFor({}, JSON.stringify(roster)))));
   });
 
   it('is registered', () => {
@@ -2326,9 +2342,12 @@ describe('checkStaleRepoBuild (AISDLC-988)', () => {
     expect(results[0].remediation).toContain('pnpm --filter @ai-sdlc/pipeline-cli build');
   });
 
-  it('is quiet when the build is fresh or the repo has no resolve script', () => {
-    expect(checkStaleRepoBuild(makeCtx(withScript(0)))).toEqual([]);
-    expect(checkStaleRepoBuild(makeCtx(makeAdapters({ exists: () => false })))).toEqual([]);
+  it('passes when the build is fresh, and says it does not apply without a resolve script', () => {
+    expect(checkStaleRepoBuild(makeCtx(withScript(0)))[0]?.severity).toBe('pass');
+    const na = checkStaleRepoBuild(makeCtx(makeAdapters({ exists: () => false })));
+    expect(na).toHaveLength(1);
+    expect(na[0]?.severity).toBe('pass');
+    expect(na[0]?.title).toContain('not applicable');
   });
 
   it('is registered', () => {
@@ -2474,8 +2493,8 @@ describe('checkLeasePushPreflight (AISDLC-798)', () => {
         cmd === 'git' ? { stdout: 'ai-sdlc/aisdlc-9-x\n', exitCode: 0 } : { stdout, exitCode: 0 },
     });
 
-  it('is quiet without --task', () => {
-    expect(checkLeasePushPreflight(ctxWith(makeAdapters(), null))).toEqual([]);
+  it('answers without a finding without --task', () => {
+    expectAnswered(checkLeasePushPreflight(ctxWith(makeAdapters(), null)));
   });
 
   it('fails when the task has no worktree', () => {
@@ -2641,15 +2660,26 @@ describe('hierarchy-module check', () => {
       }),
     );
 
-  it('is quiet without a roster or on a bad one', () => {
-    expect(checkHierarchyModule(ctxFor(null, null))).toEqual([]);
-    expect(checkHierarchyModule(ctxFor(null, 'nope'))).toEqual([]);
-    expect(checkHierarchyModule(ctxFor(null, '{}'))).toEqual([]);
+  it('warns naming cli-hierarchy up without a roster, fails on an unreadable one', () => {
+    const none = checkHierarchyModule(ctxFor(null, null));
+    expect(none).toHaveLength(1);
+    expect(none[0]?.severity).toBe('warn');
+    expect(none[0]?.remediation).toContain('cli-hierarchy up');
+    expect(checkHierarchyModule(ctxFor(null, 'nope'))[0]?.severity).toBe('fail');
+    expect(checkHierarchyModule(ctxFor(null, '{}'))[0]?.severity).toBe('fail');
+  });
+
+  it('warns when the roster has no running dispatch session', () => {
+    const r = checkHierarchyModule(ctxFor(null, JSON.stringify({ sessions: [] })));
+    expect(r[0]?.severity).toBe('warn');
+    expect(r[0]?.remediation).toContain('cli-hierarchy up');
   });
 
   it('passes on a fresh loaded heartbeat', () => {
     const f = JSON.stringify({ state: 'loaded', at: new Date().toISOString() });
-    expect(checkHierarchyModule(ctxFor(f))).toEqual([]);
+    const r = checkHierarchyModule(ctxFor(f));
+    expect(r).toHaveLength(1);
+    expect(r[0]?.severity).toBe('pass');
   });
 
   it('fails on refused, absent, stale and unreadable files', () => {
@@ -2717,9 +2747,9 @@ describe('vscode-hierarchy-terminals check', () => {
 
   const win = (iso: string, folder = '/proj') => ({ activatedAt: iso, folders: [folder] });
 
-  it('is quiet outside VS Code', () => {
-    expect(checkVscodeHierarchyTerminals(setup({}).ctx)).toEqual([]);
-    expect(checkVscodeHierarchyTerminals(setup({ term: 'iTerm.app' }).ctx)).toEqual([]);
+  it('answers without a finding outside VS Code', () => {
+    expectAnswered(checkVscodeHierarchyTerminals(setup({}).ctx));
+    expectAnswered(checkVscodeHierarchyTerminals(setup({ term: 'iTerm.app' }).ctx));
   });
 
   it('warns with the install command when the extension is missing', () => {
@@ -3090,5 +3120,113 @@ describe('checkMergePolicy (AISDLC-1351)', () => {
     );
     expect(on.severity).toBe('pass');
     expect(on.title).not.toContain('merging is off');
+  });
+});
+
+// ── Prerequisite checks (AISDLC-1356) ─────────────────────────────────────
+
+describe('prerequisite checks (AISDLC-1356)', () => {
+  const write = (rel: string, text: string): void => {
+    mkdirSync(dirname(join(tmpDir, rel)), { recursive: true });
+    writeFileSync(join(tmpDir, rel), text);
+  };
+
+  it('gh-auth fails on a non-zero exit and passes on zero', () => {
+    const bad = checkGhAuth(
+      makeCtx(makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 1 }) })),
+    );
+    expect(bad.severity).toBe('fail');
+    expect(bad.remediation).toContain('gh auth login');
+    const ok = checkGhAuth(
+      makeCtx(makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 0 }) })),
+    );
+    expect(ok.severity).toBe('pass');
+  });
+
+  it('backlog-tasks warns when missing and --fix creates it', () => {
+    const ctx = makeCtx(makeAdapters());
+    expect(checkBacklogTasks(ctx).severity).toBe('warn');
+    expect(fixBacklogTasks(ctx).applied).toBe(true);
+    expect(existsSync(join(tmpDir, 'backlog', 'tasks'))).toBe(true);
+    expect(checkBacklogTasks(ctx).severity).toBe('pass');
+    expect(fixBacklogTasks(ctx).applied).toBe(false);
+  });
+
+  it('webhook-config warns without a secret, warns without a feed, passes with both', () => {
+    expect(checkWebhookConfig(makeCtx(makeAdapters())).severity).toBe('warn');
+    const noFeed = makeCtx(makeAdapters({ env: { AI_SDLC_WEBHOOK_SECRET: 's' } }));
+    const r = checkWebhookConfig(noFeed);
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('no feed');
+    write(
+      '.ai-sdlc/dispatch/webhook.json',
+      JSON.stringify({ pid: 1, port: 2, feed: { kind: 'gh-forward' } }),
+    );
+    expect(checkWebhookConfig(noFeed).severity).toBe('pass');
+  });
+
+  it('scheduler-alive warns with no record or a dead pid, passes with a live pid', () => {
+    const alive = (v: boolean) => makeCtx(makeAdapters({ isPidAlive: () => v }));
+    expect(checkSchedulerAlive(alive(true)).severity).toBe('warn');
+    write('.ai-sdlc/dispatch/reconcile-scheduler.json', JSON.stringify({ pid: 4242 }));
+    const dead = checkSchedulerAlive(alive(false));
+    expect(dead.severity).toBe('warn');
+    expect(dead.remediation).toContain('cli-hierarchy up');
+    expect(checkSchedulerAlive(alive(true)).severity).toBe('pass');
+  });
+
+  it('node-version fails when .nvmrc is not installed under nvm, passes when it is', () => {
+    write('.nvmrc', '22.23.2\n');
+    const withInstalled = (dirs: string[]) =>
+      makeCtx(makeAdapters({ listDir: () => dirs, env: { NVM_DIR: '/nvm' } }));
+    const bad = checkNodeVersion(withInstalled(['v20.1.0']));
+    expect(bad.severity).toBe('fail');
+    expect(bad.remediation).toContain('nvm install 22.23.2');
+    expect(checkNodeVersion(withInstalled(['v22.23.2'])).severity).toBe('pass');
+  });
+
+  it('node-version fails when the running Node is below the engines floor', () => {
+    write('package.json', JSON.stringify({ engines: { node: '>=22.22.1' } }));
+    const at = (v: string) => makeCtx(makeAdapters({ nodeVersion: () => v }));
+    expect(checkNodeVersion(at('20.0.0')).severity).toBe('fail');
+    expect(checkNodeVersion(at('22.22.1')).severity).toBe('pass');
+  });
+
+  it('review-config names whether the file or the default applies', () => {
+    expect(checkReviewConfig(makeCtx(makeAdapters())).title).toContain('built-in default');
+    write('.ai-sdlc/review-config.yaml', 'x: 1\n');
+    expect(checkReviewConfig(makeCtx(makeAdapters())).title).toContain('is present');
+  });
+
+  it('every registered check returns a result against an empty project', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'doctor-empty-'));
+    try {
+      const ctx = makeCtx(makeAdapters({ exists: () => false, readFile: () => null }), empty);
+      const silent = DOCTOR_CHECKS.filter((c) => {
+        const out = c.run(ctx);
+        return (Array.isArray(out) ? out.length : 1) === 0;
+      }).map((c) => c.id);
+      expect(silent, 'checks that returned no result').toEqual([]);
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  it('doctor.md --fix sentence names only manifest entry ids', async () => {
+    const md = readFileSync(
+      join(__dirname, '../../../../ai-sdlc-plugin/commands/doctor.md'),
+      'utf-8',
+    );
+    const m = /`--fix`\s+scaffolds the entries that need no operator input \(([^)]*)\)/.exec(md);
+    expect(m).not.toBeNull();
+    const named = m![1].split(',').map((x) => x.trim().replace(/ /g, '-'));
+    const manifest = readFileSync(
+      join(__dirname, '../../../../pipeline-cli/src/config-manifest/manifest.ts'),
+      'utf-8',
+    );
+    const ids = [...manifest.matchAll(/^\s{4}id: '([^']+)'/gm)].map((x) => x[1]);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const n of named) expect(ids, n).toContain(n);
+    expect(md).not.toContain('reviewer set');
   });
 });
