@@ -48,6 +48,8 @@ import {
   WORKFLOWS_TEMPLATES,
   type FeatureTemplateSet,
 } from './init-templates.js';
+import { renderWorkflowForPackageManager } from './init-workflow-pm.js';
+import { detectPackageManager, type PackageManager } from '@ai-sdlc/pipeline-cli/verification';
 import { migrateLegacyWorkflows } from './init-legacy-workflows.js';
 import {
   CLIENT_SIDE_ONLY_MESSAGE,
@@ -1493,6 +1495,11 @@ export interface ApplyResult {
   branchProtection?: BranchProtectionResult;
 }
 
+function contentsOf(sets: FeatureTemplateSet[], relPath: string): string {
+  for (const set of sets) if (set.files[relPath] !== undefined) return set.files[relPath];
+  return '';
+}
+
 /**
  * Write the union of feature templates into the project dir. AC #4 says
  * the BASELINE workflow templates (gate workflow) are always written; the
@@ -1537,6 +1544,21 @@ export async function applyFeatureSelection(
   // First-set wins (BASELINE comes first, then feature bundles).
   const seenRelPaths = new Set<string>();
 
+  // AISDLC-1362: spell the gate and ingress setup, install and run steps for the repo's manager.
+  const hasPackageJson = adapters.exists(join(projectDir, 'package.json'));
+  const pm: PackageManager = hasPackageJson
+    ? detectPackageManager(
+        (f) => adapters.exists(join(projectDir, f)),
+        (f) => adapters.readTextFile(join(projectDir, f)) ?? undefined,
+      )
+    : 'pnpm';
+  const yarnBerry =
+    pm === 'yarn' &&
+    (adapters.exists(join(projectDir, '.yarnrc.yml')) ||
+      /"packageManager"\s*:\s*"yarn@([2-9]|\d{2,})/.test(
+        adapters.readTextFile(join(projectDir, 'package.json')) ?? '',
+      ));
+
   // AISDLC-1353: replace a byte-identical old verifier / old gate; report edited copies.
   migrateOldWorkflows(projectDir, flags, adapters);
 
@@ -1570,12 +1592,47 @@ export async function applyFeatureSelection(
 
       // mkdir -p the parent
       adapters.mkdirp(dirname(absPath));
-      adapters.writeFile(absPath, contents);
+      adapters.writeFile(
+        absPath,
+        isWorkflowFile && hasPackageJson
+          ? renderWorkflowForPackageManager(contents, pm, yarnBerry)
+          : contents,
+      );
       result.created.push(relPath);
       if (alreadyExists && shouldForce) {
         adapters.log(`  overwrite ${relPath} (--force)`);
       } else {
         adapters.log(`  created ${relPath}`);
+      }
+    }
+  }
+
+  if (!flags.dryRun && hasPackageJson) {
+    const gateWritten = result.created.includes('.github/workflows/ai-sdlc-gate.yml');
+    if (pm !== 'pnpm') {
+      const written = result.created.filter(
+        (r) => r.startsWith('.github/workflows/') && /pnpm/.test(contentsOf(templateSets, r)),
+      );
+      if (written.length > 0) {
+        adapters.log(`  package manager: ${pm}; workflows written for it: ${written.join(', ')}`);
+      }
+    }
+    if (gateWritten) {
+      let hasCoverage = false;
+      try {
+        const scripts = (
+          JSON.parse(adapters.readTextFile(join(projectDir, 'package.json')) ?? '{}') as {
+            scripts?: Record<string, unknown>;
+          }
+        ).scripts;
+        hasCoverage = typeof scripts?.['test:coverage'] === 'string';
+      } catch {
+        // unreadable package.json: say the script is missing
+      }
+      if (!hasCoverage) {
+        adapters.log(
+          '  note: package.json has no test:coverage script; the Coverage job in .github/workflows/ai-sdlc-gate.yml will fail until you add one or edit that job.',
+        );
       }
     }
   }
