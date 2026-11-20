@@ -334,6 +334,7 @@ describe('init command — agent-role tiers (AISDLC-79)', () => {
       const yaml = renderAgentRole(tier);
       expect(yaml).toContain('allowForcePush defaults');
       expect(yaml).toContain('leaseOnOwnBranch');
+      expect(yaml).toContain('never | leaseOnOwnBranch | lease');
       // Documented, not written: an active allowForcePush key would pin the value.
       expect(yaml).not.toMatch(/^\s*allowForcePush:/m);
     }

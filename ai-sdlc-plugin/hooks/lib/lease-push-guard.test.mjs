@@ -675,3 +675,68 @@ describe('evaluateLeasePush - planner filing shape (AISDLC-830, DEC-0088)', () =
     );
   });
 });
+
+describe('evaluateLeasePush - fix task on the PR head branch (AISDLC-1363, DEC-0421)', () => {
+  const HEAD = 'ai-sdlc/acs-13-feature';
+  const fixCtx = (over = {}) =>
+    ctx({ ownRef: `refs/heads/${HEAD}`, fixPrBranch: HEAD, fixesPr: 262, ...over });
+  const dec = (cmd, over, mode) => evaluateLeasePush(cmd, fixCtx(over), mode);
+  const push = (b = HEAD) => `git push --force-with-lease origin HEAD:refs/heads/${b}`;
+
+  it('allows a lease push to the recorded PR head branch', () => {
+    assert.equal(dec(push()).decision, 'allow');
+    assert.equal(
+      dec(`git push --force-with-lease=${HEAD}:0123abcd origin HEAD:refs/heads/${HEAD}`).decision,
+      'allow',
+    );
+  });
+
+  it('refuses when no head is recorded or it names another branch', () => {
+    assert.equal(dec(push(), { fixPrBranch: null }).decision, 'deny');
+    assert.equal(dec(push(), { fixPrBranch: undefined }).decision, 'deny');
+    assert.equal(dec(push(), { fixPrBranch: 'ai-sdlc/acs-14-other' }).decision, 'deny');
+    assert.equal(dec(push('ai-sdlc/acs-14-other')).decision, 'deny');
+    assert.equal(dec(push('other')).decision, 'deny');
+  });
+
+  it('refuses a recorded head that is main, master or protected, or another repository', () => {
+    for (const b of ['main', 'master', 'release/1', 'prod', 'owner:feature', 'fork:x']) {
+      assert.equal(dec(push(b), { ownRef: `refs/heads/${b}`, fixPrBranch: b }).decision, 'deny', b);
+    }
+  });
+
+  it('still refuses plain force, -f, +refspec, delete and no-colon refspec', () => {
+    for (const cmd of [
+      `git push --force origin ${HEAD}`,
+      `git push -f origin ${HEAD}`,
+      `git push origin +${HEAD}`,
+      `git push --force-with-lease origin :refs/heads/${HEAD}`,
+      `git push --force-with-lease --delete origin ${HEAD}`,
+      `git push --force-with-lease origin ${HEAD}`,
+      'git push --force-with-lease origin HEAD',
+    ]) {
+      assert.equal(dec(cmd).decision, 'deny', cmd);
+    }
+  });
+
+  it('does not change modes never and lease', () => {
+    assert.equal(dec(push(), { fixPrBranch: null }, 'lease').decision, 'allow');
+    assert.equal(dec(push(), {}, 'lease').decision, 'allow');
+    assert.equal(dec(push('main'), {}, 'lease').decision, 'deny');
+    assert.equal(hasForcePushOption(push()), true);
+  });
+
+  it('keeps the other binding conditions (task id, worktree name)', () => {
+    assert.equal(dec(push(), { taskId: null }).decision, 'deny');
+    assert.equal(dec(push(), { worktreeName: 'aisdlc-9' }).decision, 'deny');
+  });
+
+  it('names the task own branch and the recorded PR branch in the refusal', () => {
+    const r = dec(push('other'), {}).reason;
+    assert.match(r, /own branch is 'ai-sdlc\/aisdlc-1'/);
+    assert.match(r, /head branch of the PR it fixes \(#262\) is 'ai-sdlc\/acs-13-feature'/);
+    const none = dec(push('other'), { fixPrBranch: null, fixesPr: null }).reason;
+    assert.match(none, /own branch is 'ai-sdlc\/aisdlc-1'/);
+    assert.doesNotMatch(none, /head branch of the PR/);
+  });
+});
