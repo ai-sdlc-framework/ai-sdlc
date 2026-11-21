@@ -939,3 +939,25 @@ describe.skipIf(!existsSync(BUILT_DIST))('Stage 1 gate from built dist under pla
     }
   });
 });
+
+describe('runAstGate — repository configuration for the SDK sources (AISDLC-1295)', () => {
+  const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
+  const config = loadAstGateConfig(repoRoot);
+  const run = (path: string) => runAstGate([{ path, status: 'modified' }], config).outcome;
+
+  it.each(['sdk-python/src/ai_sdlc/compliance/mappings.py', 'sdk-go/operator/main.go'])(
+    'passes Stage 1 for %s',
+    (path) => {
+      expect(run(path)).toBe('pass');
+    },
+  );
+
+  it.each([
+    'scripts/tool.py',
+    'sdk-go/go.mod',
+    'sdk-python/pyproject.toml',
+    '.github/workflows/ci.yml',
+  ])('still blocks %s', (path) => {
+    expect(run(path)).toBe('abort-protected-path');
+  });
+});
