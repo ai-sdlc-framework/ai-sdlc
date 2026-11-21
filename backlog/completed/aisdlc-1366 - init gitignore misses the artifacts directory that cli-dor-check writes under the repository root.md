@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1366
 title: 'Init gitignore misses the artifacts directory that cli-dor-check writes under the repository root'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-21'
 labels:
