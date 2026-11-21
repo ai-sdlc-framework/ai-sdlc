@@ -1,5 +1,12 @@
 # @ai-sdlc/reference
 
+## [0.44.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.43.0...reference-v0.44.0) (2026-11-21)
+
+
+### Features
+
+* **pipeline-cli:** webhook receiver serves only its own repository (AISDLC-1349) ([#2874](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2874)) ([cb3d2fa](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cb3d2fa44d779bbd23b9c35eb04138c58b55f5ad))
+
 ## [0.43.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.42.0...reference-v0.43.0) (2026-11-19)
 
 

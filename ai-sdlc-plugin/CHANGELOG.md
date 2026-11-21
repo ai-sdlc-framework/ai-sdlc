@@ -5,6 +5,27 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.44.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.43.0...ai-sdlc-plugin-v0.44.0) (2026-11-21)
+
+
+### Features
+
+* **hooks:** leaseOnOwnBranch allows a fix task to lease push the PR head branch (AISDLC-1363) ([#2896](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2896)) ([f3bd120](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f3bd120d1e4c8e7bda072640a26a8467d067626a))
+* **orchestrator:** doctor fails loudly on a missing prerequisite (AISDLC-1356) ([#2892](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2892)) ([e5b835a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e5b835a5e97aa480600d36e77401919ef806955e))
+* **pipeline-cli:** heartbeat reports last tick result, module runs recorded CLI (AISDLC-1358) ([#2882](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2882)) ([db953ab](https://github.com/ai-sdlc-framework/ai-sdlc/commit/db953ab2f1e0d8afde1567f9e7c538b222403f76))
+* **pipeline-cli:** planner steps down the strength order when fable is unavailable (AISDLC-1364) ([#2900](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2900)) ([687e0d5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/687e0d596953d4fa0cd233eea78b9c843079b772))
+* **pipeline-cli:** up and status name every missing piece, STALLED only when late (AISDLC-1357) ([#2891](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2891)) ([456e8d3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/456e8d3f79962bf869a68293dfcdbfcc548ba922))
+* **plugin:** resolve plugin via project install entry, doctor flags stale (AISDLC-1327) ([#2844](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2844)) ([9887b5d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9887b5d0879727e3011792f57a0ebb72826bb08f))
+
+
+### Bug Fixes
+
+* **pipeline-cli:** name the installed CLI, not a path inside this repo (AISDLC-1359) ([#2894](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2894)) ([14959aa](https://github.com/ai-sdlc-framework/ai-sdlc/commit/14959aa7ce36cb5b0b435b002a64af7dda9a39a1))
+* **pipeline-cli:** re-run a reviewer alone when its transcript lacks the nonce marker (AISDLC-1335) ([#2849](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2849)) ([4919c82](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4919c820a86fa289575e66517d19c7a44c095871))
+* **plugin:** a reviewer harness failure is never counted as a verdict (AISDLC-1333) ([#2846](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2846)) ([aad0772](https://github.com/ai-sdlc-framework/ai-sdlc/commit/aad0772b15f57338acc0f0160889b20b7e1dde80))
+* **plugin:** command preambles never fall back to a missing plugin folder (AISDLC-1326) ([#2842](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2842)) ([57c92d4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/57c92d4a2075e1a59ceeb6e31b705a3a3bf8c149))
+* **plugin:** reviewers write only to the task and worktree named in their prompt (AISDLC-1334) ([#2850](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2850)) ([b689f33](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b689f33e1a7bb14cdb739c8bfbeea629bb03af0f))
+
 ## [0.43.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.42.0...ai-sdlc-plugin-v0.43.0) (2026-11-19)
 
 
