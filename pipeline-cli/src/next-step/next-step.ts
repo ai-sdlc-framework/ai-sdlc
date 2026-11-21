@@ -134,6 +134,9 @@ export function developerBudgetMinutes(env: NodeJS.ProcessEnv): number {
 /** A fixable reviewer-report slip may be corrected this many times per run. */
 export const MAX_REPORT_RETRIES = 2;
 
+/** Agent files in `ai-sdlc-plugin/agents/` register under the plugin name (AISDLC-1369). */
+export const PLUGIN_AGENT_PREFIX = 'ai-sdlc:';
+
 export const REPORT_SHAPE =
   '{"reviewers":[{"agent":"<agent name>","agentId":"<agentId the Agent tool returned>","approved":true|false,"findings":[{"severity":"critical|major|minor|suggestion","file":"","line":0,"message":""}],"summary":""}]}';
 
@@ -360,7 +363,7 @@ export function buildSpawnDeveloper(
   return {
     action: 'spawn-developer',
     taskId: state.taskId,
-    agent: 'developer',
+    agent: 'ai-sdlc:developer',
     iteration: state.iteration,
     promptFile,
     cwd: state.worktreePath,
@@ -383,6 +386,7 @@ export function buildSpawnReviewers(
       .filter((r) => !review.rerun || review.rerun.includes(r.agent))
       .map((r) => ({
         agent: r.agent,
+        subagentType: `${PLUGIN_AGENT_PREFIX}${r.agent}`,
         promptFile: r.promptFile,
         bootstrapPrompt: bootstrapPromptFor(r.promptFile),
         ...(r.model ? { model: r.model } : {}),

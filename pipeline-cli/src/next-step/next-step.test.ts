@@ -7,7 +7,7 @@
  * calls a run costs (AC-2). The collaborators have their own suites.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -267,7 +267,7 @@ describe('happy path', () => {
     const dev = instructions[0];
     if (dev.action !== 'spawn-developer') throw new Error('unreachable');
     expect(dev).toMatchObject({
-      agent: 'developer',
+      agent: 'ai-sdlc:developer',
       iteration: 1,
       promptFile: '/files/developer-prompt-1.md',
       cwd: worktree,
@@ -283,16 +283,23 @@ describe('happy path', () => {
     expect(rv.reviewers).toEqual([
       {
         agent: 'code-reviewer-codex',
+        subagentType: 'ai-sdlc:code-reviewer-codex',
         promptFile: '/files/review-r1-code.md',
         bootstrapPrompt: bootstrapPromptFor('/files/review-r1-code.md'),
       },
       {
         agent: 'security-reviewer',
+        subagentType: 'ai-sdlc:security-reviewer',
         promptFile: '/files/review-r1-sec.md',
         bootstrapPrompt: bootstrapPromptFor('/files/review-r1-sec.md'),
         model: 'opus',
       },
     ]);
+    const registered = readdirSync(join(process.cwd(), '..', 'ai-sdlc-plugin', 'agents'))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => `ai-sdlc:${f.slice(0, -3)}`);
+    expect(registered).toContain(dev.agent);
+    for (const r of rv.reviewers) expect(registered).toContain(r.subagentType);
     expect(rv.reviewers[0].bootstrapPrompt).toContain('/files/review-r1-code.md');
     expect(rv.reviewers[0].bootstrapPrompt).not.toMatch(/Diff-binding|nonce/i);
     expect(rv.replyShape).toContain('agentId');

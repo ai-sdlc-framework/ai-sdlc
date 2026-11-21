@@ -164,7 +164,8 @@ export interface NextStepState {
 export interface SpawnDeveloperInstruction {
   action: 'spawn-developer';
   taskId: string;
-  agent: 'developer';
+  /** Registered subagent type: `<plugin name>:<agent file name>` (AISDLC-1369). */
+  agent: 'ai-sdlc:developer';
   iteration: number;
   promptFile: string;
   cwd: string;
@@ -180,6 +181,8 @@ export interface SpawnReviewersInstruction {
   round: number;
   reviewers: Array<{
     agent: string;
+    /** Registered subagent type to pass to the Agent tool (`ai-sdlc:<agent>`); report `agent` stays the bare name (AISDLC-1369). */
+    subagentType: string;
     promptFile: string;
     /** Short prompt to pass as the Agent `prompt`; it names `promptFile` for the reviewer to read. */
     bootstrapPrompt: string;
