@@ -58,6 +58,22 @@ function blocked(): AggregatedVerdict {
 }
 
 describe('Step 10 — buildFinalSummary', () => {
+  it('carries the before-push marker only when the pipeline opened the PR (AISDLC-1365)', () => {
+    const o = {
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      task,
+      developerReturn: dev,
+      verdict: approved(),
+      iterations: 1,
+    };
+    const marked = buildFinalSummary({ ...o, prOpenedByPipeline: true }).finalSummary;
+    expect(marked).toContain('written before the pipeline pushed this branch');
+    expect(marked.indexOf('written before')).toBeLessThan(marked.indexOf('shipped X'));
+    expect(buildFinalSummary(o).finalSummary).not.toContain('written before the pipeline pushed');
+  });
+
   it('renders the canonical CLAUDE.md template', () => {
     const r = buildFinalSummary({
       taskId: 'AISDLC-1',

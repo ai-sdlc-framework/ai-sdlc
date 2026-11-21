@@ -908,3 +908,13 @@ describe('reviewer transcript attribution (AISDLC-1334)', () => {
     assert.ok(text.includes('You write no transcript'));
   });
 });
+
+describe('developer.md first push (AISDLC-1365)', () => {
+  const body = readFileSync(join(__dirname, 'developer.md'), 'utf-8');
+  it('tells the developer to push a branch the remote lacks without the lease', () => {
+    assert.ok(body.includes('Push a branch the remote lacks without `--force-with-lease`'));
+  });
+  it('limits the lease form to a branch the remote already has', () => {
+    assert.ok(body.includes('only when the remote already has the branch'));
+  });
+});

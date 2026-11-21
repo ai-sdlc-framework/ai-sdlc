@@ -495,3 +495,12 @@ describe('/ai-sdlc execute: staged review agents (RFC-0052)', () => {
     assert.match(cmdBody, /falls back to the three-reviewer set on its own/);
   });
 });
+
+describe('/ai-sdlc execute: standalone push behaviour (AISDLC-1365)', () => {
+  it('states the plain first push, the git -C form and where a refusal is reported', () => {
+    assert.match(cmdBody, /Standalone push behaviour/);
+    assert.match(cmdBody, /plain `git push -u origin HEAD:refs\/heads\/<branch>`/);
+    assert.match(cmdBody, /git -C <main>\/\.worktrees\/<task-id> push/);
+    assert.match(cmdBody, /reports a refused push in its `notes`/);
+  });
+});

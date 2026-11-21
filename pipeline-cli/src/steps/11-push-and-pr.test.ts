@@ -248,6 +248,26 @@ describe('Step 11 — composeTitle', () => {
 });
 
 describe('Step 11 — composeBody', () => {
+  it('heads the summary with the before-push marker only when the pipeline opens the PR (AISDLC-1365)', () => {
+    const base = {
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+    };
+    const opened = composeBody({ ...base, prOpenedByPipeline: true });
+    expect(opened).toContain('written before the pipeline pushed this branch');
+    expect(opened.indexOf('written before the pipeline pushed')).toBeLessThan(
+      opened.indexOf(dev.summary),
+    );
+    const reused = composeBody(base);
+    expect(reused).not.toContain('written before the pipeline pushed');
+    expect(composeBody({ ...base, prOpenedByPipeline: false })).toBe(reused);
+  });
+
   it('records the pinned pipeline sha of the hotfix lane (AISDLC-1024)', () => {
     const base = {
       taskId: 'AISDLC-1',

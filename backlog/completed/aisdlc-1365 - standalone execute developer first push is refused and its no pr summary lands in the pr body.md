@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1365
 title: 'Standalone execute developer first push is refused and its no-PR summary lands in the PR body'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-21'
 labels:

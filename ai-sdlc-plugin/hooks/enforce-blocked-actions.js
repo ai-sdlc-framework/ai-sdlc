@@ -255,8 +255,11 @@ function forcePushRefusal(why, failing) {
   const cwdCause = loc
     ? `CAUSE (AISDLC-905): the tool's cwd is outside the task worktree: the hook saw ${loc.found}, ` +
       `expected ${loc.expected}. The shell cwd can silently reset to the main checkout between calls. ` +
-      `Fix: run it as a lone command from that worktree (cd <worktree> in a call of its own, then the push by itself, ` +
-      `or git -C <main>/.worktrees/<task-id> push ...). `
+      `Fix: a lone cd does not change the cwd the hook sees, so run the push as one command with ` +
+      `git -C <main>/.worktrees/<task-id> push ... (no pipe or other shell operator), and from a session ` +
+      `rooted at the main checkout bind the task by launching it with AI_SDLC_ACTIVE_TASK_ID=<task-id> ` +
+      `(equal to the worktree's .active-task). A first push of a branch the remote lacks needs no lease: ` +
+      `git push -u origin HEAD:refs/heads/<own-branch>. `
     : '';
   return (
     cwdCause +
