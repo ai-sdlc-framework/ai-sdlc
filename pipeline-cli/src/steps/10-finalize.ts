@@ -84,6 +84,25 @@ export function verificationLines(
 }
 
 /**
+ * The Verification line for the reviews that actually ran (AISDLC-1369): the
+ * count and harness of each reported verdict, then the planned-harness note
+ * when there is one. Never a hard-coded reviewer count.
+ */
+function reviewsLine(verdict: FinalizeTaskOptions['verdict']): string {
+  const n = verdict.verdicts.length;
+  const noun = n === 1 ? 'review' : 'reviews';
+  const harnesses = verdict.verdicts
+    .map((v) =>
+      v.plannedHarness && v.plannedHarness !== v.harness
+        ? `${v.agentId}=${v.harness} (fell back from ${v.plannedHarness})`
+        : `${v.agentId}=${v.harness}`,
+    )
+    .join(', ');
+  const parts = [harnesses ? `harness: ${harnesses}` : '', verdict.harnessNote].filter(Boolean);
+  return `- ${n} ${noun} approved${parts.length ? ` (${parts.join('; ')})` : ''}`;
+}
+
+/**
  * Build the `finalSummary` markdown block per CLAUDE.md template + the
  * `acceptanceCriteriaCheck` index list (defaults to all ACs unless the
  * developer reported an explicit subset).
@@ -108,7 +127,7 @@ export function buildFinalSummary(opts: FinalizeTaskOptions): {
   const summaries = opts.developerReturn.verificationSummaries;
   const summaryOf = (k: VerificationKey): string => (summaries?.[k] ? ` (${summaries[k]})` : '');
 
-  const harnessLine = opts.verdict.harnessNote ? ` (${opts.verdict.harnessNote})` : '';
+  const reviewLine = reviewsLine(opts.verdict);
 
   const finalSummary =
     `## Summary\n${opts.prOpenedByPipeline ? `${SUMMARY_BEFORE_PUSH_MARKER}\n\n` : ''}${opts.developerReturn.summary}\n\n` +
@@ -116,7 +135,7 @@ export function buildFinalSummary(opts: FinalizeTaskOptions): {
     `## Design decisions\n${notesText(opts.developerReturn.notes)}\n\n` +
     `## Verification\n` +
     `${verificationLines(opts.workDir, opts.developerReturn, summaryOf)}\n` +
-    `- 3 parallel reviews approved${harnessLine}\n\n` +
+    `${reviewLine}\n\n` +
     `## Follow-up\n${followupsText(opts.developerReturn.followups)}\n`;
 
   return { finalSummary, acceptanceCriteriaCheck };

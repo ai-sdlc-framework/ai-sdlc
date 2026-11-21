@@ -111,7 +111,7 @@ describe('steps read the resolver', () => {
       worktreePath: root,
       task,
       developerReturn: dev,
-      verdict: { decision: 'APPROVED' } as never,
+      verdict: { decision: 'APPROVED', verdicts: [], harnessNote: '' } as never,
       iterations: 1,
     });
     expect(finalSummary).toContain('- `pytest` — passed');

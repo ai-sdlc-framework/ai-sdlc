@@ -22,6 +22,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -107,6 +108,31 @@ describe('/ai-sdlc execute frontmatter', () => {
     assert.match(agentDecl, /\bcode-reviewer\b/, 'allowlist must include code-reviewer');
     assert.match(agentDecl, /\btest-reviewer\b/, 'allowlist must include test-reviewer');
     assert.match(agentDecl, /\bsecurity-reviewer\b/, 'allowlist must include security-reviewer');
+  });
+
+  it('uses registered ai-sdlc:<agent> names in allowed-tools and spawn text (AISDLC-1369)', () => {
+    const agentsDir = join(repoRoot, 'ai-sdlc-plugin', 'agents');
+    const registered = readdirSync(agentsDir)
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => `ai-sdlc:${f.slice(0, -3)}`);
+    const decl = frontmatter['allowed-tools'].find((t) => t.startsWith('Agent('));
+    const names = decl
+      .slice('Agent('.length, -1)
+      .split(',')
+      .map((s) => s.trim());
+    for (const n of names) assert.ok(registered.includes(n), `${n} is not a registered agent`);
+    assert.ok(names.includes('ai-sdlc:developer'));
+    assert.match(cmdBody, /subagent_type: ai-sdlc:developer/);
+    assert.match(cmdBody, /`subagentType`/);
+    assert.doesNotMatch(cmdBody, /subagent_type: developer/);
+  });
+
+  it('documents that a referenced GitHub issue is not closed on merge (AISDLC-1369)', () => {
+    const doc = readFileSync(
+      join(repoRoot, 'docs', 'operations', 'backlog-and-execution-reference.md'),
+      'utf-8',
+    );
+    assert.match(doc, /listed in a backlog task's `references:` is NOT closed/);
   });
 
   it('does NOT regress to Agent(execute-orchestrator) (the deleted middleman)', () => {
@@ -490,7 +516,7 @@ describe('AISDLC-651.3: a parked developer return is not a failure', () => {
 
 describe('/ai-sdlc execute: staged review agents (RFC-0052)', () => {
   it('may spawn the planner and synthesizer and tells the model how to report them', () => {
-    assert.match(cmdContent, /Agent\([^)]*review-planner, review-synthesizer\)/);
+    assert.match(cmdContent, /Agent\([^)]*ai-sdlc:review-planner, ai-sdlc:review-synthesizer\)/);
     assert.match(cmdBody, /`outputFile`/);
     assert.match(cmdBody, /falls back to the three-reviewer set on its own/);
   });

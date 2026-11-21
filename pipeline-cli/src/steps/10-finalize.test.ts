@@ -119,6 +119,49 @@ describe('Step 10 — buildFinalSummary', () => {
   });
 });
 
+describe('Step 10 — reviews line (AISDLC-1369)', () => {
+  const run = (verdict: AggregatedVerdict) =>
+    buildFinalSummary({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      task,
+      developerReturn: dev,
+      verdict,
+      iterations: 1,
+    }).finalSummary;
+
+  it('states the actual count and harness of each reviewer', () => {
+    const out = run({
+      ...approved(),
+      verdicts: [
+        { agentId: 'code-reviewer', harness: 'claude-code', approved: true, findings: [] },
+        {
+          agentId: 'test-reviewer',
+          harness: 'claude-code',
+          plannedHarness: 'codex',
+          approved: true,
+          findings: [],
+        },
+      ],
+    });
+    expect(out).toContain('- 2 reviews approved');
+    expect(out).toContain('code-reviewer=claude-code');
+    expect(out).toContain('test-reviewer=claude-code (fell back from codex)');
+    expect(out).not.toContain('3 parallel');
+  });
+
+  it('has no "(;" fragment without a harness note', () => {
+    const out = run({
+      ...approved(),
+      verdicts: [{ agentId: 'code-reviewer', harness: 'codex', approved: true, findings: [] }],
+    });
+    expect(out).toContain('- 1 review approved (harness: code-reviewer=codex)');
+    expect(out).not.toContain('(;');
+    expect(run({ ...approved(), harnessNote: 'note' })).toContain('- 0 reviews approved (note)');
+  });
+});
+
 describe('Step 10 — follow-up section (AISDLC-997)', () => {
   const base = {
     taskId: 'AISDLC-1',

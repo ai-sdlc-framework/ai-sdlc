@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1369
 title: 'Execute spawns agents by their registered names, the task file states the real review count, and the PR links the issue'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-21'
 labels:

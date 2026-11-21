@@ -28,6 +28,7 @@ import {
   fixReportOrFail,
   readState,
   recordDeveloperResponseOf,
+  PLUGIN_AGENT_PREFIX,
   recordRound,
   REPORT_SHAPE,
   rollbackStatus,
@@ -501,6 +502,7 @@ class ExecuteHost implements EngineHost {
       );
       reviewers.push({
         agent: sh.role,
+        subagentType: `${PLUGIN_AGENT_PREFIX}${sh.role}`,
         promptFile: file,
         bootstrapPrompt: bootstrapPromptFor(file),
       });
