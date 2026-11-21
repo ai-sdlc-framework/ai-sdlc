@@ -115,13 +115,13 @@ export const EU_AI_ACT_MAPPINGS: readonly ControlMapping[] = [
   {
     controlId: 'sandbox-isolation',
     framework: 'eu-ai-act',
-    frameworkReference: 'Article 54 - AI Regulatory Sandboxes',
+    frameworkReference: 'Article 57 - AI Regulatory Sandboxes',
     description: 'Sandbox isolation supports controlled testing environments',
   },
   {
     controlId: 'metrics-collection',
     framework: 'eu-ai-act',
-    frameworkReference: 'Article 61 - Post-Market Monitoring',
+    frameworkReference: 'Article 72 - Post-Market Monitoring',
     description: 'Metrics collection enables post-deployment performance monitoring',
   },
 ];
@@ -143,7 +143,7 @@ export const NIST_AI_RMF_MAPPINGS: readonly ControlMapping[] = [
   {
     controlId: 'autonomy-governance',
     framework: 'nist-ai-rmf',
-    frameworkReference: 'GOVERN 1.3 - Roles and Responsibilities',
+    frameworkReference: 'GOVERN 2.1 - Roles and Responsibilities',
     description: 'Autonomy governance defines clear AI/human responsibility boundaries',
   },
   {
@@ -155,7 +155,7 @@ export const NIST_AI_RMF_MAPPINGS: readonly ControlMapping[] = [
   {
     controlId: 'human-review',
     framework: 'nist-ai-rmf',
-    frameworkReference: 'MANAGE 2.2 - Human Oversight',
+    frameworkReference: 'GOVERN 3.2 - Human Oversight',
     description: 'Human review mechanisms provide oversight at critical decision points',
   },
   {
