@@ -1296,19 +1296,16 @@ export async function runHierarchyCli(
           sleep: deps.sleep,
           log: deps.log,
           notifyPlanner: (text) => {
-            const { roster } = readRosterChecked(deps.boardDir);
-            const planner = roster.sessions.find(
-              (e) => e.role === 'planner' && e.status === 'running',
-            );
-            if (!planner) return;
-            sendToRoster(
-              roster.sessions,
-              planner.name,
-              text,
-              extras.sendBrief ?? createTmuxBriefSender(deps.run),
-              readReceivedAddresses(deps.boardDir),
-              extras.sendSocket,
-            );
+            try {
+              createPlannerNotifier(
+                deps.boardDir,
+                deps.run,
+                extras.sendBrief,
+                extras.sendSocket,
+              )(text);
+            } catch (err) {
+              if (!/no running planner/.test((err as Error).message)) throw err;
+            }
           },
         });
       }
