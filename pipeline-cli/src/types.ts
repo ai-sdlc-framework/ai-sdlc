@@ -633,6 +633,8 @@ export interface FinalizeTaskOptions {
   developerReturn: DeveloperReturn;
   verdict: AggregatedVerdict;
   iterations: number;
+  /** AISDLC-1365 - the pipeline (Step 11b), not the developer, opens the PR: the summary gets a stale-claim marker. */
+  prOpenedByPipeline?: boolean;
 }
 
 export interface FinalizeTaskResult {
@@ -669,6 +671,8 @@ export interface PushAndPrOptions {
   developerReturn: DeveloperReturn;
   verdict: AggregatedVerdict;
   needsHumanAttention?: boolean;
+  /** AISDLC-1365 - this call opens the PR (no PR existed): head the summary with the stale-claim marker. */
+  prOpenedByPipeline?: boolean;
   /** Optional logger; defaults to console. AISDLC-245.5 — used to surface deprecation warnings. */
   logger?: PipelineLogger;
   /**

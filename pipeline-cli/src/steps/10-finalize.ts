@@ -62,6 +62,13 @@ export interface FinalizeStepOptions extends FinalizeTaskOptions {
   resume?: boolean;
 }
 
+/**
+ * AISDLC-1365 - the developer writes its summary before the pipeline pushes the branch, so a
+ * "push refused, no PR is open" sentence goes stale the moment Step 11b opens the PR.
+ */
+export const SUMMARY_BEFORE_PUSH_MARKER =
+  '> Note: this summary was written before the pipeline pushed this branch; any statement in it about a refused push or a missing PR is out of date.';
+
 /** One bullet per verification key; an unconfigured key prints `skipped (not configured)`. */
 export function verificationLines(
   projectRoot: string,
@@ -104,7 +111,7 @@ export function buildFinalSummary(opts: FinalizeTaskOptions): {
   const harnessLine = opts.verdict.harnessNote ? ` (${opts.verdict.harnessNote})` : '';
 
   const finalSummary =
-    `## Summary\n${opts.developerReturn.summary}\n\n` +
+    `## Summary\n${opts.prOpenedByPipeline ? `${SUMMARY_BEFORE_PUSH_MARKER}\n\n` : ''}${opts.developerReturn.summary}\n\n` +
     `## Changes\n${filesBlock}\n\n` +
     `## Design decisions\n${notesText(opts.developerReturn.notes)}\n\n` +
     `## Verification\n` +

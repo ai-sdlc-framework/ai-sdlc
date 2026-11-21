@@ -138,6 +138,10 @@ Print a tight summary (task, branch, worktree, developer commit and file count, 
 
 Plugin subagents cannot use the `Agent` tool (Claude Code filters it one level deep; AISDLC-69.2, AISDLC-98), so only the main session can spawn `developer` and the reviewers, which is the one thing this body still does. Parallelism is per Claude Code session: run `/loop /ai-sdlc execute <task-id>` or several terminals; each run has its own worktree, state file and `.active-task` sentinel, so nothing races.
 
+## Standalone push behaviour (AISDLC-1365)
+
+In a standalone session rooted at the main checkout (no `AI_SDLC_ACTIVE_TASK_ID`, not a hierarchy executor) the PreToolUse hook refuses a lease push from the task worktree, and a lone `cd` does not change the cwd it sees. The developer pushes a first branch with a plain `git push -u origin HEAD:refs/heads/<branch>` (no lease needed), and otherwise runs `git -C <main>/.worktrees/<task-id> push ...` as one command with no pipe. The developer reports a refused push in its `notes` (never as a claim about the PR in `summary`); `next-step` pushes and opens the PR itself, and marks the summary as written before the push.
+
 ## What this command DOES NOT do (intentional)
 
 - **Never runs the raw merge command.** Merging follows `governance.allowMerge`; when it permits merging, the only path is `cli-merge-if-eligible`.
