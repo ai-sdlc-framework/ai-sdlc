@@ -14,6 +14,8 @@ import { validateHierarchyRoster } from '@ai-sdlc/reference';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { landingPath } from './reconcile.js';
+import { resolvePlannerModel } from './model-fallback.js';
+import { writeModelMarker } from '../routing/model-unavailable.js';
 import { schedulerDown, schedulerStatus } from './reconcile-scheduler.js';
 import { hostStallMs, schedulerLateMs } from './host-liveness.js';
 
@@ -3363,5 +3365,92 @@ describe('up and status name every missing piece (AISDLC-1357)', () => {
     });
     expect(hostStallMs(undefined, {})).toBe(60_000);
     expect(schedulerLateMs({})).toBe(120_000);
+  });
+});
+
+describe('planner model fallback (AISDLC-1364)', () => {
+  const routing = `apiVersion: ai-sdlc.io/v1alpha1
+kind: ModelRouting
+metadata:
+  name: model-routing
+spec:
+  strength: [haiku, sonnet, opus, fable]
+  exploreShare: 0
+  salt: s
+  cells:
+    planner-session:
+      '*': { model: fable }
+`;
+  const marker = {
+    model: 'fable',
+    until: '2026-11-24T20:00:00.000Z',
+    reason: 'usage limit reached',
+  };
+  const fallbackLines = () => logs.filter((l) => l.startsWith('model fallback:'));
+
+  beforeEach(() => {
+    deps.readRoutingTable = () => routing;
+  });
+
+  it('up launches claude --model opus and prints one line while the marker is active', async () => {
+    writeModelMarker(boardDir, marker);
+    const planner = resolvePlannerModel(undefined, deps);
+    await hierarchyUp(
+      {
+        ...baseOpts,
+        plannerModel: planner.model,
+        ...(planner.line ? { plannerFallbackLine: planner.line } : {}),
+      },
+      deps,
+    );
+    expect(newWindowCommands()[0]).toContain("--model 'opus'");
+    expect(fallbackLines()).toEqual([
+      'model fallback: planner-session runs opus instead of fable (usage limit reached); fable resets 2026-11-24T20:00:00.000Z',
+    ]);
+  });
+
+  it('up prints nothing and launches fable without a marker', async () => {
+    const planner = resolvePlannerModel(undefined, deps);
+    await hierarchyUp({ ...baseOpts, plannerModel: planner.model }, deps);
+    expect(newWindowCommands()[0]).toContain("--model 'fable'");
+    expect(fallbackLines()).toEqual([]);
+    expect(formatStatus(hierarchyStatus(deps)).join('\n')).not.toContain('model fallback:');
+  });
+
+  it('an explicit --planner-model wins over the marker', () => {
+    writeModelMarker(boardDir, marker);
+    expect(resolvePlannerModel('fable', deps)).toEqual({ model: 'fable' });
+  });
+
+  it('a planner restart launches opus while the marker is active, and status prints the line', async () => {
+    await hierarchyUp({ ...baseOpts, plannerModel: 'fable' }, deps);
+    writeModelMarker(boardDir, marker);
+    fake.calls.length = 0;
+    logs.length = 0;
+    await hierarchyRestart({ session: Q('planner') }, deps);
+    expect(newWindowCommands()[0]).toContain("--model 'opus'");
+    expect(fallbackLines()).toHaveLength(1);
+    const status = formatStatus(hierarchyStatus(deps)).filter((l) =>
+      l.startsWith('model fallback:'),
+    );
+    expect(status).toHaveLength(1);
+    expect(status[0]).toContain('planner-session');
+  });
+
+  it('the fallback never touches ANTHROPIC_API_KEY', async () => {
+    writeModelMarker(boardDir, marker);
+    deps.env = { ...deps.env, ANTHROPIC_API_KEY: 'sk-test' };
+    const planner = resolvePlannerModel(undefined, deps);
+    await hierarchyUp({ ...baseOpts, plannerModel: planner.model }, deps);
+    expect(newWindowCommands().join('\n')).not.toContain('ANTHROPIC_API_KEY');
+    expect(newWindowCommands().join('\n')).not.toContain('sk-test');
+  });
+
+  it('a non-planner restart keeps its recorded model', async () => {
+    await hierarchyUp(baseOpts, deps);
+    writeModelMarker(boardDir, { ...marker, model: 'sonnet' });
+    fake.calls.length = 0;
+    await hierarchyRestart({ session: 'executor-alpha' }, deps);
+    expect(newWindowCommands()[0]).toContain("--model 'sonnet'");
   });
 });

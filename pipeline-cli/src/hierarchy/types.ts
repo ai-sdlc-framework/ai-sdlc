@@ -129,6 +129,8 @@ export interface HierarchyDeps {
    * `['attach-session', '-t', '=planner']`. Returns the exit code.
    */
   attach: (args: readonly string[]) => number;
+  /** Test injection: the routing table text for the model fallback (AISDLC-1364); absent reads the base ref. */
+  readRoutingTable?: (workDir: string, baseRef: string) => string | null;
   /** Name of the `claude` executable. */
   claudeBin: string;
   /** Poll attempts and spacing when waiting for the registry or for a window to close. */

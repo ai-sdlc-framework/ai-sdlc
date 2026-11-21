@@ -205,7 +205,8 @@ import {
 } from '../hierarchy/index.js';
 import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
-import { routedModel } from '../routing/role-model.js';
+import { resolvePlannerModel } from '../hierarchy/model-fallback.js';
+import { clearModelMarker, writeModelMarker } from '../routing/model-unavailable.js';
 import { defaultRunner } from '../runtime/exec.js';
 import { runParentUpkeep, type ParentUpkeepResult } from '../steps/00-parent-upkeep.js';
 import { sweepDue, sweepMergedWorktrees } from '../steps/00-sweep.js';
@@ -235,6 +236,7 @@ Commands:
   sweep-worktrees  Remove merged, closed, no-PR and stale worktrees (branches are never deleted); --dry-run lists only
   down       Stop sessions and return their inflight manifests to the queue
   clear      Empty an executor's context between tasks and restart its loop
+  model-unavailable  Mark a model unusable until a time so the planner steps down (model-unavailable <model> --until <ISO> [--reason <t>] | <model> --clear)
   restart    Stop and start one session or all of them, updating the roster (restart <name>|--all)
   register   Re-record an executor whose process was restarted by hand (register <executor>)
   stall-notice  Alert once when queued work has not moved for N minutes (no relaunch, no model)
@@ -259,7 +261,8 @@ Commands:
 
 Options for up:
   --executors <n>          Deprecated: standing executors, 0 to 5 (default 0); dispatch spawns one per task
-  --planner-model <m>      Planner model (default: the planner cell of model-routing.yaml)
+  --planner-model <m>      Planner model (default: the planner-session cell of model-routing.yaml,
+                           stepped down while a model-unavailable marker is active)
   --dispatch-model <m>     Dispatch model (default sonnet)
   --executor-model <m>     Executor model (default sonnet)
   --no-planner             Do not start a planner
@@ -821,10 +824,12 @@ export async function runHierarchyCli(
         } catch {
           /* memory backup is best effort and never blocks up */
         }
+        const planner = resolvePlannerModel(flags['planner-model'], deps);
         const result = await hierarchyUp(
           {
             executors: flags.executors ?? '0',
-            plannerModel: flags['planner-model'] ?? routedModel('planner'),
+            plannerModel: planner.model,
+            ...(planner.line ? { plannerFallbackLine: planner.line } : {}),
             dispatchModel: flags['dispatch-model'] ?? 'sonnet',
             executorModel: flags['executor-model'] ?? 'sonnet',
             noPlanner: flags['no-planner'] === 'true',
@@ -846,6 +851,34 @@ export async function runHierarchyCli(
         // AISDLC-1102: the loop canary runs on the first tick after `up`.
         markCanaryDue(deps.boardDir);
         return result.attachExitCode ?? 0;
+      }
+      case 'model-unavailable': {
+        // AISDLC-1364: record (or clear) a model the account cannot use until its reset time.
+        const model = firstPositional(argv);
+        if (!model) {
+          deps.log('cli-hierarchy model-unavailable: a model name is required');
+          return 2;
+        }
+        if (flags.clear === 'true') {
+          deps.log(
+            clearModelMarker(deps.boardDir, model)
+              ? `cleared the ${model} marker`
+              : `no ${model} marker to clear`,
+          );
+          return 0;
+        }
+        const until = flags.until;
+        if (!until || !Number.isFinite(Date.parse(until))) {
+          deps.log('cli-hierarchy model-unavailable: --until <ISO time> is required');
+          return 2;
+        }
+        writeModelMarker(deps.boardDir, {
+          model,
+          until: new Date(until).toISOString(),
+          reason: flags.reason && flags.reason !== 'true' ? flags.reason : 'usage limit reached',
+        });
+        deps.log(`${model} marked unavailable until ${new Date(until).toISOString()}`);
+        return 0;
       }
       case 'spawn': {
         const taskArg = firstPositional(argv);

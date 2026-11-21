@@ -56,6 +56,7 @@ import {
   webhookDown,
   webhookUp,
 } from './webhook.js';
+import { restartModel } from './model-fallback.js';
 import { assertModel, assertPermissionMode, splitSessionName } from './validate.js';
 
 /** Options for `restart`. */
@@ -292,12 +293,14 @@ export async function hierarchyRestart(
   const project = entry.project ?? defaultProjectForBoard(deps.boardDir);
   const warnings: string[] = [];
   const others = roster.sessions.filter((e) => e !== entry);
+  const relaunch = restartModel(entry.role, entry.model, deps);
+  if (relaunch.line) deps.log(relaunch.line);
   const launched = await launchSession(
     {
       role: entry.role,
       name: entry.tmuxWindow,
       bare: splitSessionName(entry.tmuxWindow)?.bare ?? entry.tmuxWindow,
-      model: entry.model,
+      model: relaunch.model,
       permissionMode: entry.permissionMode,
       prompt: ROLE_PROMPT[entry.role],
       ...(entry.taskId ? { taskId: entry.taskId } : {}),

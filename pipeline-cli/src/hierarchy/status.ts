@@ -60,6 +60,7 @@ import {
   type DrainStallRecord,
   type StuckPrRow,
 } from './drain-stall.js';
+import { plannerFallbackLine } from './model-fallback.js';
 import { budgetStatus, formatBudget, type BudgetStatus } from './budget.js';
 import { dynamicExecutors } from './ephemeral-tick.js';
 import { executorCap, formatExecutorCap, type ExecutorCap } from './executor-cap.js';
@@ -124,6 +125,8 @@ export interface StatusResult {
   contextThresholds?: Record<HierarchyRole, number>;
   /** Token budget pace from `usage.json` (AISDLC-1072); absent when never sampled. */
   budget?: BudgetStatus;
+  /** Planner model fallback line (AISDLC-1364); absent when no fallback is active. */
+  modelFallback?: string;
   /** AISDLC-1316: recorded docs site pin state when the last bump run was skipped or failed. */
   docsSitePin?: { state: 'skipped' | 'failed'; runUrl?: string };
   /** The board hold (AISDLC-1319): who set it, since when and why; absent when not held. */
@@ -258,6 +261,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* an unreadable usage file must not break status */
   }
+  const modelFallbackNow = plannerFallbackLine(deps);
   const boardHold = readHold(deps.boardDir) ?? undefined;
   let resourcesNow: ReturnType<HierarchyDeps['resources']> | undefined;
   try {
@@ -451,6 +455,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     ...(lastTick ? { lastTick } : {}),
     contextThresholds: thresholdsByRole,
     ...(budgetNow ? { budget: budgetNow } : {}),
+    ...(modelFallbackNow ? { modelFallback: modelFallbackNow } : {}),
     ...(boardHold ? { hold: boardHold } : {}),
     ...(docsPin && docsPin.state !== 'ok'
       ? { docsSitePin: { ...docsPin, state: docsPin.state } }
@@ -495,6 +500,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
         ]
       : []),
     ...(result.budget ? [formatBudget(result.budget)] : []),
+    ...(result.modelFallback ? [result.modelFallback] : []),
     ...(result.executorCap ? [formatExecutorCap(result.executorCap)] : []),
     ...(result.openPrs ? [formatOpenPrs(result.openPrs)] : []),
   ];
