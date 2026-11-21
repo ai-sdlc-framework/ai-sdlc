@@ -38,6 +38,8 @@ describe('runtime gitignore list', () => {
       '.ai-sdlc/sweep-landed-cache.json',
       '.active-task',
       '.worktrees/',
+      'artifacts/_dor/',
+      'artifacts/_capabilities/',
     ]);
     expect(ARTIFACTS_GITIGNORE_ENTRY).toBe('.ai-sdlc/artifacts/');
   });
@@ -260,7 +262,9 @@ describe('gitignoreCovers without git: broader lines and globs', () => {
 
 describe('missingRuntimeGitignorePaths', () => {
   it('does not report the artifacts entry when a broader line already ignores it', () => {
-    const rest = RUNTIME_GITIGNORE_PATHS.filter((p) => p !== ARTIFACTS_GITIGNORE_ENTRY);
+    const rest = RUNTIME_GITIGNORE_PATHS.filter(
+      (p) => p !== ARTIFACTS_GITIGNORE_ENTRY && !p.startsWith('artifacts/'),
+    );
     expect(missingRuntimeGitignorePaths('artifacts/\n')).toEqual(rest);
     const outsideAiSdlc = RUNTIME_GITIGNORE_PATHS.filter((p) => !p.startsWith('.ai-sdlc/'));
     expect(missingRuntimeGitignorePaths('.ai-sdlc/\n')).toEqual(outsideAiSdlc);
@@ -277,7 +281,9 @@ describe('missingRuntimeGitignorePaths', () => {
     expect(missingRuntimeGitignorePaths('artifacts/\n', () => false)).toEqual([
       ...RUNTIME_GITIGNORE_PATHS,
     ]);
-    const rest = RUNTIME_GITIGNORE_PATHS.filter((p) => p !== ARTIFACTS_GITIGNORE_ENTRY);
+    const rest = RUNTIME_GITIGNORE_PATHS.filter(
+      (p) => p !== ARTIFACTS_GITIGNORE_ENTRY && !p.startsWith('artifacts/'),
+    );
     expect(missingRuntimeGitignorePaths('artifacts/\n', () => null)).toEqual(rest);
   });
 

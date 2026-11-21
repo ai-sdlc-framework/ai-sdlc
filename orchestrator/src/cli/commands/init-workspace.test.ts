@@ -25,7 +25,7 @@ import {
   rmSync,
   realpathSync,
 } from 'node:fs';
-import { execSync, spawnSync } from 'node:child_process';
+import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { RUNTIME_GITIGNORE_PATHS } from '../../runtime-gitignore.js';
 import { cleanGitEnv } from '../../runtime/git-env.js';
 import { join } from 'node:path';
@@ -264,6 +264,31 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
         env: cleanGitEnv(),
       });
       expect(r.status, entry).toBe(0);
+    }
+  });
+
+  it('leaves the default calibration log and capability state ignored (AISDLC-1366)', async () => {
+    const repo = tmpDir;
+    initBareRepo(repo);
+    const prevEnv = process.env.ARTIFACTS_DIR;
+    delete process.env.ARTIFACTS_DIR;
+    try {
+      const git = (...args: string[]) =>
+        execFileSync('git', ['-C', repo, ...args], { env: cleanGitEnv(), encoding: 'utf-8' });
+      git('config', 'user.email', 't@example.com');
+      git('config', 'user.name', 't');
+      git('config', 'commit.gpgsign', 'false');
+      await runInit(['--skip-mcp', '--yes', '--no-branch-protection']);
+      git('add', '-A');
+      git('commit', '-q', '--no-verify', '--allow-empty', '-m', 'init');
+      // The default paths when ARTIFACTS_DIR is unset (calibration-log.ts, composite.ts).
+      mkdirSync(join(repo, 'artifacts', '_dor'), { recursive: true });
+      mkdirSync(join(repo, 'artifacts', '_capabilities'), { recursive: true });
+      writeFileSync(join(repo, 'artifacts', '_dor', 'calibration.jsonl'), '{}\n');
+      writeFileSync(join(repo, 'artifacts', '_capabilities', 'state.json'), '{}\n');
+      expect(git('status', '--porcelain')).not.toContain('artifacts');
+    } finally {
+      if (prevEnv !== undefined) process.env.ARTIFACTS_DIR = prevEnv;
     }
   });
 

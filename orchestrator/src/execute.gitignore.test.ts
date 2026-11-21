@@ -122,7 +122,12 @@ describe.skipIf(!gitAvailable)('ensureRuntimeGitignore in a git repository', () 
     writeFileSync(gitignore(), 'artifacts/\n');
     ensureRuntimeGitignore(dir);
     const out = readFileSync(gitignore(), 'utf-8');
-    expect(out).toBe(`artifacts/\n${STATE_ONLY}`);
+    // `artifacts/` also covers the root-level artifacts/_dor and artifacts/_capabilities entries.
+    const stateOnlyNoRoot = STATE_ONLY.replace('artifacts/_dor/\n', '').replace(
+      'artifacts/_capabilities/\n',
+      '',
+    );
+    expect(out).toBe(`artifacts/\n${stateOnlyNoRoot}`);
     expect(count(out, '.ai-sdlc/artifacts/')).toBe(0);
   });
 

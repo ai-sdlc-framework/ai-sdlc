@@ -27,6 +27,8 @@ import {
   readFileSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -1142,5 +1144,42 @@ describe('Step 0.5 — claude memory dream output (AISDLC-869)', () => {
     const result = await syncParentUntrackedFiles({ workDir });
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/stray\.txt/);
+  });
+});
+
+describe('Step 0.5 — default artifacts output is ignored (AISDLC-1366)', () => {
+  it('returns ok: true in a real repository once the init gitignore lines cover the DoR and capability output', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'ai-sdlc-step05-artifacts-'));
+    try {
+      const git = (...args: string[]) =>
+        execFileSync('git', ['-C', repo, ...args], { encoding: 'utf-8' });
+      git('init', '-q');
+      // The two lines init writes (orchestrator RUNTIME_GITIGNORE_PATHS).
+      writeFileSync(join(repo, '.gitignore'), 'artifacts/_dor/\nartifacts/_capabilities/\n');
+      git('add', '.gitignore');
+      git(
+        '-c',
+        'user.email=t@example.com',
+        '-c',
+        'user.name=t',
+        '-c',
+        'commit.gpgsign=false',
+        'commit',
+        '-q',
+        '--no-verify',
+        '-m',
+        'init',
+      );
+      mkdirSync(join(repo, 'artifacts', '_dor'), { recursive: true });
+      mkdirSync(join(repo, 'artifacts', '_capabilities'), { recursive: true });
+      writeFileSync(join(repo, 'artifacts', '_dor', 'calibration.jsonl'), '{}\n');
+      writeFileSync(join(repo, 'artifacts', '_capabilities', 'state.json'), '{}\n');
+      const untracked = git('ls-files', '--others', '--exclude-standard');
+      expect(untracked).not.toContain('artifacts');
+      const result = await syncParentUntrackedFiles({ workDir: repo });
+      expect(result.ok).toBe(true);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });
