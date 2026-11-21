@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1364
 title: 'Sessions and commands pinned to fable fall back to opus when fable is not available'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-21'
 labels:
