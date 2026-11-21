@@ -41,6 +41,12 @@ export const RUNTIME_GITIGNORE_PATHS: readonly string[] = [
   '.ai-sdlc/sweep-landed-cache.json', // pipeline-cli/src/steps/00-sweep.ts
   '.active-task', // per-worktree active-task sentinel
   '.worktrees/', // task worktrees
+  // AISDLC-1366: cli-dor-check writes these under <repo>/artifacts/ when ARTIFACTS_DIR is
+  // unset. Only the two framework subdirectories are listed, never `artifacts/` itself,
+  // because a top-level artifacts/ can be the project's own tracked directory. The
+  // calibration log keeps issue titles and body previews, so it must never be committed.
+  'artifacts/_dor/', // pipeline-cli/src/dor/calibration-log.ts
+  'artifacts/_capabilities/', // capability state recorded by pipeline-cli/src/dor/composite.ts
 ];
 
 /** Strips leading and trailing slashes by index, never by a backtracking regex. */

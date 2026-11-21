@@ -1350,7 +1350,22 @@ describe('checkRuntimeGitignore', () => {
     expect(r.title).toContain('.ai-sdlc/dispatch/');
     expect(r.title).toContain('.ai-sdlc/transcripts/');
     expect(r.title).not.toContain('.ai-sdlc/state.db,');
-    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: true, missingCount: 13 });
+    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: true, missingCount: 15 });
+  });
+
+  it('fails without the artifacts/_dor and artifacts/_capabilities entries, passes once fix adds them (AISDLC-1366)', () => {
+    const withoutArtifacts = ALL.replace('artifacts/_dor/\n', '').replace(
+      'artifacts/_capabilities/\n',
+      '',
+    );
+    writeFileSync(join(tmpDir, '.gitignore'), `# ai-sdlc:runtime-gitignore\n${withoutArtifacts}`);
+    const ctx = makeCtx(noGit());
+    const r = checkRuntimeGitignore(ctx);
+    expect(r.severity).toBe('fail');
+    expect(r.title).toContain('artifacts/_dor/');
+    expect(r.title).toContain('artifacts/_capabilities/');
+    expect(fixRuntimeGitignore(ctx).applied).toBe(true);
+    expect(checkRuntimeGitignore(ctx).severity).toBe('pass');
   });
 
   it('fails when there is no .gitignore at all', () => {
@@ -1367,13 +1382,13 @@ describe('checkRuntimeGitignore', () => {
     expect(r.remediation).toBeUndefined();
   });
 
-  it.each(['.ai-sdlc/*\n.active-task\n.worktrees/', '.ai-sdlc/\n.active-task\n.worktrees/'])(
-    'passes when broader lines cover every entry (%j)',
-    (text) => {
-      writeFileSync(join(tmpDir, '.gitignore'), `${text}\n`);
-      expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
-    },
-  );
+  it.each([
+    '.ai-sdlc/*\n.active-task\n.worktrees/\nartifacts/',
+    '.ai-sdlc/\n.active-task\n.worktrees/\nartifacts/',
+  ])('passes when broader lines cover every entry (%j)', (text) => {
+    writeFileSync(join(tmpDir, '.gitignore'), `${text}\n`);
+    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
+  });
 
   it('does not count a comment as covering an entry', () => {
     writeFileSync(join(tmpDir, '.gitignore'), `# ${ALL.split('\n').join('\n# ')}\n`);
