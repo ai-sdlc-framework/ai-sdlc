@@ -9,7 +9,7 @@ argument-hint: '[last-reply: <text>]'
 allowed-tools:
   - Read
   - Bash
-model: fable
+model: opus
 rung: 4
 ---
 

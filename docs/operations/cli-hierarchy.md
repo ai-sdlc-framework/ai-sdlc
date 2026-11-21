@@ -129,7 +129,7 @@ cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
 | Option                          | Meaning                                                                                                                           |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `--executors <n>`               | Deprecated: standing executors, 0 to 5 (default 0); a value above 0 prints a deprecation line and is removed in the next release. |
-| `--planner-model <m>`           | Planner model (default `fable`).                                                                                                  |
+| `--planner-model <m>` | Planner model (default: the `planner-session` cell of `.ai-sdlc/model-routing.yaml`; see "Model fallback" below). |
 | `--dispatch-model <m>`          | Dispatch model (default `sonnet`, per DEC-0068).                                                                                  |
 | `--executor-model <m>`          | Executor model (default `sonnet`).                                                                                                |
 | `--no-planner`                  | Do not start a planner.                                                                                                           |
@@ -2941,3 +2941,19 @@ Every tmux call a tick makes (the `/exit` request, the exit-dialog check, the br
 The reconcile scheduler runs its ticks single-flight and records the running tick as `tick: {pid, startedAt}` in `<board>/reconcile-scheduler.json`. A tick older than the stall limit (default twice the 30 s tick interval; `AI_SDLC_TICK_STALL_MINUTES` to change it) is sent SIGTERM, then SIGKILL after 5 s, a `tick-stalled` event is appended to `<board>/board-events.jsonl`, and the next tick starts. `cli-hierarchy status` prints `scheduler: STALLED (last tick <age>s ago, pid N)` instead of `up` when the last tick is older than that limit.
 
 Manual recovery when a tick still hangs: find the blocked child (`ps -o pid,ppid,command | grep 'tmux '`) and `kill <child pid>`; the tick continues within seconds.
+
+
+### `model-unavailable` (AISDLC-1364)
+
+The planner session is routed by the `planner-session` cell of `.ai-sdlc/model-routing.yaml`; the `/ai-sdlc planner` command is a separate cell (`planner`) and pins `opus`, because a command `model:` applies to one turn only and a usage limit on its model stops that turn.
+
+When a model hits its limit, record it with its reset time:
+
+```
+cli-hierarchy model-unavailable fable --until 2026-11-24T20:00:00Z [--reason "usage limit reached"]
+cli-hierarchy model-unavailable fable --clear
+```
+
+While the marker is in force, `up` and a planner `restart` launch `claude --model <next weaker model>`, where "weaker" is the `strength` order in `model-routing.yaml` (the only place the order is written). The security reviewer never resolves below its opus floor, and a role with no allowed fallback fails with an error instead of downgrading. An explicit `--planner-model` always wins. `status` and `up` print one `model fallback:` line naming the role, both models, the reason and the reset time, and nothing otherwise. After `until` the marker is ignored; a running session is not switched, so run `cli-hierarchy restart <planner>` or `up` to return to the configured model (a restart keeps the model recorded in the roster, stepping it down only while it is marked).
+
+Claude Code's own `--fallback-model` does not cover rate or usage limits, so it is not used. The fallback only changes the `--model` argument on the same subscription: it never sets or reads `ANTHROPIC_API_KEY` and never chooses usage-credit billing.

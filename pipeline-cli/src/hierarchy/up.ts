@@ -73,6 +73,8 @@ import {
 export interface UpOptions {
   executors: number | string;
   plannerModel: string;
+  /** Line naming a planner model fallback (AISDLC-1364); logged once when present. */
+  plannerFallbackLine?: string;
   dispatchModel: string;
   executorModel: string;
   noPlanner: boolean;
@@ -498,6 +500,7 @@ export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): P
       `deprecated: --executors ${count} starts standing executors; dispatch now spawns one executor per task (RFC-0059), so the default is 0 and this option is removed in the next release`,
     );
   }
+  if (opts.plannerFallbackLine) deps.log(opts.plannerFallbackLine);
   assertModel(opts.plannerModel, '--planner-model');
   assertModel(opts.dispatchModel, '--dispatch-model');
   assertModel(opts.executorModel, '--executor-model');
