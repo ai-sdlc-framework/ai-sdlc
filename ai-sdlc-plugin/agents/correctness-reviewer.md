@@ -61,7 +61,7 @@ Use the Bash tool to resolve the task id (resolving the resolver script portably
 ATTR_TASK_ID="<task id from the Attribution block>"
 ATTR_WORKTREE="<absolute worktree path from the Attribution block>"
 CANDIDATES=()
-[ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && CANDIDATES+=("${CLAUDE_PLUGIN_ROOT}/scripts/resolve-transcript-task-id.sh")
+CANDIDATES+=("${CLAUDE_PLUGIN_ROOT}/scripts/resolve-transcript-task-id.sh")
 [ -n "${CLAUDE_PLUGIN_DIR:-}" ] && CANDIDATES+=("${CLAUDE_PLUGIN_DIR}/scripts/resolve-transcript-task-id.sh")
 CANDIDATES+=("scripts/resolve-transcript-task-id.sh")
 RESOLVE_SCRIPT=""

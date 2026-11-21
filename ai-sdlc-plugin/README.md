@@ -124,7 +124,7 @@ Slash command bodies invoke `@ai-sdlc/pipeline-cli` CLIs and plugin-internal scr
 # Must be set FIRST — resolve-pipeline-cli.sh lives under PLUGIN_SCRIPTS_DIR.
 # >>> plugin-root preamble
 unset PLUGIN_SCRIPTS_DIR
-for _c in "${CLAUDE_PLUGIN_DIR:-}" "${CLAUDE_PLUGIN_ROOT:-}" "$(pwd)/ai-sdlc-plugin" "$(node -e 'const f=require("fs"),p=require("path"),r=(d)=>{try{return f.realpathSync(d)}catch(e){return d}};try{const g=JSON.parse(f.readFileSync(p.join(require("os").homedir(),".claude/plugins/installed_plugins.json"))).plugins,s=[];for(const k in g)if(k.startsWith("ai-sdlc@"))s.push(...g[k]);const o=[];for(let d=process.cwd(),u;u!==d;d=p.dirname(d)){u=d;for(const e of s)if(e.scope!="user"&&e.scope!="managed"&&e.projectPath&&r(e.projectPath)==d)o.push(e)}for(const e of s)if(e.scope=="user")o.push(e);console.log(o.find((e)=>f.existsSync(e.installPath)).installPath)}catch(e){}' 2>/dev/null)"; do
+for _c in "${CLAUDE_PLUGIN_DIR:-}" "${CLAUDE_PLUGIN_ROOT}" "$(pwd)/ai-sdlc-plugin" "$(node -e 'const f=require("fs"),p=require("path"),r=(d)=>{try{return f.realpathSync(d)}catch(e){return d}};try{const g=JSON.parse(f.readFileSync(p.join(require("os").homedir(),".claude/plugins/installed_plugins.json"))).plugins,s=[];for(const k in g)if(k.startsWith("ai-sdlc@"))s.push(...g[k]);const o=[];for(let d=process.cwd(),u;u!==d;d=p.dirname(d)){u=d;for(const e of s)if(e.scope!="user"&&e.scope!="managed"&&e.projectPath&&r(e.projectPath)==d)o.push(e)}for(const e of s)if(e.scope=="user")o.push(e);console.log(o.find((e)=>f.existsSync(e.installPath)).installPath)}catch(e){}' 2>/dev/null)"; do
   [ -n "$_c" ] && [ -d "$_c" ] && PLUGIN_SCRIPTS_DIR="$_c/scripts" && break
 done
 [ -n "${PLUGIN_SCRIPTS_DIR:-}" ] || { echo "ERROR: plugin not found: set CLAUDE_PLUGIN_DIR or CLAUDE_PLUGIN_ROOT, or install it (see ~/.claude/plugins/installed_plugins.json)" >&2; exit 1; }
@@ -161,7 +161,7 @@ Or override `PIPELINE_CLI_BIN` in your shell before launching Claude Code:
 export PIPELINE_CLI_BIN=/path/to/ai-sdlc/pipeline-cli/bin
 ```
 
-**Note on `CLAUDE_PLUGIN_ROOT`:** for plugin-internal scripts already using `${CLAUDE_PLUGIN_ROOT}` (e.g. `sign-attestation.mjs` invocations in `/ai-sdlc execute` Step 10.5 and `/ai-sdlc rebase`), leave those unchanged — Claude Code injects `CLAUDE_PLUGIN_ROOT` at session start and it is always available in the main session context.
+**Note on `CLAUDE_PLUGIN_ROOT`:** for plugin-internal scripts already using `${CLAUDE_PLUGIN_ROOT}` (e.g. `sign-attestation.mjs` invocations in `/ai-sdlc execute` Step 10.5 and `/ai-sdlc rebase`), leave those unchanged — Claude Code substitutes the plain `${CLAUDE_PLUGIN_ROOT}` text in command and agent bodies, but does not export the variable to the Bash tool environment, so never write the `${CLAUDE_PLUGIN_ROOT:-...}` or `$CLAUDE_PLUGIN_ROOT` forms there.
 
 ### Troubleshooting: pin bumped but runtime still stale after `/plugin update` (AISDLC-608)
 

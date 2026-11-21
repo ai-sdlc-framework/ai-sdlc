@@ -24,7 +24,7 @@
 #      → Broken/incomplete install. Try to self-heal via install-runtime-deps.sh,
 #        then retry. If self-heal fails, fall through.
 #
-#   3. CLAUDE_PLUGIN_ROOT set (always injected by Claude Code) + node_modules exists
+#   3. CLAUDE_PLUGIN_ROOT set (text Claude Code substitutes; not exported to the Bash tool) + node_modules exists
 #      → Use CLAUDE_PLUGIN_ROOT as the install dir (same directory, different var).
 #
 #   4. Plugin cache probe: ~/.claude/plugins/cache/<marketplace>/ai-sdlc/<version>/
@@ -54,8 +54,8 @@
 #
 # Environment variables read:
 #   CLAUDE_PLUGIN_DIR  — set by Claude Code harness for marketplace installs
-#   CLAUDE_PLUGIN_ROOT — always set by Claude Code harness (same dir as CLAUDE_PLUGIN_DIR
-#                         in most contexts, but guaranteed to exist)
+#   CLAUDE_PLUGIN_ROOT — not exported to the Bash tool; may be set by a caller (same dir as CLAUDE_PLUGIN_DIR
+#                         when both are set)
 #
 # The script is idempotent and safe to call multiple times.
 
@@ -312,7 +312,7 @@ if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
   fi
 fi
 
-# ── Topology 3: CLAUDE_PLUGIN_ROOT set (always injected by Claude Code) ─────
+# ── Topology 3: CLAUDE_PLUGIN_ROOT set (text Claude Code substitutes; not exported to the Bash tool) ─────
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   CANDIDATE="$CLAUDE_PLUGIN_ROOT/$PIPELINE_CLI_REL"
   # AISDLC-385: fast-path requires BOTH pipeline-cli AND mcp-server present.

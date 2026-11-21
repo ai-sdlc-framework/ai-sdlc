@@ -68,7 +68,7 @@ plugin cache and warns on stderr (with the rebuild command
 ```bash
 # >>> plugin-root preamble
 unset PLUGIN_SCRIPTS_DIR
-for _c in "${CLAUDE_PLUGIN_DIR:-}" "${CLAUDE_PLUGIN_ROOT:-}" "$(pwd)/ai-sdlc-plugin" "$(node -e 'const f=require("fs"),p=require("path"),r=(d)=>{try{return f.realpathSync(d)}catch(e){return d}};try{const g=JSON.parse(f.readFileSync(p.join(require("os").homedir(),".claude/plugins/installed_plugins.json"))).plugins,s=[];for(const k in g)if(k.startsWith("ai-sdlc@"))s.push(...g[k]);const o=[];for(let d=process.cwd(),u;u!==d;d=p.dirname(d)){u=d;for(const e of s)if(e.scope!="user"&&e.scope!="managed"&&e.projectPath&&r(e.projectPath)==d)o.push(e)}for(const e of s)if(e.scope=="user")o.push(e);console.log(o.find((e)=>f.existsSync(e.installPath)).installPath)}catch(e){}' 2>/dev/null)"; do
+for _c in "${CLAUDE_PLUGIN_DIR:-}" "${CLAUDE_PLUGIN_ROOT}" "$(pwd)/ai-sdlc-plugin" "$(node -e 'const f=require("fs"),p=require("path"),r=(d)=>{try{return f.realpathSync(d)}catch(e){return d}};try{const g=JSON.parse(f.readFileSync(p.join(require("os").homedir(),".claude/plugins/installed_plugins.json"))).plugins,s=[];for(const k in g)if(k.startsWith("ai-sdlc@"))s.push(...g[k]);const o=[];for(let d=process.cwd(),u;u!==d;d=p.dirname(d)){u=d;for(const e of s)if(e.scope!="user"&&e.scope!="managed"&&e.projectPath&&r(e.projectPath)==d)o.push(e)}for(const e of s)if(e.scope=="user")o.push(e);console.log(o.find((e)=>f.existsSync(e.installPath)).installPath)}catch(e){}' 2>/dev/null)"; do
   [ -n "$_c" ] && [ -d "$_c" ] && PLUGIN_SCRIPTS_DIR="$_c/scripts" && break
 done
 [ -n "${PLUGIN_SCRIPTS_DIR:-}" ] || { echo "ERROR: plugin not found: set CLAUDE_PLUGIN_DIR or CLAUDE_PLUGIN_ROOT, or install it (see ~/.claude/plugins/installed_plugins.json)" >&2; exit 1; }
@@ -91,7 +91,7 @@ pin (local files only; exit status 1 means at least one exact pin differs):
 ```bash
 # >>> plugin-root preamble
 unset PLUGIN_SCRIPTS_DIR
-for _c in "${CLAUDE_PLUGIN_DIR:-}" "${CLAUDE_PLUGIN_ROOT:-}" "$(pwd)/ai-sdlc-plugin" "$(node -e 'const f=require("fs"),p=require("path"),r=(d)=>{try{return f.realpathSync(d)}catch(e){return d}};try{const g=JSON.parse(f.readFileSync(p.join(require("os").homedir(),".claude/plugins/installed_plugins.json"))).plugins,s=[];for(const k in g)if(k.startsWith("ai-sdlc@"))s.push(...g[k]);const o=[];for(let d=process.cwd(),u;u!==d;d=p.dirname(d)){u=d;for(const e of s)if(e.scope!="user"&&e.scope!="managed"&&e.projectPath&&r(e.projectPath)==d)o.push(e)}for(const e of s)if(e.scope=="user")o.push(e);console.log(o.find((e)=>f.existsSync(e.installPath)).installPath)}catch(e){}' 2>/dev/null)"; do
+for _c in "${CLAUDE_PLUGIN_DIR:-}" "${CLAUDE_PLUGIN_ROOT}" "$(pwd)/ai-sdlc-plugin" "$(node -e 'const f=require("fs"),p=require("path"),r=(d)=>{try{return f.realpathSync(d)}catch(e){return d}};try{const g=JSON.parse(f.readFileSync(p.join(require("os").homedir(),".claude/plugins/installed_plugins.json"))).plugins,s=[];for(const k in g)if(k.startsWith("ai-sdlc@"))s.push(...g[k]);const o=[];for(let d=process.cwd(),u;u!==d;d=p.dirname(d)){u=d;for(const e of s)if(e.scope!="user"&&e.scope!="managed"&&e.projectPath&&r(e.projectPath)==d)o.push(e)}for(const e of s)if(e.scope=="user")o.push(e);console.log(o.find((e)=>f.existsSync(e.installPath)).installPath)}catch(e){}' 2>/dev/null)"; do
   [ -n "$_c" ] && [ -d "$_c" ] && PLUGIN_SCRIPTS_DIR="$_c/scripts" && break
 done
 [ -n "${PLUGIN_SCRIPTS_DIR:-}" ] || { echo "ERROR: plugin not found: set CLAUDE_PLUGIN_DIR or CLAUDE_PLUGIN_ROOT, or install it (see ~/.claude/plugins/installed_plugins.json)" >&2; exit 1; }

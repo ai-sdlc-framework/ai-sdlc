@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1367
 title: 'Plugin commands and agents read the plugin root through text Claude Code substitutes'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-21'
 labels:

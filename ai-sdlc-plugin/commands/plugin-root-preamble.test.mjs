@@ -124,3 +124,67 @@ describe('AISDLC-1326 plugin-root preamble', () => {
     assert.ok(files.some((f) => f.name === 'init.md') && files.some((f) => f.name === 'doctor.md'));
   });
 });
+
+describe('AISDLC-1367 plugin root through substituted text', () => {
+  const AGENTS = join(DIR, '..', 'agents');
+  const agentFiles = readdirSync(AGENTS)
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => ({ name: f, body: readFileSync(join(AGENTS, f), 'utf8') }));
+  const commandFiles = readdirSync(DIR)
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => ({ name: f, body: readFileSync(join(DIR, f), 'utf8') }));
+
+  it('resolves from substituted ${CLAUDE_PLUGIN_ROOT} text with no env, no registry, adopter cwd', () => {
+    const plugin = tmp();
+    const cwd = tmp();
+    for (const f of files) {
+      const body = blocksOf(f.body)[0].replace('"${CLAUDE_PLUGIN_ROOT}"', `"${plugin}"`);
+      const r = spawnSync('bash', ['-c', `${body}\necho "RESOLVED=$PLUGIN_SCRIPTS_DIR"`], {
+        cwd,
+        env: { PATH: process.env.PATH, HOME: tmp() },
+        encoding: 'utf8',
+      });
+      assert.equal(r.status, 0, f.name);
+      assert.match(r.stdout, new RegExp(`RESOLVED=${plugin}/scripts`), f.name);
+    }
+  });
+
+  it('no command or agent uses a form Claude Code does not substitute', () => {
+    for (const f of [...commandFiles, ...agentFiles]) {
+      const stripped = f.body.replaceAll('${CLAUDE_PLUGIN_ROOT}', '');
+      assert.doesNotMatch(stripped, /\$\{CLAUDE_PLUGIN_ROOT:/, f.name);
+      assert.doesNotMatch(stripped, /\$CLAUDE_PLUGIN_ROOT/, f.name);
+    }
+  });
+
+  it('reviewer agents file-test a substituted candidate for resolve-transcript-task-id.sh', () => {
+    const reviewers = agentFiles.filter((f) => f.body.includes('resolve-transcript-task-id.sh'));
+    assert.equal(reviewers.length, 5);
+    const plugin = tmp();
+    mkdirSync(join(plugin, 'scripts'));
+    writeFileSync(join(plugin, 'scripts/resolve-transcript-task-id.sh'), 'echo ok\n');
+    for (const f of reviewers) {
+      const block = f.body
+        .match(/CANDIDATES=\(\)[\s\S]*?^done$/m)[0]
+        .replaceAll('${CLAUDE_PLUGIN_ROOT}', plugin);
+      assert.match(block, /-f "\$candidate"/, f.name);
+      const r = spawnSync('bash', ['-c', `${block}\necho "R=$RESOLVE_SCRIPT"`], {
+        cwd: tmp(),
+        env: { PATH: process.env.PATH },
+        encoding: 'utf8',
+      });
+      assert.match(
+        r.stdout,
+        new RegExp(`R=${plugin}/scripts/resolve-transcript-task-id.sh`),
+        f.name,
+      );
+    }
+  });
+
+  it('README and resolve-pipeline-cli.sh no longer claim the variable is always set', () => {
+    const readme = readFileSync(join(DIR, '..', 'README.md'), 'utf8');
+    const sh = readFileSync(join(DIR, '..', 'scripts/resolve-pipeline-cli.sh'), 'utf8');
+    assert.doesNotMatch(readme, /always available/);
+    assert.doesNotMatch(sh, /always injected|always set by Claude Code/);
+  });
+});
