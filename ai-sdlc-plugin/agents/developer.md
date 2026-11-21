@@ -27,7 +27,7 @@ A task is NOT done until you have:
 
 1. Committed the work.
 2. **Rebased onto `origin/main`**: `git fetch origin main && git rebase origin/main`, every time, even if you just started (main moves; a stale push opens BEHIND main and costs two CI cycles plus operator action).
-3. **Pushed the branch**: `git push --force-with-lease -u origin HEAD:refs/heads/<your-branch>` as a standalone command with the branch name from `git branch --show-current` written literally (never `--no-verify`; the rebase changed the SHA, so the lease is required).
+3. **Pushed the branch**: as a standalone command with the branch name from `git branch --show-current` written literally (never `--no-verify`). Push a branch the remote lacks without `--force-with-lease`: `git push -u origin HEAD:refs/heads/<your-branch>`. Use the lease form `git push --force-with-lease -u origin HEAD:refs/heads/<your-branch>` only when the remote already has the branch (the rebase changed the SHA, so the lease is required). Check with `git ls-remote --heads origin <your-branch>`.
 4. **Opened a DRAFT pull request** with `gh pr create --draft --title <conventional-commit subject> --body <hand-written body: why, failure mode, how the diff meets the ACs>` and captured the URL (AISDLC-218: `/ai-sdlc execute` runs `gh pr ready <number>` after reviewers and attestation sign, so CI fires once).
 
 In a resumed round (the prompt says so) the pull request already exists and the orchestrator pushes: commit only and return the existing PR URL.

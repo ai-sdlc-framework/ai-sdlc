@@ -216,6 +216,29 @@ describe('leaseOnOwnBranch - allowed', () => {
     assert.ok(denied(out), out);
   });
 
+  it('AISDLC-1365: a lone plain first push from a worktree cwd is allowed with no task binding', () => {
+    const out = run(`git push -u origin HEAD:refs/heads/${OWN}`, {
+      cwd: leaseRepo.wt,
+      projectDir: leaseRepo.root,
+      env: { AI_SDLC_ACTIVE_TASK_ID: '' },
+    });
+    assert.ok(!denied(out), out);
+  });
+
+  it('AISDLC-1365: a main-rooted lone lease push refusal names git -C and AI_SDLC_ACTIVE_TASK_ID, not a lone cd', () => {
+    const out = run(L(), {
+      cwd: leaseRepo.root,
+      projectDir: leaseRepo.root,
+      env: { AI_SDLC_ACTIVE_TASK_ID: '' },
+    });
+    assert.ok(denied(out), out);
+    const reason = JSON.parse(out).hookSpecificOutput.permissionDecisionReason;
+    assert.match(reason, /git -C <main>\/\.worktrees\/<task-id> push/);
+    assert.match(reason, /no pipe/);
+    assert.match(reason, /AI_SDLC_ACTIVE_TASK_ID/);
+    assert.doesNotMatch(reason, /cd <worktree> in a call of its own/);
+  });
+
   it('plain non-force push of own branch is unaffected', () => {
     const out = run(`git push origin ${OWN}`, { cwd: leaseRepo.wt, projectDir: leaseRepo.root });
     assert.ok(!denied(out), out);
@@ -426,7 +449,11 @@ describe('never / unset / malformed - behaves exactly as before', () => {
     for (const reason of reasons) {
       assert.match(reason, /spec\.governance\.allowForcePush/, reason);
       assert.match(reason, /leaseOnOwnBranch/, reason);
-      assert.doesNotMatch(reason, /SKIP_|AI_SDLC_|bypass|--no-verify|--mirror/i, reason);
+      assert.doesNotMatch(
+        reason,
+        /SKIP_|AI_SDLC_(?!ACTIVE_TASK_ID)|bypass|--no-verify|--mirror/i,
+        reason,
+      );
       assert.doesNotMatch(reason, /--force(?![-\w])/, reason);
       assert.doesNotMatch(reason, /(^|\s)-f(\s|$)/, reason);
     }
@@ -1493,7 +1520,7 @@ describe('AISDLC-861: lease push resolves the worktree from -C or the active tas
     assert.match(out, /tool's cwd is outside the task worktree/);
     assert.match(out, /expected a direct child of/);
     assert.ok(out.includes(leaseRepo.root), 'names the cwd it saw');
-    assert.match(out, /run it as a lone command from that worktree/);
+    assert.match(out, /git -C <main>\/\.worktrees\/<task-id> push/);
   });
 
   it('does not resolve a worktree from AI_SDLC_ACTIVE_TASK_ID alone (executed cwd would differ)', () => {

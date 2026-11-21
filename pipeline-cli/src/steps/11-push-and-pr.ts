@@ -57,6 +57,7 @@ import { loadVerification } from './verification-config.js';
 import { VERIFICATION_KEYS } from './verify-defaults.js';
 import { decidePrDraft } from '../hierarchy/mark-ready.js';
 import { detectDraftPrForBranch } from './03-setup-worktree.js';
+import { SUMMARY_BEFORE_PUSH_MARKER } from './10-finalize.js';
 import { composeJudgmentNotes } from '../judgment/agent-output-checks.js';
 import { writeEvent, type WriteEventOpts } from '../orchestrator/events.js';
 
@@ -214,6 +215,7 @@ export function composeBody(opts: PushAndPrOptions): string {
   return (
     headerWarning +
     closesHeader +
+    (opts.prOpenedByPipeline ? `${SUMMARY_BEFORE_PUSH_MARKER}\n\n` : '') +
     `${opts.developerReturn.summary}\n\n` +
     `## Changed files\n${filesBlock}\n` +
     reviewBlock +
@@ -732,7 +734,7 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
       ? { sourceKind: 'gh-issue', issueNumber: opts.issueNumber }
       : undefined,
   );
-  const body = composeBody(opts);
+  const body = composeBody({ ...opts, prOpenedByPipeline: true });
 
   // AISDLC-218: open as DRAFT. The slash command body / library caller is
   // responsible for spawning reviewers + signing attestation, then calling
