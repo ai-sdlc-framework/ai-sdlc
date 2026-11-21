@@ -19,7 +19,7 @@ AI-SDLC is a **Decision Engine** for autonomous AI software development. It's th
 
 - **Decision Engine substrate** — operator-as-decision-steward; every architectural / quality / autonomy decision routes through the [Decision Catalog (RFC-0035)](../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md)
 - **Spec-kit bridge** — `cli-import-spec` / `/ai-sdlc import-spec` consumes spec-kit `tasks.md`, runs the DoR Gate at import, and lands governed backlog tasks ready for dispatch (RFC-0036). **Recommended adopter authoring path.**
-- **Agent-agnostic orchestration** — works with Claude Code, GitHub Copilot, Cursor, OpenAI Codex, or any LLM API
+- **Agent-agnostic orchestration** — works with Claude Code, GitHub Copilot, Cursor, OpenAI Codex, Kiro, or any LLM API
 - **Structured pipelines** that route tasks through defined stages based on complexity
 - **Quality gates** with three-tier enforcement (advisory, soft-mandatory, hard-mandatory)
 - **Progressive autonomy** where agents earn trust through demonstrated reliability
@@ -108,6 +108,10 @@ export CURSOR_API_KEY=cur_...
 
 # Codex — set CODEX_API_KEY
 export CODEX_API_KEY=cdx_...
+
+# Kiro — install kiro-cli (https://kiro.dev/docs/cli/), set KIRO_API_KEY,
+# then select it explicitly: ai-sdlc run --issue 42 --runner kiro
+export KIRO_API_KEY=...
 
 # Any OpenAI-compatible API — set OPENAI_API_KEY or LLM_API_KEY + LLM_API_URL
 export OPENAI_API_KEY=sk-...

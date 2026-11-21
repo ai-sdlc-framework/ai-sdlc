@@ -625,6 +625,7 @@ export {
   CopilotRunner,
   CursorRunner,
   CodexRunner,
+  KiroRunner,
   RunnerRegistry,
   createRunnerRegistry,
   SecurityTriageRunner,
