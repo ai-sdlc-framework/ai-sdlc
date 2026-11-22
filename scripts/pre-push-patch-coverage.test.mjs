@@ -616,6 +616,7 @@ describe('pre-push narrows to related files (AISDLC-1377, DEC-0423)', () => {
   });
   it('coverageArgs uses vitest related, or the whole package without files', () => {
     assert.ok(coverageArgs('pipeline-cli', ['src/a.ts']).includes('related'));
+    assert.ok(coverageArgs('pipeline-cli', ['src/a.ts']).includes('--passWithNoTests'));
     assert.deepEqual(coverageArgs('pipeline-cli', []), [
       '--filter',
       './pipeline-cli',

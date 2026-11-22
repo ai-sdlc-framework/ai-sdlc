@@ -253,6 +253,7 @@ export function coverageArgs(pkg, related) {
     'vitest',
     'related',
     '--run',
+    '--passWithNoTests',
     '--coverage',
     '--coverage.thresholds.lines=0',
     '--coverage.thresholds.functions=0',

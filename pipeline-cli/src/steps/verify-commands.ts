@@ -172,11 +172,16 @@ const FORCE_FULL =
 /** Paths outside a package that only gate tests, or nothing, depend on. */
 const GATE_OR_DOC = /^(scripts\/|\.github\/workflows\/__tests__\/|docs\/|backlog\/|spec\/)|\.md$/;
 
+/** Single-quote a path for `sh -c`. */
+function shQuote(f: string): string {
+  return `'${f.replace(/'/g, "'\\''")}'`;
+}
+
 /** Command for one touched package: related test files under coverage, else the whole package. */
 export function coverageCommand(pkg: string, related?: readonly string[]): string {
   if (!related || related.length === 0) return `pnpm --filter ./${pkg} test:coverage`;
   // CI keeps the package-wide floors; a related-only run cannot meet them.
-  return `pnpm --filter ./${pkg} exec vitest related --run --coverage --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 ${related.join(' ')}`;
+  return `pnpm --filter ./${pkg} exec vitest related --run --passWithNoTests --coverage --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 ${related.map(shQuote).join(' ')}`;
 }
 
 /** The gate runner invocation that runs only the gates related to the diff against `base`. */
