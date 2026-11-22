@@ -33,6 +33,7 @@ import {
   webhookStatus,
   webhookUp,
 } from './webhook.js';
+import { agentPath, resolveRealGh } from './webhook-forwarder.js';
 import { runWebhookHealthTick } from './webhook-health.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -898,5 +899,55 @@ describe('board identity (AISDLC-1349)', () => {
     const lines = formatWebhookForeign(webhookHealth(hd(own), up));
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/3 delivery\(ies\) refused for repository o\/b.*o\/a/);
+  });
+});
+
+describe('per-board isolation (AISDLC-1376)', () => {
+  it('uses the real gh when another board wrapper is first on PATH (AC-1)', () => {
+    const other = '/repos/other/.ai-sdlc/dispatch/bin';
+    const deps = {
+      ...mk({ PATH: `${other}:/opt/bin:/usr/bin` }),
+      isExecutable: (f: string) => f === `${other}/gh` || f === '/opt/bin/gh',
+    } as unknown as HierarchyDeps;
+    expect(agentPath(deps)).toBe('/opt/bin:/usr/bin');
+    expect(resolveRealGh(deps)).toBe('/opt/bin/gh');
+  });
+
+  it('two back-to-back up calls spawn one receiver (AC-2)', () => {
+    const spawner = vi.fn(() => 4242);
+    const deps = {
+      ...mk({ AI_SDLC_WEBHOOK_SECRET: 'x', AI_SDLC_WEBHOOK_PORT: '9001' }),
+      now: () => new Date(),
+    } as unknown as HierarchyDeps;
+    webhookUp(deps, undefined, spawner);
+    webhookUp(deps, undefined, spawner);
+    expect(spawner).toHaveBeenCalledTimes(1);
+    expect(lines).toContain('webhook already starting for this board');
+  });
+
+  it('spawns again once the starting marker is stale', () => {
+    const spawner = vi.fn();
+    writeFileSync(path.join(dir, 'webhook-starting'), `4242 ${Date.now() - 60_000}\n`);
+    const deps = {
+      ...mk({ AI_SDLC_WEBHOOK_SECRET: 'x', AI_SDLC_WEBHOOK_PORT: '9001' }),
+      now: () => new Date(),
+    } as unknown as HierarchyDeps;
+    webhookUp(deps, undefined, spawner);
+    expect(spawner).toHaveBeenCalledTimes(1);
+  });
+
+  it('a receiver whose pid is not recorded leaves webhook.json on stop (AC-3)', async () => {
+    const deps = {
+      ...mk({ AI_SDLC_WEBHOOK_SECRET: 's3', HOME: dir, PATH: '/usr/bin' }),
+      now: () => new Date(),
+      run: () => ({ status: 0, stdout: '[]', stderr: '' }),
+    } as unknown as HierarchyDeps;
+    const done = webhookServe(deps, '0', undefined, { scan: true });
+    await vi.waitFor(() => expect(existsSync(path.join(dir, 'webhook.json'))).toBe(true));
+    const live = { pid: process.pid + 1, port: 1 };
+    writeFileSync(path.join(dir, 'webhook.json'), JSON.stringify(live) + '\n');
+    process.emit('SIGTERM');
+    await done;
+    expect(JSON.parse(readFileSync(path.join(dir, 'webhook.json'), 'utf-8'))).toEqual(live);
   });
 });

@@ -129,7 +129,7 @@ cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
 | Option                          | Meaning                                                                                                                           |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `--executors <n>`               | Deprecated: standing executors, 0 to 5 (default 0); a value above 0 prints a deprecation line and is removed in the next release. |
-| `--planner-model <m>` | Planner model (default: the `planner-session` cell of `.ai-sdlc/model-routing.yaml`; see "Model fallback" below). |
+| `--planner-model <m>`           | Planner model (default: the `planner-session` cell of `.ai-sdlc/model-routing.yaml`; see "Model fallback" below).                 |
 | `--dispatch-model <m>`          | Dispatch model (default `sonnet`, per DEC-0068).                                                                                  |
 | `--executor-model <m>`          | Executor model (default `sonnet`).                                                                                                |
 | `--no-planner`                  | Do not start a planner.                                                                                                           |
@@ -439,6 +439,15 @@ AI_SDLC_WEBHOOK_SECRET=... cli-hierarchy webhook up [--port <n>] [--feed gh-forw
 cli-hierarchy webhook status [--json]
 cli-hierarchy webhook down
 ```
+
+Per-board isolation (AISDLC-1376): every repository on a machine has its own receiver, `gh`
+forwarder agent and `webhook.json`, and one board's run never touches another's. (1) The forwarder
+agent's `gh` is the real `gh`: every board's `.ai-sdlc/dispatch/bin` wrapper directory is dropped from
+the agent PATH, not only this board's. (2) `webhook up` writes a `webhook-starting` marker in the board
+directory before it spawns a receiver; a second `up` within 30 s logs "already starting" and spawns
+nothing, and the receiver removes the marker once it has bound and recorded itself. (3) A receiver
+deletes `webhook.json` on stop only when the record names its own pid (or no record exists); an orphan
+leaves the live receiver's record in place.
 
 The secret comes only from the `AI_SDLC_WEBHOOK_SECRET` environment variable, never a file in the
 repository. Without it `webhook up` does nothing and dispatch stays poll-only (not an error). The
@@ -2950,7 +2959,6 @@ Every tmux call a tick makes (the `/exit` request, the exit-dialog check, the br
 The reconcile scheduler runs its ticks single-flight and records the running tick as `tick: {pid, startedAt}` in `<board>/reconcile-scheduler.json`. A tick older than the stall limit (default twice the 30 s tick interval; `AI_SDLC_TICK_STALL_MINUTES` to change it) is sent SIGTERM, then SIGKILL after 5 s, a `tick-stalled` event is appended to `<board>/board-events.jsonl`, and the next tick starts. `cli-hierarchy status` prints `scheduler: STALLED (last tick <age>s ago, pid N)` instead of `up` when the last tick is older than that limit.
 
 Manual recovery when a tick still hangs: find the blocked child (`ps -o pid,ppid,command | grep 'tmux '`) and `kill <child pid>`; the tick continues within seconds.
-
 
 ### `model-unavailable` (AISDLC-1364)
 

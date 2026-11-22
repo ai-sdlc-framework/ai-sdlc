@@ -161,6 +161,8 @@ export const webhookTargetUrl = (port: number): string =>
   `http://127.0.0.1:${port}/webhooks/github`;
 
 const PORT_FILE = 'webhook-port';
+const STARTING_FILE = 'webhook-starting';
+const STARTING_WINDOW_MS = 30_000;
 const COLLISION_FILE = 'webhook-collision.txt';
 /** Candidate ports tried from the recorded or default port when none is pinned. */
 export const WEBHOOK_PORT_SCAN = 20;
@@ -538,10 +540,13 @@ function resolvePort(deps: HierarchyDeps, flag: string | undefined): number {
   return n;
 }
 
-export type Spawner = (file: string, args: readonly string[]) => void;
+/** Starts a detached process; returns its pid when known (the starting marker needs it). */
+export type Spawner = (file: string, args: readonly string[]) => number | void;
 
 const spawnDetached: Spawner = (file, args) => {
-  spawn(file, [...args], { detached: true, stdio: 'ignore' }).unref();
+  const child = spawn(file, [...args], { detached: true, stdio: 'ignore' });
+  child.unref();
+  return child.pid;
 };
 
 /** The line `up` and `restart` print for a board with no recorded feed. */
@@ -606,10 +611,26 @@ export function webhookUp(
   }
   // Every start carries the recorded feed forward; the receiver installs the forwarder once bound.
   if (!feed && recorded) feed = carriedFeed(recorded);
+  // A receiver this board just spawned may still be binding; a second `up` must not start another.
+  const startingFile = path.join(deps.boardDir, STARTING_FILE);
+  try {
+    const [pidText, atText] = readFileSync(startingFile, 'utf-8').trim().split(' ');
+    const at = Number(atText);
+    if (
+      (deps.isAlive ?? defaultIsAlive)(Number(pidText)) &&
+      deps.now().getTime() - at >= 0 &&
+      deps.now().getTime() - at < STARTING_WINDOW_MS
+    ) {
+      deps.log('webhook already starting for this board');
+      return before;
+    }
+  } catch {
+    // no marker: nothing is starting
+  }
   const port = selectPort(deps, portFlag);
   const raw = portFlag ?? deps.env[WEBHOOK_PORT_ENV];
   const pinned = raw !== undefined && raw !== '';
-  spawner(process.execPath, [
+  const child = spawner(process.execPath, [
     deps.binPath ?? process.argv[1] ?? '',
     'webhook',
     'serve',
@@ -627,6 +648,10 @@ export function webhookUp(
         ]
       : []),
   ]);
+  if (typeof child === 'number') {
+    mkdirSync(deps.boardDir, { recursive: true });
+    writeFileSync(startingFile, `${child} ${deps.now().getTime()}\n`);
+  }
   deps.log(`webhook starting on 127.0.0.1:${port}`);
   return before;
 }
@@ -732,6 +757,7 @@ export async function webhookServe(
       ...(recordedFeed ? { feed: recordedFeed } : {}),
     }) + '\n',
   );
+  rmSync(path.join(deps.boardDir, STARTING_FILE), { force: true });
   deps.log(`webhook listening on 127.0.0.1:${receiver.port}`);
   await new Promise<void>((resolve) => {
     const stop = (): void => resolve();
@@ -739,5 +765,7 @@ export async function webhookServe(
     process.once('SIGINT', stop);
   });
   await receiver.stop();
-  rmSync(stateFile(deps.boardDir), { force: true });
+  // Only the receiver the record names may delete it; an orphan must not erase the live one's record.
+  const current = readState(deps.boardDir);
+  if (!current || current.pid === process.pid) rmSync(stateFile(deps.boardDir), { force: true });
 }
