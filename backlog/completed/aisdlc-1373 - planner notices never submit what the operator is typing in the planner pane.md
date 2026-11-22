@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1373
 title: 'Planner notices never submit what the operator is typing in the planner pane'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-21'
 labels:

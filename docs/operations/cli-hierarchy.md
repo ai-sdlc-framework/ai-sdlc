@@ -533,6 +533,15 @@ forwarder agent with `cli-hierarchy webhook up --feed gh-forward`,
 re-register the repository hook, or `cli-hierarchy webhook up` when the receiver itself is down. Meanwhile dispatch
 polls `gh` (about 2,700 calls an hour), which is the cost a degraded feed hides.
 
+### How planner notices arrive (AISDLC-1373)
+
+Reconcile (routed PRs, red main, docs bumps, auto-enqueue), the escalation writer and the canary all
+send through one notifier, `createPlannerNotifier`. When the planner recorded a socket address in
+`<board-dir>/handoff/address-<planner-name>.json`, the notice goes over that socket and never touches
+the pane. Otherwise the notice is typed into the planner pane, but only when the composer is empty.
+If the composer holds text the operator is typing, nothing is typed and no `Enter` is sent; the send
+fails, the item stays undelivered, and a later pass retries it.
+
 ### `attach`
 
 Show one agent in this terminal: `switch-client` when `TMUX` is set, `attach-session`
