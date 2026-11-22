@@ -26,6 +26,14 @@ export interface VerifySlot {
   release(): void;
 }
 
+export interface VerifySlotOptions {
+  /**
+   * A full-scope run (AISDLC-1378): waits until no other verify holds a slot, and blocks new
+   * acquirers while it runs, so at most one full suite runs per machine.
+   */
+  exclusive?: boolean;
+}
+
 export interface VerifySlotDeps {
   pid?: number;
   isAlive?: (pid: number) => boolean;
@@ -35,6 +43,23 @@ export interface VerifySlotDeps {
 
 function slotsDir(boardDir: string): string {
   return join(boardDir, 'verify-slots');
+}
+
+function exclusiveDir(boardDir: string): string {
+  return join(slotsDir(boardDir), 'exclusive');
+}
+
+/** True while a live full-scope run holds the exclusive marker (a dead holder is reclaimed). */
+export function exclusiveHeld(boardDir: string, alive: (pid: number) => boolean): boolean {
+  const dir = exclusiveDir(boardDir);
+  const holder = readPid(dir);
+  if (holder !== null) return alive(holder);
+  try {
+    readdirSync(dir);
+    return true; // marker exists, pid still being written
+  } catch {
+    return false;
+  }
 }
 
 function defaultAlive(pid: number): boolean {
@@ -96,12 +121,19 @@ function tryTake(boardDir: string, index: number, pid: number, alive: (p: number
 export async function acquireVerifySlot(
   boardDir: string,
   deps: VerifySlotDeps = {},
+  options: VerifySlotOptions = {},
 ): Promise<VerifySlot> {
   const pid = deps.pid ?? process.pid;
   const alive = deps.isAlive ?? defaultAlive;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   mkdirSync(slotsDir(boardDir), { recursive: true });
+  const poll = deps.pollMs ?? VERIFY_SLOT_POLL_MS;
+  if (options.exclusive) return acquireExclusive(boardDir, pid, alive, sleep, poll);
   for (;;) {
+    if (exclusiveHeld(boardDir, alive)) {
+      await sleep(poll);
+      continue;
+    }
     for (let i = 0; i < VERIFY_SLOT_COUNT; i++) {
       const dir = tryTake(boardDir, i, pid, alive);
       if (dir) {
@@ -113,6 +145,39 @@ export async function acquireVerifySlot(
         };
       }
     }
-    await sleep(deps.pollMs ?? VERIFY_SLOT_POLL_MS);
+    await sleep(poll);
   }
+}
+
+async function acquireExclusive(
+  boardDir: string,
+  pid: number,
+  alive: (p: number) => boolean,
+  sleep: (ms: number) => Promise<void>,
+  poll: number,
+): Promise<VerifySlot> {
+  const dir = exclusiveDir(boardDir);
+  // Phase 1: take the marker (atomic mkdir); from here new acquirers wait.
+  for (;;) {
+    try {
+      mkdirSync(dir);
+      writeFileSync(join(dir, 'pid'), String(pid));
+      break;
+    } catch {
+      const holder = readPid(dir);
+      if (holder !== null && !alive(holder)) rmSync(dir, { recursive: true, force: true });
+      else await sleep(poll);
+    }
+  }
+  const release = () => rmSync(dir, { recursive: true, force: true });
+  // Phase 2: wait for every verify that already holds a slot to finish.
+  try {
+    while (listVerifySlots(boardDir, alive).some((s) => s.alive && s.pid !== pid)) {
+      await sleep(poll);
+    }
+  } catch (e) {
+    release();
+    throw e;
+  }
+  return { index: -1, workers: VERIFY_WORKERS_ALONE, release };
 }

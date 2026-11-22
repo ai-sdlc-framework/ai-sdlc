@@ -194,7 +194,7 @@ describe('verify slots (AISDLC-1087)', () => {
     };
     const call = () =>
       runVerifyCommands({
-        commands: ['pnpm test'],
+        commands: ['pnpm lint'],
         cwd: '/x',
         runner,
         boardDir: board,
@@ -204,6 +204,35 @@ describe('verify slots (AISDLC-1087)', () => {
     expect(runs.every((r) => r.ok)).toBe(true);
     expect(peak).toBe(2);
     expect(workers.slice(0, 2)).toEqual(['4', '2']);
+    expect(listVerifySlots(board)).toEqual([]);
+    rmSync(board, { recursive: true, force: true });
+  });
+
+  it('runs full-scope (pnpm test) verifies one at a time (AISDLC-1378)', async () => {
+    const board = mkdtempSync(join(tmpdir(), 'verify-slots-'));
+    let active = 0;
+    let peak = 0;
+    const workers: (string | undefined)[] = [];
+    const runner = async (_c: string, _a: string[], o?: { env?: NodeJS.ProcessEnv }) => {
+      if (_c !== 'sh') return { stdout: '', stderr: '', code: 0 };
+      active++;
+      peak = Math.max(peak, active);
+      workers.push(o?.env?.AI_SDLC_VITEST_MAX_WORKERS);
+      await new Promise((r) => setTimeout(r, 40));
+      active--;
+      return { stdout: 'ok', stderr: '', code: 0 };
+    };
+    const call = () =>
+      runVerifyCommands({
+        commands: ['pnpm test'],
+        cwd: '/x',
+        runner,
+        boardDir: board,
+        slotDeps: { pollMs: 5 },
+      });
+    const runs = await Promise.all([call(), call(), call()]);
+    expect(runs.every((r) => r.ok)).toBe(true);
+    expect(peak).toBe(1);
     expect(listVerifySlots(board)).toEqual([]);
     rmSync(board, { recursive: true, force: true });
   });

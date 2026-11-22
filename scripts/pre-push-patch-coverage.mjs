@@ -89,8 +89,11 @@ export function sessionScrubbedEnv(env = process.env) {
   return out;
 }
 
-/** How long the hook waits for a verify slot before running unslotted (AISDLC-1186). */
-export const SLOT_WAIT_MS = 5 * 60 * 1000;
+/**
+ * How long the hook waits for a verify slot (AISDLC-1378). Unbounded by default: with a board
+ * directory the coverage run never goes unslotted, it waits its turn.
+ */
+export const SLOT_WAIT_MS = Infinity;
 const SLOTS_MODULE = join(ROOT, 'pipeline-cli', 'dist', 'runtime', 'verify-slots.js');
 
 /** Board directory for the verify slots, or null when there is none. */
@@ -105,7 +108,8 @@ async function loadSlotsModule() {
 
 /**
  * Take a verify slot (shared with the machine verify run, AISDLC-1087) for the coverage run.
- * Returns { env, release } or null (after one log line) when the run must go unslotted.
+ * Returns { env, release }, null only when there is no board directory (one log line), or
+ * { refused } when a board exists but no slot could be taken: it never runs unslotted then.
  */
 async function takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log }) {
   if (!boardDir) {
@@ -116,16 +120,23 @@ async function takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log
   try {
     mod = await loadSlots();
   } catch {
-    log('[patch-coverage] verify-slots module not built; running unslotted');
-    return null;
+    return {
+      refused:
+        'verify-slots module not built; run `pnpm build` so the coverage run can take a slot',
+    };
   }
   const started = now();
   const wait = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  let waitLogged = false;
   try {
     const slot = await mod.acquireVerifySlot(boardDir, {
       ...slotDeps,
       sleep: async (ms) => {
         if (now() - started >= waitMs) throw new Error('slot wait timed out');
+        if (!waitLogged) {
+          waitLogged = true;
+          log('[patch-coverage] waiting for a verify slot');
+        }
         await wait(ms);
       },
     });
@@ -135,12 +146,7 @@ async function takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log
     };
   } catch (e) {
     const timedOut = e instanceof Error && e.message === 'slot wait timed out';
-    log(
-      `[patch-coverage] ${timedOut ? 'no verify slot after the wait' : 'verify slot unavailable'}; running unslotted`,
-    );
-    return timedOut
-      ? { env: { AI_SDLC_VITEST_MAX_WORKERS: String(mod.VERIFY_WORKERS_SHARED) }, release() {} }
-      : null;
+    return { refused: timedOut ? 'no verify slot within the wait' : 'verify slot unavailable' };
   }
 }
 
@@ -302,7 +308,12 @@ export async function main({
     return runCoverage({ run, packages: [], env: baseEnv, base, head, log });
   }
   log(`[patch-coverage] no verify reuse: ${mismatch}`);
-  const slot = await takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log });
+  const taken = await takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log });
+  if (taken?.refused) {
+    log(`[patch-coverage] ${taken.refused}; refusing to run the coverage suite unslotted`);
+    return 1;
+  }
+  const slot = taken;
   const env = slot ? { ...baseEnv, ...slot.env } : baseEnv;
   let released = false;
   const release = () => {
