@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1370
 title: 'First plugin session starts the MCP server and execute shell blocks run on macOS bash 3.2'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-21'
 labels:
