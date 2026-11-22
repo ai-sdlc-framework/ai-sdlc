@@ -592,10 +592,19 @@ describe('helpers', () => {
     expect(actionCommands({ ...base, kind: 'decisions-sync' }, '/bin')![0]!.args).toContain(
       'decisions-sync',
     );
-    const backlog = actionCommands({ ...base, taskId: 'AISDLC-5' }, '/bin')![0]!.args;
+    const backlog = actionCommands({ ...base, kind: 'task', taskId: 'AISDLC-5' }, '/bin')![0]!.args;
     expect(backlog[backlog.indexOf('--source-kind') + 1]).toBe('backlog');
-    expect(actionCommands(base, '/bin')).toBeNull();
-    const r = commandExecutor(() => ({ status: 0, stdout: '', stderr: '' }), '/', '/bin')(base);
+    const docs = actionCommands(base, '/bin')![0]!.args;
+    expect(docs[docs.indexOf('--source-kind') + 1]).toBe('docs');
+    expect(actionCommands({ ...base, kind: 'task' }, '/bin')).toBeNull();
+    const r = commandExecutor(
+      () => ({ status: 0, stdout: '', stderr: '' }),
+      '/',
+      '/bin',
+    )({
+      ...base,
+      kind: 'task',
+    });
     expect(r.ran).toBe(false);
     expect(r.note).toContain('planner');
   });
@@ -639,6 +648,93 @@ describe('helpers', () => {
       note: 'gh failed: nope',
     });
     expect(commandExecutor(ok, '/', '/bin')({ ...ctx, action: 'none' }).ran).toBe(false);
+  });
+});
+
+describe('decision filing PRs (AISDLC-1374)', () => {
+  const decisionPr = (over: Partial<ReconcilePr> = {}): ReconcilePr =>
+    docsPr({
+      taskId: 'DEC-0422',
+      title: 'record DEC-0422 (planner)',
+      headBranch: 'ai-sdlc/file-dec-0422-opened-1200',
+      ...over,
+    });
+
+  it('is a docs PR armed with the docs source kind, not routed to the planner', () => {
+    const d = decide(decisionPr());
+    expect(d).toMatchObject({ kind: 'docs', action: 'arm' });
+    const cmds = actionCommands(
+      {
+        pr: 9,
+        taskId: 'DEC-0422',
+        kind: 'docs',
+        action: 'arm',
+        state: 'no-match',
+        headSha: 'sha',
+        boardDir: '/b',
+      },
+      '/bin',
+    )!;
+    expect(cmds[0]!.args).toEqual(expect.arrayContaining(['--source-kind', 'docs', '--arm']));
+    expect(cmds[0]!.args).not.toContain('backlog');
+  });
+
+  it('a task filing PR is armed as docs and a task PR still arms as backlog', () => {
+    expect(
+      decide(docsPr({ taskId: 'AISDLC-1374', headBranch: 'ai-sdlc/file-aisdlc-1374' })).action,
+    ).toBe('arm');
+    const ctx: ActionContext = {
+      pr: 9,
+      taskId: 'AISDLC-1',
+      kind: 'task',
+      action: 'arm',
+      state: 'no-match',
+      headSha: 'sha',
+      boardDir: '/b',
+    };
+    expect(actionCommands(ctx, '/bin')![0]!.args).toContain('backlog');
+  });
+
+  it('without auto-merge it runs no arm command and routes nothing', () => {
+    const d = decide(decisionPr({ autoMergeUnavailable: true }));
+    expect(d.action).toBe('none');
+    const execute = vi.fn(() => ({ ran: true }));
+    const notify = vi.fn();
+    reconcile([decisionPr({ autoMergeUnavailable: true })], {
+      boardDir: board,
+      execute,
+      now: fixedNow,
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('gatherFacts marks the repo as lacking auto-merge', () => {
+    const facts = gatherFacts(
+      (_f, args) => {
+        const key = args.slice(0, 2).join(' ');
+        if (key === 'api user') return { status: 0, stdout: 'me\n', stderr: '' };
+        if (key === 'repo view') return { status: 0, stdout: 'false\n', stderr: '' };
+        if (key === 'pr list')
+          return {
+            status: 0,
+            stdout: JSON.stringify([
+              {
+                number: 5,
+                title: 'record DEC-0422 (planner)',
+                headRefName: 'ai-sdlc/file-dec-0422-opened-1200',
+                isCrossRepository: false,
+                author: { login: 'me' },
+              },
+            ]),
+            stderr: '',
+          };
+        return { status: 0, stdout: '{}', stderr: '' };
+      },
+      '/',
+      board,
+    )!;
+    expect(facts[0]).toMatchObject({ prNumber: 5, autoMergeUnavailable: true });
   });
 });
 

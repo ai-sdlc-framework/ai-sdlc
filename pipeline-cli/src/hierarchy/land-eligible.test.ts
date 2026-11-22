@@ -70,7 +70,7 @@ function writeDone(taskId: string): void {
 
 function deps(
   gh: ReturnType<typeof fakeGh>,
-  land: (n: number, m: 'merge' | 'arm') => Promise<LandOutcome>,
+  land: (n: number, m: 'merge' | 'arm', head?: string) => Promise<LandOutcome>,
   mergeAuthors = ['deefactorial'],
 ) {
   return {
@@ -238,6 +238,24 @@ describe('landing an iterate-needed task (AISDLC-1030)', () => {
     const v = collectVerdicts(board).find((x) => x.taskId === 'AISDLC-7');
     expect(v).toMatchObject({ outcome: 'success', prNumber: 7 });
     expect(v?.landed).toBeDefined();
+  });
+});
+
+describe('a repo without auto-merge (AISDLC-1374)', () => {
+  it('squashes a decision filing PR in merge mode, runs no arm command and writes no arm notice', async () => {
+    const gh = fakeGh([pr(9, { headRefName: 'ai-sdlc/file-dec-0422-opened-1200' })], 'false');
+    const { calls } = gh;
+    const seen: [string, string | undefined][] = [];
+    const r = await landEligiblePrs(
+      deps(gh, async (_n, mode, head) => {
+        seen.push([mode, head]);
+        return { merged: true, armed: false, reason: 'ok' };
+      }),
+    );
+    expect(seen).toEqual([['merge', 'ai-sdlc/file-dec-0422-opened-1200']]);
+    expect(r.landed).toEqual([{ pr: 9, mode: 'merge' }]);
+    expect(calls.some((c) => c.includes('--arm'))).toBe(false);
+    expect(existsSync(path.join(board, 'notes'))).toBe(false);
   });
 });
 

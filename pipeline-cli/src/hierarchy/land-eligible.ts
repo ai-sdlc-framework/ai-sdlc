@@ -21,6 +21,7 @@ import { patchDoneVerdict } from '../dispatch/board.js';
 import { completeLandedIterateNeeded } from '../dispatch/complete.js';
 import { resolveTargetRepo, runMergeIfEligible } from '../governance/merge-if-eligible.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
+import { isFilingBranch } from './filing-branches.js';
 import { prFingerprint, recordRefusal, refusalStillValid } from './pr-snapshot.js';
 import { taskIdFrom } from './reconcile.js';
 import type { CommandRunner } from './types.js';
@@ -56,7 +57,7 @@ export interface LandDeps {
   /** Logins on the policy's `mergeAuthors` list. */
   mergeAuthors: readonly string[];
   /** Lands one PR in the given mode through `runMergeIfEligible`. */
-  land: (pr: number, mode: 'merge' | 'arm') => Promise<LandOutcome>;
+  land: (pr: number, mode: 'merge' | 'arm', headRefName?: string) => Promise<LandOutcome>;
   now?: () => Date;
 }
 
@@ -165,7 +166,7 @@ export async function landEligiblePrs(deps: LandDeps): Promise<LandReport> {
     if (refusalStillValid(deps.boardDir, pr.number, fingerprint, now())) continue;
     let outcome: LandOutcome;
     try {
-      outcome = await deps.land(pr.number, mode);
+      outcome = await deps.land(pr.number, mode, pr.headRefName);
     } catch (err) {
       outcome = {
         merged: false,
@@ -216,13 +217,15 @@ export function readMergeAuthors(repoRoot: string, parse: (yaml: string) => stri
  */
 export function createLander(opts: { repoRoot: string; runner?: Runner }): LandDeps['land'] {
   const runner = opts.runner ?? defaultRunner;
-  return async (pr, mode) => {
+  return async (pr, mode, headRefName) => {
     const target = await resolveTargetRepo({ runner, cwd: opts.repoRoot });
     const repoSlug = target.slug;
     const trusted = { root: repoSlug === null ? null : opts.repoRoot, reason: target.reason };
     const r = await runMergeIfEligible({
       prNumber: pr,
-      sourceKind: 'backlog',
+      // AISDLC-1374: a filing branch (decision or task filing PR) lands through the docs lane,
+      // which checks the branch prefix and that every changed path is docs-only.
+      sourceKind: isFilingBranch(headRefName) ? 'docs' : 'backlog',
       repoSlug: repoSlug ?? '',
       repoRoot: trusted.root,
       rootRefusal: trusted.reason,

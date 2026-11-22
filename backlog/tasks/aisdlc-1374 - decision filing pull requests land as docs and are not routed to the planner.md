@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1374
 title: 'Decision filing pull requests land as docs and are not routed to the planner'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-21'
 labels:

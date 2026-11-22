@@ -95,6 +95,8 @@ export interface ReconcilePr extends PrFacts {
    * attestation (every reviewer approved); only the push is missing, so the machine owns it.
    */
   reclaimable?: boolean;
+  /** AISDLC-1374: the repo has no GitHub auto-merge; the lander squashes a green CLEAN docs PR itself. */
+  autoMergeUnavailable?: boolean;
   /** AISDLC-1232: reruns already recorded for this head in `reentered.json`. */
   staleRerunCount?: number;
   /**
@@ -242,6 +244,9 @@ export function decide(
       const green = checks.length > 0 && checks.every((k) => k.conclusion === 'success');
       if (!(green && f.mergeStateStatus === 'CLEAN' && !f.autoMergeArmed)) {
         action = 'route-to-planner';
+      } else if (kind === 'docs' && f.autoMergeUnavailable === true) {
+        // No auto-merge to arm: the lander squashes it once green and CLEAN (AISDLC-1374).
+        action = 'none';
       }
     }
     return guardSameHead({ ...base, action }, f, record, maxSameHeadActions);
@@ -502,8 +507,14 @@ export function actionCommands(
         },
       ];
     case 'arm': {
-      // A docs PR with no task id has no sanctioned source kind: route it to the planner.
-      if (ctx.kind !== 'decisions-sync' && ctx.kind !== 'deps' && !ctx.taskId) return null;
+      // A task-kind PR with no task id has no sanctioned source kind: route it to the planner.
+      if (
+        ctx.kind !== 'decisions-sync' &&
+        ctx.kind !== 'deps' &&
+        ctx.kind !== 'docs' &&
+        !ctx.taskId
+      )
+        return null;
       return [
         {
           file: 'node',
@@ -515,7 +526,9 @@ export function actionCommands(
               ? 'decisions-sync'
               : ctx.kind === 'deps'
                 ? 'deps'
-                : 'backlog',
+                : ctx.kind === 'docs'
+                  ? 'docs'
+                  : 'backlog',
             '--arm',
           ],
         },
@@ -1642,6 +1655,21 @@ export function gatherFacts(
   if (!Array.isArray(prs)) return undefined;
   const allowed = allowedAuthors(run, cwd);
   if (!allowed) return undefined;
+  // One probe per pass, and only when a docs PR needs the answer (AISDLC-1374).
+  let autoMergeProbed: boolean | undefined;
+  const autoMergeIsUnavailable = (): boolean => {
+    autoMergeProbed ??= (() => {
+      const r = run(
+        'gh',
+        ['repo', 'view', '--json', 'autoMergeAllowed', '--jq', '.autoMergeAllowed'],
+        {
+          cwd,
+        },
+      );
+      return r.status === 0 && r.stdout.trim() === 'false';
+    })();
+    return autoMergeProbed;
+  };
   const verdicts = collectVerdicts(boardDir);
   const facts: ReconcilePr[] = [];
   for (const p of prs) {
@@ -1744,6 +1772,7 @@ export function gatherFacts(
       draft: isDraft,
       ...(p.mergeStateStatus === undefined ? {} : { mergeStateStatus: p.mergeStateStatus }),
       autoMergeArmed: p.autoMergeRequest != null,
+      ...(kind === 'docs' && autoMergeIsUnavailable() ? { autoMergeUnavailable: true } : {}),
       changedFiles: files,
       docsOnly: files.length > 0 && files.every((x) => DOCS_FILE_RE.test(x)),
       checks,
