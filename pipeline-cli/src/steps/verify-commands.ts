@@ -390,13 +390,6 @@ export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyR
     return { ok: true, skipped: 'docs-only', results: [], verifications, ...base };
   }
   let slot: VerifySlot | undefined;
-  if (opts.boardDir) {
-    try {
-      slot = await acquireVerifySlot(opts.boardDir, opts.slotDeps);
-    } catch {
-      // best effort: an unwritable board runs unlimited rather than blocking the gate
-    }
-  }
   try {
     const before = await snapshot(runner, opts.cwd);
     let commands = opts.commands;
@@ -413,6 +406,16 @@ export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyR
         affected = first?.packages;
       }
       commands = expandVerifyCommands(commands, touched, before.headSha, affected, first);
+    }
+    // A full-scope run holds the machine alone; an affected-scope run shares (AISDLC-1378).
+    if (opts.boardDir) {
+      try {
+        slot = await acquireVerifySlot(opts.boardDir, opts.slotDeps, {
+          exclusive: !affected && opts.commands.includes('pnpm test'),
+        });
+      } catch {
+        // best effort: an unwritable board runs unlimited rather than blocking the gate
+      }
     }
     const run = await runAll({ ...opts, commands }, runner, timeout, verifications, base, slot);
     const after = await snapshot(runner, opts.cwd);

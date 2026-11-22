@@ -254,23 +254,25 @@ describe('main verify slot (AISDLC-1186)', () => {
     assert.equal(logs.filter((l) => /unslotted/.test(l)).length, 1);
     assert.equal(envs.length, 2);
   });
-  it('runs unslotted with one line when the module cannot load', async () => {
+  it('refuses to run unslotted when the module cannot load and a board exists', async () => {
     const logs = [];
+    let ran = 0;
     const code = await main({
       boardDir: '/b',
       reuseFacts: () => null,
       loadSlots: async () => {
         throw new Error('nope');
       },
-      run: () => ok,
+      run: () => (ran++, ok),
       changed,
       log: (m) => logs.push(m),
     });
-    assert.equal(code, 0);
-    assert.equal(logs.filter((l) => /unslotted/.test(l)).length, 1);
+    assert.equal(code, 1);
+    assert.equal(ran, 0);
+    assert.ok(logs.some((l) => /refusing to run the coverage suite unslotted/.test(l)));
   });
-  it('runs unslotted when acquiring throws for another reason', async () => {
-    const logs = [];
+  it('refuses when acquiring throws for another reason', async () => {
+    let ran = 0;
     const code = await main({
       boardDir: '/b',
       reuseFacts: () => null,
@@ -279,40 +281,63 @@ describe('main verify slot (AISDLC-1186)', () => {
           throw new Error('mkdir failed');
         },
       }),
-      run: () => ok,
+      run: () => (ran++, ok),
+      changed,
+      log: () => {},
+    });
+    assert.equal(code, 1);
+    assert.equal(ran, 0);
+  });
+  it('waits for a slot and never runs unslotted, even after a long wait', async () => {
+    let t = 0;
+    let polls = 0;
+    let ran = 0;
+    const logs = [];
+    const code = await main({
+      boardDir: '/b',
+      reuseFacts: () => null,
+      loadSlots: async () => ({
+        acquireVerifySlot: async (_d, deps) => {
+          for (let i = 0; i < 5; i++) (polls++, await deps.sleep(500));
+          return { workers: 2, release() {} };
+        },
+      }),
+      now: () => t,
+      sleep: async (ms) => {
+        t += ms * 1e6; // hours of waiting
+      },
+      run: () => (ran++, ok),
       changed,
       log: (m) => logs.push(m),
     });
     assert.equal(code, 0);
-    assert.equal(logs.filter((l) => /unslotted/.test(l)).length, 1);
+    assert.equal(polls, 5);
+    assert.equal(ran, 2);
+    assert.equal(logs.filter((l) => /waiting for a verify slot/.test(l)).length, 1);
+    assert.ok(!logs.some((l) => /unslotted/.test(l)));
   });
-  it('falls back to the shared worker count after the bounded wait', async () => {
+  it('refuses (does not go unslotted) when a finite wait elapses', async () => {
     let t = 0;
-    const envs = [];
-    const logs = [];
-    const slow = async () => ({
-      VERIFY_WORKERS_SHARED: 2,
-      acquireVerifySlot: async (_d, deps) => {
-        for (;;) await deps.sleep(500);
-      },
-    });
+    let ran = 0;
     const code = await main({
       boardDir: '/b',
       reuseFacts: () => null,
-      loadSlots: slow,
+      loadSlots: async () => ({
+        acquireVerifySlot: async (_d, deps) => {
+          for (;;) await deps.sleep(500);
+        },
+      }),
       now: () => t,
       sleep: async (ms) => {
         t += ms * 100;
       },
       waitMs: 1000,
-      run: (_c, _a, o) => (envs.push(o.env), ok),
+      run: () => (ran++, ok),
       changed,
-      log: (m) => logs.push(m),
+      log: () => {},
     });
-    assert.equal(code, 0);
-    assert.ok(t >= 1000);
-    assert.equal(logs.filter((l) => /unslotted/.test(l)).length, 1);
-    for (const e of envs) assert.equal(e.AI_SDLC_VITEST_MAX_WORKERS, '2');
+    assert.equal(code, 1);
+    assert.equal(ran, 0);
   });
   it('resolveBoardDir honours the env var and existence', () => {
     assert.equal(
