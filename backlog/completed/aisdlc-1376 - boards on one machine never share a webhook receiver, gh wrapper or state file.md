@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1376
 title: 'Boards on one machine never share a webhook receiver, gh wrapper or state file'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-22'
 labels:

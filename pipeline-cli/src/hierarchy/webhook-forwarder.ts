@@ -75,10 +75,16 @@ const defaultExecutable = (file: string): boolean => {
 
 const sameDir = (a: string, b: string): boolean => path.resolve(a) === path.resolve(b);
 
+/** Any board's `gh` wrapper directory (`<repo>/.ai-sdlc/dispatch/bin`), not only this board's own. */
+const isBoardWrapperDir = (d: string): boolean =>
+  /(^|[\\/])\.ai-sdlc[\\/]dispatch[\\/]bin$/.test(path.resolve(d));
+
 /** The session PATH without the board's `bin/` directory (it holds the `gh` call-counting wrapper). */
 export function agentPath(deps: HierarchyDeps): string {
   const bin = path.join(deps.boardDir, 'bin');
-  const entries = (deps.env.PATH ?? '').split(path.delimiter).filter((d) => d && !sameDir(d, bin));
+  const entries = (deps.env.PATH ?? '')
+    .split(path.delimiter)
+    .filter((d) => d && !sameDir(d, bin) && !isBoardWrapperDir(d));
   return entries.length > 0
     ? entries.join(path.delimiter)
     : '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin';
