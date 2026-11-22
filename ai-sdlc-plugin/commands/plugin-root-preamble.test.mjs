@@ -26,7 +26,7 @@ const files = readdirSync(DIR)
   .filter((f) => f.body.includes('PLUGIN_SCRIPTS_DIR='));
 
 const blocksOf = (body) => body.match(BLOCK_RE) ?? [];
-const preamble = blocksOf(files.find((f) => f.name === 'execute.md').body)[0];
+const preamble = blocksOf(files[0].body)[0];
 
 function tmp() {
   return realpathSync(mkdtempSync(join(tmpdir(), 'preamble-')));
@@ -48,7 +48,8 @@ function registry(home, entries) {
 
 describe('AISDLC-1326 plugin-root preamble', () => {
   it('covers all ten commands that set PLUGIN_SCRIPTS_DIR', () => {
-    assert.ok(files.length >= 10);
+    // AISDLC-1370: execute.md now calls scripts by one-line ${CLAUDE_PLUGIN_ROOT} paths.
+    assert.ok(files.length >= 9);
     for (const f of files) assert.ok(blocksOf(f.body).length >= 1, f.name);
   });
 

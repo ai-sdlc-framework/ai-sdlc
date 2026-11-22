@@ -174,8 +174,10 @@ describe('/ai-sdlc execute body is a thin next-step loop (AISDLC-762)', () => {
   });
 
   it('drives the pipeline through `next-step` with --task, --state and --fresh', () => {
+    assert.match(cmdBody, /execute-next-step\.sh" "\$ARGUMENTS"/);
+    const run = readFileSync(join(__dirname, '..', 'scripts', 'execute-next-step.sh'), 'utf-8');
     assert.match(
-      cmdBody,
+      run,
       /ai-sdlc-pipeline\.mjs" next-step --task "\$ARGUMENTS" --state "\$STATE" --fresh/,
     );
   });
@@ -402,41 +404,94 @@ describe('/ai-sdlc execute — floors enforced by next-step are still documented
   });
 });
 
-describe('/ai-sdlc execute — path resolution (AISDLC-245.4, AISDLC-272)', () => {
-  it('establishes PLUGIN_SCRIPTS_DIR from CLAUDE_PLUGIN_DIR, then CLAUDE_PLUGIN_ROOT, then the dogfood dir', () => {
-    assert.match(cmdBody, /# >>> plugin-root preamble/);
-    assert.match(cmdBody, /PLUGIN_SCRIPTS_DIR="\$_c\/scripts"/);
+describe('/ai-sdlc execute — shell blocks (AISDLC-1370)', () => {
+  const blocks = () => [...cmdBody.matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1]);
+  const scriptsDir = join(__dirname, '..', 'scripts');
+
+  it('every bash block is one line calling a script from ai-sdlc-plugin/scripts/', () => {
+    const found = blocks();
+    assert.ok(found.length >= 2);
+    for (const b of found) {
+      const lines = b.split('\n').filter((l) => l.trim());
+      assert.equal(lines.length, 1, `block must be one line: ${b}`);
+      assert.match(lines[0], /^(node|bash) "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/[\w.-]+"/);
+      const script = lines[0].match(/scripts\/([\w.-]+)"/)[1];
+      assert.ok(existsSync(join(scriptsDir, script)), `${script} must exist`);
+    }
   });
 
-  it('delegates PIPELINE_CLI_BIN resolution to resolve-pipeline-cli.sh', () => {
-    assert.match(cmdBody, /resolve-pipeline-cli\.sh/);
-    assert.match(
-      cmdBody,
-      /PIPELINE_CLI_BIN=\$\(bash "\$PLUGIN_SCRIPTS_DIR\/resolve-pipeline-cli\.sh"\)/,
-    );
+  it('no block uses a construct bash 3.2 or Claude Code refuses (static check)', () => {
+    for (const b of blocks()) {
+      assert.doesNotMatch(b, /\$\(/, 'no command substitution');
+      assert.doesNotMatch(b, /\$\{[^}]*:[-=+?]/, 'no ${VAR:-} operator forms');
+      assert.doesNotMatch(b, /\[\[|<<|;|&&|\|\|/, 'no compound syntax');
+    }
   });
 
-  it('lets the operator override PIPELINE_CLI_BIN and fails with an actionable message', () => {
-    assert.match(cmdBody, /if \[ -z "\$\{PIPELINE_CLI_BIN:-\}" \]/);
-    assert.match(cmdBody, /export PIPELINE_CLI_BIN=\/path\/to\/pipeline-cli\/bin/);
-    assert.match(cmdBody, /@ai-sdlc\/pipeline-cli not found/);
+  it('the scripts parse under the local bash', () => {
+    for (const f of ['execute-next-step.sh', 'choose-pipeline-cli-bin.sh']) {
+      execFileSync('bash', ['-n', join(scriptsDir, f)]);
+    }
   });
 
-  it('falls back to the repo build when the resolver script is not shipped (upgrade in place)', () => {
-    assert.match(cmdBody, /PIPELINE_CLI_BIN="\$\(pwd\)\/pipeline-cli\/bin"/);
+  it('keeps the state file under TMPDIR, never inside the parent checkout', () => {
+    const run = readFileSync(join(scriptsDir, 'execute-next-step.sh'), 'utf-8');
+    assert.match(run, /STATE="\$\{TMPDIR:-\/tmp\}\/ai-sdlc-next-step\//);
+    assert.match(run, /next-step --task "\$ARGUMENTS" --state "\$STATE" --fresh/);
   });
 
   it('invokes pipeline-cli only through $PIPELINE_CLI_BIN (no bare relative paths)', () => {
     const offenders = cmdBody
       .split('\n')
       .filter((l) => /node\s+(?:\.\/)?pipeline-cli\/bin\//.test(l))
-      // The rendered-rules line names the sanctioned merge CLI in prose; it is not a shell block.
       .filter((l) => !/cli-merge-if-eligible/.test(l));
     assert.deepEqual(offenders, [], 'bare pipeline-cli paths found');
   });
+});
 
-  it('keeps the state file under TMPDIR, never inside the parent checkout', () => {
-    assert.match(cmdBody, /STATE="\$\{TMPDIR:-\/tmp\}\/ai-sdlc-next-step\//);
+describe('plugin README macOS note (AISDLC-1370)', () => {
+  it('tells macOS users about CLAUDE_CODE_SHELL', () => {
+    const readme = readFileSync(join(__dirname, '..', 'README.md'), 'utf-8');
+    assert.match(readme, /on macOS, set `CLAUDE_CODE_SHELL` to a newer shell/);
+  });
+});
+
+describe('choose-pipeline-cli-bin.sh (AISDLC-1370)', () => {
+  const script = join(__dirname, '..', 'scripts', 'choose-pipeline-cli-bin.sh');
+  const run = (env, cwd) => {
+    const e = { ...process.env, ...env };
+    if (!('PIPELINE_CLI_BIN' in env)) delete e.PIPELINE_CLI_BIN;
+    return execFileSync('bash', [script], { env: e, cwd, encoding: 'utf-8' });
+  };
+
+  it('returns PIPELINE_CLI_BIN unchanged when set', () => {
+    assert.equal(run({ PIPELINE_CLI_BIN: '/x/y/bin' }, tmpdir()), '/x/y/bin');
+  });
+
+  it('returns the resolver result otherwise, and the repo fallback when the resolver is absent', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'choose-cli-'));
+    try {
+      writeFileSync(
+        join(dir, 'resolve-pipeline-cli.sh'),
+        '#!/usr/bin/env bash\nprintf /resolved/bin\n',
+      );
+      writeFileSync(join(dir, 'choose-pipeline-cli-bin.sh'), readFileSync(script));
+      const out = execFileSync('bash', [join(dir, 'choose-pipeline-cli-bin.sh')], {
+        env: { ...process.env, PIPELINE_CLI_BIN: '' },
+        encoding: 'utf-8',
+      });
+      assert.equal(out, '/resolved/bin');
+      rmSync(join(dir, 'resolve-pipeline-cli.sh'));
+      const cwd = realpathSync(dir);
+      const out2 = execFileSync('bash', [join(dir, 'choose-pipeline-cli-bin.sh')], {
+        env: { ...process.env, PIPELINE_CLI_BIN: '' },
+        cwd,
+        encoding: 'utf-8',
+      });
+      assert.equal(out2, `${cwd}/pipeline-cli/bin`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

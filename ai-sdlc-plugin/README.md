@@ -77,6 +77,10 @@ This makes harness selection transparent to the Step 8 verdict aggregator — no
 | `ai-sdlc-governance` | Auto-loaded governance rules, blocked actions, and pre-commit checklist |
 | `decision-rubric` | Five-part rubric (problem → research → options → recommendation + counter-argument → question) for putting non-trivial design/policy decisions to the operator; applies to open questions from any work item (RFC, backlog task, GitHub/Jira/Linear issue) |
 
+## macOS: `CLAUDE_CODE_SHELL`
+
+macOS ships bash 3.2 as `/bin/bash`; on macOS, set `CLAUDE_CODE_SHELL` to a newer shell (for example `export CLAUDE_CODE_SHELL=/opt/homebrew/bin/bash` or `/bin/zsh`) before starting Claude Code if it refuses a command block with exit 126. The `/ai-sdlc execute` blocks are one-line script calls written to run under bash 3.2 regardless.
+
 ## Install topologies + path resolution (AISDLC-245.4, AISDLC-272, AISDLC-557)
 
 Slash command bodies invoke `@ai-sdlc/pipeline-cli` CLIs and plugin-internal scripts. They must work across **six distinct install topologies**:
