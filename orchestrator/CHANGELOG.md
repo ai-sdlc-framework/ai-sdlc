@@ -5,6 +5,37 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.44.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.43.0...orchestrator-v0.44.0) (2026-11-22)
+
+
+### Features
+
+* **hooks:** leaseOnOwnBranch allows a fix task to lease push the PR head branch (AISDLC-1363) ([#2896](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2896)) ([f3bd120](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f3bd120d1e4c8e7bda072640a26a8467d067626a))
+* **orchestrator:** doctor fails loudly on a missing prerequisite (AISDLC-1356) ([#2892](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2892)) ([e5b835a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e5b835a5e97aa480600d36e77401919ef806955e))
+* **orchestrator:** scaffold the verdict gate and retire the old verifier (AISDLC-1353) ([#2877](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2877)) ([b9be05f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b9be05f97996cc3be96b30396750cb15ed04f626))
+* **orchestrator:** scaffolded gate and DoR workflows use the repo package manager (AISDLC-1362) ([#2895](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2895)) ([90ab222](https://github.com/ai-sdlc-framework/ai-sdlc/commit/90ab2228a68a70d575b9058bab164d201c165d2b))
+* **orchestrator:** setup and init share one manifest template (AISDLC-1354) ([#2884](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2884)) ([9131b88](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9131b882da1c2c4949f77a48bd815d0adb154a32))
+* **orchestrator:** setup reports init output and retries failed parts (AISDLC-1355) ([#2888](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2888)) ([7cab024](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7cab024f10d17f82a82d67b6378f74905b88714b))
+* **pipeline-cli:** heartbeat reports last tick result, module runs recorded CLI (AISDLC-1358) ([#2882](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2882)) ([db953ab](https://github.com/ai-sdlc-framework/ai-sdlc/commit/db953ab2f1e0d8afde1567f9e7c538b222403f76))
+* **pipeline-cli:** scaffold merge settings, report a board that cannot merge (AISDLC-1351) ([#2886](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2886)) ([375142d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/375142dc080db8671cb1c47e40a2e82333db99dd))
+* **plugin:** resolve plugin via project install entry, doctor flags stale (AISDLC-1327) ([#2844](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2844)) ([9887b5d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9887b5d0879727e3011792f57a0ebb72826bb08f))
+
+
+### Bug Fixes
+
+* **orchestrator:** explain first adopter PR and name missing AI_SDLC_PAT secret (AISDLC-1336) ([#2847](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2847)) ([925a6b7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/925a6b7c5cf64d5f02477888e682a7409e717c85))
+* **orchestrator:** init gitignore covers artifacts/_dor and artifacts/_capabilities (AISDLC-1366) ([#2906](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2906)) ([3c906f2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3c906f26b6f87ba00c95ce80894ea466bf86f87b))
+* **orchestrator:** scaffold only posted checks, show merge refusal (AISDLC-1352) ([#2871](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2871)) ([2215d20](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2215d20f16803b6a6c483d8d98cf4d376c41cadc))
+* **orchestrator:** shorten scaffolded review failure status description (AISDLC-1332) ([#2845](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2845)) ([0941350](https://github.com/ai-sdlc-framework/ai-sdlc/commit/09413500d5f293a1d9e92f980dd2eb17f815b1d0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/pipeline-cli bumped to 0.44.0
+    * @ai-sdlc/reference bumped to 0.44.0
+
 ## [0.43.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.42.0...orchestrator-v0.43.0) (2026-11-19)
 
 
