@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1377
 title: 'Local verify and pre-push run only the tests affected by the change'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-22'
 labels:

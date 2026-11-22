@@ -6,6 +6,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   packagesToCover,
+  relatedFilesByPackage,
+  coverageArgs,
   main,
   resolveBoardDir,
   gitSafeEnv,
@@ -575,5 +577,59 @@ describe('verify-record reuse (AISDLC-1187, DEC-0371)', () => {
     assert.ok(f.tree);
     assert.ok(Array.isArray(f.records));
     assert.ok('pipeline-cli' in f.coverageMtimeMs);
+  });
+});
+
+describe('pre-push narrows to related files (AISDLC-1377, DEC-0423)', () => {
+  const ok = { status: 0 };
+  it('passes related files to vitest and still runs the patch gate', async () => {
+    const calls = [];
+    const code = await main({
+      boardDir: null,
+      reuseFacts: () => null,
+      run: (cmd, args) => (calls.push([cmd, ...args]), ok),
+      changed: () => ['pipeline-cli/src/steps/verify-commands.ts'],
+      log: () => {},
+    });
+    assert.equal(code, 0);
+    assert.deepEqual(calls[0].slice(-2), [
+      '--coverage.thresholds.functions=0',
+      'src/steps/verify-commands.ts',
+    ]);
+    assert.match(calls.at(-1)[1], /check-pr-patch-coverage\.mjs$/);
+  });
+  it('relatedFilesByPackage keeps existing files and drops packages with config changes', () => {
+    const exists = (f) => f !== 'pipeline-cli/src/gone.ts';
+    assert.deepEqual(
+      relatedFilesByPackage(
+        ['pipeline-cli', 'orchestrator'],
+        [
+          'pipeline-cli/src/a.ts',
+          'pipeline-cli/src/gone.ts',
+          'orchestrator/package.json',
+          'orchestrator/src/b.ts',
+        ],
+        exists,
+      ),
+      { 'pipeline-cli': ['src/a.ts'] },
+    );
+  });
+  it('coverageArgs uses vitest related, or the whole package without files', () => {
+    assert.ok(coverageArgs('pipeline-cli', ['src/a.ts']).includes('related'));
+    assert.deepEqual(coverageArgs('pipeline-cli', []), [
+      '--filter',
+      './pipeline-cli',
+      'test:coverage',
+    ]);
+  });
+  it('still fails when the gate finds an uncovered changed line', async () => {
+    const code = await main({
+      boardDir: null,
+      reuseFacts: () => null,
+      run: (cmd, args) => (/check-pr-patch-coverage/.test(args[0] ?? '') ? { status: 1 } : ok),
+      changed: () => ['pipeline-cli/src/a.ts'],
+      log: () => {},
+    });
+    assert.equal(code, 1);
   });
 });

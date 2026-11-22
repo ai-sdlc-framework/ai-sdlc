@@ -223,6 +223,43 @@ export function gatherReuseFacts(packages, env = sessionScrubbedEnv()) {
   }
 }
 
+/** Package-level changes that must keep the whole package under test:coverage (DEC-0423). */
+const FORCE_FULL_FILE = /(^|\/)(package\.json|tsconfig[^/]*\.json|vitest\.[^/]*)$/;
+
+/**
+ * Per package, the changed files `vitest related` should start from (relative to the package),
+ * or nothing for a package that must run in full (config change, or no surviving file).
+ */
+export function relatedFilesByPackage(packages, files, exists = (f) => existsSync(join(ROOT, f))) {
+  const out = {};
+  for (const pkg of packages) {
+    const own = files.filter((f) => f.startsWith(`${pkg}/`));
+    if (own.some((f) => FORCE_FULL_FILE.test(f))) continue;
+    const alive = own
+      .filter((f) => !f.endsWith('.md') && exists(f))
+      .map((f) => f.slice(pkg.length + 1));
+    if (alive.length > 0) out[pkg] = alive;
+  }
+  return out;
+}
+
+/** The pnpm arguments for one package: related files under coverage, else the whole package. */
+export function coverageArgs(pkg, related) {
+  if (!related || related.length === 0) return ['--filter', `./${pkg}`, 'test:coverage'];
+  return [
+    '--filter',
+    `./${pkg}`,
+    'exec',
+    'vitest',
+    'related',
+    '--run',
+    '--coverage',
+    '--coverage.thresholds.lines=0',
+    '--coverage.thresholds.functions=0',
+    ...related,
+  ];
+}
+
 export async function main({
   reuseFacts = gatherReuseFacts,
   run = spawnSync,
@@ -250,7 +287,10 @@ export async function main({
     env: baseEnv,
   }).trim();
   const base = 'origin/main';
-  const packages = packagesToCover(changed({ base, head, cwd: ROOT }));
+  const changedFiles = changed({ base, head, cwd: ROOT });
+  const packages = packagesToCover(changedFiles);
+  const related =
+    process.env.AI_SDLC_VERIFY_FULL === '1' ? {} : relatedFilesByPackage(packages, changedFiles);
   if (packages.length === 0) {
     log('[patch-coverage] no instrumentable code changed vs origin/main; skipping coverage run');
     return 0;
@@ -276,17 +316,17 @@ export async function main({
   const handlers = ['SIGINT', 'SIGTERM'].map((sig) => [sig, onSignal(sig)]);
   if (slot) for (const [sig, h] of handlers) process.on(sig, h);
   try {
-    return runCoverage({ run, packages, env, base, head, log });
+    return runCoverage({ run, packages, env, base, head, log, related });
   } finally {
     release();
     for (const [sig, h] of handlers) process.off(sig, h);
   }
 }
 
-function runCoverage({ run, packages, env, base, head, log }) {
+function runCoverage({ run, packages, env, base, head, log, related = {} }) {
   for (const pkg of packages) {
     log(`[patch-coverage] running test:coverage in ${pkg}`);
-    const r = run('pnpm', ['--filter', `./${pkg}`, 'test:coverage'], {
+    const r = run('pnpm', coverageArgs(pkg, related[pkg]), {
       cwd: ROOT,
       stdio: 'inherit',
       env,
