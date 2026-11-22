@@ -112,7 +112,7 @@ export function formatWebhookEscalationBody(
     `Webhook health is ${h.class}: ${h.reasons.join('; ') || 'see signals'}.`,
     `Signals: ${JSON.stringify(h.signals)}.`,
     'Dispatch keeps working by polling gh (about 2,700 calls an hour), which is the rate-limit pressure.',
-    `Fix (operator only; it touches your GitHub account and network): restart the feed with \`${webhookFixCommand(h.signals.receiverPort)}\` ` +
+    `Self-repair restarts the forwarder and removes its stale hook on its own; it could not restore deliveries. To fix by hand, restart the feed with \`${webhookFixCommand(h.signals.receiverPort)}\` ` +
       'and record it with `cli-hierarchy webhook up --feed gh-forward`, or re-register the repository hook ' +
       '(secret equal to AI_SDLC_WEBHOOK_SECRET). If the receiver itself is down run `cli-hierarchy webhook up`.',
     ...tried,
@@ -257,7 +257,7 @@ export function catalogWebhookEscalation(
             options: [
               {
                 id: 'restart-feed',
-                description: 'Operator restarts the forwarder or re-registers the hook',
+                description: 'Restart the forwarder or re-register the hook',
               },
               { id: 'accept-poll-only', description: 'Stay poll-only and accept the gh call rate' },
             ],

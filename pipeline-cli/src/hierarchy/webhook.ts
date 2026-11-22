@@ -632,7 +632,7 @@ export function webhookUp(
 }
 
 /** Rewrite the recorded feed of a running receiver. */
-function recordFeed(boardDir: string, feed: WebhookFeed): void {
+export function recordFeed(boardDir: string, feed: WebhookFeed): void {
   const s = readState(boardDir);
   if (s) writeFileSync(stateFile(boardDir), JSON.stringify({ ...s, feed }) + '\n');
 }

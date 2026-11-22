@@ -81,7 +81,7 @@ describe('webhook health tick (AISDLC-1157)', () => {
     expect(reports[5]).toMatch(/healthy again/);
     expect(filed).toHaveLength(1);
     expect(filed[0]!.body).toContain(WEBHOOK_FIX_COMMAND);
-    expect(filed[0]!.body).toContain('operator only');
+    expect(filed[0]!.body).not.toContain('operator only');
     expect(notices).toHaveLength(1);
     expect(closed).toEqual([{ id: 'DEC-0900', note: expect.stringContaining('recovered') }]);
     // A new episode files a new escalation.

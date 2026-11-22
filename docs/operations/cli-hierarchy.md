@@ -492,7 +492,14 @@ gui/<uid>/<label>`, or, when the installed agent file differs from the current s
 least 5 minutes apart; each is recorded in `<board-dir>/webhook-health.json`. A decision is opened only when the
 attempts are used up or the agent file is out of date with the secret unset; its body lists the attempts and the tail
 of `webhook-forward.log` with the secret redacted (the secret is never written to the state file either). An arriving
-event returns the class to `healthy`, resets the attempt count and answers the open decision. A named tunnel (for example Cloudflare Tunnel) pointing at
+event returns the class to `healthy`, resets the attempt count and answers the open decision. Before each kickstart the repair deletes the repository's leftover `cli` hooks (as `webhook up` does), because a forwarder
+that dies on a websocket drop (`close 1006`) leaves its hook on GitHub and every launchd restart would fail with
+`HTTP 422 Hook already exists`. A record with feed `none` (or a `gh-forward` record with no `agent`) is repaired too when
+this board's own agent plist exists and the log shows one of those failures; a successful repair records `gh-forward`
+with the agent label. The repair never asks the operator to restart the service: the escalation point is the decision
+opened after 3 attempts in 60 minutes did not restore deliveries, or when the repair is blocked (no recorded port, or
+an out-of-date agent file with the secret unset).
+A named tunnel (for example Cloudflare Tunnel) pointing at
 `127.0.0.1:<port>` (the selected port) is the alternative for daily use (`--feed tunnel`).
 
 **Forwarder agent hardening (AISDLC-1285).** Four rules keep a crash-looping agent from reading as healthy:
