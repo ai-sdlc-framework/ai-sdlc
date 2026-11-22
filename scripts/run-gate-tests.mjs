@@ -11,11 +11,14 @@
  * carries the reason and is a finding in docs/operations/gate-audit-2026-10.md.
  * The list is shrink-only: fix the test, then delete its entry.
  *
- * Usage: node scripts/run-gate-tests.mjs [--list]
+ * Usage: node scripts/run-gate-tests.mjs [--list] [--affected-from <ref>]
+ *
+ * `--affected-from <ref>` (AISDLC-1377, DEC-0423) runs only the gates related to the diff
+ * against <ref>; see selectGateTests. Any doubt runs every gate.
  */
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const GATE_TEST_DIRS = [
@@ -102,6 +105,57 @@ function childEnv() {
   return env;
 }
 
+/** A change to one of these can alter how every gate runs: select every gate. */
+const RUN_ALL_RE =
+  /(^|\/)package\.json$|^(pnpm-lock\.yaml|scripts\/run-gate-tests\.mjs|vitest\.git-env\.setup\.mjs)$/;
+
+/**
+ * Gate test files related to `changed` (repo-relative paths): a changed gate test itself, its
+ * same-stem sibling (`foo.mjs` for `foo.test.mjs`), or any gate test whose source names the
+ * changed path or file name (the guarded-path reference). Returns `null` (run every gate) when a
+ * run-all path changed or there is no change list.
+ */
+export function selectGateTests(
+  root,
+  changed,
+  files,
+  read = (f) => readFileSync(join(root, f), 'utf8'),
+) {
+  if (!changed || changed.length === 0 || changed.some((f) => RUN_ALL_RE.test(f))) return null;
+  const selected = new Set();
+  for (const test of files) {
+    const stem = test.replace(/\.test\.mjs$/, '');
+    let src;
+    for (const c of changed) {
+      if (c === test || c.replace(/\.[^./]+$/, '') === stem) {
+        selected.add(test);
+        break;
+      }
+      src ??= read(test);
+      const name = c.slice(c.lastIndexOf('/') + 1);
+      if (src.includes(c) || src.includes(name)) {
+        selected.add(test);
+        break;
+      }
+    }
+  }
+  return files.filter((f) => selected.has(f));
+}
+
+/** Files changed against `ref` plus untracked ones, or null when git cannot say. */
+function changedSince(root, ref) {
+  try {
+    const run = (args) =>
+      execFileSync('git', args, { cwd: root, encoding: 'utf8', env: childEnv() });
+    return `${run(['diff', '--name-only', ref])}\n${run(['ls-files', '--others', '--exclude-standard'])}`
+      .split('\n')
+      .map((f) => f.trim())
+      .filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
 /** Run discovered tests; returns the exit status. */
 export function runGateTests(root, args = [], dirs = GATE_TEST_DIRS, knownRed = KNOWN_RED) {
   const { files, skipped } = discoverGateTests(root, dirs, knownRed);
@@ -110,7 +164,17 @@ export function runGateTests(root, args = [], dirs = GATE_TEST_DIRS, knownRed = 
     return 0;
   }
   for (const f of skipped) console.log(`[run-gate-tests] SKIPPED known-red ${f}: ${knownRed[f]}`);
-  const r = spawnSync(process.execPath, ['--import', GIT_ENV_PRELOAD, '--test', ...files], {
+  let run = files;
+  const at = args.indexOf('--affected-from');
+  if (at >= 0 && args[at + 1]) {
+    const picked = selectGateTests(root, changedSince(root, args[at + 1]), files);
+    if (picked) {
+      console.log(`[run-gate-tests] affected gates: ${picked.length} of ${files.length}`);
+      if (picked.length === 0) return 0;
+      run = picked;
+    }
+  }
+  const r = spawnSync(process.execPath, ['--import', GIT_ENV_PRELOAD, '--test', ...run], {
     cwd: root,
     stdio: 'inherit',
     env: childEnv(),

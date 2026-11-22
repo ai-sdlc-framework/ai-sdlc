@@ -10,6 +10,8 @@ import {
   applyVerifyRun,
   expandVerifyCommands,
   patchGateCommand,
+  firstRoundScope,
+  gateCommand,
   formatVerifyFeedback,
   recordDeveloperHonestyEvent,
   runVerifyCommands,
@@ -454,5 +456,116 @@ describe('verify narrowing (AISDLC-1188, DEC-0372)', () => {
       verifications: {} as never,
     });
     expect(none.verificationScope).toBe('affected packages: none');
+  });
+});
+
+describe('first round runs only affected tests (AISDLC-1377, DEC-0423)', () => {
+  const defaults = ['pnpm build', 'pnpm test', 'pnpm lint', 'pnpm format:check'];
+  const mk = (changed: string[], opts: { mergeBase?: string; lsFail?: boolean } = {}) => {
+    const dir = mkdtempSync(join(tmpdir(), 'first-round-'));
+    for (const p of ['pipeline-cli', 'orchestrator', 'other']) {
+      mkdirSync(join(dir, p, 'src'), { recursive: true });
+      writeFileSync(join(dir, p, 'package.json'), '{}');
+    }
+    mkdirSync(join(dir, 'scripts'), { recursive: true });
+    writeFileSync(join(dir, 'scripts', 'list-coverage-packages.mjs'), '');
+    for (const f of changed) {
+      mkdirSync(join(dir, f, '..'), { recursive: true });
+      writeFileSync(join(dir, f), '');
+    }
+    const fr = new FakeRunner()
+      .on(/rev-parse HEAD\^\{tree\}/, ok('tree1\n'))
+      .on(/rev-parse origin\/main/, ok('base1\n'))
+      .on(/rev-parse HEAD/, ok('head1\n'))
+      .on(/merge-base origin\/main HEAD/, ok(`${opts.mergeBase ?? 'mb1'}\n`))
+      .on(/status --porcelain/, ok(''))
+      .on(/list-coverage-packages/, ok('["pipeline-cli"]\n'))
+      .on(/diff --name-only/, ok(changed.join('\n') + '\n'))
+      .on(/ls-files/, ok(''))
+      .on(
+        /^pnpm ls /,
+        opts.lsFail
+          ? fail('boom', 1)
+          : ok(
+              JSON.stringify([
+                { path: join(dir, 'pipeline-cli') },
+                { path: join(dir, 'orchestrator') },
+              ]),
+            ),
+      );
+    return { dir, fr };
+  };
+  const shellCmds = (fr: FakeRunner) =>
+    fr.calls.filter((c) => c.command === 'sh').map((c) => c.args[1]);
+  const go = (m: ReturnType<typeof mk>) =>
+    runVerifyCommands({ commands: defaults, cwd: m.dir, runner: m.fr.toRunner() });
+
+  it('runs vitest for the changed package and dependents only, with related files', async () => {
+    const m = mk(['pipeline-cli/src/a.ts']);
+    const r = await go(m);
+    expect(r.scope).toBe('affected');
+    expect(r.scopePackages).toEqual(['orchestrator', 'pipeline-cli']);
+    const cmds = shellCmds(m.fr);
+    expect(cmds).toContain("pnpm -r --no-bail --filter './orchestrator' test");
+    expect(cmds.join('\n')).not.toContain('other');
+    expect(cmds).toContain(
+      "pnpm --filter ./pipeline-cli exec vitest related --run --passWithNoTests --coverage --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 'src/a.ts'",
+    );
+    expect(cmds.some((c) => c === 'pnpm --filter ./pipeline-cli test:coverage')).toBe(false);
+    expect(cmds.some((c) => c.includes(gateCommand('mb1')))).toBe(true);
+    expect(m.fr.calls.find((c) => c.command === 'pnpm')?.args).toContain('...[mb1]');
+    rmSync(m.dir, { recursive: true, force: true });
+  });
+
+  it('passes only existing related files and falls back to the whole package without any', async () => {
+    const m = mk(['pipeline-cli/src/a.test.ts', 'scripts/x.mjs']);
+    rmSync(join(m.dir, 'pipeline-cli/src/a.test.ts'));
+    const scope = await firstRoundScope(m.fr.toRunner(), m.dir, ['pipeline-cli']);
+    expect(scope?.related).toEqual({});
+    expect(expandVerifyCommands(defaults, ['pipeline-cli'], 'h', scope?.packages, scope)).toContain(
+      'pnpm --filter ./pipeline-cli test:coverage',
+    );
+    rmSync(m.dir, { recursive: true, force: true });
+  });
+
+  it('a gate-guarded path under scripts/ narrows without forcing a full run', async () => {
+    const m = mk(['scripts/check-x.mjs']);
+    const scope = await firstRoundScope(m.fr.toRunner(), m.dir, []);
+    expect(scope?.base).toBe('mb1');
+    rmSync(m.dir, { recursive: true, force: true });
+  });
+
+  const forced: Array<[string, string[], { mergeBase?: string; lsFail?: boolean }]> = [
+    ['root package.json', ['package.json'], {}],
+    ['a package package.json', ['pipeline-cli/package.json'], {}],
+    ['pnpm-lock.yaml', ['pnpm-lock.yaml'], {}],
+    ['a tsconfig', ['tsconfig.base.json'], {}],
+    ['vitest shared config', ['vitest.shared.mjs'], {}],
+    ['the gate runner', ['scripts/run-gate-tests.mjs'], {}],
+    ['.ai-sdlc config', ['.ai-sdlc/review-config.yaml'], {}],
+    ['a workflow', ['.github/workflows/ci.yml'], {}],
+    ['an unowned non-gate file', ['Makefile'], {}],
+    ['no merge-base', ['pipeline-cli/src/a.ts'], { mergeBase: '' }],
+    ['a failing package selection', ['pipeline-cli/src/a.ts'], { lsFail: true }],
+  ];
+  for (const [name, changed, opts] of forced) {
+    it(`forces the full command list on ${name}`, async () => {
+      const m = mk(changed, opts);
+      const r = await go(m);
+      expect(r.scope).toBe('full');
+      expect(shellCmds(m.fr)).toEqual(expandVerifyCommands(defaults, ['pipeline-cli'], 'head1'));
+      rmSync(m.dir, { recursive: true, force: true });
+    });
+  }
+
+  it('forces the full list when AI_SDLC_VERIFY_FULL=1', async () => {
+    process.env['AI_SDLC_VERIFY_FULL'] = '1';
+    try {
+      const m = mk(['pipeline-cli/src/a.ts']);
+      expect((await go(m)).scope).toBe('full');
+      rmSync(m.dir, { recursive: true, force: true });
+    } finally {
+      delete process.env['AI_SDLC_VERIFY_FULL'];
+    }
   });
 });

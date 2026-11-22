@@ -21,6 +21,7 @@ Only rules that change behaviour in every session live here (budget 9k chars, `s
 ## Testing and CI
 
 - Run `pnpm build && pnpm test && pnpm lint && pnpm format:check` before pushing.
+- Local verify and pre-push run affected tests only; CI runs all (DEC-0423; `AI_SDLC_VERIFY_FULL=1`).
 - Coverage blocks a merge only in CI (AISDLC-726): per-package line floors plus a 90% patch gate; pre-push runs an early copy (AISDLC-1119, DEC-0282).
 - Hook scripts (`ai-sdlc-plugin/hooks/*.js`) use `node --test`; orchestrator and MCP server use Vitest. Do NOT remove the `pretest` build hook in `dogfood/package.json` (AISDLC-404).
 - One CI run per PR (AISDLC-727): `ai-sdlc-gate.yml`; merge gate is the rollup `ai-sdlc/pr-ready` ([`docs/operations/quality-gate.md`](docs/operations/quality-gate.md)).

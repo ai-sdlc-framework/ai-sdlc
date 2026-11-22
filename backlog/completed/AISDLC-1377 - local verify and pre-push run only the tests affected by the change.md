@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1377
 title: 'Local verify and pre-push run only the tests affected by the change'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-22'
 labels:
@@ -48,10 +48,35 @@ priority: high
 
 ## Acceptance Criteria
 
-- [ ] #1 A test: a first-round change in one pipeline-cli source file runs vitest only for pipeline-cli and its dependents, not other packages.
-- [ ] #2 A test: inside the package, only related test files are passed to vitest.
-- [ ] #3 A test: a change under a gate's guarded path runs that gate and no unrelated gate.
-- [ ] #4 Tests: each forced-full trigger listed above produces the full command list.
-- [ ] #5 The pre-push patch-coverage copy narrows the same way and still fails on an uncovered changed line.
-- [ ] #6 CLAUDE.md and `docs/operations/quality-gate.md` state the DEC-0423 split; `scripts/check-claude-md-size.test.mjs` passes.
-- [ ] #7 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] #1 A test: a first-round change in one pipeline-cli source file runs vitest only for pipeline-cli and its dependents, not other packages.
+- [x] #2 A test: inside the package, only related test files are passed to vitest.
+- [x] #3 A test: a change under a gate's guarded path runs that gate and no unrelated gate.
+- [x] #4 Tests: each forced-full trigger listed above produces the full command list.
+- [x] #5 The pre-push patch-coverage copy narrows the same way and still fails on an uncovered changed line.
+- [x] #6 CLAUDE.md and `docs/operations/quality-gate.md` state the DEC-0423 split; `scripts/check-claude-md-size.test.mjs` passes.
+- [x] #7 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Final Summary
+
+## Summary
+Added --passWithNoTests to both related-coverage command builders (coverageCommand in verify-commands.ts and coverageArgs in pre-push-patch-coverage.mjs). Changed-file paths in coverageCommand are now single-quoted for sh -c. Tests assert the flag and the quoting.
+
+## Changes
+- pipeline-cli/src/steps/verify-commands.ts
+- pipeline-cli/src/steps/verify-commands.test.ts
+- scripts/pre-push-patch-coverage.mjs
+- scripts/pre-push-patch-coverage.test.mjs
+
+## Design decisions
+Resumed round: commit only, not pushed, per instructions. The existing PR URL was not provided in the prompt.
+
+## Verification
+- `pnpm build` — passed (dashboard build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (240 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+- 3 reviews approved (harness: code-reviewer=claude-code, test-reviewer=claude-code, security-reviewer=claude-code; harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+(none)
+
