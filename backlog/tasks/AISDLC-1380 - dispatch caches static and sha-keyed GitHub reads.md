@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1380
 title: 'Dispatch caches static and sha-keyed GitHub reads'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-22'
 labels:

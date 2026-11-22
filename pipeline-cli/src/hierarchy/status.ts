@@ -205,7 +205,10 @@ export function formatWorktrees(w: StatusResult['worktrees']): string[] {
 }
 
 /** Join the roster with the registry, tmux and the board. */
-export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
+export function hierarchyStatus(
+  deps: HierarchyDeps,
+  opts: { rosterOnly?: boolean } = {},
+): StatusResult {
   const checked = readRosterChecked(deps.boardDir);
   const { rejected } = checked;
   let roster = checked.roster;
@@ -380,7 +383,10 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   }
   let quota: Quota | undefined;
   try {
-    const r = deps.run('gh', ['api', 'rate_limit'], { cwd: deps.cwd });
+    // AISDLC-1380: roster-only callers never print the quota; skip the gh call.
+    const r = opts.rosterOnly
+      ? undefined
+      : deps.run('gh', ['api', 'rate_limit'], { cwd: deps.cwd });
     if (r?.status === 0) quota = parseQuota(r.stdout);
   } catch {
     /* gh missing or offline */

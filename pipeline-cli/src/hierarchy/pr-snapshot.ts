@@ -155,29 +155,22 @@ export function pruneEvents(
   return deleted;
 }
 
-/** The newest event id recorded for a PR; empty when none. */
-export function latestEventId(boardDir: string, pr: number): string {
-  const mine = eventEntries(boardDir).filter((e) => e.pr === pr);
-  mine.sort((a, b) => a.mtimeMs - b.mtimeMs || (a.id < b.id ? -1 : 1));
-  return mine.length > 0 ? mine[mine.length - 1]!.id : '';
-}
-
 /** True when the receiver has run and no event record is newer than `sinceMs`. */
 function quietSince(boardDir: string, sinceMs: number): boolean {
   if (!existsSync(eventsDir(boardDir))) return false;
   return eventEntries(boardDir).every((e) => e.mtimeMs <= sinceMs);
 }
 
-/** Head sha, newest event id and a digest of the check rollup. */
+/** Head sha and a digest of the check rollup; a new webhook event alone does not change it (AISDLC-1380). */
 export function prFingerprint(
-  boardDir: string,
+  _boardDir: string,
   p: { number: number; headRefOid?: string; statusCheckRollup?: unknown },
 ): string {
   const digest = createHash('sha256')
     .update(JSON.stringify(p.statusCheckRollup ?? null))
     .digest('hex')
     .slice(0, 16);
-  return `${p.headRefOid ?? ''}|${latestEventId(boardDir, p.number)}|${digest}`;
+  return `${p.headRefOid ?? ''}|${digest}`;
 }
 
 interface Refusal {

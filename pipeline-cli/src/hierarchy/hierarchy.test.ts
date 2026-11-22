@@ -691,6 +691,16 @@ describe('hierarchy up', () => {
     expect(ok.status).toEqual([]);
   });
 
+  it('a roster-only status makes no rate_limit call (AISDLC-1380)', async () => {
+    await hierarchyUp(baseOpts, deps);
+    const rateLimit = () => fake.calls.filter((c) => c.args.includes('rate_limit')).length;
+    const before = rateLimit();
+    hierarchyStatus(deps, { rosterOnly: true });
+    expect(rateLimit()).toBe(before);
+    hierarchyStatus(deps);
+    expect(rateLimit()).toBe(before + 1);
+  });
+
   it('never emits a global option from up, status, attach or down', async () => {
     await hierarchyUp(baseOpts, deps);
     hierarchyStatus(deps);
