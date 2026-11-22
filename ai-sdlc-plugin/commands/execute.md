@@ -34,14 +34,7 @@ You are a **loop driver, not a pipeline narrator** (AISDLC-762). Steps 0-15 (par
 Items 1-4 and 6 are **governance-configurable per repo** (`.ai-sdlc/agent-role.yaml` `spec.governance`, RFC-0048 / AISDLC-601). Run this first and treat its output as authoritative for the session (no `governance:` section means every rule prints its strict text, except force-push which defaults to `allowForcePush: leaseOnOwnBranch`, AISDLC-710). Items 5 and 7 are **fixed integrity floors**, never configurable (RFC-0048 OQ-3).
 
 ```bash
-# >>> plugin-root preamble
-unset PLUGIN_SCRIPTS_DIR
-for _c in "${CLAUDE_PLUGIN_DIR:-}" "${CLAUDE_PLUGIN_ROOT}" "$(pwd)/ai-sdlc-plugin" "$(node -e 'const f=require("fs"),p=require("path"),r=(d)=>{try{return f.realpathSync(d)}catch(e){return d}};try{const g=JSON.parse(f.readFileSync(p.join(require("os").homedir(),".claude/plugins/installed_plugins.json"))).plugins,s=[];for(const k in g)if(k.startsWith("ai-sdlc@"))s.push(...g[k]);const o=[];for(let d=process.cwd(),u;u!==d;d=p.dirname(d)){u=d;for(const e of s)if(e.scope!="user"&&e.scope!="managed"&&e.projectPath&&r(e.projectPath)==d)o.push(e)}for(const e of s)if(e.scope=="user")o.push(e);console.log(o.find((e)=>f.existsSync(e.installPath)).installPath)}catch(e){}' 2>/dev/null)"; do
-  [ -n "$_c" ] && [ -d "$_c" ] && PLUGIN_SCRIPTS_DIR="$_c/scripts" && break
-done
-[ -n "${PLUGIN_SCRIPTS_DIR:-}" ] || { echo "ERROR: plugin not found: set CLAUDE_PLUGIN_DIR or CLAUDE_PLUGIN_ROOT, or install it (see ~/.claude/plugins/installed_plugins.json)" >&2; exit 1; }
-# <<< plugin-root preamble
-node "$PLUGIN_SCRIPTS_DIR/render-governance-hard-rules.mjs"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/render-governance-hard-rules.mjs"
 ```
 
 1. **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** Never run `gh pr merge` (any flag form, `--auto` included), and never merge through `gh api .../pulls/<n>/merge` or `curl`. Merge or arm auto-merge only with `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog [--arm]` (AISDLC-603), which re-checks green + CLEAN + trusted source. The PreToolUse hook enforces this regardless of policy.
@@ -65,27 +58,7 @@ An executor that claims a task whose manifest carries `resume.resumeMode: push-o
 Resolve the pipeline CLI once (every later call uses the absolute `reply` command the CLI prints, so you never re-resolve), then make the first call. `--fresh` discards any stale state from an earlier run of the same argument.
 
 ```bash
-# >>> plugin-root preamble
-unset PLUGIN_SCRIPTS_DIR
-for _c in "${CLAUDE_PLUGIN_DIR:-}" "${CLAUDE_PLUGIN_ROOT}" "$(pwd)/ai-sdlc-plugin" "$(node -e 'const f=require("fs"),p=require("path"),r=(d)=>{try{return f.realpathSync(d)}catch(e){return d}};try{const g=JSON.parse(f.readFileSync(p.join(require("os").homedir(),".claude/plugins/installed_plugins.json"))).plugins,s=[];for(const k in g)if(k.startsWith("ai-sdlc@"))s.push(...g[k]);const o=[];for(let d=process.cwd(),u;u!==d;d=p.dirname(d)){u=d;for(const e of s)if(e.scope!="user"&&e.scope!="managed"&&e.projectPath&&r(e.projectPath)==d)o.push(e)}for(const e of s)if(e.scope=="user")o.push(e);console.log(o.find((e)=>f.existsSync(e.installPath)).installPath)}catch(e){}' 2>/dev/null)"; do
-  [ -n "$_c" ] && [ -d "$_c" ] && PLUGIN_SCRIPTS_DIR="$_c/scripts" && break
-done
-[ -n "${PLUGIN_SCRIPTS_DIR:-}" ] || { echo "ERROR: plugin not found: set CLAUDE_PLUGIN_DIR or CLAUDE_PLUGIN_ROOT, or install it (see ~/.claude/plugins/installed_plugins.json)" >&2; exit 1; }
-# <<< plugin-root preamble
-# AISDLC-1024: a task labelled pipeline-hotfix runs on the last canary-green build, not HEAD.
-if [ -z "${AI_SDLC_PIPELINE_REF:-}" ] && [ -f "$PLUGIN_SCRIPTS_DIR/hotfix-pipeline-ref.mjs" ]; then
-  AI_SDLC_PIPELINE_REF=$(node "$PLUGIN_SCRIPTS_DIR/hotfix-pipeline-ref.mjs" "$ARGUMENTS" 2>/dev/null || true)
-  [ -n "$AI_SDLC_PIPELINE_REF" ] && export AI_SDLC_PIPELINE_REF || unset AI_SDLC_PIPELINE_REF
-fi
-if [ -z "${PIPELINE_CLI_BIN:-}" ]; then
-  if [ -f "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh" ]; then
-    PIPELINE_CLI_BIN=$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh") || { echo "ERROR: @ai-sdlc/pipeline-cli not found; export PIPELINE_CLI_BIN=/path/to/pipeline-cli/bin" >&2; exit 1; }
-  else
-    PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
-  fi
-fi
-STATE="${TMPDIR:-/tmp}/ai-sdlc-next-step/$(printf '%s' "$ARGUMENTS" | tr -c 'A-Za-z0-9.-' '_').json"
-node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" next-step --task "$ARGUMENTS" --state "$STATE" --fresh
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/execute-next-step.sh" "$ARGUMENTS"
 ```
 
 If it fails with an unknown-command error, the installed `@ai-sdlc/pipeline-cli` predates AISDLC-762: update the runtime (the resolver script prints how) and retry; do not fall back to improvising the pipeline by hand.
