@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.44.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.43.0...pipeline-cli-v0.44.0) (2026-11-22)
+
+
+### Features
+
+* **hooks:** leaseOnOwnBranch allows a fix task to lease push the PR head branch (AISDLC-1363) ([#2896](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2896)) ([f3bd120](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f3bd120d1e4c8e7bda072640a26a8467d067626a))
+* **orchestrator:** scaffolded gate and DoR workflows use the repo package manager (AISDLC-1362) ([#2895](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2895)) ([90ab222](https://github.com/ai-sdlc-framework/ai-sdlc/commit/90ab2228a68a70d575b9058bab164d201c165d2b))
+* **orchestrator:** setup and init share one manifest template (AISDLC-1354) ([#2884](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2884)) ([9131b88](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9131b882da1c2c4949f77a48bd815d0adb154a32))
+* **pipeline-cli:** allow SDK Python and Go sources in untrusted PR Stage 1 (AISDLC-1295) ([#2757](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2757)) ([6121616](https://github.com/ai-sdlc-framework/ai-sdlc/commit/612161601e5105cddef5a089257b6af195b49400))
+* **pipeline-cli:** heartbeat reports last tick result, module runs recorded CLI (AISDLC-1358) ([#2882](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2882)) ([db953ab](https://github.com/ai-sdlc-framework/ai-sdlc/commit/db953ab2f1e0d8afde1567f9e7c538b222403f76))
+* **pipeline-cli:** local verify and pre-push run only affected tests (AISDLC-1377) ([#2931](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2931)) ([bfba97a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bfba97af0a8be7353222952a32ff3e5639d915a8))
+* **pipeline-cli:** planner steps down the strength order when fable is unavailable (AISDLC-1364) ([#2900](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2900)) ([687e0d5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/687e0d596953d4fa0cd233eea78b9c843079b772))
+* **pipeline-cli:** scaffold merge settings, report a board that cannot merge (AISDLC-1351) ([#2886](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2886)) ([375142d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/375142dc080db8671cb1c47e40a2e82333db99dd))
+* **pipeline-cli:** space and cap decisions sync pull requests (AISDLC-1344) ([#2859](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2859)) ([679b56f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/679b56f81579db80cb01a2ffc2ddcbd27a6c28e3))
+* **pipeline-cli:** up and status name every missing piece, STALLED only when late (AISDLC-1357) ([#2891](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2891)) ([456e8d3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/456e8d3f79962bf869a68293dfcdbfcc548ba922))
+* **pipeline-cli:** verify uses repo package manager and adopter task prefix (AISDLC-1360) ([#2893](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2893)) ([cc8ff71](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cc8ff71027b9737feb18a26a226db2ee030cee34))
+* **pipeline-cli:** webhook receiver serves only its own repository (AISDLC-1349) ([#2874](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2874)) ([cb3d2fa](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cb3d2fa44d779bbd23b9c35eb04138c58b55f5ad))
+* Webhook health reads healthy only after an event was delivered, and the decision text names the real port (AISDLC-1345) ([#2864](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2864)) ([338e682](https://github.com/ai-sdlc-framework/ai-sdlc/commit/338e68204995f1c508422bca86296972b88da204))
+
+
+### Bug Fixes
+
+* **orchestrator:** explain first adopter PR and name missing AI_SDLC_PAT secret (AISDLC-1336) ([#2847](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2847)) ([925a6b7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/925a6b7c5cf64d5f02477888e682a7409e717c85))
+* **orchestrator:** init gitignore covers artifacts/_dor and artifacts/_capabilities (AISDLC-1366) ([#2906](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2906)) ([3c906f2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3c906f26b6f87ba00c95ce80894ea466bf86f87b))
+* **orchestrator:** scaffold only posted checks, show merge refusal (AISDLC-1352) ([#2871](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2871)) ([2215d20](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2215d20f16803b6a6c483d8d98cf4d376c41cadc))
+* **pipeline-cli:** accept lone dash as next-step --result value (AISDLC-1337) ([#2848](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2848)) ([02a63f0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/02a63f071b353effa0c57eb2592c282ed9686a2e))
+* **pipeline-cli:** blockers list uses the eligible-queue rule for done prerequisites (AISDLC-1341) ([#2852](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2852)) ([a823608](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a823608e651b207327c46d3d45539d3bf337fe06))
+* **pipeline-cli:** hold planner notices while the operator is typing (AISDLC-1373) ([#2915](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2915)) ([bd6d062](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bd6d06225ddf1ef6020651dacd1f216b2a348c07))
+* **pipeline-cli:** isolate webhook receiver, gh wrapper and state per board (AISDLC-1376) ([#2930](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2930)) ([f33628d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f33628d8cdb25f2e2d61103a116e17423ad84088))
+* **pipeline-cli:** keep webhook feed on restart, bind before install (AISDLC-1350) ([#2885](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2885)) ([e9559f2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e9559f2c3d6a6eaffa267f8ee46b857ad69546c1))
+* **pipeline-cli:** land decision filing PRs as docs, not routed to planner (AISDLC-1374) ([#2919](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2919)) ([cd53eb2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cd53eb237c3164eeda4325ebd201c95cb7b3d6b3))
+* **pipeline-cli:** name the installed CLI, not a path inside this repo (AISDLC-1359) ([#2894](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2894)) ([14959aa](https://github.com/ai-sdlc-framework/ai-sdlc/commit/14959aa7ce36cb5b0b435b002a64af7dda9a39a1))
+* **pipeline-cli:** one full verify suite per machine, pre-push never unslotted (AISDLC-1378) ([#2932](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2932)) ([13bff44](https://github.com/ai-sdlc-framework/ai-sdlc/commit/13bff44e48013aba159090b9a752f75a0d894530))
+* **pipeline-cli:** promote a decision once when its event file is missing locally (AISDLC-1343) ([#2856](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2856)) ([fec0e37](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fec0e377d9327a29647d4c07413cc07dffcb0a18))
+* **pipeline-cli:** re-run a reviewer alone when its transcript lacks the nonce marker (AISDLC-1335) ([#2849](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2849)) ([4919c82](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4919c820a86fa289575e66517d19c7a44c095871))
+* **pipeline-cli:** report a dirty parent once with its files and spare task retries (AISDLC-1346) ([#2867](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2867)) ([2134949](https://github.com/ai-sdlc-framework/ai-sdlc/commit/213494951d1d6f8632b574a553a6dd41cf4a8344))
+* **pipeline-cli:** restarted executor keeps its taskId and task env (AISDLC-1340) ([#2851](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2851)) ([409e6de](https://github.com/ai-sdlc-framework/ai-sdlc/commit/409e6de91ea2dc88e6d60c02a9c207d16fefaa87))
+* **pipeline-cli:** say when a board has no webhook feed (AISDLC-1348) ([#2883](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2883)) ([34c4586](https://github.com/ai-sdlc-framework/ai-sdlc/commit/34c4586cd647d9277ffceaacf712921513adc4bf))
+* **pipeline-cli:** spawn agents by registered names, state real review count (AISDLC-1369) ([#2911](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2911)) ([ea5d901](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ea5d9015d27de3a3a21b8b8c2fdb258029fa8e57))
+* **pipeline-cli:** standalone first push is plain and a new PR marks the stale summary (AISDLC-1365) ([#2903](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2903)) ([86295bb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/86295bbb26160c220342a0da25fe92340581f3ca))
+* **pipeline-cli:** webhook self-repair clears stale hooks and adopts the board agent (AISDLC-1375) ([#2921](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2921)) ([077b341](https://github.com/ai-sdlc-framework/ai-sdlc/commit/077b34105bc51a367b7bc45c0c649dcc8f1b28e8))
+* **plugin:** a reviewer harness failure is never counted as a verdict (AISDLC-1333) ([#2846](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2846)) ([aad0772](https://github.com/ai-sdlc-framework/ai-sdlc/commit/aad0772b15f57338acc0f0160889b20b7e1dde80))
+* **plugin:** reviewers write only to the task and worktree named in their prompt (AISDLC-1334) ([#2850](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2850)) ([b689f33](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b689f33e1a7bb14cdb739c8bfbeea629bb03af0f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.44.0
+
 ## [0.43.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.42.0...pipeline-cli-v0.43.0) (2026-11-19)
 
 
