@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1375
 title: 'Webhook self-repair recovers a dropped forwarder without the operator'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-22'
 labels:

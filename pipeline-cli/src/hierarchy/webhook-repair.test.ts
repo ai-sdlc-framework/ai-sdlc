@@ -295,4 +295,78 @@ describe('webhook self-repair (AISDLC-1299)', () => {
     expect(r.detail).not.toContain('abc123');
     expect(redactSecrets('--secret=zzz x', [])).toBe('--secret=[redacted] x');
   });
+
+  const withHooks = (s: ReturnType<typeof setup>): void => {
+    const base = (s.deps as { run: (f: string, a: readonly string[]) => unknown }).run;
+    (s.deps as { run: unknown }).run = (f: string, a: readonly string[]) => {
+      if (f === 'gh' && a[0] === 'api' && a[1]?.endsWith('/hooks')) {
+        s.calls.push([f, a]);
+        return { status: 0, stdout: JSON.stringify([{ id: 7, name: 'cli' }]), stderr: '' };
+      }
+      return base(f, a);
+    };
+  };
+  const deletes = (calls: Call[]): number => calls.findIndex(([, a]) => a.includes('DELETE'));
+  const kickIdx = (calls: Call[]): number =>
+    calls.findIndex(([f, a]) => f === 'launchctl' && a[0] === 'kickstart');
+
+  it('deletes stale cli hooks before the kickstart when the log ends in Hook already exists (AC1)', () => {
+    const s = setup({ plist: 'current' });
+    withHooks(s);
+    writeFileSync(
+      path.join(dir, 'webhook-forward.log'),
+      'Error: error creating webhook: HTTP 422: Validation Failed Hook already exists on this repository\n',
+    );
+    const r = makeWebhookRepair(s.deps).run();
+    expect(r).toMatchObject({ action: 'kickstart', ok: true });
+    expect(deletes(s.calls)).toBeGreaterThan(-1);
+    expect(deletes(s.calls)).toBeLessThan(kickIdx(s.calls));
+    expect(r.detail).toContain('1 stale cli hook');
+  });
+
+  it('after a websocket close 1006 the restart is preceded by hook cleanup (AC3)', () => {
+    const s = setup({ plist: 'current' });
+    withHooks(s);
+    writeFileSync(
+      path.join(dir, 'webhook-forward.log'),
+      'Error: error receiving json event: websocket: close 1006 (abnormal closure): unexpected EOF\n',
+    );
+    makeWebhookRepair(s.deps).run();
+    expect(deletes(s.calls)).toBeLessThan(kickIdx(s.calls));
+    expect(deletes(s.calls)).toBeGreaterThan(-1);
+  });
+
+  it('a record with feed none but this board agent plist is eligible and records gh-forward (AC2)', () => {
+    const s = setup({ feed: { kind: 'none' }, plist: 'current' });
+    writeFileSync(path.join(dir, 'webhook-forward.log'), 'HTTP 422: Hook already exists\n');
+    const repair = makeWebhookRepair(s.deps, 'darwin');
+    const h = reading({ feed: 'none', forwarder: 'unknown' });
+    expect(repair.eligible(h)).toBe(true);
+    const r = repair.run();
+    expect(r.ok).toBe(true);
+    expect(JSON.parse(readFileSync(path.join(dir, 'webhook.json'), 'utf-8')).feed).toEqual({
+      kind: 'gh-forward',
+      agent: s.label,
+    });
+  });
+
+  it('a feed none record with no agent plist is not eligible', () => {
+    const s = setup({ feed: { kind: 'none' }, plist: 'none' });
+    expect(makeWebhookRepair(s.deps, 'darwin').eligible(reading({ feed: 'none' }))).toBe(false);
+  });
+
+  it('opens the decision only after attempts are used up, with no operator-only text (AC4)', () => {
+    const s = setup({ plist: 'current' });
+    const filed: WebhookEscalationInput[] = [];
+    for (const m of [0, 6, 12]) {
+      at(m);
+      tick(s, reading(), filed);
+      expect(filed).toHaveLength(0);
+    }
+    at(20);
+    tick(s, reading(), filed);
+    expect(filed).toHaveLength(1);
+    expect(filed[0]!.body).not.toContain('operator only');
+    expect(filed[0]!.body).toContain('Self-repair tried 3 time(s)');
+  });
 });

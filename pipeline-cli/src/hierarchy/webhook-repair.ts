@@ -5,7 +5,7 @@
  * Only a launchd-supervised `gh-forward` feed on macOS is touched; tunnels and `none` never are.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import type { HierarchyDeps } from './types.js';
@@ -16,11 +16,12 @@ import {
   forwarderPlistPath,
   installForwarder,
   agentDomain,
+  deleteStaleCliHooks,
   renderPlist,
   resolveRealGh,
   resolveRepo,
 } from './webhook-forwarder.js';
-import { readState, WEBHOOK_SECRET_ENV, type WebhookHealth } from './webhook.js';
+import { readState, recordFeed, WEBHOOK_SECRET_ENV, type WebhookHealth } from './webhook.js';
 
 /** One recorded repair attempt (kept in the health state file; never carries a secret). */
 export interface RepairAttempt {
@@ -113,9 +114,20 @@ export function makeWebhookRepair(
     const f = readState(deps.boardDir)?.feed;
     return f?.kind === 'gh-forward' ? f.agent : undefined;
   };
+  /** This board's own agent plist, when the record lost it (feed `none` or no `agent`). */
+  const adoptableAgent = (): string | undefined => {
+    const f = readState(deps.boardDir)?.feed;
+    if (f?.kind === 'tunnel' || (f?.kind === 'gh-forward' && f.agent)) return undefined;
+    const label = forwarderLabel(deps);
+    return existsSync(forwarderPlistPath(deps, label)) ? label : undefined;
+  };
+  const failingLog = (): boolean =>
+    /Hook already exists|websocket: close 1006/.test(readLogTail(deps, undefined, 5));
   return {
     eligible: (h) => {
-      if (platform !== 'darwin' || !feedAgent()) return false;
+      if (platform !== 'darwin') return false;
+      const adopt = !feedAgent() ? adoptableAgent() : undefined;
+      if (!feedAgent() && !adopt) return false;
       if (
         h.class === 'healthy' ||
         h.class === 'unverified' ||
@@ -123,13 +135,18 @@ export function makeWebhookRepair(
         h.signals.port === false
       )
         return false;
+      if (adopt) {
+        if (h.signals.feed !== 'none' && h.signals.feed !== undefined) return false;
+        return failingLog() || h.signals.forwarder === 'dead';
+      }
       if (h.signals.feed !== 'gh-forward') return false;
       const silent = h.reasons.some((r) => r.startsWith('no event for'));
       return h.signals.forwarder === 'dead' || silent;
     },
     run: () => {
       const at = deps.now().toISOString();
-      const label = feedAgent() ?? forwarderLabel(deps);
+      const adopt = !feedAgent() ? adoptableAgent() : undefined;
+      const label = feedAgent() ?? adopt ?? forwarderLabel(deps);
       const port = readState(deps.boardDir)?.port;
       if (!port) {
         return {
@@ -164,19 +181,28 @@ export function makeWebhookRepair(
             };
           }
           installForwarder(deps, secret, port, platform);
+          if (adopt) recordFeed(deps.boardDir, { kind: 'gh-forward', agent: label });
           return { at, action: 'reinstall', ok: true, detail: `rewrote and reloaded ${label}` };
+        }
+        // A dropped websocket leaves its `cli` hook behind; a restart into it fails with HTTP 422.
+        let removed = 0;
+        try {
+          removed = deleteStaleCliHooks(deps, resolveRepo(deps));
+        } catch {
+          /* repository unresolved: nothing to clean */
         }
         const r = deps.run('launchctl', ['kickstart', '-k', agentDomain(label)], {
           cwd: deps.cwd,
         });
         const ok = r?.status === 0;
+        if (ok && adopt) recordFeed(deps.boardDir, { kind: 'gh-forward', agent: label });
         return {
           at,
           action: 'kickstart',
           ok,
           detail: redact(
             ok
-              ? `kickstart -k ${label}`
+              ? `kickstart -k ${label}${removed > 0 ? ` after removing ${removed} stale cli hook(s)` : ''}`
               : `kickstart -k ${label} failed: ${(r?.stderr ?? '').trim().split('\n')[0] ?? ''}`,
           ),
         };
