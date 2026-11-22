@@ -61,6 +61,7 @@ describe('planner notice composer guard (AISDLC-1373)', () => {
     status: 'running',
     paneId: '',
     pid: 1,
+    project: 'p',
   };
   const writeRoster = (): void =>
     writeFileSync(
