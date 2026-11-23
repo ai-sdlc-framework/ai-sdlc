@@ -87,6 +87,10 @@ export interface RegistrySession {
   cwd?: string;
   /** Harness session id; names the transcript file (AISDLC-1066). */
   sessionId?: string;
+  /** The process start time the harness recorded (`ps -o lstart`); tells a reused pid apart (AISDLC-1392). */
+  procStart?: string;
+  /** The unix socket path the session listens on, e.g. `/tmp/cc-socks/<pid>.sock`. */
+  messagingSocketPath?: string;
 }
 
 /** A point-in-time view of machine headroom used by the resource gate. */

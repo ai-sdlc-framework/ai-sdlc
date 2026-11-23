@@ -178,6 +178,13 @@ import {
   checkRepoMatch,
   readRosterChecked,
   readReceivedAddresses,
+  readReceivedSenders,
+  pruneReceivedLog,
+  createSocketSender,
+  defaultResolveDeps,
+  resolveSessionSocket,
+  sendResolved,
+  readSessionRegistry,
   sendToRoster,
   writeRotateRequest,
   type SocketSender,
@@ -485,7 +492,7 @@ function sendRotate(
   sendSocket: SocketSender | undefined,
 ): void {
   const { roster } = readRosterChecked(deps.boardDir);
-  sendToRoster(
+  const sent = sendToRoster(
     roster.sessions,
     name,
     'rotate',
@@ -493,6 +500,7 @@ function sendRotate(
     readReceivedAddresses(deps.boardDir),
     sendSocket,
   );
+  if (sent) void sent.catch(() => undefined);
   writeRotateRequest(deps.boardDir, name, deps.now());
 }
 
@@ -702,6 +710,9 @@ export async function runHierarchyCli(
   extras: {
     sendBrief?: BriefSender;
     sendSocket?: SocketSender;
+    /** Test seams for the name-to-socket lookup of `send` (AISDLC-1392). */
+    procStartOf?: (pid: number) => string | undefined;
+    socketExists?: (address: string) => boolean;
     /** Replaces the policy file as the source of the operational grants (tests). */
     operational?: ReadonlySet<string>;
     /** Replaces the policy file as the source of the lease-push rules (tests). */
@@ -1958,20 +1969,33 @@ export async function runHierarchyCli(
           return 2;
         }
         const { roster } = readRosterChecked(deps.boardDir);
+        const registry = readSessionRegistry(deps.registryDir);
+        const resolveDeps = {
+          procStartOf: extras.procStartOf ?? defaultResolveDeps.procStartOf,
+          socketExists: extras.socketExists ?? defaultResolveDeps.socketExists,
+        };
         try {
-          sendToRoster(
-            roster.sessions,
+          const outcome = await sendResolved({
+            sessions: roster.sessions,
             to,
             text,
-            extras.sendBrief ?? createTmuxBriefSender(deps.run),
-            readReceivedAddresses(deps.boardDir),
-            extras.sendSocket,
-          );
+            received: readReceivedSenders(deps.boardDir),
+            registry,
+            sendPane: extras.sendBrief ?? createTmuxBriefSender(deps.run),
+            sendSocket: extras.sendSocket ?? createSocketSender,
+            deps: resolveDeps,
+          });
+          deps.log(JSON.stringify({ ok: true, ...outcome }));
         } catch (err) {
           process.stderr.write(`cli-hierarchy send: ${(err as Error).message}\n`);
           return 1;
+        } finally {
+          // a received address whose sender no longer resolves is dead: stop accepting it (AISDLC-1392)
+          pruneReceivedLog(
+            deps.boardDir,
+            (name) => resolveSessionSocket(registry, name, resolveDeps) !== undefined,
+          );
         }
-        deps.log(JSON.stringify({ ok: true, sent: to }));
         return 0;
       }
       case 'route-decision': {

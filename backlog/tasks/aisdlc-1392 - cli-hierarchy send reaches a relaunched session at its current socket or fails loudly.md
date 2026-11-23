@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1392
 title: 'cli-hierarchy send reaches a relaunched session at its current socket or fails loudly'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-22'
 labels:
