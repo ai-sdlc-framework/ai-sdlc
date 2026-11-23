@@ -209,7 +209,8 @@ export function retireFailedLanded(boardDir: string, deps: RetireFailedLandedDep
     return [];
   }
   if (names.length === 0) return [];
-  const completed = deps.completedOnMain() ?? new Map<string, string>();
+  const completedRead = deps.completedOnMain();
+  const completed = completedRead ?? new Map<string, string>();
   const merged = new Map<
     string,
     { pr: number; sha: string; kind?: string; headBranch?: string }[]
@@ -240,6 +241,9 @@ export function retireFailedLanded(boardDir: string, deps: RetireFailedLandedDep
       continue;
     }
     // AISDLC-1297: only the task's own code PR retires a verdict; a filing PR never does.
+    // AISDLC-1381: when main is readable, a task whose file is not in backlog/completed/ has not
+    // landed, whatever a landing record says (a filing PR record can lack kind and branch).
+    if (completedRead !== undefined && !completedRead.has(taskId)) continue;
     const sha =
       completed.get(taskId) ??
       (merged.get(taskId) ?? []).find((m) =>
