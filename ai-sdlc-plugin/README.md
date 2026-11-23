@@ -6,7 +6,7 @@ Claude Code plugin providing governance rules, review subagents, and MCP tools f
 
 Plugin subagents are `.md` files with YAML frontmatter declaring tool grants, the harness, and the agent role.
 
-> **Harness note:** Claude Code filters the `Agent` tool out of plugin subagent sessions one level deep — plugin subagents cannot spawn other subagents. The `/ai-sdlc execute` slash command (main session) spawns the developer + reviewers directly.
+> **Harness note:** Claude Code filters the `Agent` tool out of plugin subagent sessions one level deep — plugin subagents cannot spawn other subagents. The `/ai-sdlc:execute` slash command (main session) spawns the developer + reviewers directly.
 
 ### Developer
 
@@ -16,7 +16,7 @@ Plugin subagents are `.md` files with YAML frontmatter declaring tool grants, th
 
 ### Reviewers — Claude variants (default)
 
-Run inside Claude Code sessions. Spawned by `/ai-sdlc execute` Step 7b.
+Run inside Claude Code sessions. Spawned by `/ai-sdlc:execute` Step 7b.
 
 | Agent | Model | Description |
 |-------|-------|-------------|
@@ -28,7 +28,7 @@ Run inside Claude Code sessions. Spawned by `/ai-sdlc execute` Step 7b.
 
 Shell out to `codex exec` internally. Use when the developer ran on Claude Code (cross-harness independence) or when Codex is preferred for cost/latency reasons.
 
-**Spawning:** `Agent(subagent_type='ai-sdlc:code-reviewer-codex')` in a slash command body, or by choosing the `-codex` suffix in the `/ai-sdlc execute` harness selection step.
+**Spawning:** `Agent(subagent_type='ai-sdlc:code-reviewer-codex')` in a slash command body, or by choosing the `-codex` suffix in the `/ai-sdlc:execute` harness selection step.
 
 | Agent | Harness | Description |
 |-------|---------|-------------|
@@ -62,13 +62,13 @@ This makes harness selection transparent to the Step 8 verdict aggregator — no
 
 | Command | Description |
 |---------|-------------|
-| `/ai-sdlc execute <task-id>` | Full pipeline: worktree → developer → 3 reviewers → PR |
-| `/ai-sdlc orchestrator-tick`, `dispatch-worker`, `execute-parallel*` | Retired (AISDLC-763): one-paragraph pointers to [`cli-hierarchy`](../docs/operations/cli-hierarchy.md). |
-| `/ai-sdlc review-pr` | Standalone review pass on the current branch |
-| `/ai-sdlc rebase <pr>` | Mechanical rebase + re-sign of an open PR |
-| `/ai-sdlc triage` | Issue triage (DOR evaluation + PPA trust) |
-| `/ai-sdlc pipeline-status` | Pipeline status summary |
-| `/ai-sdlc cleanup [<task-id>]` | Remove stale worktrees |
+| `/ai-sdlc:execute <task-id>` | Full pipeline: worktree → developer → 3 reviewers → PR |
+| `/ai-sdlc:orchestrator-tick`, `dispatch-worker`, `execute-parallel*` | Retired (AISDLC-763): one-paragraph pointers to [`cli-hierarchy`](../docs/operations/cli-hierarchy.md). |
+| `/ai-sdlc:review-pr` | Standalone review pass on the current branch |
+| `/ai-sdlc:rebase <pr>` | Mechanical rebase + re-sign of an open PR |
+| `/ai-sdlc:triage` | Issue triage (DOR evaluation + PPA trust) |
+| `/ai-sdlc:pipeline-status` | Pipeline status summary |
+| `/ai-sdlc:cleanup [<task-id>]` | Remove stale worktrees |
 
 ## Skills (`skills/`)
 
@@ -79,7 +79,7 @@ This makes harness selection transparent to the Step 8 verdict aggregator — no
 
 ## macOS: `CLAUDE_CODE_SHELL`
 
-macOS ships bash 3.2 as `/bin/bash`; on macOS, set `CLAUDE_CODE_SHELL` to a newer shell (for example `export CLAUDE_CODE_SHELL=/opt/homebrew/bin/bash` or `/bin/zsh`) before starting Claude Code if it refuses a command block with exit 126. The `/ai-sdlc execute` blocks are one-line script calls written to run under bash 3.2 regardless.
+macOS ships bash 3.2 as `/bin/bash`; on macOS, set `CLAUDE_CODE_SHELL` to a newer shell (for example `export CLAUDE_CODE_SHELL=/opt/homebrew/bin/bash` or `/bin/zsh`) before starting Claude Code if it refuses a command block with exit 126. The `/ai-sdlc:execute` blocks are one-line script calls written to run under bash 3.2 regardless.
 
 ## Install topologies + path resolution (AISDLC-245.4, AISDLC-272, AISDLC-557)
 
@@ -165,7 +165,7 @@ Or override `PIPELINE_CLI_BIN` in your shell before launching Claude Code:
 export PIPELINE_CLI_BIN=/path/to/ai-sdlc/pipeline-cli/bin
 ```
 
-**Note on `CLAUDE_PLUGIN_ROOT`:** for plugin-internal scripts already using `${CLAUDE_PLUGIN_ROOT}` (e.g. `sign-attestation.mjs` invocations in `/ai-sdlc execute` Step 10.5 and `/ai-sdlc rebase`), leave those unchanged — Claude Code substitutes the plain `${CLAUDE_PLUGIN_ROOT}` text in command and agent bodies, but does not export the variable to the Bash tool environment, so never write the `${CLAUDE_PLUGIN_ROOT:-...}` or `$CLAUDE_PLUGIN_ROOT` forms there.
+**Note on `CLAUDE_PLUGIN_ROOT`:** for plugin-internal scripts already using `${CLAUDE_PLUGIN_ROOT}` (e.g. `sign-attestation.mjs` invocations in `/ai-sdlc:execute` Step 10.5 and `/ai-sdlc:rebase`), leave those unchanged — Claude Code substitutes the plain `${CLAUDE_PLUGIN_ROOT}` text in command and agent bodies, but does not export the variable to the Bash tool environment, so never write the `${CLAUDE_PLUGIN_ROOT:-...}` or `$CLAUDE_PLUGIN_ROOT` forms there.
 
 ### Troubleshooting: pin bumped but runtime still stale after `/plugin update` (AISDLC-608)
 
@@ -220,7 +220,7 @@ keyring prerequisite were removed in RFC-0061 phase 3.
 
 ## Pre-push hook and the verdict record (RFC-0061, AISDLC-1261)
 
-`/ai-sdlc execute` Step 10 writes reviewer verdicts to
+`/ai-sdlc:execute` Step 10 writes reviewer verdicts to
 `.ai-sdlc/verdicts/<task-id>.json`; the merge gate reads that review verdict
 record (`cli-attestation verdict-check`). Nothing is signed at push time, and
 `check-attestation-sign.sh` no longer ships.

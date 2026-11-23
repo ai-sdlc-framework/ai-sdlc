@@ -10,7 +10,7 @@
 Then, once the plugin is loaded (run `/reload-plugins` if Claude Code does not pick it up), run one command:
 
 ```text
-/ai-sdlc setup
+/ai-sdlc:setup
 ```
 
 It runs init, registers the MCP advisor for the detected clients and runs doctor, then prints a report listing each step as done, skipped (already present) or not possible, with the reason and the exact next action. Re-running it is safe and says "Nothing changed" when the repo is already set up. No signing key is needed (RFC-0061). The global `@ai-sdlc/orchestrator` install is not required. The longer paths below remain for scripted or manual installs.
@@ -28,13 +28,13 @@ Prerequisites to check first: `node --version` (20 or newer), `pnpm --version` (
 2. Install the SDK in this repository. Run `pnpm add @ai-sdlc/reference`. Verify with `pnpm ls @ai-sdlc/reference`, which must list the package.
 3. Install the Claude Code plugin. Run `/plugin marketplace add ai-sdlc-framework/ai-sdlc` then `/plugin install ai-sdlc@ai-sdlc`. Verify that `/plugin` lists `ai-sdlc` as enabled and that `/ai-sdlc` commands are available (restart the session if they are not).
 4. Scaffold the repository. Run `ai-sdlc init --yes`. Verify with `ai-sdlc health`, which must report all checks passing, and confirm `.ai-sdlc/pipeline.yaml` exists.
-5. Run the doctor. Run `/ai-sdlc doctor`. It must finish with no errors and no unresolved warnings.
+5. Run the doctor. Run `/ai-sdlc:doctor`. It must finish with no errors and no unresolved warnings.
 
 Recovery for known failures:
 
 - Partial plugin cache install (plugin listed but commands missing, or files missing under the plugin cache): run `/plugin uninstall ai-sdlc@ai-sdlc`, delete the cached `ai-sdlc` directory under `~/.claude/plugins/` (show me the path before deleting), restart Claude Code, then repeat step 3.
 - Missing `@ai-sdlc/reference` (import or "cannot find module" errors, or doctor reports it absent): run `pnpm add @ai-sdlc/reference` in the repository root, confirm it appears in `package.json`, then re-run the failing step.
-- Doctor warnings: read each warning, fix the cause it names (usually one of the two failures above, a missing `gh` login, or an uncommitted scaffold), and re-run `/ai-sdlc doctor` until it is clean. Do not suppress or ignore a warning without telling me why.
+- Doctor warnings: read each warning, fix the cause it names (usually one of the two failures above, a missing `gh` login, or an uncommitted scaffold), and re-run `/ai-sdlc:doctor` until it is clean. Do not suppress or ignore a warning without telling me why.
 
 When doctor passes, commit the scaffold (the `git add` command init prints under "Next steps", which lists only paths that exist) and report what you installed and the doctor output.
 ````
@@ -244,10 +244,10 @@ pipeline to its current requirement:
 | `@ai-sdlc/reference` SDK validation | No | Node.js + TypeScript |
 | Conformance suite (`conformance/`) | No | Language-agnostic fixture runner |
 | `ai-sdlc run --issue <n>` (single issue) | No | SDK spawner; can use API key |
-| `/ai-sdlc execute <task-id>` (full pipeline) | **Yes** | Orchestrator + worktree + attestation |
+| `/ai-sdlc:execute <task-id>` (full pipeline) | **Yes** | Orchestrator + worktree + attestation |
 | Configured reviewer fan-out ([reviewer-set-flag.md](../operations/reviewer-set-flag.md)) | **Yes** | `developer` and the reviewer agents of the configured set |
-| Review verdict record (`refs/ai-sdlc/verdicts/*`) | **Yes** | Written by the pipeline at the end of `/ai-sdlc execute` |
-| `cli-hierarchy up` (replaces retired `/ai-sdlc orchestrator-tick`) | **Yes** | Autonomous loop requires CC sessions |
+| Review verdict record (`refs/ai-sdlc/verdicts/*`) | **Yes** | Written by the pipeline at the end of `/ai-sdlc:execute` |
+| `cli-hierarchy up` (replaces retired `/ai-sdlc:orchestrator-tick`) | **Yes** | Autonomous loop requires CC sessions |
 
 **Adopters on other substrates** (GitHub Copilot, Cursor, Codex, OpenAI API)
 can use the `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` path which
@@ -314,7 +314,7 @@ git push
 Inside a Claude Code session, run:
 
 ```bash
-/ai-sdlc execute MY-TASK-1
+/ai-sdlc:execute MY-TASK-1
 ```
 
 What happens next (you will see progress lines in the session):
@@ -469,7 +469,7 @@ requires adding the remote before running init to avoid the placeholder entirely
 `.ai-sdlc/pipeline.yaml` and replace `your-org` with your real org and repo name,
 then re-commit.
 
-### Gap 4 — Claude Code must be authenticated before `/ai-sdlc execute` dispatches
+### Gap 4 — Claude Code must be authenticated before `/ai-sdlc:execute` dispatches
 
 **Observed:** a fresh machine with `claude` on PATH but not authenticated (no
 `~/.claude/` session state) fails at the `Agent(developer)` dispatch step with an

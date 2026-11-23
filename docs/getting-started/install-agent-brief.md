@@ -14,12 +14,12 @@ Prerequisites to check first: `node --version` (20 or newer), `pnpm --version` (
 2. Install the SDK in this repository. Run `pnpm add @ai-sdlc/reference`. Verify with `pnpm ls @ai-sdlc/reference`, which must list the package.
 3. Install the Claude Code plugin. Run `/plugin marketplace add ai-sdlc-framework/ai-sdlc` then `/plugin install ai-sdlc@ai-sdlc`. Verify that `/plugin` lists `ai-sdlc` as enabled and that `/ai-sdlc` commands are available (restart the session if they are not).
 4. Scaffold the repository. Run `ai-sdlc init --yes`. Verify with `ai-sdlc health`, which must report all checks passing, and confirm `.ai-sdlc/pipeline.yaml` exists.
-5. Run the doctor. Run `/ai-sdlc doctor`. It must finish with no errors and no unresolved warnings.
+5. Run the doctor. Run `/ai-sdlc:doctor`. It must finish with no errors and no unresolved warnings.
 
 Recovery for known failures:
 
 - Partial plugin cache install (plugin listed but commands missing, or files missing under the plugin cache): run `/plugin uninstall ai-sdlc@ai-sdlc`, delete the cached `ai-sdlc` directory under `~/.claude/plugins/` (show me the path before deleting), restart Claude Code, then repeat step 3.
 - Missing `@ai-sdlc/reference` (import or "cannot find module" errors, or doctor reports it absent): run `pnpm add @ai-sdlc/reference` in the repository root, confirm it appears in `package.json`, then re-run the failing step.
-- Doctor warnings: read each warning, fix the cause it names (usually one of the two failures above, a missing `gh` login, or an uncommitted scaffold), and re-run `/ai-sdlc doctor` until it is clean. Do not suppress or ignore a warning without telling me why.
+- Doctor warnings: read each warning, fix the cause it names (usually one of the two failures above, a missing `gh` login, or an uncommitted scaffold), and re-run `/ai-sdlc:doctor` until it is clean. Do not suppress or ignore a warning without telling me why.
 
 When doctor passes, commit the scaffold (the `git add` command init prints under "Next steps", which lists only paths that exist) and report what you installed and the doctor output.

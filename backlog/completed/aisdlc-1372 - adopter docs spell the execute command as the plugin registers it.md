@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1372
 title: 'Adopter docs spell the execute command as the plugin registers it'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-21'
 labels:

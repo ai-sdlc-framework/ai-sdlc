@@ -10,7 +10,7 @@ npx -y @ai-sdlc/mcp-advisor
 
 Set `AI_SDLC_WORKSPACE` to the workspace root (`.` for the directory the client opens) when the repository is a multi-repo workspace. Leave it out for a single repository.
 
-Claude Code users do not need this page: `/ai-sdlc setup` (or `ai-sdlc init`) writes `.mcp.json` for you. For every other client, `ai-sdlc init` writes the files below when it detects the client (a `.codex/`, `.cursor/`, `.vscode/` or `.windsurf/` directory, or the client binary on PATH; Cursor needs `--cursor` or a `.cursor/` directory). To pin a version, use `@ai-sdlc/mcp-advisor@<version>` in `args`. The snippets below show the workspace form and are checked against the generated output by a test.
+Claude Code users do not need this page: `/ai-sdlc:setup` (or `ai-sdlc init`) writes `.mcp.json` for you. For every other client, `ai-sdlc init` writes the files below when it detects the client (a `.codex/`, `.cursor/`, `.vscode/` or `.windsurf/` directory, or the client binary on PATH; Cursor needs `--cursor` or a `.cursor/` directory). To pin a version, use `@ai-sdlc/mcp-advisor@<version>` in `args`. The snippets below show the workspace form and are checked against the generated output by a test.
 
 ## Codex
 
