@@ -90,6 +90,28 @@ describe('createSnapshotRunner', () => {
     expect(calls.filter((c) => c[1] === 'list')).toHaveLength(1);
   });
 
+  it('a no-PR check_run event does not invalidate the snapshot; a push does (AISDLC-1379)', () => {
+    const { run, calls } = fake();
+    mkdirSync(path.join(board, 'events'));
+    wake(run, new Date());
+    calls.length = 0;
+    const ev = (kind: 'check_run' | 'push', id: string) =>
+      writeEventRecord(path.join(board, 'events'), {
+        repo: 'o/r',
+        pr: null,
+        headSha: 'b'.repeat(40),
+        kind,
+        deliveryId: id,
+        receivedAt: new Date().toISOString(),
+      });
+    ev('check_run', 'n1');
+    wake(run, new Date(Date.now() + 1000));
+    expect(calls).toHaveLength(0);
+    ev('push', 'p1');
+    wake(run, new Date(Date.now() - 1));
+    expect(calls.filter((c) => c[1] === 'list')).toHaveLength(1);
+  });
+
   it('without a receiver every wake lists once', () => {
     const { run, calls } = fake();
     wake(run, new Date());

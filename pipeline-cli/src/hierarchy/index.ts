@@ -323,6 +323,7 @@ export {
   parseFeed,
   trackPrActivity,
   webhookDown,
+  webhookGate,
   webhookHealth,
   webhookPersistence,
   webhookServe,

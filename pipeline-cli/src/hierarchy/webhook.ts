@@ -5,7 +5,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -487,6 +487,26 @@ export function webhookHealth(deps: HierarchyDeps, opts: WebhookHealthOptions = 
     since: deps.now().toISOString(),
     reasons,
   };
+}
+
+/**
+ * AISDLC-1379 (RFC-0054 OQ-1 Option D): what the dispatch host needs to choose its reconcile cadence. `class` is
+ * the health class, or `none` when no secret is set; `wakeAtMs` is the mtime of `.reconcile-wake`, null if absent.
+ */
+export function webhookGate(deps: HierarchyDeps): { class: string; wakeAtMs: number | null } {
+  let cls = 'none';
+  try {
+    if (deps.env.AI_SDLC_WEBHOOK_SECRET) cls = webhookHealth(deps).class;
+  } catch {
+    /* an unreadable health reading means the fast cadence */
+  }
+  let wakeAtMs: number | null = null;
+  try {
+    wakeAtMs = statSync(path.join(deps.boardDir, '.reconcile-wake')).mtimeMs;
+  } catch {
+    /* no wake yet */
+  }
+  return { class: cls, wakeAtMs };
 }
 
 /** `5m`, `3h` or `2d`; `never` for no event. */

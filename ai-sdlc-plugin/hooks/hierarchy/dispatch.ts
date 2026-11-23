@@ -19,6 +19,11 @@ export const DISPATCH_PRIMITIVES = [
 
 /** Default interval of the tick timer, the current `nextWakeSec` floor of the dispatch loop. */
 export const DEFAULT_TICK_MS = 30_000;
+/**
+ * AISDLC-1379 (RFC-0054 OQ-1 Option D): with the webhook healthy, events are hints and the reconcile and CI sweep
+ * run at most this often unless a wake file is newer than the last run.
+ */
+export const SLOW_RECONCILE_MS = 15 * 60_000;
 /** Context size, in tokens, at which the host rotates (120k, OQ-1); rarely reached because it has no model turns. */
 export const DISPATCH_ROTATE_AT_TOKENS = 120_000;
 
@@ -73,6 +78,10 @@ export interface DispatchState {
   tickNo?: number;
   /** Executor name -> tick number it was last sent `enqueue`. */
   lastWoke?: Record<string, number>;
+  /** Epoch ms of the last reconcile this host ran from the timer (AISDLC-1379). */
+  lastReconcileAt?: number;
+  /** `.reconcile-wake` mtime the last reconcile accounted for (AISDLC-1379). */
+  lastWakeSeen?: number;
   /** Number of in-flight ticks: a slow tick must not overlap the next. */
   ticking: boolean;
 }
@@ -377,6 +386,33 @@ async function recordHealth(
   );
 }
 
+const firstLineOf = (r: { stderr?: string; stdout?: string }): string =>
+  ((r.stderr || r.stdout || '').split('\n').find((l) => l.trim()) ?? 'no output').slice(0, 160);
+
+/**
+ * AISDLC-1379: true when this timer fire must run the reconcile and CI sweep. Always at the fast cadence unless the
+ * tick reports a healthy webhook; then only on a newer wake file or after {@link SLOW_RECONCILE_MS}. Records the run.
+ */
+export function reconcileDue(
+  state: DispatchState,
+  gate: { class?: unknown; wakeAtMs?: unknown } | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  const wake = typeof gate?.wakeAtMs === 'number' ? gate.wakeAtMs : 0;
+  const healthy = gate?.class === 'healthy';
+  const last = state.lastReconcileAt;
+  const due =
+    !healthy ||
+    last === undefined ||
+    nowMs - last >= SLOW_RECONCILE_MS ||
+    wake > (state.lastWakeSeen ?? 0);
+  if (due) {
+    state.lastReconcileAt = nowMs;
+    state.lastWakeSeen = wake;
+  }
+  return due;
+}
+
 /** One tick: run `cli-hierarchy tick`, wake executors for ingested work, escalate, refresh the pane. */
 export async function tick(p: DispatchPorts, state: DispatchState): Promise<void> {
   if (state.ticking) return;
@@ -424,23 +460,23 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
       if (blockersText) await tellPlanner(p, state, `blockers changed:\n${blockersText}`);
     }
     // The old loop ran the PR reconciler and the CI sweep after every tick; `cli-ci sweep` throttles itself to 15 minutes.
-    const rec = await runCli(p, DISPATCH_BIN, ['reconcile', ...boardArgs(state)]);
     const failures: string[] = [];
-    const firstLineOf = (r: { stderr?: string; stdout?: string }): string =>
-      ((r.stderr || r.stdout || '').split('\n').find((l) => l.trim()) ?? 'no output').slice(0, 160);
-    if (!rec.ok) {
-      note(state, 'reconcile failed');
-      failures.push(`reconcile failed: ${firstLineOf(rec)}`);
-    } else {
-      // AISDLC-1095: the reconciler dedupes (routeOnce); forward only the routings new this run.
-      for (const line of newRoutingLines(rec.stdout)) {
-        await tellPlanner(p, state, `reconciler routed a PR to you: ${line}`);
+    if (reconcileDue(state, result.webhookGate)) {
+      const rec = await runCli(p, DISPATCH_BIN, ['reconcile', ...boardArgs(state)]);
+      if (!rec.ok) {
+        note(state, 'reconcile failed');
+        failures.push(`reconcile failed: ${firstLineOf(rec)}`);
+      } else {
+        // AISDLC-1095: the reconciler dedupes (routeOnce); forward only the routings new this run.
+        for (const line of newRoutingLines(rec.stdout)) {
+          await tellPlanner(p, state, `reconciler routed a PR to you: ${line}`);
+        }
       }
-    }
-    const sweep = await runCli(p, CI_BIN, ['sweep', ...boardArgs(state)]);
-    if (!sweep.ok) {
-      note(state, 'cli-ci sweep failed');
-      failures.push(`cli-ci sweep failed: ${firstLineOf(sweep)}`);
+      const sweep = await runCli(p, CI_BIN, ['sweep', ...boardArgs(state)]);
+      if (!sweep.ok) {
+        note(state, 'cli-ci sweep failed');
+        failures.push(`cli-ci sweep failed: ${firstLineOf(sweep)}`);
+      }
     }
     // AISDLC-1357: a failing reconcile or sweep reaches `status`; the next clean tick writes `loaded` again.
     if (failures.length > 0) {
