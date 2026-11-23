@@ -17,7 +17,7 @@ requiresDocs: []
 # RFC-0018: In-Soul Journey Pattern
 
 **Document type:** Normative
-**Status:** Ready for Review v0.4. Design Authority editorial pass on 2026-11-23 (§13 v0.4); its normative changes await Engineering and Product re-confirmation (Sign-Off). v0.3 status: operator OQ walkthrough complete 2026-05-28 with full rigor rubric (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument per OQ). All 10 §10 OQs resolved. Cross-cutting framing: operator-impacting journey-lifecycle events (count thresholds, state cardinality, metric staleness, accessibility-cadence overdue, WCAG-superseded use, sub-journey / cross-soul activation requests, state-ID drift) **route through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md)** — pipeline never halts. §10.1 codifies per-Soul / per-org config schema. Implementation broken into 6 phase tasks (AISDLC-465..470).
+**Status:** Ready for Review v0.4.1. Design Authority editorial pass on 2026-11-23 (§13 v0.4); Engineering amendment v0.4.1 the same day defines the records and data the OQ-6 and OQ-7 amendments depend on (§13 v0.4.1). Engineering re-confirmed v0.4 and signed v0.4.1 on 2026-11-23; Product re-confirmation and Design Authority review of v0.4.1 are pending (Sign-Off). v0.3 status: operator OQ walkthrough complete 2026-05-28 with full rigor rubric (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument per OQ). All 10 §10 OQs resolved. Cross-cutting framing: operator-impacting journey-lifecycle events (count thresholds, state cardinality, metric staleness, accessibility-cadence overdue, WCAG-superseded use, sub-journey / cross-soul activation requests, state-ID drift) **route through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md)** — pipeline never halts. §10.1 codifies per-Soul / per-org config schema. Implementation broken into 6 phase tasks (AISDLC-465..470).
 **Lifecycle:** Ready for Review
 **Created:** 2026-05-04
 **Updated:** 2026-11-23
@@ -39,17 +39,18 @@ requiresDocs: []
 |--------|------|--------|------|
 | Morgan Hirtle | Chief of Design / Design Authority | ✍️ Authored v0.1 stub | 2026-05-04 |
 | Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ✅ Signed v0.3 (all 10 §10 OQs resolved per operator walkthrough 2026-05-28 with full rigor rubric; pending Design editorial pass) | 2026-05-28 |
+| Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ✅ Signed v0.4.1 (re-confirms the v0.4 Design Authority pass and authors the v0.4.1 Engineering amendment to OQ-6 and OQ-7) | 2026-11-23 |
 | Alexander Kline | Head of Product Strategy / Product Authority | ✅ Signed v0.2 (PPA-composability scope only; full v1.0+ pending Mo's editorial) | 2026-05-04 |
 
 ### Re-confirmation of v0.4 normative changes
 
-The v0.4 editorial pass changes the `accessibility` and `successMetrics` schema and amends the OQ-6 and OQ-7 resolutions. §13 v0.4 lists each change. Engineering and Product signed v0.3 and v0.2 on the condition that this pass happen; these rows record whether each authority accepts what the pass changed.
+The v0.4 editorial pass changes the `accessibility` and `successMetrics` schema and amends the OQ-6 and OQ-7 resolutions. §13 v0.4 lists each change; §13 v0.4.1 lists the Engineering amendment that follows it. Engineering and Product signed v0.3 and v0.2 on the condition that this pass happen; these rows record whether each authority accepts what the pass changed.
 
 | Authority | Status |
 |---|---|
-| Engineering Authority | [PENDING — Engineering Authority] |
+| Engineering Authority | ✅ Re-confirmed v0.4 and signed v0.4.1, Dominique Legault, 2026-11-23 |
 | Product Authority | [PENDING — Product Authority] |
-| Design Authority | Sign-off follows merge of this pass |
+| Design Authority | Sign-off follows merge of this pass. Review of the v0.4.1 Engineering amendment (OQ-6 and OQ-7) requested |
 
 ### Product Authority review (PPA-composability scope only)
 
@@ -130,6 +131,7 @@ spec:
   journeys:
     - id: onboarding
       scope: soul                 # journey applies to ALL variants
+      declaredAt: "2026-05-04"    # v0.4.1: implied first audit date (OQ-6)
       states:
         - id: arrived
           terminal: false
@@ -180,6 +182,7 @@ spec:
         - "profile-form is single-screen (no pagination)"
     - id: annual-review-submission
       scope: variant:annual-review  # journey applies only to a specific variant
+      declaredAt: "2026-05-04"
       complianceFloor: inherit
       accessibility:
         wcagLevel: "AA"
@@ -196,6 +199,7 @@ spec:
 |---|---|---|---|
 | `id` | string (kebab-case, unique within parent scope) | yes | Journey identifier |
 | `scope` | enum (`soul`, `variant:<id>`) | yes | Whether this journey applies to the whole Soul or a specific Variant |
+| `declaredAt` | date (`YYYY-MM-DD`) | yes | Date the journey was declared. It counts as the journey's first audit (OQ-6). MUST NOT be in the future and MUST NOT change once the journey exists (v0.4.1) |
 | `states` | array of state objects | yes | Named states; at least 1 MUST have `terminal: true` AND `successState: true` |
 | `transitions` | array of transition objects | yes | State-to-state transitions; `from` MAY be a string OR array (any-of); `to` is a single state id |
 | `completionCriteria` | object | yes | How "done" is defined (terminal-success-state, all-states-reached, custom-predicate) |
@@ -219,7 +223,7 @@ A journey's `accessibility` block is tighten-only against its parent's floor (th
 
 - `wcagLevel` MAY be higher than the parent's and MUST NOT be lower.
 - `wcagVersion` MAY be later than the parent's and MUST NOT be earlier. Level and version are checked separately, so a journey at 2.1 AAA under a parent at 2.2 AA violates the floor. W3C states that content conforming to WCAG 2.2 also conforms to WCAG 2.0 and 2.1, so a later version is never a weaker floor ([WCAG 2.2 Abstract](https://www.w3.org/TR/WCAG22/#abstract)).
-- `additionalCriteria` lists WCAG success criteria above the declared level that the journey also commits to meet, by number (for example `"3.3.6"`). Each entry MUST exist in the declared WCAG version and MUST be above the declared level.
+- `additionalCriteria` lists WCAG success criteria above the declared level that the journey also commits to meet, by number (for example `"3.3.6"`). Each entry MUST exist in the declared WCAG version and MUST be above the declared level. At `wcagLevel: AAA` no criterion is above the declared level, so `additionalCriteria` MUST be empty. Both checks run against a table of each criterion's number, level and versions, generated from W3C's published `wcag.json` (v0.4.1, OQ-7).
 
 A journey that needs more than AA SHOULD declare AA plus named criteria in `additionalCriteria` instead of `wcagLevel: AAA`. W3C advises against requiring Level AAA as a general policy for entire sites, because some content cannot meet every AAA criterion ([WCAG 2.2 §5](https://www.w3.org/TR/WCAG22/#conformance)). For example, a regulatory-submission journey under a 2.2 AA Soul can declare 2.2 AA with `additionalCriteria: ["2.2.5", "3.3.6"]` (Re-authenticating and Error Prevention (All)).
 
@@ -297,7 +301,7 @@ Add to Soul DID schema AND Variant schema (per RFC-0017 §5.1):
   "$defs": {
     "Journey": {
       "type": "object",
-      "required": ["id", "scope", "states", "transitions", "completionCriteria", "accessibility"],
+      "required": ["id", "scope", "declaredAt", "states", "transitions", "completionCriteria", "accessibility"],
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
@@ -305,6 +309,7 @@ Add to Soul DID schema AND Variant schema (per RFC-0017 §5.1):
           "type": "string",
           "pattern": "^(soul|variant:[a-z][a-z0-9-]*)$"
         },
+        "declaredAt": { "type": "string", "format": "date" },
         "states": {
           "type": "array",
           "minItems": 2,
@@ -433,7 +438,7 @@ Soul DIDs without `journeys[]` are unchanged. Adding journeys is purely additive
 3. Provide deprecation window (default 90 days for journeys vs. 30 for variants — journeys carry more downstream code references)
 4. Emit `JourneyRemoved` event per RFC-0008 event taxonomy
 
-Journeys declared against v0.3 migrate to v0.4 as follows. `conformanceTarget: 100` is unchanged. A lower value has no equivalent, so the loader rejects it with a message naming the field (declare it as a success metric if it is still wanted). Replace `targetSeconds` with `target` plus `unit: seconds`. Add `unit` and `direction` to every metric. Add `auditCadence` where it is missing.
+Journeys declared against v0.3 migrate to v0.4 as follows. `conformanceTarget: 100` is unchanged. A lower value has no equivalent, so the loader rejects it with a message naming the field (declare it as a success metric if it is still wanted). Replace `targetSeconds` with `target` plus `unit: seconds`. Add `unit` and `direction` to every metric. Add `auditCadence` where it is missing. Add `declaredAt` (v0.4.1) to every journey; for a journey that already exists, use the date it was first declared.
 
 ## 7. Backward Compatibility
 
@@ -485,6 +490,11 @@ v0.4 follow-ups:
 - [ ] `orchestrator/src/journey-sa2-router.ts` and its tests: `3.0` removed from `WCAG_VERSIONS`; advisory renamed `wcag-version-not-latest` and fired for 2.0 and 2.1 when a journey is declared or its version changes; metric types gain `unit` and `direction` and drop `targetSeconds` (Engineering Authority)
 - [ ] `docs/operations/journey-metrics.md`: Cκ boost table per §5.4 (Engineering Authority)
 - [ ] RFC-0027 §5.1.1 aligned with v0.4 (Design Authority)
+
+v0.4.1 follow-ups (Engineering amendment to OQ-6 and OQ-7):
+
+- [ ] `AccessibilityAudit` resource schema and loader, `declaredAt` on journeys with its no-future and no-change checks, release detection from `releaseTagPattern`, and posture filtering by `accessibilityRegimes` (AISDLC-1403)
+- [ ] WCAG success criteria table generated from W3C `wcag.json`, the `additionalCriteria` checks, and the PR base-and-head emission of `wcag-version-not-latest` (AISDLC-1402)
 
 ## 10. Open Questions — resolved (operator walkthrough 2026-05-28 with full rubric)
 
@@ -543,6 +553,13 @@ v0.4 follow-ups:
 
    When an active compliance posture (RFC-0022) also sets an audit cadence, the audit is due on the earliest date that the journey's cadence or any posture cadence produces. This replaces ranking cadences by strictness, which fails when releases are less frequent than a posture's calendar cadence. A posture's `auditFrequency` (RFC-0022) maps `annual` to `annually` and `continuous` to `continuous`; `on-demand` sets no due date.
 
+   **Engineering amendment (v0.4.1, operator rubric 2026-11-23):** The v0.4 amendment depends on records and dates it does not define. Each item below was decided with the full rubric; the options set aside are named.
+
+   1. **Audit record.** The operator records an audit as an `AccessibilityAudit` resource, built the same way as `MetricSnapshot` (OQ-5): `metadata.journey` (path-style journey URI), `spec.auditedAt` (date), `spec.scope` (`full` or `partial`), `spec.statesCovered[]` (required when `partial`), and required `spec.auditor` and `spec.reportUrl` (the audit report, for example a VPAT or OpenACR file). The framework reads the date, scope and states; it does not verify the audit, the same attestation model as RFC-0022 `attestedBy`. Set aside: parsing OpenACR or EARL as the record (per product, with no journey or state coverage), a `lastAudit` field on the journey (keeps only the latest audit and mixes intent with observation), and inferring audits from labels or scans (contradicts item 2 above).
+   2. **Release and merge.** For `release-gated`, a release is a git tag matching the Soul's `accessibility.releaseTagPattern` in `journey-config` (default `v*`). The work it ships is the targeting merges between the previous matching tag and this one. For `continuous`, a change that targets the journey is a merged PR whose work item lists the journey in `targetedJourneys`. A team that deploys without tags declares `continuous`. Set aside: an operator-recorded `Release` resource (a forgotten record means the audit never falls due), collapsing `release-gated` into per-merge, and a `ReleaseSource` adapter in v1 (the v2 path, as OQ-5 deferred `MetricsAdapter`).
+   3. **Declaration date.** Each journey declares a required `declaredAt` date (§5.2). The declaration validator rejects a future date and, by comparing base and head on the PR that changes the declaration, any change to `declaredAt` on an existing journey. Set aside: the date of the commit that first adds the journey id (a shallow clone, the CI default, makes every journey look newly declared and never overdue, with nothing reporting it), and requiring an audit before a new journey scores normally (reverses the v0.4 grace rule).
+   4. **Postures.** Only regimes whose `id` is in the accessibility regime list feed the earliest-due-date rule: `Section-508`, `EN-301-549`, `EAA`, `ADA-Title-II`, `ADA-Title-III` and `AODA` by default, extended per org with `accessibility.accessibilityRegimes` in `journey-config`. Other regimes (SOC 2, HIPAA, PCI DSS) set no accessibility due date. A regime id outside the list falls back to the journey's own required `auditCadence`, so a misspelled id loses only the posture's tighter cadence. Set aside: a `domains` tag on RFC-0022 regimes (amends another RFC's schema for one consumer; the path if a second consumer appears), the journey cadence alone (the legal cadence would be advised, not enforced), and all postures as written (a SOC 2 `continuous` regime would force a per-merge accessibility audit on every journey).
+
 **OQ-7 — WCAG version evolution:** WCAG 3.0 is in development. How does the schema handle a new WCAG version landing — bump `wcagVersion` enum, leave existing journey declarations valid? Recommendation: additive enum (existing journeys keep their declared version; new journeys can pick the latest); document migration in a follow-on RFC when WCAG 3.0 normative.
 
    **Resolution (2026-05-28, full rubric):** **Additive enum + WCAG 3.0 scoring-model preview documented + `Decision: wcag-version-superseded` advisory on W3C-superseded versions.** Industry research: WCAG version history 2.0 (2008) → 2.1 (2018) → 2.2 (2023) → 3.0 (in development); W3C never formally removes versions but 2.1+ is recommended; WCAG 3.0 is a structural shift (binary conformance → Silver framework graduated scoring). Resolution pre-documents that the `conformanceTarget: number` field assumes binary; WCAG 3.0 normative will likely require `scoringModel: 'binary' | 'graduated'` discriminant in a future RFC. Pre-documenting captures the foreseeable scope. `Decision: wcag-version-superseded` advisory when adopter declares WCAG 2.0 (no scoring impact; visible-gap signal). **Selected over author's lean (additive enum + vague defer)** because both refinements implicit → re-discovery cost. **Selected over strict-force-latest** because contradicts version-bound audit reality (conformance audits target specific version). **Selected over schema-permissive** because loses validation value.
@@ -553,6 +570,11 @@ v0.4 follow-ups:
    2. `Decision: wcag-version-superseded` is renamed `wcag-version-not-latest`. W3C states that WCAG 2.2 does not deprecate or supersede 2.0 or 2.1, so "superseded" is inaccurate. The advisory fires when a journey declares a version older than the latest version in the enum (today, 2.0 or 2.1). It stays advisory with no scoring impact, and is emitted when a journey is declared or its version changes, instead of on every scoring pass.
    3. `wcagVersion` is tighten-only against the parent floor (§5.3).
    4. `conformanceTarget` is fixed at 100 and conformance is pass/fail (§5.3), so the note above about a numeric target no longer applies.
+
+   **Engineering amendment (v0.4.1, operator rubric 2026-11-23):**
+
+   1. **Emission point.** The declaration validator emits `wcag-version-not-latest` by comparing base and head on the PR that changes the declaration: when a journey is added at an older-than-latest version, or its `wcagVersion` changes to one. It keeps no state. A change that reaches `main` without a PR misses this advisory along with every other declaration check. Set aside: a scorer-side ledger per (journey, version) (persistent state for an advisory with no scoring impact), the PR check plus a ledger backstop, and emitting on every scoring pass (the noise item 2 removes).
+   2. **Criteria table.** The `additionalCriteria` checks (§5.3) run against a vendored table of each success criterion's number, level and versions, generated from W3C's `wcag.json` (https://www.w3.org/WAI/WCAG22/wcag.json) and committed with its source URL and fetch date. A test keeps the table's versions equal to the `wcagVersion` enum, so adding a version (by amendment, item 1) regenerates the table in the same change. Set aside: fetching `wcag.json` at load time (loads fail offline), a hand-written table, and checking only the number format (leaves the §5.3 MUSTs unenforced).
 
 **OQ-8 — Drift detection on state ID references:** §6.2 says substrate code referencing a removed state ID is a drift signal. How does the detector find these references — string match on the state ID, AST scan for typed references, or both? Recommendation: string match v1 (cheap, conservative); AST scan in a follow-on if false-positive rate is too high.
 
@@ -613,6 +635,15 @@ journey:
 
   accessibility:                             # OQ-6, amended v0.4 (auditCadence required; due dates per cadence)
     auditOverdueGracePolicy: graduated       # alternatives: binary-30d, hard-block
+    auditRecord: AccessibilityAudit          # v0.4.1: operator-supplied, like MetricSnapshot
+    releaseTagPattern: "v*"                  # v0.4.1: a matching git tag is a release for release-gated
+    accessibilityRegimes:                    # v0.4.1: RFC-0022 regime ids that feed the earliest-due-date rule
+      - Section-508
+      - EN-301-549
+      - EAA
+      - ADA-Title-II
+      - ADA-Title-III
+      - AODA
     graduatedThresholds:
       warnAt: 0                              # days past cadence
       reduced25At: 30
@@ -685,3 +716,4 @@ Validation criteria (Mo's edits welcome):
 | v0.3 | 2026-05-28 | dominique (Operator OQ walkthrough) | Full-rubric resolution of all 10 §10 OQs (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument per OQ). Resolutions: **(OQ-1)** per-org configurable journey count limits with defaults soft 10 / hard 50 (matches RFC-0017 OQ-1 per-org-config pattern; higher than variant 5/20 because journey count tracks user-flow surface). **(OQ-2)** per-org configurable state cardinality limits with defaults soft 12 / hard 100 (sanity guard, not architectural); concrete operator-actionable warning message pointing at v1 workaround. **(OQ-3)** schema-enforced flat (no nested journeys); future RFC via `Decision: journey-sub-flow-activation-request` at ≥2 distinct adopter requests (matches RFC-0017 OQ-2 + OQ-8 pattern). **(OQ-4)** closed enum for completion-criteria v1 (`terminal-success-state`, `all-states-reached`); future Decision-Catalog auto-promote on ≥2 requests; pre-recommended CEL (Google Common Expression Language) for v2 — captures industry consensus + signals adopters the answer is known. **(OQ-5)** operator-supplied `MetricSnapshot` resource for v1 + `Decision: journey-metric-stale` on stale data (>30d default, per-Soul configurable; warn-and-unknown, NOT fail-closed) + v2 trajectory pre-recommends `MetricsAdapter` pattern parallel to RFC-0030 SignalSourceAdapter. **(OQ-6)** graduated Eρ₅ degradation (0-30d warn / 30-60d -25% / 60-90d -50% / 90d+ blocking) + threshold Decisions + per-Soul `accessibility.auditOverdueGracePolicy` config (preserves stricter `binary-30d` / `hard-block` modes for SOC2/HIPAA shops). **(OQ-7)** additive WCAG-version enum + pre-documented scoring-model shift for WCAG 3.0 (binary → Silver framework graduated; may require `scoringModel` discriminant in future RFC) + `Decision: wcag-version-superseded` advisory on W3C-superseded version use. **(OQ-8)** AST scan from v1 reusing RFC-0009 §13 Rule #1 infrastructure (NOT string match — engine already exists; deprecation cost dominates). **(OQ-9)** v1 limitation with concrete per-soul-with-handoff workaround documented (shared `userId` / `sessionId` correlation, framework scores per-soul only) + future RFC via `Decision: cross-soul-journey-coordination-request`. **(OQ-10)** 4th rule in same §13 engine + concrete registration mechanism (`Tessellation§13RuleRegistry.register(rule)` + standard interface) — composes with OQ-8 + RFC-0028 OQ-7.2 unified-drift-detection direction. §10.1 added consolidating per-Soul / per-org `.ai-sdlc/journey-config.yaml` schema. Cross-cutting framing: operator-impacting journey-lifecycle events route through RFC-0035 G0 catalog. Frontmatter `requires` expanded: added RFC-0035 (catalog routing for journey Decisions). Lifecycle promoted Draft → Ready for Review. Implementation broken into 6 phase tasks: AISDLC-465 (Phase 1 schema additions + count/state limits + inheritance validator + nested rejection), AISDLC-466 (Phase 2 admission scorer composition + completion criteria), AISDLC-467 (Phase 3 §13 4th rule integration — JourneyStateIdDriftRule + Tessellation§13RuleRegistry), AISDLC-468 (Phase 4 MetricSnapshot resource + stale-metric Decision + accessibility cadence graduated degradation), AISDLC-469 (Phase 5 WCAG version evolution + superseded Decision + WCAG 3.0 forward-compat documentation), AISDLC-470 (Phase 6 InternalAdopter reference impl + glossary + conformance tests + cross-soul workaround docs). Engineering + Operator sign-off (Dominique) added; pending Design editorial pass from Mo + Practitioner validation per §11. |
 | v0.3.1 | 2026-10-22 | Morgan Hirtle | Editorial: example identifiers replaced with neutral placeholders. No normative change. |
 | v0.4 | 2026-11-23 | Morgan Hirtle | Design Authority editorial pass on §5.4 success metrics, the journey accessibility block and all ten §10 resolutions. Normative: `conformanceTarget` fixed at 100, so conformance is pass/fail (§5.3); `wcagVersion` floor added and `3.0` removed from the enum (§5.3, OQ-7); `additionalCriteria` added for AA plus named AAA criteria, replacing the AAA examples, with each entry required to exist in the declared version and sit above the declared level (§5.1, §5.3, §11); Eρ₅ elevation also counts a later `wcagVersion` and any `additionalCriteria` (§5.4, §6.2); `auditCadence` required, a full audit defined as an evaluation of every screen against all declared criteria, with no automated scan alone counting as an audit, due dates defined per cadence, a new journey counted as audited on its declaration date, `release-gated` and `continuous` audits allowed to cover only the states touched with a full audit due 12 months after the last full one, an audit clearing every earlier due date whose states it covers and a full audit clearing them all, and posture cadences combined by earliest due date with RFC-0022 `auditFrequency` mapped (OQ-6); success metrics gain required `unit` (with `seconds` and `count` 0 or more) and `direction`, `targetSeconds` is removed, the Cκ boost covers any metric past threshold and applies once per journey, and per-state metrics are not part of v1 (§5.4); `wcag-version-superseded` renamed `wcag-version-not-latest`, fired for 2.0 and 2.1 when a journey is declared or its version changes (OQ-7). Editorial: a Design Authority note on each §10 resolution; research figures marked as unverified; §6.2 and §7 aligned with these changes; W3C references added and corrected; §9 follow-ups extended. Engineering and Product re-confirmation pending. |
+| v0.4.1 | 2026-11-23 | Dominique Legault (Engineering Authority; operator rubric) | Engineering amendment to the v0.4 OQ-6 and OQ-7 amendments, defining the records and data they depend on; each item decided with the full rubric. Normative: an `AccessibilityAudit` resource shaped like `MetricSnapshot` (journey, `auditedAt`, `scope`, `statesCovered`, required `auditor` and `reportUrl`); a release for `release-gated` is a git tag matching the Soul's `releaseTagPattern` (default `v*`), and a change for `continuous` is a merged PR whose work item targets the journey; journeys declare a required `declaredAt` that MUST NOT be in the future or change; only regimes in the accessibility regime list (default Section-508, EN-301-549, EAA, ADA-Title-II, ADA-Title-III, AODA; extendable per org) feed the earliest-due-date rule; `wcag-version-not-latest` is emitted by the declaration validator comparing PR base and head; `additionalCriteria` checks run against a table generated from W3C `wcag.json`, and `additionalCriteria` MUST be empty at level AAA. §5.1, §5.2, §5.3, §6.1, §6.3, §9, §10.1 aligned. Engineering re-confirmed v0.4 and signed v0.4.1; Product re-confirmation and Design Authority review pending. |
