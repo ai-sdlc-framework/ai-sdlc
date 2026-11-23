@@ -230,6 +230,8 @@ export async function runDorCheckCli(): Promise<number> {
       );
       process.stdout.write(result.comment);
       if (!result.comment.endsWith('\n')) process.stdout.write('\n');
+    } else if (argv.task) {
+      process.stdout.write(`[dor-gate] DoR passed: ${result.taskFile} (${result.taskId})\n`);
     }
   }
 
