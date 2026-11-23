@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1391
 title: 'Planner notices go to the planner session socket and are never typed into its pane'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-22'
 labels:
