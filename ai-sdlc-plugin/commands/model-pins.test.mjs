@@ -157,10 +157,16 @@ describe('role pins equal .ai-sdlc/model-routing.yaml (AISDLC-982)', () => {
     });
   }
 
-  it('every cell names an existing agent or command', () => {
+  it('every cell names an existing agent or command, or is a session cell', () => {
     const names = new Set(files.map((f) => f.name));
-    const stray = Object.keys(cells).filter((n) => !names.has(n));
+    // A `<name>-session` cell routes a long-lived session, not a command file (AISDLC-1364).
+    const stray = Object.keys(cells).filter((n) => !names.has(n) && !n.endsWith('-session'));
     assert.deepEqual(stray, [], 'remove cells with no agent or command file');
+  });
+
+  it('the planner command runs opus and the planner session runs fable', () => {
+    assert.equal(cells.planner, 'opus');
+    assert.equal(cells['planner-session'], 'fable');
   });
 
   it('parseCells reads the wildcard cell of each role', () => {

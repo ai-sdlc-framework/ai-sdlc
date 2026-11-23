@@ -9,7 +9,7 @@ import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } f
 import path from 'node:path';
 import process from 'node:process';
 
-import { hostStallMs, lastTickInfo } from './host-liveness.js';
+import { hostStallMs, lastTickInfo, schedulerLateMs } from './host-liveness.js';
 import { peekQueue } from '../dispatch/board.js';
 import { reconcileLogPath } from './pr-rows.js';
 import { readTickRecord } from './tick-watchdog.js';
@@ -77,7 +77,9 @@ export function schedulerStatus(deps: HierarchyDeps): SchedulerStatus {
   const running =
     rec !== undefined && now - rec.startedAt > limitMs && (deps.isAlive ?? defaultIsAlive)(rec.pid);
   const queuedStale =
-    last !== undefined && last.ageSec * 1000 > limitMs && peekQueue(deps.boardDir).queued > 0;
+    last !== undefined &&
+    last.ageSec * 1000 > schedulerLateMs(deps.env) &&
+    peekQueue(deps.boardDir).queued > 0;
   if (running || queuedStale) {
     const ageSec = last?.ageSec ?? Math.round((now - (rec?.startedAt ?? now)) / 1000);
     return { state: 'up', pid, stalled: { ageSec } };
@@ -120,6 +122,29 @@ export function schedulerUp(
   writeFileSync(stateFile(deps.boardDir), JSON.stringify({ pid }) + '\n');
   deps.log(`scheduler starting (pid ${pid})`);
   return { state: 'up', pid };
+}
+
+/** Milliseconds `up` waits after the spawn before it checks the scheduler is still alive. */
+export const SCHEDULER_LIVENESS_MS = 1500;
+
+/**
+ * AISDLC-1357: a scheduler that exited right after the spawn leaves a pid file and a log line saying it
+ * started. Returns a warning with the log tail when the recorded process is gone, else undefined.
+ */
+export function schedulerLivenessWarning(deps: HierarchyDeps): string | undefined {
+  const pid = readPid(deps.boardDir);
+  if (pid !== undefined && (deps.isAlive ?? defaultIsAlive)(pid)) return undefined;
+  let tail = '';
+  try {
+    tail = readFileSync(reconcileLogPath(deps.boardDir), 'utf-8')
+      .trim()
+      .split('\n')
+      .slice(-3)
+      .join(' | ');
+  } catch {
+    /* no log */
+  }
+  return `reconcile scheduler exited right after it started${tail ? ` (log tail: ${tail})` : ''}; run \`cli-hierarchy up\` again after fixing it, see ${reconcileLogPath(deps.boardDir)}`;
 }
 
 /** Stop a recorded scheduler. Returns true when a record existed. */

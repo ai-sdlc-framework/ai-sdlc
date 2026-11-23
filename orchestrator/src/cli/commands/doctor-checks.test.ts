@@ -40,6 +40,7 @@ import {
   checkPluginInstallAmbiguity,
   checkReviewerAttributionResolver,
   checkAttestationGovernanceCheck,
+  checkRequiredContextsPosted,
   checkMarketplaceCatalogDrift,
   checkNpmDistTagReachability,
   checkUsageIngest,
@@ -49,11 +50,20 @@ import {
   parseEtimeSeconds,
   checkJudgmentLayer,
   checkRuntimeGitignore,
+  fixRuntimeGitignore,
   checkHierarchyLaunchEnv,
   checkVscodeHierarchyTerminals,
   fixVscodeHierarchyTerminals,
   checkHierarchyModule,
   checkStaleRepoBuild,
+  type DoctorCheckResult,
+  checkGhAuth,
+  checkBacklogTasks,
+  fixBacklogTasks,
+  checkWebhookConfig,
+  checkSchedulerAlive,
+  checkNodeVersion,
+  checkReviewConfig,
   checkLeasePushPreflight,
   checkCiQueue,
   checkWorktreeHooks,
@@ -69,6 +79,8 @@ import {
   fixConfigManifest,
   fixWorktreeHooks,
   checkForcePushPolicy,
+  checkMergePolicy,
+  checkPluginInstallEntries,
   readForcePushPolicy,
   runDoctorChecks,
   runDoctorFixes,
@@ -81,6 +93,7 @@ import {
 } from './doctor-checks.js';
 import { SPAWN_FAILED_EXIT_CODE, buildProductionDoctorAdapters } from './doctor.js';
 import { cleanGitEnv } from '../../runtime/git-env.js';
+import { RUNTIME_GITIGNORE_PATHS } from '../../runtime-gitignore.js';
 import { setClock } from '../../clock.js';
 
 let tmpDir: string;
@@ -1325,65 +1338,64 @@ describe('checkRuntimeGitignore', () => {
   const gitSays = (exitCode: number) =>
     makeAdapters({ runCommand: () => ({ stdout: '', exitCode }) });
 
-  it('warns when .gitignore lacks the artifacts entry, and names the fix', () => {
-    writeFileSync(join(tmpDir, '.gitignore'), 'node_modules/\n.ai-sdlc/state/\n');
+  const ALL = RUNTIME_GITIGNORE_PATHS.join('\n') + '\n';
+  const OLD_BLOCK =
+    '# ai-sdlc:runtime-gitignore\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n.ai-sdlc/artifacts/\n.ai-sdlc/subagent-sessions/\n';
+
+  it('fails on the old five-entry block and names each missing entry', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), OLD_BLOCK);
     const r = checkRuntimeGitignore(makeCtx(noGit()));
-    expect(r.severity).toBe('warn');
-    expect(r.title).toContain('.ai-sdlc/artifacts/');
-    expect(r.remediation).toContain('.ai-sdlc/artifacts/');
-    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: true });
+    expect(r.severity).toBe('fail');
+    for (const entry of RUNTIME_GITIGNORE_PATHS.slice(5)) expect(r.title).toContain(entry);
+    expect(r.title).toContain('.ai-sdlc/dispatch/');
+    expect(r.title).toContain('.ai-sdlc/transcripts/');
+    expect(r.title).not.toContain('.ai-sdlc/state.db,');
+    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: true, missingCount: 15 });
   });
 
-  it('warns when there is no .gitignore at all', () => {
+  it('fails without the artifacts/_dor and artifacts/_capabilities entries, passes once fix adds them (AISDLC-1366)', () => {
+    const withoutArtifacts = ALL.replace('artifacts/_dor/\n', '').replace(
+      'artifacts/_capabilities/\n',
+      '',
+    );
+    writeFileSync(join(tmpDir, '.gitignore'), `# ai-sdlc:runtime-gitignore\n${withoutArtifacts}`);
+    const ctx = makeCtx(noGit());
+    const r = checkRuntimeGitignore(ctx);
+    expect(r.severity).toBe('fail');
+    expect(r.title).toContain('artifacts/_dor/');
+    expect(r.title).toContain('artifacts/_capabilities/');
+    expect(fixRuntimeGitignore(ctx).applied).toBe(true);
+    expect(checkRuntimeGitignore(ctx).severity).toBe('pass');
+  });
+
+  it('fails when there is no .gitignore at all', () => {
     const r = checkRuntimeGitignore(makeCtx(noGit()));
-    expect(r.severity).toBe('warn');
+    expect(r.severity).toBe('fail');
     expect(r.title).toMatch(/no \.gitignore found/);
-    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: false });
+    expect(r.anonymizableEvidence).toMatchObject({ gitignorePresent: false });
   });
 
-  it('is quiet when the entry is present', () => {
-    writeFileSync(join(tmpDir, '.gitignore'), '# ai-sdlc:runtime-gitignore\n.ai-sdlc/artifacts/\n');
+  it('passes when every entry is written', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), `# ai-sdlc:runtime-gitignore\n${ALL}`);
     const r = checkRuntimeGitignore(makeCtx(noGit()));
     expect(r.severity).toBe('pass');
     expect(r.remediation).toBeUndefined();
   });
 
-  it.each(['.ai-sdlc/artifacts', '/.ai-sdlc/artifacts/', '.ai-sdlc/artifacts/  '])(
-    'accepts the equivalent spelling %j',
-    (line) => {
-      writeFileSync(join(tmpDir, '.gitignore'), `${line}\n`);
-      expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
-    },
-  );
-
-  it('does not count a different directory or a comment as covering the entry', () => {
-    writeFileSync(join(tmpDir, '.gitignore'), '# .ai-sdlc/artifacts/\n.ai-sdlc/artifacts-old/\n');
-    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
-  });
-
-  it('warns when a later line negates the entry, or the entry is indented', () => {
-    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n!.ai-sdlc/artifacts/\n');
-    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
-    writeFileSync(join(tmpDir, '.gitignore'), '  .ai-sdlc/artifacts/\n');
-    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
-  });
-
-  it.each(['artifacts/', '.ai-sdlc/', '.ai-sdlc/*', '**/artifacts/', '.ai-sdlc/artifacts/*'])(
-    'text fallback: a broader line %j already ignores the directory',
-    (line) => {
-      writeFileSync(join(tmpDir, '.gitignore'), `${line}\n`);
-      expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
-    },
-  );
-
-  it('text fallback: `.ai-sdlc/*` then `!.ai-sdlc/artifacts` re-includes it, but `.ai-sdlc/` then the same `!` cannot', () => {
-    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/*\n!.ai-sdlc/artifacts\n');
-    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('warn');
-    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/\n!.ai-sdlc/artifacts\n');
+  it.each([
+    '.ai-sdlc/*\n.active-task\n.worktrees/\nartifacts/',
+    '.ai-sdlc/\n.active-task\n.worktrees/\nartifacts/',
+  ])('passes when broader lines cover every entry (%j)', (text) => {
+    writeFileSync(join(tmpDir, '.gitignore'), `${text}\n`);
     expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('pass');
   });
 
-  it('asks git about the project directory and trusts a yes over the text', () => {
+  it('does not count a comment as covering an entry', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), `# ${ALL.split('\n').join('\n# ')}\n`);
+    expect(checkRuntimeGitignore(makeCtx(noGit())).severity).toBe('fail');
+  });
+
+  it('asks git about every entry and trusts a yes over the text', () => {
     writeFileSync(join(tmpDir, '.gitignore'), 'node_modules/\n');
     const calls: string[][] = [];
     const adapters = makeAdapters({
@@ -1393,26 +1405,53 @@ describe('checkRuntimeGitignore', () => {
       },
     });
     expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('pass');
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(RUNTIME_GITIGNORE_PATHS.length);
     expect(calls[0].slice(0, 3)).toEqual(['git', '-C', tmpDir]);
     expect(calls[0]).toContain('check-ignore');
-    expect(calls[0].at(-1)).toBe('.ai-sdlc/artifacts/probe');
   });
 
-  it('trusts git saying not ignored over text that looks covered (a nested rule re-includes it)', () => {
-    writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
-    expect(checkRuntimeGitignore(makeCtx(gitSays(1))).severity).toBe('warn');
+  it('trusts git saying not ignored over text that looks covered', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), ALL);
+    expect(checkRuntimeGitignore(makeCtx(gitSays(1))).severity).toBe('fail');
   });
 
   it.each([128, SPAWN_FAILED_EXIT_CODE])(
     'falls back to the text when git cannot answer (exit %i)',
     (code) => {
-      writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
+      writeFileSync(join(tmpDir, '.gitignore'), ALL);
       expect(checkRuntimeGitignore(makeCtx(gitSays(code))).severity).toBe('pass');
       writeFileSync(join(tmpDir, '.gitignore'), 'dist/\n');
-      expect(checkRuntimeGitignore(makeCtx(gitSays(code))).severity).toBe('warn');
+      expect(checkRuntimeGitignore(makeCtx(gitSays(code))).severity).toBe('fail');
     },
   );
+
+  it('fix adds the missing entries under the same sentinel block, then passes, and a second fix changes nothing', () => {
+    writeFileSync(join(tmpDir, '.gitignore'), `node_modules/\n\n${OLD_BLOCK}`);
+    const ctx = makeCtx(noGit());
+    const first = fixRuntimeGitignore(ctx);
+    expect(first.applied).toBe(true);
+    const after = readFileSync(join(tmpDir, '.gitignore'), 'utf-8');
+    expect(after.split('# ai-sdlc:runtime-gitignore').length).toBe(2);
+    expect(after).toContain('.ai-sdlc/dispatch/');
+    expect(checkRuntimeGitignore(ctx).severity).toBe('pass');
+    const second = fixRuntimeGitignore(ctx);
+    expect(second.applied).toBe(false);
+    expect(readFileSync(join(tmpDir, '.gitignore'), 'utf-8')).toBe(after);
+  });
+
+  it('fix creates a sentinel block when there is none, and from no .gitignore', () => {
+    const ctx = makeCtx(noGit());
+    expect(fixRuntimeGitignore(ctx).applied).toBe(true);
+    expect(readFileSync(join(tmpDir, '.gitignore'), 'utf-8')).toBe(
+      `# ai-sdlc:runtime-gitignore\n${ALL}`,
+    );
+    writeFileSync(join(tmpDir, '.gitignore'), 'dist/\n');
+    expect(fixRuntimeGitignore(ctx).applied).toBe(true);
+    expect(readFileSync(join(tmpDir, '.gitignore'), 'utf-8')).toBe(
+      `dist/\n# ai-sdlc:runtime-gitignore\n${ALL}`,
+    );
+    expect(checkRuntimeGitignore(ctx).severity).toBe('pass');
+  });
 
   it('with the production adapter and no git binary on PATH, falls back to the text (no exit status at all)', () => {
     const savedPath = process.env.PATH;
@@ -1420,10 +1459,10 @@ describe('checkRuntimeGitignore', () => {
     try {
       const adapters = makeAdapters({ runCommand: buildProductionDoctorAdapters().runCommand });
       expect(adapters.runCommand('git', ['--version']).exitCode).toBe(SPAWN_FAILED_EXIT_CODE);
-      writeFileSync(join(tmpDir, '.gitignore'), '.ai-sdlc/artifacts/\n');
+      writeFileSync(join(tmpDir, '.gitignore'), ALL);
       expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('pass');
       writeFileSync(join(tmpDir, '.gitignore'), 'dist/\n');
-      expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('warn');
+      expect(checkRuntimeGitignore(makeCtx(adapters)).severity).toBe('fail');
     } finally {
       process.env.PATH = savedPath;
     }
@@ -1579,8 +1618,8 @@ describe('checkCiQueue (AISDLC-799)', () => {
   const ctxWith = (stdout: string, exitCode = 0) =>
     makeCtx(makeAdapters({ runCommand: () => ({ stdout, exitCode }) }));
 
-  it('is quiet below both thresholds', () => {
-    expect(checkCiQueue(ctxWith(queued(40, '2026-10-10T20:50:00Z')))).toEqual([]);
+  it('answers without a finding below both thresholds', () => {
+    expectAnswered(checkCiQueue(ctxWith(queued(40, '2026-10-10T20:50:00Z'))));
   });
 
   it('warns when more than 40 runs are queued', () => {
@@ -1597,19 +1636,19 @@ describe('checkCiQueue (AISDLC-799)', () => {
     expect(r[0].title).toContain('oldest queued 20 min');
   });
 
-  it('is quiet at exactly 15 minutes and when nothing is queued', () => {
-    expect(checkCiQueue(ctxWith(queued(1, '2026-10-10T20:45:00Z')))).toEqual([]);
-    expect(checkCiQueue(ctxWith('[]'))).toEqual([]);
+  it('answers without a finding at exactly 15 minutes and when nothing is queued', () => {
+    expectAnswered(checkCiQueue(ctxWith(queued(1, '2026-10-10T20:45:00Z'))));
+    expectAnswered(checkCiQueue(ctxWith('[]')));
   });
 
   it('ignores entries without a parseable createdAt', () => {
-    expect(checkCiQueue(ctxWith(JSON.stringify([{ createdAt: 5 }, {}])))).toEqual([]);
+    expectAnswered(checkCiQueue(ctxWith(JSON.stringify([{ createdAt: 5 }, {}]))));
   });
 
-  it('is quiet when gh fails or returns unusable output', () => {
-    expect(checkCiQueue(ctxWith('', 1))).toEqual([]);
-    expect(checkCiQueue(ctxWith('not json'))).toEqual([]);
-    expect(checkCiQueue(ctxWith('{}'))).toEqual([]);
+  it('answers without a finding when gh fails or returns unusable output', () => {
+    expectAnswered(checkCiQueue(ctxWith('', 1)));
+    expectAnswered(checkCiQueue(ctxWith('not json')));
+    expectAnswered(checkCiQueue(ctxWith('{}')));
   });
 
   it('is registered and report-only', () => {
@@ -1678,9 +1717,25 @@ describe('DOCTOR_CHECKS registry', () => {
   });
 });
 
+/** A check that has nothing to report still answers, and never fails. */
+function expectAnswered(results: DoctorCheckResult[]): void {
+  expect(results.length).toBeGreaterThan(0);
+  expect(results.some((r) => r.severity === 'fail')).toBe(false);
+}
+
 describe('runDoctorChecks + summarizeDoctorResults', () => {
   it('a known-good project (no plugin dir, no attestation artifacts, clean gh) reports zero fails', () => {
-    const results = runDoctorChecks(makeCtx(makeAdapters()));
+    const results = runDoctorChecks(
+      makeCtx(
+        makeAdapters({
+          runCommand: (_cmd, args) => ({
+            stdout: '',
+            exitCode:
+              (args.includes('check-ignore') && args.includes('-q')) || args[0] === 'auth' ? 0 : 1,
+          }),
+        }),
+      ),
+    );
     const summary = summarizeDoctorResults(results);
     expect(summary.fail).toBe(0);
     expect(summary.total).toBe(results.length);
@@ -1702,6 +1757,9 @@ describe('runDoctorChecks + summarizeDoctorResults', () => {
       makeCtx(
         makeAdapters({
           runCommand: (cmd, args) => {
+            if (args.includes('check-ignore') && args.includes('-q'))
+              return { stdout: '', exitCode: 0 };
+            if (cmd === 'gh' && args[0] === 'auth') return { stdout: '', exitCode: 0 };
             if (cmd === 'gh' && args[0] === 'repo') return { stdout: 'acme/widgets', exitCode: 0 };
             if (cmd === 'gh' && args[0] === 'api') {
               return {
@@ -1790,7 +1848,7 @@ describe('checkOrphanedVitestWorkers', () => {
     expect(parseEtimeSeconds('garbage')).toBeUndefined();
   });
 
-  it('is quiet when there are no orphans', () => {
+  it('answers without a finding when there are no orphans', () => {
     const adapters = makeAdapters({
       runCommand: () =>
         psOut([
@@ -1799,7 +1857,7 @@ describe('checkOrphanedVitestWorkers', () => {
           '  300     1 00:30 node (vitest 3)', // orphan but younger than 2 minutes
         ]),
     });
-    expect(checkOrphanedVitestWorkers(makeCtx(adapters))).toEqual([]);
+    expectAnswered(checkOrphanedVitestWorkers(makeCtx(adapters)));
   });
 
   it('warns on vitest workers with ppid 1 older than 2 minutes and prints the kill command', () => {
@@ -1824,7 +1882,7 @@ describe('checkOrphanedVitestWorkers', () => {
           makeAdapters({ runCommand: () => psOut([`  500     1 ${etime} node (vitest 1)`]) }),
         ),
       );
-    expect(at('02:00')).toEqual([]);
+    expectAnswered(at('02:00'));
     expect(at('02:01')).toHaveLength(1);
   });
 
@@ -1841,9 +1899,9 @@ describe('checkOrphanedVitestWorkers', () => {
     expect(r.remediation).toMatch(/kill 602$/);
   });
 
-  it('is quiet when ps fails', () => {
+  it('answers without a finding when ps fails', () => {
     const adapters = makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 1 }) });
-    expect(checkOrphanedVitestWorkers(makeCtx(adapters))).toEqual([]);
+    expectAnswered(checkOrphanedVitestWorkers(makeCtx(adapters)));
   });
 
   it('is registered', () => {
@@ -1919,20 +1977,20 @@ describe('worktree-hooks check', () => {
     expect(results[0].title).toContain(join(tmpDir, HOOKS_REL));
   });
 
-  it('is quiet when every worktree has its hook', () => {
+  it('answers without a finding when every worktree has its hook', () => {
     writeHook(tmpDir);
     addWorktree('aisdlc-1', { hook: true });
-    expect(checkWorktreeHooks(makeCtx(makeHookAdapters()))).toEqual([]);
+    expectAnswered(checkWorktreeHooks(makeCtx(makeHookAdapters())));
   });
 
-  it('is quiet when the main checkout has no pre-push hook (none expected)', () => {
+  it('answers without a finding when the main checkout has no pre-push hook (none expected)', () => {
     addWorktree('aisdlc-1');
-    expect(checkWorktreeHooks(makeCtx(makeHookAdapters()))).toEqual([]);
+    expectAnswered(checkWorktreeHooks(makeCtx(makeHookAdapters())));
   });
 
-  it('is quiet when git cannot resolve the hooks directory', () => {
+  it('answers without a finding when git cannot resolve the hooks directory', () => {
     addWorktree('aisdlc-1');
-    expect(checkWorktreeHooks(makeCtx(makeAdapters()))).toEqual([]);
+    expectAnswered(checkWorktreeHooks(makeCtx(makeAdapters())));
   });
 
   it('--fix runs prepare only where node_modules exists and reports the skipped worktree', () => {
@@ -2011,14 +2069,14 @@ describe('parent-checkout-state check', () => {
     expect(results[0].remediation).toContain('reset --hard origin/main');
   });
 
-  it('is quiet when the checkout is clean', () => {
-    expect(checkParentCheckoutState(makeCtx(gitAdapters({})))).toEqual([]);
+  it('answers without a finding when the checkout is clean', () => {
+    expectAnswered(checkParentCheckoutState(makeCtx(gitAdapters({}))));
   });
 
-  it('is quiet when not on main (feature worktrees have local changes)', () => {
-    expect(
+  it('answers without a finding when not on main (feature worktrees have local changes)', () => {
+    expectAnswered(
       checkParentCheckoutState(makeCtx(gitAdapters({ branch: 'feat/x', staged: 'a.ts\n' }))),
-    ).toEqual([]);
+    );
   });
 
   it('is registered and report-only', () => {
@@ -2269,14 +2327,14 @@ describe('hierarchy-launch-env check', () => {
     expect(results[0].remediation).toContain('cli-hierarchy down --role <role>');
   });
 
-  it('is quiet when every running session carries the env, has no roster, or tmux cannot say', () => {
+  it('answers without a finding when every running session carries the env, has no roster, or tmux cannot say', () => {
     const good =
       'AI_SDLC_HIERARCHY_SESSION=p-executor-alpha AI_SDLC_HIERARCHY_ROLE=executor claude';
     const both = { 'p-executor-alpha': good, 'p-executor-beta': good.replace('alpha', 'beta') };
-    expect(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, JSON.stringify(roster))))).toEqual([]);
-    expect(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, null)))).toEqual([]);
-    expect(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, 'not json')))).toEqual([]);
-    expect(checkHierarchyLaunchEnv(makeCtx(adaptersFor({}, JSON.stringify(roster))))).toEqual([]);
+    expectAnswered(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, JSON.stringify(roster)))));
+    expectAnswered(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, null))));
+    expectAnswered(checkHierarchyLaunchEnv(makeCtx(adaptersFor(both, 'not json'))));
+    expectAnswered(checkHierarchyLaunchEnv(makeCtx(adaptersFor({}, JSON.stringify(roster)))));
   });
 
   it('is registered', () => {
@@ -2299,9 +2357,12 @@ describe('checkStaleRepoBuild (AISDLC-988)', () => {
     expect(results[0].remediation).toContain('pnpm --filter @ai-sdlc/pipeline-cli build');
   });
 
-  it('is quiet when the build is fresh or the repo has no resolve script', () => {
-    expect(checkStaleRepoBuild(makeCtx(withScript(0)))).toEqual([]);
-    expect(checkStaleRepoBuild(makeCtx(makeAdapters({ exists: () => false })))).toEqual([]);
+  it('passes when the build is fresh, and says it does not apply without a resolve script', () => {
+    expect(checkStaleRepoBuild(makeCtx(withScript(0)))[0]?.severity).toBe('pass');
+    const na = checkStaleRepoBuild(makeCtx(makeAdapters({ exists: () => false })));
+    expect(na).toHaveLength(1);
+    expect(na[0]?.severity).toBe('pass');
+    expect(na[0]?.title).toContain('not applicable');
   });
 
   it('is registered', () => {
@@ -2447,8 +2508,8 @@ describe('checkLeasePushPreflight (AISDLC-798)', () => {
         cmd === 'git' ? { stdout: 'ai-sdlc/aisdlc-9-x\n', exitCode: 0 } : { stdout, exitCode: 0 },
     });
 
-  it('is quiet without --task', () => {
-    expect(checkLeasePushPreflight(ctxWith(makeAdapters(), null))).toEqual([]);
+  it('answers without a finding without --task', () => {
+    expectAnswered(checkLeasePushPreflight(ctxWith(makeAdapters(), null)));
   });
 
   it('fails when the task has no worktree', () => {
@@ -2614,15 +2675,26 @@ describe('hierarchy-module check', () => {
       }),
     );
 
-  it('is quiet without a roster or on a bad one', () => {
-    expect(checkHierarchyModule(ctxFor(null, null))).toEqual([]);
-    expect(checkHierarchyModule(ctxFor(null, 'nope'))).toEqual([]);
-    expect(checkHierarchyModule(ctxFor(null, '{}'))).toEqual([]);
+  it('warns naming cli-hierarchy up without a roster, fails on an unreadable one', () => {
+    const none = checkHierarchyModule(ctxFor(null, null));
+    expect(none).toHaveLength(1);
+    expect(none[0]?.severity).toBe('warn');
+    expect(none[0]?.remediation).toContain('cli-hierarchy up');
+    expect(checkHierarchyModule(ctxFor(null, 'nope'))[0]?.severity).toBe('fail');
+    expect(checkHierarchyModule(ctxFor(null, '{}'))[0]?.severity).toBe('fail');
+  });
+
+  it('warns when the roster has no running dispatch session', () => {
+    const r = checkHierarchyModule(ctxFor(null, JSON.stringify({ sessions: [] })));
+    expect(r[0]?.severity).toBe('warn');
+    expect(r[0]?.remediation).toContain('cli-hierarchy up');
   });
 
   it('passes on a fresh loaded heartbeat', () => {
     const f = JSON.stringify({ state: 'loaded', at: new Date().toISOString() });
-    expect(checkHierarchyModule(ctxFor(f))).toEqual([]);
+    const r = checkHierarchyModule(ctxFor(f));
+    expect(r).toHaveLength(1);
+    expect(r[0]?.severity).toBe('pass');
   });
 
   it('fails on refused, absent, stale and unreadable files', () => {
@@ -2635,6 +2707,14 @@ describe('hierarchy-module check', () => {
     expect(checkHierarchyModule(ctxFor('garbage'))[0]?.title).toContain('absent');
     const stale = JSON.stringify({ state: 'loaded', at: '2020-01-01T00:00:00Z' });
     expect(checkHierarchyModule(ctxFor(stale))[0]?.title).toContain('stale');
+  });
+
+  it('fails on a failing heartbeat and names the reason (AISDLC-1358)', () => {
+    const r = checkHierarchyModule(
+      ctxFor(JSON.stringify({ state: 'failing', reason: 'Cannot find module', at: new Date() })),
+    );
+    expect(r[0]?.id).toBe('hierarchy-module');
+    expect(r[0]?.title).toContain('p-dispatch failing: Cannot find module');
   });
 
   it('is registered', () => {
@@ -2682,9 +2762,9 @@ describe('vscode-hierarchy-terminals check', () => {
 
   const win = (iso: string, folder = '/proj') => ({ activatedAt: iso, folders: [folder] });
 
-  it('is quiet outside VS Code', () => {
-    expect(checkVscodeHierarchyTerminals(setup({}).ctx)).toEqual([]);
-    expect(checkVscodeHierarchyTerminals(setup({ term: 'iTerm.app' }).ctx)).toEqual([]);
+  it('answers without a finding outside VS Code', () => {
+    expectAnswered(checkVscodeHierarchyTerminals(setup({}).ctx));
+    expectAnswered(checkVscodeHierarchyTerminals(setup({ term: 'iTerm.app' }).ctx));
   });
 
   it('warns with the install command when the extension is missing', () => {
@@ -2831,5 +2911,337 @@ describe('hook-env-hygiene check', () => {
       },
     });
     expect(checkHookEnvHygiene(makeCtx(adapters, repoRoot)).severity).toBe('pass');
+  });
+});
+
+describe('AISDLC-1327: plugin install entries', () => {
+  function layout(entries: unknown[] | null, versions = ['1.0.0', '2.0.0']) {
+    const home = join(tmpDir, '__home__');
+    const cache = join(home, '.claude', 'plugins', 'cache', 'mp', 'ai-sdlc');
+    for (const v of versions) {
+      mkdirSync(join(cache, v), { recursive: true });
+      writeFileSync(join(cache, v, 'plugin.json'), JSON.stringify({ version: v }));
+    }
+    const registry = join(home, '.claude', 'plugins', 'installed_plugins.json');
+    if (entries) {
+      writeFileSync(registry, JSON.stringify({ version: 2, plugins: { 'ai-sdlc@mp': entries } }));
+    }
+    const adapters = makeAdapters({
+      listDir: (p) => {
+        try {
+          return readdirSync(p);
+        } catch {
+          return [];
+        }
+      },
+    });
+    return { cache, registry, ctx: makeCtx(adapters, join(tmpDir, 'proj', 'sub')) };
+  }
+
+  it('resolvePluginInstall prefers the matching project entry over the user entry', () => {
+    const { cache, ctx } = layout([
+      {
+        scope: 'user',
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/2.0.0'),
+      },
+      {
+        scope: 'project',
+        projectPath: join(tmpDir, 'proj'),
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/1.0.0'),
+        version: '1.0.0',
+      },
+    ]);
+    expect(resolvePluginInstall(ctx)?.path).toBe(join(cache, '1.0.0'));
+  });
+
+  it('falls back to the user entry when no project entry matches', () => {
+    const { cache, ctx } = layout([
+      {
+        scope: 'project',
+        projectPath: '/elsewhere',
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/2.0.0'),
+      },
+      {
+        scope: 'user',
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/1.0.0'),
+      },
+    ]);
+    expect(resolvePluginInstall(ctx)?.path).toBe(join(cache, '1.0.0'));
+  });
+
+  it('takes the nearest ancestor when two project entries match', () => {
+    const { cache, ctx } = layout([
+      {
+        scope: 'project',
+        projectPath: tmpDir,
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/2.0.0'),
+      },
+      {
+        scope: 'local',
+        projectPath: join(tmpDir, 'proj'),
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/1.0.0'),
+      },
+    ]);
+    expect(resolvePluginInstall(ctx)?.path).toBe(join(cache, '1.0.0'));
+  });
+
+  it('check warns for a stale entry naming its project path and version', () => {
+    const { ctx } = layout([
+      {
+        scope: 'project',
+        projectPath: '/old/project',
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/1.0.0'),
+        version: '1.0.0',
+      },
+    ]);
+    const r = checkPluginInstallEntries(ctx);
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('/old/project');
+    expect(r.title).toContain('v1.0.0');
+  });
+
+  it('check fails when the project entry points at a missing folder', () => {
+    const { ctx } = layout([
+      { scope: 'project', projectPath: join(tmpDir, 'proj'), installPath: join(tmpDir, 'gone') },
+    ]);
+    expect(checkPluginInstallEntries(ctx).severity).toBe('fail');
+  });
+
+  it('check passes without a registry file and when every entry is newest', () => {
+    expect(checkPluginInstallEntries(layout(null).ctx).severity).toBe('pass');
+    const { ctx } = layout([
+      {
+        scope: 'user',
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/2.0.0'),
+        version: '2.0.0',
+      },
+    ]);
+    const r = checkPluginInstallEntries(ctx);
+    expect(r.severity).toBe('pass');
+  });
+
+  it('writes nothing: cache folders and registry stay byte-identical after check and fix', () => {
+    const { cache, registry, ctx } = layout([
+      {
+        scope: 'project',
+        projectPath: '/old/project',
+        installPath: join(tmpDir, '__home__/.claude/plugins/cache/mp/ai-sdlc/1.0.0'),
+        version: '1.0.0',
+      },
+    ]);
+    const before = readFileSync(registry, 'utf-8');
+    checkPluginInstallEntries(ctx);
+    const check = DOCTOR_CHECKS.find((c) => c.id === 'plugin-install-entries')!;
+    expect(check.fix).toBeUndefined();
+    runDoctorFixes(ctx, [check]);
+    expect(readFileSync(registry, 'utf-8')).toBe(before);
+    expect(readdirSync(cache).sort()).toEqual(['1.0.0', '2.0.0']);
+  });
+
+  it('is registered in the doctor registry', () => {
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('plugin-install-entries');
+  });
+});
+
+// ── checkRequiredContextsPosted (AISDLC-1352) ───────────────────────────
+
+describe('checkRequiredContextsPosted (AISDLC-1352)', () => {
+  const GATE = 'jobs:\n  gate:\n    name: ai-sdlc/pr-ready\n    runs-on: ubuntu-latest\n';
+  const UPLOAD = 'jobs:\n  cov:\n    steps:\n      - uses: codecov/codecov-action@v5\n';
+  const run = (contexts: string[], workflows: Record<string, string>, ghFails = false) =>
+    checkRequiredContextsPosted(
+      makeCtx(
+        makeAdapters({
+          listFiles: () => Object.keys(workflows),
+          readFile: (p) => workflows[p.split('/').pop() ?? ''] ?? null,
+          runCommand: (_cmd, args) => {
+            if (ghFails) return { stdout: 'boom', exitCode: 1 };
+            if (args[0] === 'repo') return { stdout: 'o/r main', exitCode: 0 };
+            return {
+              stdout: JSON.stringify({ required_status_checks: { contexts } }),
+              exitCode: 0,
+            };
+          },
+        }),
+      ),
+    );
+
+  it('fails and names codecov/patch when nothing uploads to Codecov', () => {
+    const r = run(['ai-sdlc/pr-ready', 'codecov/patch'], { 'gate.yml': GATE });
+    expect(r.severity).toBe('fail');
+    expect(r.title).toContain('codecov/patch');
+    expect(r.title).not.toContain('ai-sdlc/pr-ready`');
+  });
+
+  it('passes when every context is a job name or an uploaded Codecov check', () => {
+    const r = run(['ai-sdlc/pr-ready', 'codecov/patch'], { 'gate.yml': GATE, 'ci.yml': UPLOAD });
+    expect(r.severity).toBe('pass');
+  });
+
+  it('matches a templated job name', () => {
+    const wf = 'jobs:\n  t:\n    name: test (${{ matrix.node }})\n';
+    expect(run(['test (20)'], { 'ci.yml': wf }).severity).toBe('pass');
+  });
+
+  it('reports not checked (warn, not pass) when gh api fails', () => {
+    const r = run(['x'], { 'gate.yml': GATE }, true);
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('not checked');
+  });
+
+  it('reports not checked when no workflow files exist', () => {
+    const r = run(['ai-sdlc/pr-ready'], {});
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('not checked');
+  });
+});
+
+describe('checkMergePolicy (AISDLC-1351)', () => {
+  const run = (yaml: string | null) => {
+    if (yaml !== null) {
+      mkdirSync(join(tmpDir, '.ai-sdlc'), { recursive: true });
+      writeFileSync(join(tmpDir, '.ai-sdlc', 'agent-role.yaml'), yaml);
+    }
+    return checkMergePolicy(makeCtx(makeAdapters()));
+  };
+  const gov = (body: string) => `spec:\n  governance:\n${body}`;
+
+  it('warns with no file and fails on unreadable YAML or no governance block', () => {
+    expect(run(null).severity).toBe('warn');
+    expect(checkMergePolicy(makeCtx(makeAdapters({ readFile: () => 'a: [' }))).severity).toBe(
+      'fail',
+    );
+    expect(run('spec:\n  role: x\n').severity).toBe('fail');
+  });
+
+  it('fails when a key is missing, malformed, or not a list', () => {
+    expect(run(gov('    allowMerge: never\n')).title).toContain('mergeAuthors, operational');
+    const bad = run(gov('    allowMerge: yes\n    mergeAuthors: []\n    operational: []\n'));
+    expect(bad.severity).toBe('fail');
+    expect(bad.title).toContain('allowMerge');
+    expect(
+      run(gov('    allowMerge: never\n    mergeAuthors: a\n    operational: []\n')).severity,
+    ).toBe('fail');
+  });
+
+  it('passes with the three keys stated, saying when merging is off', () => {
+    const never = run(gov('    allowMerge: never\n    mergeAuthors: []\n    operational: []\n'));
+    expect(never.severity).toBe('pass');
+    expect(never.title).toContain('merging is off');
+    const on = run(
+      gov(
+        '    allowMerge: onGreenClean\n    mergeAuthors: [a]\n    operational: [land-eligible-prs]\n',
+      ),
+    );
+    expect(on.severity).toBe('pass');
+    expect(on.title).not.toContain('merging is off');
+  });
+});
+
+// ── Prerequisite checks (AISDLC-1356) ─────────────────────────────────────
+
+describe('prerequisite checks (AISDLC-1356)', () => {
+  const write = (rel: string, text: string): void => {
+    mkdirSync(dirname(join(tmpDir, rel)), { recursive: true });
+    writeFileSync(join(tmpDir, rel), text);
+  };
+
+  it('gh-auth fails on a non-zero exit and passes on zero', () => {
+    const bad = checkGhAuth(
+      makeCtx(makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 1 }) })),
+    );
+    expect(bad.severity).toBe('fail');
+    expect(bad.remediation).toContain('gh auth login');
+    const ok = checkGhAuth(
+      makeCtx(makeAdapters({ runCommand: () => ({ stdout: '', exitCode: 0 }) })),
+    );
+    expect(ok.severity).toBe('pass');
+  });
+
+  it('backlog-tasks warns when missing and --fix creates it', () => {
+    const ctx = makeCtx(makeAdapters());
+    expect(checkBacklogTasks(ctx).severity).toBe('warn');
+    expect(fixBacklogTasks(ctx).applied).toBe(true);
+    expect(existsSync(join(tmpDir, 'backlog', 'tasks'))).toBe(true);
+    expect(checkBacklogTasks(ctx).severity).toBe('pass');
+    expect(fixBacklogTasks(ctx).applied).toBe(false);
+  });
+
+  it('webhook-config warns without a secret, warns without a feed, passes with both', () => {
+    expect(checkWebhookConfig(makeCtx(makeAdapters())).severity).toBe('warn');
+    const noFeed = makeCtx(makeAdapters({ env: { AI_SDLC_WEBHOOK_SECRET: 's' } }));
+    const r = checkWebhookConfig(noFeed);
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('no feed');
+    write(
+      '.ai-sdlc/dispatch/webhook.json',
+      JSON.stringify({ pid: 1, port: 2, feed: { kind: 'gh-forward' } }),
+    );
+    expect(checkWebhookConfig(noFeed).severity).toBe('pass');
+  });
+
+  it('scheduler-alive warns with no record or a dead pid, passes with a live pid', () => {
+    const alive = (v: boolean) => makeCtx(makeAdapters({ isPidAlive: () => v }));
+    expect(checkSchedulerAlive(alive(true)).severity).toBe('warn');
+    write('.ai-sdlc/dispatch/reconcile-scheduler.json', JSON.stringify({ pid: 4242 }));
+    const dead = checkSchedulerAlive(alive(false));
+    expect(dead.severity).toBe('warn');
+    expect(dead.remediation).toContain('cli-hierarchy up');
+    expect(checkSchedulerAlive(alive(true)).severity).toBe('pass');
+  });
+
+  it('node-version fails when .nvmrc is not installed under nvm, passes when it is', () => {
+    write('.nvmrc', '22.23.2\n');
+    const withInstalled = (dirs: string[]) =>
+      makeCtx(makeAdapters({ listDir: () => dirs, env: { NVM_DIR: '/nvm' } }));
+    const bad = checkNodeVersion(withInstalled(['v20.1.0']));
+    expect(bad.severity).toBe('fail');
+    expect(bad.remediation).toContain('nvm install 22.23.2');
+    expect(checkNodeVersion(withInstalled(['v22.23.2'])).severity).toBe('pass');
+  });
+
+  it('node-version fails when the running Node is below the engines floor', () => {
+    write('package.json', JSON.stringify({ engines: { node: '>=22.22.1' } }));
+    const at = (v: string) => makeCtx(makeAdapters({ nodeVersion: () => v }));
+    expect(checkNodeVersion(at('20.0.0')).severity).toBe('fail');
+    expect(checkNodeVersion(at('22.22.1')).severity).toBe('pass');
+  });
+
+  it('review-config names whether the file or the default applies', () => {
+    expect(checkReviewConfig(makeCtx(makeAdapters())).title).toContain('built-in default');
+    write('.ai-sdlc/review-config.yaml', 'x: 1\n');
+    expect(checkReviewConfig(makeCtx(makeAdapters())).title).toContain('is present');
+  });
+
+  it('every registered check returns a result against an empty project', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'doctor-empty-'));
+    try {
+      const ctx = makeCtx(makeAdapters({ exists: () => false, readFile: () => null }), empty);
+      const silent = DOCTOR_CHECKS.filter((c) => {
+        const out = c.run(ctx);
+        return (Array.isArray(out) ? out.length : 1) === 0;
+      }).map((c) => c.id);
+      expect(silent, 'checks that returned no result').toEqual([]);
+    } finally {
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  it('doctor.md --fix sentence names only manifest entry ids', async () => {
+    const md = readFileSync(
+      join(__dirname, '../../../../ai-sdlc-plugin/commands/doctor.md'),
+      'utf-8',
+    );
+    const m = /`--fix`\s+scaffolds the entries that need no operator input \(([^)]*)\)/.exec(md);
+    expect(m).not.toBeNull();
+    const named = m![1].split(',').map((x) => x.trim().replace(/ /g, '-'));
+    const manifest = readFileSync(
+      join(__dirname, '../../../../pipeline-cli/src/config-manifest/manifest.ts'),
+      'utf-8',
+    );
+    const ids = [...manifest.matchAll(/^\s{4}id: '([^']+)'/gm)].map((x) => x[1]);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const n of named) expect(ids, n).toContain(n);
+    expect(md).not.toContain('reviewer set');
   });
 });

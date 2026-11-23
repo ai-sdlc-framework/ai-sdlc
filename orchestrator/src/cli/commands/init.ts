@@ -33,7 +33,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } fr
 import { join, basename } from 'node:path';
 import { detectAgentsDetailed, installMcpServer } from './mcp-setup.js';
 import { detectWorkspace, generateWorkspaceYaml, type WorkspaceRepo } from './workspace-detect.js';
-import { detectGitRemote, applyRemoteToPipelineYaml } from './git-remote.js';
+import { detectGitRemote, type RemoteInfo } from './git-remote.js';
 import { resolveVersions, formatVersionBlock } from '../versions.js';
 import {
   RUNTIME_GITIGNORE_SENTINEL,
@@ -53,7 +53,12 @@ import {
   type FeatureSelection,
   type WizardFlags,
 } from './init-features.js';
-import { scaffoldConfig } from '@ai-sdlc/pipeline-cli/config-manifest';
+import {
+  AGENT_ROLE_TIERS,
+  REQUIRED_CONFIG_MANIFEST,
+  scaffoldConfig,
+  type AgentRoleTier,
+} from '@ai-sdlc/pipeline-cli/config-manifest';
 import { scaffoldVerification } from '@ai-sdlc/pipeline-cli/verification';
 import { REVIEW_POLICY_INIT_LINE } from './doctor-checks.js';
 import {
@@ -61,170 +66,6 @@ import {
   EMBEDDING_CONFIG_YAML_STUB,
   buildSoulDsbTemplate,
 } from './init-templates.js';
-
-export const PIPELINE_YAML = `apiVersion: ai-sdlc.io/v1alpha1
-kind: Pipeline
-metadata:
-  name: default
-spec:
-  triggers:
-    - event: issue.assigned
-  providers:
-    sourceControl:
-      type: github
-      config:
-        org: your-org
-  # backlog: holds settings specific to the backlog-task (/ai-sdlc execute)
-  # workflow. These were formerly in a separate pipeline-backlog.yaml file
-  # (deprecated by AISDLC-245.5). Slash commands + pipeline-cli readers
-  # prefer this canonical location.
-  backlog:
-    branching:
-      pattern: 'ai-sdlc/{issueIdLower}-{slug}'
-      targetBranch: main
-      cleanup: on-merge
-    pullRequest:
-      titleTemplate: 'feat: {issueTitle} ({issueId})'
-      descriptionSections:
-        - summary
-        - changes
-        - closes
-      includeProvenance: true
-      closeKeyword: References
-`;
-
-/**
- * Tier-based agent-role templates (AISDLC-79).
- *
- * Three named tiers map to escalating tool surfaces. The default (`coding`)
- * preserves pre-AISDLC-79 behavior plus `NotebookEdit` (parity with the
- * Claude Code SDK's filesystem editing surface). Higher tiers add tools only
- * when their use-case justifies the additional surface area / risk.
- *
- * See `backlog/decisions/AISDLC-79-agent-role-tools-defaults.md` for rationale.
- */
-export type AgentRoleTier = 'coding' | 'research' | 'meta';
-
-export const AGENT_ROLE_TIERS: readonly AgentRoleTier[] = ['coding', 'research', 'meta'] as const;
-
-/**
- * Documents the governance defaults in every scaffolded agent-role.yaml (AISDLC-710).
- * It is commented out on purpose: unset means the default, and the default is
- * `allowForcePush: leaseOnOwnBranch`, so a lease push of a dispatched task's own
- * branch after a rebase is allowed without an operator prompt.
- */
-export const AGENT_ROLE_GOVERNANCE_COMMENT = `  # Governance (optional; every key defaults when unset). allowForcePush defaults
-  # to leaseOnOwnBranch: \`git push --force-with-lease\` of a dispatched task's own
-  # branch is allowed (never main/master/protected branches, never plain force).
-  # Uncomment to change it; \`never\` makes agents ask before every lease push.
-  # governance:
-  #   allowForcePush: leaseOnOwnBranch   # never | leaseOnOwnBranch
-`;
-
-const AGENT_ROLE_YAML_CODING = `apiVersion: ai-sdlc.io/v1alpha1
-kind: AgentRole
-metadata:
-  name: default-agent
-spec:
-  role: developer
-  goal: Implement issue requirements with tests
-  # Tier: coding-agent (default).
-  # Filesystem + shell editing surface only. No web access, no sub-agent
-  # spawning, no Skill loading. This matches the pre-AISDLC-79 default
-  # plus NotebookEdit (parity with the Claude Code SDK's editing surface).
-  tools:
-    - Edit          # write to existing files
-    - Write         # create new files
-    - Read          # read source / configs
-    - Glob          # discover files by pattern
-    - Grep          # search code
-    - Bash          # run tests, lint, build, git
-    - NotebookEdit  # edit Jupyter notebooks (parity with SDK editing surface)
-    # Excluded by default (opt in via --role research|meta during init):
-    #   - WebFetch    — pulls untrusted remote content into context (research tier)
-    #   - WebSearch   — same (research tier)
-    #   - Task        — spawns sub-agents; cost + reasoning amplification (meta tier)
-    #   - Skill       — loads external skill packs (meta tier)
-  constraints:
-    maxFilesPerChange: 15
-    requireTests: true
-    blockedPaths:
-      - .github/workflows/**
-      - .ai-sdlc/**
-${AGENT_ROLE_GOVERNANCE_COMMENT}`;
-
-const AGENT_ROLE_YAML_RESEARCH = `apiVersion: ai-sdlc.io/v1alpha1
-kind: AgentRole
-metadata:
-  name: default-agent
-spec:
-  role: research-developer
-  goal: Investigate, gather references, and implement issue requirements with tests
-  # Tier: research-agent.
-  # Coding-tier surface plus read-only web access. Use for tasks that need
-  # to consult external docs, package registries, or RFCs.
-  tools:
-    - Edit          # write to existing files
-    - Write         # create new files
-    - Read          # read source / configs
-    - Glob          # discover files by pattern
-    - Grep          # search code
-    - Bash          # run tests, lint, build, git
-    - NotebookEdit  # edit Jupyter notebooks
-    - WebFetch      # fetch a known URL (docs, RFCs, API references)
-    - WebSearch     # discover sources by query
-    # Excluded (use --role meta to opt in):
-    #   - Task        — spawns sub-agents (meta tier)
-    #   - Skill       — loads external skill packs (meta tier)
-  constraints:
-    maxFilesPerChange: 15
-    requireTests: true
-    blockedPaths:
-      - .github/workflows/**
-      - .ai-sdlc/**
-${AGENT_ROLE_GOVERNANCE_COMMENT}`;
-
-const AGENT_ROLE_YAML_META = `apiVersion: ai-sdlc.io/v1alpha1
-kind: AgentRole
-metadata:
-  name: default-agent
-spec:
-  role: meta-developer
-  goal: Orchestrate sub-agents, load skill packs, and implement complex multi-step work
-  # Tier: meta-agent.
-  # Full surface: filesystem + shell + web + sub-agent + skill loading.
-  # Use only when the task legitimately needs sub-agent fan-out or external
-  # skill packs. Higher cost amplification and broader attack surface.
-  tools:
-    - Edit          # write to existing files
-    - Write         # create new files
-    - Read          # read source / configs
-    - Glob          # discover files by pattern
-    - Grep          # search code
-    - Bash          # run tests, lint, build, git
-    - NotebookEdit  # edit Jupyter notebooks
-    - WebFetch      # fetch a known URL
-    - WebSearch     # discover sources by query
-    - Task          # spawn sub-agents for parallel / specialized work
-    - Skill         # load external skill packs (declared capabilities)
-  constraints:
-    maxFilesPerChange: 15
-    requireTests: true
-    blockedPaths:
-      - .github/workflows/**
-      - .ai-sdlc/**
-${AGENT_ROLE_GOVERNANCE_COMMENT}`;
-
-const AGENT_ROLE_YAML_BY_TIER: Record<AgentRoleTier, string> = {
-  coding: AGENT_ROLE_YAML_CODING,
-  research: AGENT_ROLE_YAML_RESEARCH,
-  meta: AGENT_ROLE_YAML_META,
-};
-
-/** Resolve the agent-role.yaml template for a given tier. Default = `coding`. */
-export function getAgentRoleYaml(tier: AgentRoleTier = 'coding'): string {
-  return AGENT_ROLE_YAML_BY_TIER[tier];
-}
 
 const QUALITY_GATE_YAML = `apiVersion: ai-sdlc.io/v1alpha1
 kind: QualityGate
@@ -412,26 +253,21 @@ function ensureGitignore(projectDir: string, dryRun: boolean, prefix: string = '
   console.log(`${prefix}  updated .gitignore`);
 }
 
-interface InitProjectOptions {
-  /** Pre-rendered pipeline YAML (with org/repo substituted). */
-  pipelineYaml: string;
-  /** Agent-role tier selection (drives `agent-role.yaml` template). */
-  tier: AgentRoleTier;
-}
-
-/** Initialize a single project directory with AI-SDLC config files. */
+/**
+ * Initialize a single project directory with AI-SDLC config files. `pipeline.yaml`
+ * and `agent-role.yaml` are not written here: they come from the config manifest
+ * (`scaffoldManifestEntries`), the one template source shared with `cli-init`
+ * (AISDLC-1354).
+ */
 function initProject(
   projectDir: string,
   configDirName: string,
   dryRun: boolean,
   prefix: string = '',
-  options: InitProjectOptions = { pipelineYaml: PIPELINE_YAML, tier: 'coding' },
 ): void {
   const configDir = join(projectDir, configDirName);
 
   const files = [
-    { name: 'pipeline.yaml', content: options.pipelineYaml },
-    { name: 'agent-role.yaml', content: getAgentRoleYaml(options.tier) },
     { name: 'quality-gate.yaml', content: QUALITY_GATE_YAML },
     { name: 'autonomy-policy.yaml', content: AUTONOMY_POLICY_YAML },
     // RFC-0031 §12.6 per-org calibration config (Refit AISDLC-310):
@@ -439,15 +275,14 @@ function initProject(
     // proposal mechanism. Defaults match the operator-affirmed shipped values.
     { name: 'calibration.yaml', content: CALIBRATION_YAML_STUB },
     // RFC-0019 §15.1 per-org embedding-framework defaults (AISDLC-340).
-    // Documents every NEW re-walkthrough field (scaleEscalationHeuristic,
-    // perConsumerOverridesAllowed, crossProviderPolicy split, catalogDedup
-    // milestones, unifiedCostReport, adapterBillingModelRespected). The
-    // file is OPTIONAL — when absent, framework defaults match these values.
+    // The file is OPTIONAL: when absent, framework defaults match these values.
     { name: 'embedding-config.yaml', content: EMBEDDING_CONFIG_YAML_STUB },
   ];
 
   if (dryRun) {
     console.log(`${prefix}Would create ${configDir}/`);
+    console.log(`${prefix}  pipeline.yaml`);
+    console.log(`${prefix}  agent-role.yaml`);
     for (const f of files) {
       console.log(`${prefix}  ${f.name}`);
     }
@@ -473,19 +308,37 @@ function initProject(
 }
 
 /**
- * Scaffold every manifest entry that needs no operator input (review-policy.md,
- * workflow.yaml, ...) so a fresh init passes doctor's config-manifest check on
- * the first run (AISDLC-1240). `initProject` keeps its own file list, which
- * diverged from the manifest; existing files are never overwritten.
+ * Scaffold the config manifest entries (pipeline.yaml, agent-role.yaml,
+ * review-policy.md, workflow.yaml, ...) from the one template source shared with
+ * `cli-init` (AISDLC-1354), with the detected org/repo and the chosen tier.
+ * Existing files are never overwritten. Under a custom `--dir` only the two
+ * files init has always written are scaffolded, into that directory.
  */
 async function scaffoldManifestEntries(
   projectDir: string,
+  configDirName: string,
   dryRun: boolean,
+  remote: RemoteInfo,
+  tier: AgentRoleTier,
   prefix: string = '',
 ): Promise<void> {
   if (dryRun) return;
-  const result = await scaffoldConfig({ projectDir, skipOperatorInput: true });
+  const custom = configDirName !== '.ai-sdlc';
+  const manifest = custom
+    ? REQUIRED_CONFIG_MANIFEST.filter((e) => e.id === 'agent-role' || e.id === 'pipeline').map(
+        (e) => ({ ...e, path: e.path.replace(/^\.ai-sdlc\//, `${configDirName}/`) }),
+      )
+    : REQUIRED_CONFIG_MANIFEST;
+  const result = await scaffoldConfig({
+    projectDir,
+    manifest,
+    defaults: { org: remote.org, repo: remote.repo, tier },
+    skipVersionStamp: custom,
+  });
   for (const path of result.created) console.log(`${prefix}  created ${path}`);
+  for (const f of result.failed) console.error(`${prefix}  failed ${f.path}: ${f.reason}`);
+  if (result.failed.length > 0) process.exitCode = 1;
+  if (custom) return;
   const verification = scaffoldVerification(projectDir);
   if (verification) console.log(`${prefix}  created ${verification}`);
 }
@@ -765,7 +618,6 @@ export const initCommand = new Command('init')
 
     // ── pipeline.yaml org/repo substitution (AC #2) ───────────────────
     const remote = detectGitRemote({ cwd: projectDir });
-    const pipelineYaml = applyRemoteToPipelineYaml(PIPELINE_YAML, remote);
     if (remote.detected) {
       console.log(`Detected git remote: ${remote.org}/${remote.repo}`);
     } else {
@@ -793,17 +645,11 @@ export const initCommand = new Command('init')
         console.log(`\n${repo.name}/`);
         // Per-repo remote detection so each child gets its own org/repo.
         const childRemote = detectGitRemote({ cwd: repo.absPath });
-        const childPipeline = applyRemoteToPipelineYaml(PIPELINE_YAML, childRemote);
         if (childRemote.detected) {
           console.log(`  detected remote: ${childRemote.org}/${childRemote.repo}`);
         }
-        initProject(repo.absPath, configDirName, dryRun, '  ', {
-          pipelineYaml: childPipeline,
-          tier,
-        });
-        if (configDirName === '.ai-sdlc') {
-          await scaffoldManifestEntries(repo.absPath, dryRun, '  ');
-        }
+        initProject(repo.absPath, configDirName, dryRun, '  ');
+        await scaffoldManifestEntries(repo.absPath, configDirName, dryRun, childRemote, tier, '  ');
       }
 
       // MCP setup at workspace root (serves all repos)
@@ -840,8 +686,8 @@ export const initCommand = new Command('init')
       console.log(REVIEW_POLICY_INIT_LINE);
     } else {
       // Single-repo mode (original behavior)
-      initProject(projectDir, configDirName, dryRun, '', { pipelineYaml, tier });
-      if (configDirName === '.ai-sdlc') await scaffoldManifestEntries(projectDir, dryRun);
+      initProject(projectDir, configDirName, dryRun, '');
+      await scaffoldManifestEntries(projectDir, configDirName, dryRun, remote, tier);
 
       if (!opts.skipMcp) {
         const { detected, skipped } = detectAgentsDetailed(projectDir, {

@@ -103,6 +103,12 @@ export interface ReviewRoundState {
   roundPlan?: Omit<import('../incremental-review/review-rounds.js').ReviewRoundPlan, 'deltaDiff'>;
   /** Set while the staged review (RFC-0052) is driving this round. */
   staged?: StagedRoundState;
+  /** AISDLC-1335: reviewers asked to run again alone (transcript lacked the nonce marker). */
+  rerun?: string[];
+  /** AISDLC-1335: reports kept while a re-run is pending; the re-run's report replaces its own. */
+  heldReports?: import('./review-finalize.js').ReviewerReport[];
+  /** AISDLC-1335: re-runs asked so far this round, by reviewer agent. */
+  rerunAttempts?: Record<string, number>;
 }
 
 /** Durable state, JSON on disk between `next-step` invocations. */
@@ -158,7 +164,8 @@ export interface NextStepState {
 export interface SpawnDeveloperInstruction {
   action: 'spawn-developer';
   taskId: string;
-  agent: 'developer';
+  /** Registered subagent type: `<plugin name>:<agent file name>` (AISDLC-1369). */
+  agent: 'ai-sdlc:developer';
   iteration: number;
   promptFile: string;
   cwd: string;
@@ -174,6 +181,8 @@ export interface SpawnReviewersInstruction {
   round: number;
   reviewers: Array<{
     agent: string;
+    /** Registered subagent type to pass to the Agent tool (`ai-sdlc:<agent>`); report `agent` stays the bare name (AISDLC-1369). */
+    subagentType: string;
     promptFile: string;
     /** Short prompt to pass as the Agent `prompt`; it names `promptFile` for the reviewer to read. */
     bootstrapPrompt: string;

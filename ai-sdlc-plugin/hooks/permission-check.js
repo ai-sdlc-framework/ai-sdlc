@@ -13,6 +13,7 @@ const { readFileSync } = require('fs');
 const { join } = require('path');
 const { execSync } = require('child_process');
 const { readStdinSync } = require('./lib/read-stdin');
+const { cliCommand } = require('./lib/cli-command');
 
 // ── Read stdin ───────────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ for (const pattern of blockedActions) {
         permissionDecisionReason:
           `Blocked by AI-SDLC governance: blockedActions pattern '${pattern}' (.ai-sdlc/agent-role.yaml). ` +
           `Next step: use the sanctioned alternative for the same goal, or record the need with ` +
-          `'node pipeline-cli/bin/cli-decisions.mjs escalate'.`,
+          `'${cliCommand('cli-decisions.mjs')} escalate'.`,
       },
     };
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');

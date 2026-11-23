@@ -31,7 +31,8 @@ const FAKE_PR_URL = 'https://github.com/smoke/first-run/pull/1';
 
 /** Real git, stubbed gh: the only network-bound command the pipeline issues. */
 const runner = async (command, args, opts) => {
-  if (command === 'gh') {
+  // The bootstrap smoke (AISDLC-1361) puts a stateful fake `gh` on PATH and wants it called.
+  if (command === 'gh' && process.env.BOOTSTRAP_SMOKE_GH !== '1') {
     return {
       stdout: args[0] === 'pr' && args[1] === 'create' ? `${FAKE_PR_URL}\n` : '',
       stderr: '',

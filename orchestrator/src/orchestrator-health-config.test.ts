@@ -7,7 +7,12 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Orchestrator } from './orchestrator.js';
-import { PIPELINE_YAML } from './cli/commands/init.js';
+import { REQUIRED_CONFIG_MANIFEST } from '@ai-sdlc/pipeline-cli/config-manifest';
+
+const PIPELINE_YAML = REQUIRED_CONFIG_MANIFEST.find((e) => e.id === 'pipeline')!.render({
+  org: 'acme',
+  repo: 'widgets',
+});
 import { formatOutput } from './cli/formatters/index.js';
 
 const dirs: string[] = [];

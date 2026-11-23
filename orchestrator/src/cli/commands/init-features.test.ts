@@ -16,11 +16,15 @@
  */
 
 import {
-  ADOPTER_TEMPLATE_POSTS_APPROVAL,
-  VERIFY_ATTESTATION_WORKFLOW,
-  templatePostsApproval,
+  ATTESTATION_TEMPLATES,
+  BASELINE_WORKFLOW_TEMPLATES,
+  CLASSIFIER_TEMPLATES,
+  DOR_TEMPLATES,
+  WORKFLOWS_TEMPLATES,
 } from './init-templates.js';
+import { spawnSync } from 'node:child_process';
 import { buildWizardFlags } from './init.js';
+import { REQUIRED_APPROVING_REVIEW_COUNT } from './branch-protection-shared.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -126,6 +130,9 @@ function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: 
       // no-op for stubs — file writes are flat key/value
     },
     exists: (p) => state.files.has(p),
+    removeFile: (p) => {
+      state.files.delete(p);
+    },
     readTextFile: (p) => state.files.get(p) ?? null,
     chmodExecutable: (p) => {
       state.chmodCalls.push(p);
@@ -200,7 +207,7 @@ describe('resolveFeatureSelection', () => {
       'Will this repo use Definition-of-Ready gates?',
       'Do you want attestation infrastructure (audit-only)?',
       'Add review classifier for cost-optimized reviews?',
-      'Apply recommended branch protection? (required: ai-sdlc/pr-ready + codecov/patch)',
+      'Apply recommended branch protection? (required: ai-sdlc/pr-ready, plus codecov/patch only when a workflow uploads to Codecov)',
       'Scaffold GitHub Actions workflows (gate, review, attestation, auto-merge)?',
       'Scaffold RFC-0030 signal-ingestion config (default OFF; opt in via AI_SDLC_SIGNAL_INGESTION soak)?',
     ]);
@@ -225,7 +232,7 @@ describe('resolveFeatureSelection', () => {
     );
     expect(state.promptCalls.map((c) => c.question)).toEqual([
       'Do you want attestation infrastructure (audit-only)?',
-      'Apply recommended branch protection? (required: ai-sdlc/pr-ready + codecov/patch)',
+      'Apply recommended branch protection? (required: ai-sdlc/pr-ready, plus codecov/patch only when a workflow uploads to Codecov)',
       'Scaffold GitHub Actions workflows (gate, review, attestation, auto-merge)?',
       'Scaffold RFC-0030 signal-ingestion config (default OFF; opt in via AI_SDLC_SIGNAL_INGESTION soak)?',
     ]);
@@ -343,7 +350,7 @@ describe('applyFeatureSelection', () => {
     expect(cfg).toContain('evaluationMode: warn-only');
   });
 
-  it('AC #1 (attestation branch): writes trusted-reviewers.yaml + verify-attestation.yml + attestations dir + husky hook', async () => {
+  it('AC #1 (attestation branch): writes trusted-reviewers.yaml + attestations dir + husky hook', async () => {
     const { state, adapters } = makeStub();
     await applyFeatureSelection(
       '/proj',
@@ -352,7 +359,7 @@ describe('applyFeatureSelection', () => {
       adapters,
     );
     expect(state.files.has('/proj/.ai-sdlc/trusted-reviewers.yaml')).toBe(true);
-    expect(state.files.has('/proj/.github/workflows/verify-attestation.yml')).toBe(true);
+    expect(state.files.has('/proj/.github/workflows/verify-attestation.yml')).toBe(false);
     expect(state.files.has('/proj/.ai-sdlc/attestations/.gitkeep')).toBe(false);
     expect(state.files.has('/proj/.husky/pre-push')).toBe(true);
 
@@ -362,11 +369,6 @@ describe('applyFeatureSelection', () => {
     expect(hook).toContain('# ai-sdlc:attestation-sign-block');
     expect(hook).not.toContain('check-attestation-sign');
     expect(hook).toContain('GIT_INDEX_FILE');
-
-    // Audit-only verifier (Q3): no commit-status posting.
-    const verify = state.files.get('/proj/.github/workflows/verify-attestation.yml')!;
-    expect(verify).toContain('audit');
-    expect(verify).not.toContain('commit_status'); // sanity: no status posting
   });
 
   it('AC #1 (classifier branch): writes review-classifier.yaml stub when classifier=true', async () => {
@@ -423,6 +425,20 @@ describe('applyFeatureSelection', () => {
     expect(result.wouldCreate).toContain('.github/workflows/dor-ingress.yml');
     expect(result.wouldCreate).toContain('.ai-sdlc/trusted-reviewers.yaml');
     expect(result.wouldCreate).toContain('.husky/pre-push');
+  });
+
+  it('AISDLC-1325: re-run without attestation strips a stale signer block and logs one line', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set(
+      '/proj/.husky/pre-push',
+      'echo keep\n# ai-sdlc:attestation-sign-block\nbash "$H/scripts/check-attestation-sign.sh"\n# end ai-sdlc:attestation-sign-block\n',
+    );
+    await applyFeatureSelection('/proj', { ...NO_FEATURES }, baseFlags, adapters);
+    const hook = state.files.get('/proj/.husky/pre-push')!;
+    expect(hook).toBe('echo keep\n');
+    expect(state.log.filter((l) => l.includes('.husky/pre-push'))).toEqual([
+      '  rewrote .husky/pre-push (removed stale attestation-sign block)',
+    ]);
   });
 
   it('husky hook: appends to existing pre-push without clobbering user content', async () => {
@@ -598,11 +614,11 @@ describe('applyFeatureSelection', () => {
 
   // ── AISDLC-261: workflows feature ───────────────────────────────────────
 
-  it('AISDLC-261: --with-workflows writes all 4 canonical workflow files', async () => {
+  it('AISDLC-261: --with-workflows writes the 3 canonical workflow files', async () => {
     const { state, adapters } = makeStub();
     await applyFeatureSelection('/proj', { ...NO_FEATURES, workflows: true }, baseFlags, adapters);
     expect(state.files.has('/proj/.github/workflows/ai-sdlc-gate.yml')).toBe(true);
-    expect(state.files.has('/proj/.github/workflows/verify-attestation.yml')).toBe(true);
+    expect(state.files.has('/proj/.github/workflows/verify-attestation.yml')).toBe(false);
     expect(state.files.has('/proj/.github/workflows/ai-sdlc-review.yml')).toBe(true);
     expect(state.files.has('/proj/.github/workflows/auto-enable-auto-merge.yml')).toBe(true);
 
@@ -610,9 +626,6 @@ describe('applyFeatureSelection', () => {
     const gate = state.files.get('/proj/.github/workflows/ai-sdlc-gate.yml')!;
     expect(gate).toContain('ai-sdlc/pr-ready');
     expect(gate).toContain('re-actors/alls-green');
-
-    const verify = state.files.get('/proj/.github/workflows/verify-attestation.yml')!;
-    expect(verify).toContain('audit');
 
     const review = state.files.get('/proj/.github/workflows/ai-sdlc-review.yml')!;
     expect(review).toContain('Post Review Results');
@@ -632,7 +645,6 @@ describe('applyFeatureSelection', () => {
     );
     // All 4 workflows are present even in --add mode (workflows IS the feature)
     expect(state.files.has('/proj/.github/workflows/ai-sdlc-gate.yml')).toBe(true);
-    expect(state.files.has('/proj/.github/workflows/verify-attestation.yml')).toBe(true);
     expect(state.files.has('/proj/.github/workflows/ai-sdlc-review.yml')).toBe(true);
     expect(state.files.has('/proj/.github/workflows/auto-enable-auto-merge.yml')).toBe(true);
     // Non-workflow baseline files are NOT written in --add workflows mode
@@ -658,7 +670,6 @@ describe('applyFeatureSelection', () => {
       adapters,
     );
     expect(result2.skipped).toContain('.github/workflows/ai-sdlc-gate.yml');
-    expect(result2.skipped).toContain('.github/workflows/verify-attestation.yml');
     expect(result2.skipped).toContain('.github/workflows/ai-sdlc-review.yml');
     expect(result2.skipped).toContain('.github/workflows/auto-enable-auto-merge.yml');
     expect(result2.created).toHaveLength(0);
@@ -749,12 +760,58 @@ describe('applyFeatureSelection', () => {
 // ── applyBranchProtection ────────────────────────────────────────────────
 
 describe('applyBranchProtection', () => {
+  it('AISDLC-1352: requires codecov/patch only when a workflow uses codecov-action, and names it in every message', async () => {
+    const withCodecov = mkdtempSync(join(tmpdir(), 'init-codecov-'));
+    const without = mkdtempSync(join(tmpdir(), 'init-nocodecov-'));
+    try {
+      for (const [dir, yml] of [
+        [withCodecov, 'jobs:\n  c:\n    steps:\n      - uses: codecov/codecov-action@v5\n'],
+        [without, 'jobs:\n  c:\n    steps:\n      - run: pnpm test\n'],
+      ] as const) {
+        mkdirSync(join(dir, '.github', 'workflows'), { recursive: true });
+        writeFileSync(join(dir, '.github', 'workflows', 'ci.yml'), yml);
+      }
+      const dry = makeStub();
+      const r = await applyBranchProtection(
+        withCodecov,
+        { ...baseFlags, dryRun: true },
+        dry.adapters,
+      );
+      expect(r.contexts).toEqual(['ai-sdlc/pr-ready', 'codecov/patch']);
+      expect(r.bodyJson).toContain('"codecov/patch"');
+
+      const mk = () =>
+        makeStub({
+          runResponses: new Map([
+            ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
+            ['gh api', { stdout: '{}', exitCode: 0 }],
+          ]),
+        });
+      const a = mk();
+      const ra = await applyBranchProtection(withCodecov, baseFlags, a.adapters);
+      expect(a.state.log.join('\n')).toContain('required checks ai-sdlc/pr-ready, codecov/patch +');
+      expect(JSON.parse(ra.bodyJson).required_status_checks.contexts).toEqual([
+        'ai-sdlc/pr-ready',
+        'codecov/patch',
+      ]);
+
+      const b = mk();
+      const rb = await applyBranchProtection(without, baseFlags, b.adapters);
+      expect(rb.contexts).toEqual(['ai-sdlc/pr-ready']);
+      expect(b.state.log.join('\n')).toContain('required checks ai-sdlc/pr-ready +');
+      expect(b.state.log.join('\n')).not.toContain('codecov/patch');
+    } finally {
+      rmSync(withCodecov, { recursive: true, force: true });
+      rmSync(without, { recursive: true, force: true });
+    }
+  });
+
   it('AC #6: --dry-run prints the JSON body and does NOT call gh api', async () => {
     const { state, adapters } = makeStub();
     const result = await applyBranchProtection('/proj', { ...baseFlags, dryRun: true }, adapters);
     expect(result.applied).toBe(false);
     expect(result.bodyJson).toContain('"ai-sdlc/pr-ready"');
-    expect(result.bodyJson).toContain('"codecov/patch"');
+    expect(result.bodyJson).not.toContain('"codecov/patch"');
     // `gh` should NOT have been invoked in dry-run.
     expect(state.runCommandCalls.length).toBe(0);
     // The JSON must have been logged.
@@ -827,10 +884,9 @@ describe('applyBranchProtection', () => {
     });
   });
 
-  it('AC #1 (branch-protection branch): the recommended body has the two required checks', () => {
+  it('AC #1 (branch-protection branch): the recommended body requires only ai-sdlc/pr-ready', () => {
     expect(RECOMMENDED_BRANCH_PROTECTION_BODY.required_status_checks.contexts).toEqual([
       'ai-sdlc/pr-ready',
-      'codecov/patch',
     ]);
     // Stale-review dismissal is critical for the post-force-push workflow
     // documented in CLAUDE.md.
@@ -894,80 +950,6 @@ describe('applyBranchProtection', () => {
     }
   });
 
-  it('AISDLC-748.1: adopter template ships a verifying approve job', () => {
-    expect(ADOPTER_TEMPLATE_POSTS_APPROVAL).toBe(true);
-    expect(VERIFY_ATTESTATION_WORKFLOW).toMatch(/^ {2}approve:\s*$/m);
-  });
-
-  it('AISDLC-748.1: approve job is gated on verification and keeps write scope local', () => {
-    const t = VERIFY_ATTESTATION_WORKFLOW;
-    const approve = t.slice(t.search(/^ {2}approve:\s*$/m));
-    const verify = t.slice(t.indexOf('\njobs:'), t.search(/^ {2}approve:\s*$/m));
-    expect(approve).toContain('needs: verify');
-    expect(approve).toContain("needs.verify.outputs.status == 'valid'");
-    expect(approve).toContain("github.event_name == 'pull_request_target'");
-    expect(approve).toContain('github.event.pull_request.head.repo.full_name == github.repository');
-    expect(approve).toContain('pull-requests: write');
-    expect(approve).toContain('Allow GitHub Actions to create and approve pull requests');
-    expect(approve).not.toContain('actions/checkout');
-    expect(verify).not.toContain('pull-requests: write');
-    // base checkout only; never the PR head
-    expect(verify).toContain('steps.resolve.outputs.base_sha');
-    expect(verify).toContain('persist-credentials: false');
-    expect(verify).toContain('status: ');
-    expect(verify).toContain('reason: ');
-  });
-
-  it('AISDLC-748.1: fetch step authenticates via a per-invocation extraheader', () => {
-    const t = VERIFY_ATTESTATION_WORKFLOW;
-    const fetchStep = t.slice(t.indexOf('Fetch head objects'), t.indexOf('actions/setup-node'));
-    expect(fetchStep).toContain('GH_TOKEN: ${{ github.token }}');
-    expect(fetchStep).toContain('http.https://github.com/.extraheader=AUTHORIZATION: basic');
-    expect(fetchStep).toContain('x-access-token');
-    expect(fetchStep).not.toContain('base64 -w');
-    expect(fetchStep).not.toContain('git config');
-  });
-
-  it('AISDLC-748.1: triggers use pull_request_target only, with read-only default permissions', () => {
-    const doc = parseYaml(VERIFY_ATTESTATION_WORKFLOW) as {
-      on: Record<string, unknown>;
-      permissions: Record<string, string>;
-    };
-    expect(Object.keys(doc.on)).toContain('pull_request_target');
-    expect(Object.keys(doc.on)).not.toContain('pull_request');
-    expect(doc.permissions).toEqual({ contents: 'read' });
-  });
-
-  it('AISDLC-748.1: parsed jobs structure and approve guards', () => {
-    const doc = parseYaml(VERIFY_ATTESTATION_WORKFLOW) as {
-      jobs: Record<
-        string,
-        {
-          needs?: string;
-          if?: string;
-          permissions: Record<string, string>;
-          steps: { run?: string }[];
-        }
-      >;
-    };
-    const { verify, approve } = doc.jobs;
-    expect(verify.permissions).toEqual({ contents: 'read' });
-    expect(approve.needs).toBe('verify');
-    expect(approve.permissions).toEqual({ contents: 'read', 'pull-requests': 'write' });
-    expect(approve.if).toContain('github.event.pull_request.draft == false');
-    expect(approve.if).toContain("needs.verify.result == 'success'");
-    const script = approve.steps.map((s) => s.run ?? '').join('\n');
-    expect(script).toContain('soft-fail|spot-check');
-    expect(script).toContain('[0-9a-f]{40}');
-  });
-
-  it('AISDLC-748: derivation flips true on a template containing an approve: job', () => {
-    const without = 'jobs:\n  verify:\n    runs-on: ubuntu-latest\n';
-    const withApprove = `${without}  approve:\n    needs: verify\n    runs-on: ubuntu-latest\n`;
-    expect(templatePostsApproval(without)).toBe(false);
-    expect(templatePostsApproval(withApprove)).toBe(true);
-  });
-
   it('AISDLC-748: --no-branch-protection makes no gh api call and logs the skip', async () => {
     const { state, adapters } = makeStub();
     const result = await applyFeatureSelection(
@@ -998,55 +980,50 @@ describe('applyBranchProtection', () => {
     expect(out).not.toContain('dry-run');
   });
 
-  it.each([
-    [false, 'does not yet post the approving review'],
-    [true, 'verify-attestation.yml posts the approving review'],
-  ])(
-    'AISDLC-748 200 path, templatePostsApproval=%s: always requires 1 approving review',
-    async (flag, phrase) => {
-      const { state, adapters } = makeStub({
-        runResponses: new Map([
-          ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
-          ['gh api', { stdout: '{}', exitCode: 0 }],
-        ]),
-      });
-      const projectDir = mkdtempSync(join(tmpdir(), 'init-bpflag-'));
-      try {
-        const result = await applyBranchProtection(projectDir, baseFlags, adapters, flag);
-        expect(result.mode).toBe('server');
-        const body = JSON.parse(result.bodyJson);
-        expect(body.required_pull_request_reviews.required_approving_review_count).toBe(1);
-        expect(body.required_status_checks.contexts).toEqual(['ai-sdlc/pr-ready', 'codecov/patch']);
-        expect(body.required_status_checks.contexts).toContain('ai-sdlc/pr-ready');
-        const out = state.log.join('\n');
-        expect(out).toContain(phrase);
-        expect(out).toContain('--no-branch-protection');
-      } finally {
-        rmSync(projectDir, { recursive: true, force: true });
-      }
-    },
-  );
+  it('AISDLC-1353 200 path: requires the named review count and says no workflow posts an approval', async () => {
+    const { state, adapters } = makeStub({
+      runResponses: new Map([
+        ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
+        ['gh api', { stdout: '{}', exitCode: 0 }],
+      ]),
+    });
+    const projectDir = mkdtempSync(join(tmpdir(), 'init-bpflag-'));
+    try {
+      const result = await applyBranchProtection(projectDir, baseFlags, adapters);
+      expect(result.mode).toBe('server');
+      const body = JSON.parse(result.bodyJson);
+      expect(body.required_pull_request_reviews.required_approving_review_count).toBe(
+        REQUIRED_APPROVING_REVIEW_COUNT,
+      );
+      expect(body.required_status_checks.contexts).toEqual(['ai-sdlc/pr-ready']);
+      const out = state.log.join('\n');
+      expect(out).toContain(`Required approving reviews: ${REQUIRED_APPROVING_REVIEW_COUNT}.`);
+      expect(out).toContain('No scaffolded workflow posts an approval');
+      expect(out).toContain('--no-branch-protection');
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
 
-  it.each([[false], [true]])(
-    'AISDLC-748 403 path, templatePostsApproval=%s: client-side fallback unchanged',
-    async (flag) => {
-      const { state, adapters } = makeStub({
-        runResponses: new Map([
-          ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
-          ['gh api', { stdout: 'HTTP 403: Upgrade to GitHub Pro', exitCode: 1 }],
-        ]),
-      });
-      const projectDir = mkdtempSync(join(tmpdir(), 'init-bp403flag-'));
-      try {
-        const result = await applyBranchProtection(projectDir, baseFlags, adapters, flag);
-        expect(result.mode).toBe('client-side');
-        expect(result.error).toBeUndefined();
-        expect(state.log.join('\n')).toContain('client-side enforcement');
-      } finally {
-        rmSync(projectDir, { recursive: true, force: true });
-      }
-    },
-  );
+  it('AISDLC-1353 403 path: client-side fallback prints the review count too', async () => {
+    const { state, adapters } = makeStub({
+      runResponses: new Map([
+        ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
+        ['gh api', { stdout: 'HTTP 403: Upgrade to GitHub Pro', exitCode: 1 }],
+      ]),
+    });
+    const projectDir = mkdtempSync(join(tmpdir(), 'init-bp403flag-'));
+    try {
+      const result = await applyBranchProtection(projectDir, baseFlags, adapters);
+      expect(result.mode).toBe('client-side');
+      expect(result.error).toBeUndefined();
+      const out = state.log.join('\n');
+      expect(out).toContain('client-side enforcement');
+      expect(out).toContain('No scaffolded workflow posts an approval');
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
 
   it('round-2 MAJOR fix: handles projectDir with a literal space without word-splitting', async () => {
     // Reviewer flagged that the prior `execSync(\`${cmd} ${args.join(' ')}\`)`
@@ -1787,5 +1764,76 @@ describe('buildWizardFlags --no-branch-protection (AISDLC-748)', () => {
   it('leaves noBranchProtection false when the option is omitted', () => {
     expect(buildWizardFlags({}).noBranchProtection).toBe(false);
     expect(buildWizardFlags({ branchProtection: true }).noBranchProtection).toBe(false);
+  });
+});
+
+describe('AISDLC-1332: scaffolded status descriptions fit the 140 char limit', () => {
+  it('every description= / DESC= literal is at most 140 chars', () => {
+    const found: string[] = [];
+    for (const text of Object.values(WORKFLOWS_TEMPLATES.files)) {
+      for (const m of text.matchAll(/(?:description=|DESC=)'([^']*)'/g)) found.push(m[1]!);
+    }
+    expect(found.length).toBeGreaterThanOrEqual(3);
+    for (const d of found) expect(d.length).toBeLessThanOrEqual(140);
+  });
+
+  it('review stub keeps failure default, autopass success, context name', () => {
+    const review = WORKFLOWS_TEMPLATES.files['.github/workflows/ai-sdlc-review.yml']!;
+    expect(review).toMatch(/if \[ "\$\{AUTOPASS:-\}" = "true" \]; then\s+STATE=success/);
+    expect(review).toMatch(
+      /else\s+STATE=failure\s+DESC='[^']*not wired[^']*AISDLC_REVIEW_STUB_AUTOPASS=true/,
+    );
+    expect(review).toContain("-f context='Post Review Results'");
+  });
+});
+
+describe('AISDLC-1336: scaffolded workflows and first-merge rule', () => {
+  const allWorkflows = (): Record<string, string> => ({
+    ...WORKFLOWS_TEMPLATES.files,
+    ...BASELINE_WORKFLOW_TEMPLATES.files,
+    ...DOR_TEMPLATES.files,
+    ...ATTESTATION_TEMPLATES.files,
+    ...CLASSIFIER_TEMPLATES.files,
+  });
+  type Step = { name?: string; run?: string; env?: Record<string, unknown> };
+
+  it('every step that runs gh sets GH_TOKEN in its env', () => {
+    let checked = 0;
+    for (const [path, text] of Object.entries(allWorkflows())) {
+      if (!path.startsWith('.github/workflows/')) continue;
+      const doc = parseYaml(text) as { jobs?: Record<string, { steps?: Step[] }> };
+      for (const job of Object.values(doc.jobs ?? {})) {
+        for (const step of job.steps ?? []) {
+          if (typeof step.run === 'string' && /(^|[^A-Za-z0-9_-])gh /m.test(step.run)) {
+            checked++;
+            expect(step.env?.GH_TOKEN, `${path}: step "${step.name}"`).toBeTruthy();
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('enable-auto-merge first step names AI_SDLC_PAT; no github.token fallback', () => {
+    const text = WORKFLOWS_TEMPLATES.files['.github/workflows/auto-enable-auto-merge.yml']!;
+    const doc = parseYaml(text) as { jobs: Record<string, { steps: Step[] }> };
+    const first = doc.jobs['enable-auto-merge']!.steps[0]!;
+    expect(String(first.env?.AI_SDLC_PAT)).toContain('secrets.AI_SDLC_PAT');
+    const bad = spawnSync('bash', ['-c', first.run!], { env: { ...process.env, AI_SDLC_PAT: '' } });
+    expect(bad.status).toBe(1);
+    expect(bad.stdout.toString()).toContain('AI_SDLC_PAT');
+    const ok = spawnSync('bash', ['-c', first.run!], { env: { ...process.env, AI_SDLC_PAT: 'x' } });
+    expect(ok.status).toBe(0);
+    expect(text).not.toMatch(/GH_TOKEN:.*github\.token/);
+  });
+
+  it('next steps with workflows include the first pull request rule', () => {
+    const { adapters } = makeStub();
+    const out = renderNextSteps(
+      { ...NO_FEATURES, workflows: true },
+      { created: [], skipped: [], wouldCreate: [] },
+      adapters,
+    );
+    expect(out).toContain('first pull request that adds .ai-sdlc/ is merged by a person');
   });
 });

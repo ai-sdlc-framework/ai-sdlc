@@ -22,6 +22,9 @@
     "cost",
     "design-system",
     "parallel-execution",
-    "rfc-0043-ucvg"
+    "rfc-0043-ucvg",
+    "capture",
+    "compliance-audit",
+    "quality-monitoring"
   ]
 }

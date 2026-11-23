@@ -67,6 +67,7 @@ Checks currently implemented (see `DOCTOR_CHECKS` in `doctor-checks.ts`):
 | `plugin-version` | Installed plugin version vs. latest published | `ai-sdlc-plugin/hooks/check-plugin-version.js --print` (`--deps` prints only the runtime dependency lines, with no network call, AISDLC-1271) |
 | `runtime-deps-pins` | `runtimeDependencies` pins resolve to what's installed; flags `^0.x` caret traps (AISDLC-574) | `ai-sdlc-plugin/scripts/check-stale-runtime-deps.mjs` (AISDLC-580) |
 | `manifests-agree` | `plugin.json` and `.claude-plugin/plugin.json` agree on version + pins (AISDLC-558) | — |
+| `plugin-install-entries` | WARNs on plugin install entries pinned below the newest cached version; FAILs when the project entry points at a missing folder; read-only, no fix (AISDLC-1327) | — |
 | `attestation-governance` | Attestation required-but-unconfigured; branch protection requiring `ai-sdlc/attestation` directly (AISDLC-388 misconfiguration) | `checkAttestationGovernance` (AISDLC-560) |
 | `marketplace-catalog-drift` | Marketplace catalog cache lags the source-of-truth version — the `/plugin` "already at latest" false negative | — |
 | `npm-dist-tag-reachability` | Every `runtimeDependencies` pin actually resolves on the configured npm registry | — |
@@ -74,7 +75,13 @@ Checks currently implemented (see `DOCTOR_CHECKS` in `doctor-checks.ts`):
 | `worktree-hooks` | Warns on every worktree under `.worktrees/` whose git hooks directory (asked of git with `rev-parse --git-path hooks`, never assumed to be `.husky`) has no executable `pre-push` while the main checkout has one, and names the main checkout's hooks directory. Quiet when all are fine or when the main checkout has no `pre-push` (none expected). `--fix` runs `pnpm run prepare` in each affected worktree that has `node_modules` and reports the ones it skipped for lacking it (AISDLC-693) | `git`, `pnpm` |
 | `hierarchy-launch-env` | Warns for each running `cli-hierarchy` session whose tmux `#{pane_start_command}` lacks `AI_SDLC_HIERARCHY_SESSION=<name>` and `AI_SDLC_HIERARCHY_ROLE=<role>` (the env the lease-push hook binds an executor by), and names the fix: `cli-hierarchy down --role <role>` then `up` from the main checkout's build. Quiet with no roster or when tmux cannot report the command (AISDLC-791) | `tmux` |
 | `vscode-hierarchy-terminals` | Only when `TERM_PROGRAM=vscode`: warns when the hierarchy terminals extension is missing (remediation has `code --install-extension`), when it is installed but not active in this window with its current build (reload the window), and when it is active in two windows covering this repo (names both folders; set `aiSdlc.hierarchy.enabled: false` in the unwanted one). `--fix` reinstalls a stale vsix and never reloads the window (AISDLC-1118). See [VS Code users](cli-hierarchy.md#vs-code-users) | `code` |
-| `stale-repo-build` | Warns when the repo's own `pipeline-cli` build is missing or older than its sources (`resolve-pipeline-cli.sh --strict` exits 1), so dispatch would run old code; names `pnpm --filter @ai-sdlc/pipeline-cli build`. Quiet in repos without the script (AISDLC-988) | `bash` |
+| `stale-repo-build` | Warns when the repo's own `pipeline-cli` build is missing or older than its sources (`resolve-pipeline-cli.sh --strict` exits 1), so dispatch would run old code; names `pnpm --filter @ai-sdlc/pipeline-cli build`. Passes as not applicable in repos without the script (AISDLC-988) | `bash` |
+| `gh-auth` | Fails when `gh auth status` exits non-zero; names `gh auth login` (AISDLC-1356) | `gh` |
+| `backlog-tasks` | Warns when `backlog/tasks/` is missing; `--fix` creates it (AISDLC-1356) | — |
+| `webhook-config` | Warns (never fails) when `AI_SDLC_WEBHOOK_SECRET` is unset or `webhook.json` records no feed (AISDLC-1356) | — |
+| `scheduler-alive` | Warns when the pid in `reconcile-scheduler.json` is absent or dead; names `cli-hierarchy up` (AISDLC-1356) | — |
+| `node-version` | Fails when `.nvmrc` names a Node not installed under nvm, or the running Node is below `package.json` engines (AISDLC-1356) | — |
+| `review-config` | Says whether `.ai-sdlc/review-config.yaml` is present or the built-in default applies (AISDLC-1356) | — |
 | `force-push-policy` | The effective `spec.governance.allowForcePush` value and where it came from: the `leaseOnOwnBranch` default (key unset or no `agent-role.yaml`), an explicit value (`never`, `leaseOnOwnBranch` or `lease`) in `.ai-sdlc/agent-role.yaml`, or a malformed value that fails closed to `never` (warn). See [governance](../api-reference/governance.md) (AISDLC-710) | — |
 | `judgment-layer` | The judgment layer config (`.ai-sdlc/judgment-config.yaml`); see below | `loadJudgmentConfig` (RFC-0049) |
 | `capability-liveness` | Table of registered capabilities; `fail` when a capability required in `.ai-sdlc/capabilities.yaml` (base ref only) is degraded or never observed, `warn` when one is in shadow. See [capability-liveness.md](capability-liveness.md) | `git` (RFC-0049) |
@@ -127,6 +134,7 @@ These checks have a mechanical auto-fix:
 
 - `runtime-deps-pins` → re-runs `ai-sdlc-plugin/scripts/install-runtime-deps.sh`.
 - `vscode-hierarchy-terminals` → reinstalls a stale or missing vsix (detail tells you to run `Developer: Reload Window`).
+- `backlog-tasks` → creates `backlog/tasks/`.
 - `manifests-agree` → copies `plugin.json` (the manifest release-please's
   `extra-files` config bumps directly) over `.claude-plugin/plugin.json`.
 
@@ -162,3 +170,5 @@ unresolvable plugin location is not itself a misconfiguration.
 - [`docs/operations/quality-gate.md`](quality-gate.md) — the `ai-sdlc/pr-ready` aggregator that `attestation-governance`'s branch-protection sub-check reads.
 - AISDLC-560 — the original single-check `ai-sdlc doctor` this task extended into a registry.
 - AISDLC-574 / AISDLC-580 — the runtime-dependency pin drift + staleness detection this task's `runtime-deps-pins` check reuses.
+
+**Every check answers (AISDLC-1356).** A check never returns nothing: with no input it reports `warn` ("not set up yet"), `fail` (unreadable) or `pass` ("not applicable"). A registry test runs each check against an empty project.

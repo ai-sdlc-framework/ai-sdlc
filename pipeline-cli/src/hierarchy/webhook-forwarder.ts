@@ -75,10 +75,16 @@ const defaultExecutable = (file: string): boolean => {
 
 const sameDir = (a: string, b: string): boolean => path.resolve(a) === path.resolve(b);
 
+/** Any board's `gh` wrapper directory (`<repo>/.ai-sdlc/dispatch/bin`), not only this board's own. */
+const isBoardWrapperDir = (d: string): boolean =>
+  /(^|[\\/])\.ai-sdlc[\\/]dispatch[\\/]bin$/.test(path.resolve(d));
+
 /** The session PATH without the board's `bin/` directory (it holds the `gh` call-counting wrapper). */
 export function agentPath(deps: HierarchyDeps): string {
   const bin = path.join(deps.boardDir, 'bin');
-  const entries = (deps.env.PATH ?? '').split(path.delimiter).filter((d) => d && !sameDir(d, bin));
+  const entries = (deps.env.PATH ?? '')
+    .split(path.delimiter)
+    .filter((d) => d && !sameDir(d, bin) && !isBoardWrapperDir(d));
   return entries.length > 0
     ? entries.join(path.delimiter)
     : '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin';
@@ -210,8 +216,7 @@ export function forwarderPersistence(
     const a = forwarderAgentState(deps, label);
     if (a.loaded && a.running) return `persisted: launchd ${label}`;
     if (a.loaded) return `persisted: no (${label} ${describeLoadedNotRunning(a)})`;
-    const why = (a.stderr ?? '').trim().split('\n')[0];
-    return `persisted: no (${label} not loaded${why ? `: ${why}` : ''})`;
+    return `persisted: no (${label} not installed)`;
   } catch {
     return `persisted: no (launchctl unavailable)`;
   }
@@ -286,6 +291,15 @@ export function installForwarder(
   }
   deps.log(`forwarder agent ${label} loaded for ${repo}`);
   return true;
+}
+
+/** The machine-wide launch agent label used before AISDLC-1256. */
+export const LEGACY_FORWARDER_LABEL = 'io.ai-sdlc.webhook-forward';
+
+/** Unload a legacy machine-wide agent and delete its plist, once. Best effort. */
+export function removeLegacyForwarder(deps: HierarchyDeps): void {
+  deps.run('launchctl', ['bootout', agentDomain(LEGACY_FORWARDER_LABEL)], { cwd: deps.cwd });
+  rmSync(forwarderPlistPath(deps, LEGACY_FORWARDER_LABEL), { force: true });
 }
 
 /** Unload the agent, delete its plist and any leftover `cli` hook. Best effort. */

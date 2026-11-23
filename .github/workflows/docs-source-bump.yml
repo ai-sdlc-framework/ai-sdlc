@@ -65,6 +65,7 @@ jobs:
           else
             echo "reachable=false" >> "$GITHUB_OUTPUT"
             echo "::warning title=Docs source bump skipped::Site repository $SITE_REPO is not visible to AI_SDLC_PAT. Operator action: grant the token access to it, or switch to pulling from the site repository. No bump PR was opened."
+            echo "Docs source bump skipped: site repository $SITE_REPO is not visible to AI_SDLC_PAT. No bump PR was opened. Operator action: grant the token access to it, or switch to pulling from the site repository." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - if: steps.site.outputs.reachable == 'true'

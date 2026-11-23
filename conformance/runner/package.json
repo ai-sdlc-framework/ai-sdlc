@@ -1,6 +1,6 @@
 {
   "name": "@ai-sdlc/conformance",
-  "version": "0.42.0",
+  "version": "0.44.0",
   "description": "Conformance test runner for AI-SDLC implementations",
   "license": "Apache-2.0",
   "repository": {
@@ -34,9 +34,9 @@
     "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^5.1.0",
+    "@vitest/coverage-v8": "^5.1.1",
     "typescript": "^6.0.3",
     "vite": "^8.3.8",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   }
 }

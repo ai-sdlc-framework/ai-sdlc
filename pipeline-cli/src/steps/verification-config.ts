@@ -16,6 +16,8 @@ import {
   type VerificationCommands,
 } from './verify-defaults.js';
 
+export { detectPackageManager, type PackageManager } from './verify-defaults.js';
+
 export function loadVerification(projectRoot: string): VerificationCommands {
   if (!projectRoot) return resolveVerification(undefined);
   const file = join(projectRoot, VERIFICATION_CONFIG_PATH);
@@ -35,7 +37,16 @@ export function loadVerification(projectRoot: string): VerificationCommands {
 export function scaffoldVerification(projectDir: string): string | undefined {
   const file = join(projectDir, VERIFICATION_CONFIG_PATH);
   if (existsSync(file)) return undefined;
-  const detected = detectVerificationDefaults((f) => existsSync(join(projectDir, f)));
+  const detected = detectVerificationDefaults(
+    (f) => existsSync(join(projectDir, f)),
+    (f) => {
+      try {
+        return readFileSync(join(projectDir, f), 'utf8');
+      } catch {
+        return undefined;
+      }
+    },
+  );
   if (!detected) return undefined;
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, renderVerificationYaml(detected), 'utf8');

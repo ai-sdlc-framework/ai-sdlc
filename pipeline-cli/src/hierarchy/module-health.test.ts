@@ -66,6 +66,31 @@ describe('readModuleHealth', () => {
   });
 });
 
+describe('failing state (AISDLC-1358)', () => {
+  it('readModuleHealth keeps failing with its reason, neither stale nor absent', () => {
+    const dir = board();
+    write(dir, dispatch.name, {
+      state: 'failing',
+      reason: 'Cannot find module',
+      at: '2020-01-01T00:00:00Z',
+    });
+    const h = readModuleHealth(dir, dispatch, NOW);
+    expect(h.state).toBe('failing');
+    expect(formatModuleHealth(h)).toBe('failing: Cannot find module');
+  });
+
+  it('up throws the module error naming failing: <reason> and the fix line', async () => {
+    const dir = board();
+    write(dir, dispatch.name, { state: 'failing', reason: 'Cannot find module' });
+    await expect(
+      assertDispatchModuleLoaded(
+        { boardDir: dir, now: () => NOW, sleep: async () => {} } as unknown as HierarchyDeps,
+        [dispatch],
+      ),
+    ).rejects.toThrow(/p-dispatch MODULE failing: Cannot find module.*cli-hierarchy down/s);
+  });
+});
+
 describe('assertDispatchModuleLoaded', () => {
   const depsFor = (dir: string, sleep = async () => {}): HierarchyDeps =>
     ({ boardDir: dir, now: () => NOW, sleep }) as unknown as HierarchyDeps;
@@ -159,5 +184,18 @@ describe('readModuleRotatePending (AISDLC-1159)', () => {
       JSON.stringify({ 'hierarchy/rotate-pending/p-plan': null }),
     );
     expect(readModuleRotatePending([dir], 'p-plan')).toBe(false);
+  });
+});
+
+describe('readModuleHealth failure entry (AISDLC-1357)', () => {
+  it('returns a failing record with its reason and formats it for the MODULE column', () => {
+    const b = board();
+    writeFileSync(
+      moduleHealthPath(b, 'p-dispatch'),
+      JSON.stringify({ state: 'failing', reason: 'reconcile failed: boom', at: NOW.toISOString() }),
+    );
+    const h = readModuleHealth(b, dispatch, NOW, []);
+    expect(h).toMatchObject({ state: 'failing', reason: 'reconcile failed: boom' });
+    expect(formatModuleHealth(h)).toBe('failing: reconcile failed: boom');
   });
 });

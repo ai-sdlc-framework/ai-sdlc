@@ -1,79 +1,112 @@
 // Package telemetry provides OpenTelemetry conventions and instrumentation for AI-SDLC.
 package telemetry
 
-// Span name constants for AI-SDLC operations.
+// Prefix is the common prefix of all AI-SDLC semantic conventions.
+const Prefix = "ai_sdlc."
+
+// SpanNames mirrors SPAN_NAMES in reference/src/telemetry/semantic-conventions.ts.
 var SpanNames = struct {
-	EvaluateGate     string
-	Enforce          string
-	Reconcile        string
-	ExecuteStep      string
-	Orchestrate      string
-	Promote          string
-	Demote           string
-	AdmitResource    string
-	ScoreComplexity  string
-	RouteByComplexity string
+	PipelineStage       string
+	AgentTask           string
+	GateEvaluation      string
+	ReconciliationCycle string
+	Handoff             string
+	PipelineRun         string
+	CostTracking        string
 }{
-	EvaluateGate:     "ai-sdlc.evaluate_gate",
-	Enforce:          "ai-sdlc.enforce",
-	Reconcile:        "ai-sdlc.reconcile",
-	ExecuteStep:      "ai-sdlc.execute_step",
-	Orchestrate:      "ai-sdlc.orchestrate",
-	Promote:          "ai-sdlc.promote",
-	Demote:           "ai-sdlc.demote",
-	AdmitResource:    "ai-sdlc.admit_resource",
-	ScoreComplexity:  "ai-sdlc.score_complexity",
-	RouteByComplexity: "ai-sdlc.route_by_complexity",
+	PipelineStage:       "ai_sdlc.pipeline.stage",
+	AgentTask:           "ai_sdlc.agent.task",
+	GateEvaluation:      "ai_sdlc.gate.evaluation",
+	ReconciliationCycle: "ai_sdlc.reconciliation.cycle",
+	Handoff:             "ai_sdlc.handoff",
+	PipelineRun:         "ai_sdlc.pipeline.run",
+	CostTracking:        "ai_sdlc.cost.tracking",
 }
 
-// Metric name constants for AI-SDLC instrumentation.
+// MetricNames mirrors METRIC_NAMES in the reference.
 var MetricNames = struct {
-	GateEvaluations    string
-	GatePassed         string
-	GateFailed         string
-	ReconcileLoops     string
-	ReconcileErrors    string
-	StepsExecuted      string
-	StepsFailed        string
-	PromotionAttempts  string
-	DemotionAttempts   string
+	AutonomyLevel             string
+	GatePassTotal             string
+	GateFailTotal             string
+	TaskDurationMs            string
+	ReconciliationDurationMs  string
+	TaskSuccessTotal          string
+	TaskFailureTotal          string
+	PromotionTotal            string
+	DemotionTotal             string
+	HandoffTotal              string
+	HandoffFailureTotal       string
+	ApprovalWaitMs            string
+	SandboxViolationTotal     string
+	KillSwitchActivationTotal string
+	ComplianceCoveragePercent string
+	AdapterHealthTotal        string
+	AgentDiscoveryTotal       string
+	AdmissionDurationMs       string
+	LlmEvalDurationMs         string
+	LlmEvalScore              string
+	ExpressionEvalDurationMs  string
+	CostUsdTotal              string
+	InputTokensTotal          string
+	OutputTokensTotal         string
+	TokensTotal               string
+	CostPerTaskUsd            string
 }{
-	GateEvaluations:   "ai_sdlc.gate.evaluations",
-	GatePassed:        "ai_sdlc.gate.passed",
-	GateFailed:        "ai_sdlc.gate.failed",
-	ReconcileLoops:    "ai_sdlc.reconcile.loops",
-	ReconcileErrors:   "ai_sdlc.reconcile.errors",
-	StepsExecuted:     "ai_sdlc.steps.executed",
-	StepsFailed:       "ai_sdlc.steps.failed",
-	PromotionAttempts: "ai_sdlc.autonomy.promotion_attempts",
-	DemotionAttempts:  "ai_sdlc.autonomy.demotion_attempts",
+	AutonomyLevel:             "ai_sdlc.autonomy.level",
+	GatePassTotal:             "ai_sdlc.gate.pass.total",
+	GateFailTotal:             "ai_sdlc.gate.fail.total",
+	TaskDurationMs:            "ai_sdlc.task.duration_ms",
+	ReconciliationDurationMs:  "ai_sdlc.reconciliation.duration_ms",
+	TaskSuccessTotal:          "ai_sdlc.task.success.total",
+	TaskFailureTotal:          "ai_sdlc.task.failure.total",
+	PromotionTotal:            "ai_sdlc.autonomy.promotion.total",
+	DemotionTotal:             "ai_sdlc.autonomy.demotion.total",
+	HandoffTotal:              "ai_sdlc.handoff.total",
+	HandoffFailureTotal:       "ai_sdlc.handoff.failure.total",
+	ApprovalWaitMs:            "ai_sdlc.approval.wait_ms",
+	SandboxViolationTotal:     "ai_sdlc.sandbox.violation.total",
+	KillSwitchActivationTotal: "ai_sdlc.killswitch.activation.total",
+	ComplianceCoveragePercent: "ai_sdlc.compliance.coverage_percent",
+	AdapterHealthTotal:        "ai_sdlc.adapter.health.total",
+	AgentDiscoveryTotal:       "ai_sdlc.agent.discovery.total",
+	AdmissionDurationMs:       "ai_sdlc.admission.duration_ms",
+	LlmEvalDurationMs:         "ai_sdlc.llm_eval.duration_ms",
+	LlmEvalScore:              "ai_sdlc.llm_eval.score",
+	ExpressionEvalDurationMs:  "ai_sdlc.expression_eval.duration_ms",
+	CostUsdTotal:              "ai_sdlc.cost.usd.total",
+	InputTokensTotal:          "ai_sdlc.tokens.input.total",
+	OutputTokensTotal:         "ai_sdlc.tokens.output.total",
+	TokensTotal:               "ai_sdlc.tokens.total",
+	CostPerTaskUsd:            "ai_sdlc.cost.per_task_usd",
 }
 
-// Attribute key constants for AI-SDLC spans and metrics.
+// AttributeKeys mirrors ATTRIBUTE_KEYS in the reference.
 var AttributeKeys = struct {
-	GateName        string
-	Enforcement     string
-	ResourceKind    string
-	ResourceName    string
-	PipelineName    string
-	StageName       string
-	AgentName       string
-	StepType        string
-	Result          string
-	Level           string
-	FromLevel       string
-	ToLevel         string
+	Pipeline       string
+	Stage          string
+	Agent          string
+	Gate           string
+	Enforcement    string
+	Result         string
+	ResourceKind   string
+	ResourceName   string
+	Model          string
+	CostUsd        string
+	Tokens         string
+	ComplexityBand string
+	RunId          string
 }{
-	GateName:        "ai_sdlc.gate.name",
-	Enforcement:     "ai_sdlc.gate.enforcement",
-	ResourceKind:    "ai_sdlc.resource.kind",
-	ResourceName:    "ai_sdlc.resource.name",
-	PipelineName:    "ai_sdlc.pipeline.name",
-	StageName:       "ai_sdlc.stage.name",
-	AgentName:       "ai_sdlc.agent.name",
-	StepType:        "ai_sdlc.step.type",
-	Result:          "ai_sdlc.result",
-	Level:           "ai_sdlc.autonomy.level",
-	FromLevel:       "ai_sdlc.autonomy.from_level",
-	ToLevel:         "ai_sdlc.autonomy.to_level",
+	Pipeline:       "ai_sdlc.pipeline",
+	Stage:          "ai_sdlc.stage",
+	Agent:          "ai_sdlc.agent",
+	Gate:           "ai_sdlc.gate",
+	Enforcement:    "ai_sdlc.enforcement",
+	Result:         "ai_sdlc.result",
+	ResourceKind:   "ai_sdlc.resource.kind",
+	ResourceName:   "ai_sdlc.resource.name",
+	Model:          "ai_sdlc.model",
+	CostUsd:        "ai_sdlc.cost_usd",
+	Tokens:         "ai_sdlc.tokens",
+	ComplexityBand: "ai_sdlc.complexity_band",
+	RunId:          "ai_sdlc.run_id",
 }

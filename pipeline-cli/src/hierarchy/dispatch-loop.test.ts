@@ -215,6 +215,31 @@ describe('auto-brief (AISDLC-930)', () => {
     expect(lifted.reports.map((x) => x.text).join('\n')).toContain('budget pacer: lifted');
   });
 
+  it('reports holdLifted on the tick where the pacer lifts inside the band (AISDLC-1319)', async () => {
+    let seven = 43;
+    let t = Date.parse('2026-10-23T18:30:00Z');
+    const usage = {
+      readToken: () => 'tok',
+      now: () => new Date(t),
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          seven_day: { utilization: seven, resets_at: '2026-10-27T18:30:00Z' },
+        }),
+      }),
+    };
+    await runDispatchTick(deps({ usage, now: () => new Date(t) }));
+    t += 3600_000;
+    seven = 47; // ahead of the line by about 3, margin 2
+    expect((await runDispatchTick(deps({ usage, now: () => new Date(t) }))).held).toBeDefined();
+    t += 3600_000;
+    seven = 44.5; // inside the band
+    const r = await runDispatchTick(deps({ usage, now: () => new Date(t) }));
+    expect(r.held).toBeUndefined();
+    expect(r.holdLifted).toBe(true);
+  });
+
   it('a red canary event holds the tick and files the hotfix; green lifts it (AISDLC-1023)', async () => {
     const dir = path.join(board, 'events');
     mkdirSync(dir, { recursive: true });
@@ -919,6 +944,12 @@ describe('nextWakeSec (idle hibernation)', () => {
     const denied = await runDispatchTick(deps({ markReady }));
     expect(denied.markReady).toBeUndefined();
     expect(denied.nextWakeSec).toBe(WAKE_IDLE_SEC);
+  });
+
+  it('records a note naming the missing land-eligible-prs grant (AISDLC-1351)', async () => {
+    await runDispatchTick(deps({ landEligible: async () => ({ landed: [], refused: [] }) }));
+    const note = path.join(board, 'notes', 'land-disabled.operational.txt');
+    expect(readFileSync(note, 'utf-8')).toContain('land-eligible-prs');
   });
 
   it('lands eligible PRs only when land-eligible-prs is granted (AISDLC-894)', async () => {

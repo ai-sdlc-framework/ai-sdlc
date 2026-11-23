@@ -24,7 +24,7 @@
 #      → Broken/incomplete install. Try to self-heal via install-runtime-deps.sh,
 #        then retry. If self-heal fails, fall through.
 #
-#   3. CLAUDE_PLUGIN_ROOT set (always injected by Claude Code) + node_modules exists
+#   3. CLAUDE_PLUGIN_ROOT set (text Claude Code substitutes; not exported to the Bash tool) + node_modules exists
 #      → Use CLAUDE_PLUGIN_ROOT as the install dir (same directory, different var).
 #
 #   4. Plugin cache probe: ~/.claude/plugins/cache/<marketplace>/ai-sdlc/<version>/
@@ -54,8 +54,8 @@
 #
 # Environment variables read:
 #   CLAUDE_PLUGIN_DIR  — set by Claude Code harness for marketplace installs
-#   CLAUDE_PLUGIN_ROOT — always set by Claude Code harness (same dir as CLAUDE_PLUGIN_DIR
-#                         in most contexts, but guaranteed to exist)
+#   CLAUDE_PLUGIN_ROOT — not exported to the Bash tool; may be set by a caller (same dir as CLAUDE_PLUGIN_DIR
+#                         when both are set)
 #
 # The script is idempotent and safe to call multiple times.
 
@@ -312,7 +312,7 @@ if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
   fi
 fi
 
-# ── Topology 3: CLAUDE_PLUGIN_ROOT set (always injected by Claude Code) ─────
+# ── Topology 3: CLAUDE_PLUGIN_ROOT set (text Claude Code substitutes; not exported to the Bash tool) ─────
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   CANDIDATE="$CLAUDE_PLUGIN_ROOT/$PIPELINE_CLI_REL"
   # AISDLC-385: fast-path requires BOTH pipeline-cli AND mcp-server present.
@@ -343,6 +343,41 @@ fi
 # ── Topology 4: Plugin cache probe ──────────────────────────────────────────
 # Walk ~/.claude/plugins/cache/<marketplace>/ai-sdlc/<version>/
 CACHE_ROOT="${HOME}/.claude/plugins/cache"
+
+# AISDLC-1327: ask the install entry of this project first. The registry
+# records per project which version runs; the cache walk below is the last resort.
+REGISTRY_FILE="${HOME}/.claude/plugins/installed_plugins.json"
+REGISTRY_INSTALL=""
+if [ -f "$REGISTRY_FILE" ] && command -v node >/dev/null 2>&1; then
+  REGISTRY_INSTALL="$(node -e '
+    const fs = require("fs"), path = require("path");
+    try {
+      const reg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const dir = path.resolve(process.argv[2]);
+      let best, user;
+      for (const [k, list] of Object.entries(reg.plugins || {})) {
+        if (!k.startsWith("ai-sdlc@") || !Array.isArray(list)) continue;
+        for (const e of list) {
+          if (!e || typeof e.installPath !== "string") continue;
+          if ((e.scope === "project" || e.scope === "local") && typeof e.projectPath === "string") {
+            const base = path.resolve(e.projectPath);
+            const inside = dir === base || dir.startsWith(base.endsWith("/") ? base : base + "/");
+            if (inside && (!best || path.resolve(best.projectPath).length < base.length)) best = e;
+          } else if (e.scope === "user" && !user) user = e;
+        }
+      }
+      const pick = best || user;
+      if (pick && fs.existsSync(pick.installPath)) process.stdout.write(pick.installPath);
+    } catch (_) {}
+  ' "$REGISTRY_FILE" "$(pwd)" 2>/dev/null || true)"
+fi
+if [ -n "$REGISTRY_INSTALL" ] && _is_usable "${REGISTRY_INSTALL%/}/$PIPELINE_CLI_REL"; then
+  echo "resolve-pipeline-cli.sh: using install entry of this project at $REGISTRY_INSTALL" >&2
+  printf '%s' "${REGISTRY_INSTALL%/}/$PIPELINE_CLI_REL"
+  exit 0
+fi
+[ -d "$CACHE_ROOT" ] && echo "resolve-pipeline-cli.sh: no install entry matched this project; walking the plugin cache (last resort)" >&2
+
 if [ -d "$CACHE_ROOT" ]; then
   # Collect all candidates; sort by version (highest first via sort -rV).
   BEST_CANDIDATE=""

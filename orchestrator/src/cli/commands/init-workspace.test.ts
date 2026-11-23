@@ -25,7 +25,9 @@ import {
   rmSync,
   realpathSync,
 } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync, spawnSync } from 'node:child_process';
+import { RUNTIME_GITIGNORE_PATHS } from '../../runtime-gitignore.js';
+import { cleanGitEnv } from '../../runtime/git-env.js';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -254,6 +256,40 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
     expect(gi).toContain('.ai-sdlc/audit.jsonl');
     // AISDLC-657.3: the shared runtime output directory is ignored from the first init.
     expect(gi).toContain('.ai-sdlc/artifacts/');
+
+    // AISDLC-1331: git itself reports every runtime path as ignored.
+    for (const entry of RUNTIME_GITIGNORE_PATHS) {
+      const probe = entry.endsWith('/') ? `${entry}probe` : entry;
+      const r = spawnSync('git', ['-C', tmpDir, 'check-ignore', '-q', '--no-index', '--', probe], {
+        env: cleanGitEnv(),
+      });
+      expect(r.status, entry).toBe(0);
+    }
+  });
+
+  it('leaves the default calibration log and capability state ignored (AISDLC-1366)', async () => {
+    const repo = tmpDir;
+    initBareRepo(repo);
+    const prevEnv = process.env.ARTIFACTS_DIR;
+    delete process.env.ARTIFACTS_DIR;
+    try {
+      const git = (...args: string[]) =>
+        execFileSync('git', ['-C', repo, ...args], { env: cleanGitEnv(), encoding: 'utf-8' });
+      git('config', 'user.email', 't@example.com');
+      git('config', 'user.name', 't');
+      git('config', 'commit.gpgsign', 'false');
+      await runInit(['--skip-mcp', '--yes', '--no-branch-protection']);
+      git('add', '-A');
+      git('commit', '-q', '--no-verify', '--allow-empty', '-m', 'init');
+      // The default paths when ARTIFACTS_DIR is unset (calibration-log.ts, composite.ts).
+      mkdirSync(join(repo, 'artifacts', '_dor'), { recursive: true });
+      mkdirSync(join(repo, 'artifacts', '_capabilities'), { recursive: true });
+      writeFileSync(join(repo, 'artifacts', '_dor', 'calibration.jsonl'), '{}\n');
+      writeFileSync(join(repo, 'artifacts', '_capabilities', 'state.json'), '{}\n');
+      expect(git('status', '--porcelain')).not.toContain('artifacts');
+    } finally {
+      if (prevEnv !== undefined) process.env.ARTIFACTS_DIR = prevEnv;
+    }
   });
 
   it('scaffolds every no-input manifest entry so doctor config-manifest passes first run (AISDLC-1240)', async () => {
@@ -276,9 +312,8 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
     await runInit(['--skip-mcp', '--yes']);
 
     const gi = readFileSync(join(tmpDir, '.gitignore'), 'utf-8');
-    expect(gi).toBe(
-      `node_modules/\n\n${oldBlock}.ai-sdlc/artifacts/\n.ai-sdlc/subagent-sessions/\n`,
-    );
+    expect(gi).toBe(`node_modules/\n\n${oldBlock}${RUNTIME_GITIGNORE_PATHS.slice(3).join('\n')}\n`);
+    expect(gi.split('# ai-sdlc:runtime-gitignore').length).toBe(2);
 
     // AISDLC-1260: idempotent re-run
     await runInit(['--skip-mcp', '--yes']);
@@ -438,7 +473,7 @@ describe('init — AISDLC-143 wizard scaffolding', () => {
 
     // Attestation
     expect(existsSync(join(tmpDir, '.ai-sdlc', 'trusted-reviewers.yaml'))).toBe(true);
-    expect(existsSync(join(tmpDir, '.github', 'workflows', 'verify-attestation.yml'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.github', 'workflows', 'verify-attestation.yml'))).toBe(false);
     expect(existsSync(join(tmpDir, '.ai-sdlc', 'attestations', '.gitkeep'))).toBe(false);
     expect(existsSync(join(tmpDir, '.husky', 'pre-push'))).toBe(true);
 
@@ -531,7 +566,7 @@ describe('init — AISDLC-143 wizard scaffolding', () => {
     // Branch-protection dry-run prints the JSON body
     expect(out).toContain('Branch-protection dry-run');
     expect(out).toContain('ai-sdlc/pr-ready');
-    expect(out).toContain('codecov/patch');
+    expect(out).not.toContain('codecov/patch');
   });
 
   it('--yes prints the next-steps summary with operator action items (AC #5)', async () => {

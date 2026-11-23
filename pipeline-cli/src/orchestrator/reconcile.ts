@@ -57,6 +57,7 @@
  * step failed (no verdict, no worktree, etc.).
  */
 
+import { pipelineCliBin } from '../bin-dir.js';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -617,8 +618,7 @@ function runReconcileInner(
     if (rev.status === 0 && /^[0-9a-f]{40}$/i.test(rebasedHead)) signHeadSha = rebasedHead;
   }
 
-  const cliAttestationBin =
-    options.cliAttestationBin ?? path.join(workDir, 'pipeline-cli', 'bin', 'cli-attestation.mjs');
+  const cliAttestationBin = options.cliAttestationBin ?? pipelineCliBin('cli-attestation.mjs');
   const reviewerModel = options.reviewerModel ?? DEFAULT_ROLE_MODELS['code-reviewer'];
   const harness = options.harness ?? DEFAULT_HARNESS;
 

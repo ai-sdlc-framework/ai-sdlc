@@ -129,6 +129,8 @@ export interface HierarchyDeps {
    * `['attach-session', '-t', '=planner']`. Returns the exit code.
    */
   attach: (args: readonly string[]) => number;
+  /** Test injection: the routing table text for the model fallback (AISDLC-1364); absent reads the base ref. */
+  readRoutingTable?: (workDir: string, baseRef: string) => string | null;
   /** Name of the `claude` executable. */
   claudeBin: string;
   /** Poll attempts and spacing when waiting for the registry or for a window to close. */
@@ -139,11 +141,15 @@ export interface HierarchyDeps {
   /** Liveness probe for a pid, used by the cross-project collision check. Absent: `process.kill(pid, 0)`. */
   /** Whether 127.0.0.1:<port> can be bound (webhook port selection); default probes with node. */
   isPortFree?: (port: number) => boolean;
+  /** Spawns the detached webhook receiver; default spawns `cli-hierarchy webhook serve`. */
+  spawnWebhook?: (file: string, args: readonly string[]) => void;
   /** Whether a file is an executable regular file (forwarder `gh` lookup). Absent: `fs.accessSync(X_OK)`. */
   isExecutable?: (file: string) => boolean;
   /** Blocks for `ms` (forwarder start settle). Absent: `Atomics.wait`. */
   sleepMs?: (ms: number) => void;
   isAlive?: (pid: number) => boolean;
+  /** Asks the listener on a port who it is (`/health`); undefined when it does not answer (AISDLC-1349). */
+  probeWebhookIdentity?: (port: number) => { repo: string | null; boardDir: string } | undefined;
   /** Whether nvm has the given node version installed. Absent: looks under `$NVM_DIR/versions/node`. */
   nodeInstalled?: (version: string) => boolean;
   /** Parent of a process, or null when unreadable (register's pane ancestry check). Absent: `ps`. */
@@ -159,7 +165,12 @@ export interface HierarchyDeps {
   /** Resolves the repository root `cwd` belongs to, or null (AISDLC-664.6). Absent: the verified git main checkout. */
   resolveRoot?: (cwd: string) => string | null;
   /** Loads the dispatch policy the executors will see (AISDLC-664.6). Absent: read from the verified main checkout. */
-  loadPolicy?: (root: string) => { forcePushMode: string; operational: Iterable<string> };
+  loadPolicy?: (root: string) => {
+    forcePushMode: string;
+    operational: Iterable<string>;
+    allowMerge?: string;
+    mergeAuthors?: readonly string[];
+  };
 }
 
 /**

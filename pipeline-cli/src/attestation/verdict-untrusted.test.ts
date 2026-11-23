@@ -132,4 +132,42 @@ describe('verdict-untrusted', () => {
     });
     expect(r.code).toBe('ok');
   });
+
+  describe('clean-room record against the real checker (AISDLC-1321)', () => {
+    const run = (b: { record: unknown; leavesJsonl: string }, changedPaths: string[]) => {
+      const ok = (stdout = ''): ExecResult => ({ stdout, stderr: '', code: 0 });
+      const runner: Runner = async (_c, args) =>
+        args[0] === 'show'
+          ? ok(args[1]!.endsWith('record.json') ? JSON.stringify(b.record) : b.leavesJsonl)
+          : ok();
+      return checkVerdict({
+        runner,
+        cwd: dir,
+        headSha: HEAD,
+        pullRequest: 7,
+        changedPaths,
+        requireCleanRoom: true,
+      });
+    };
+    const build = (r = report()) => buildCleanRoomVerdict(r, { treeSha: TREE, repository: 'o/r' });
+
+    it('passes for a plain diff and a trust-chain diff', async () => {
+      expect((await run(build(), ['pipeline-cli/src/foo.ts'])).code).toBe('ok');
+      expect((await run(build(), ['.ai-sdlc/review-config.yaml'])).code).toBe('ok');
+    });
+    it('refuses a record with a non-approving reviewer, naming only that reviewer', async () => {
+      const r = await run(build(report(false)), ['pipeline-cli/src/foo.ts']);
+      expect(r.code).toBe('coverage-short');
+    });
+    it('refuses a hand-edited record lacking test-reviewer and names only it', async () => {
+      const b = build();
+      b.record.reviewers = b.record.reviewers.filter((x) => x.name !== 'test-reviewer');
+      b.record.coverage.required = b.record.coverage.required.filter((x) => x !== 'test-reviewer');
+      const r = await run(b, ['pipeline-cli/src/foo.ts']);
+      expect(r.code).toBe('coverage-short');
+      expect(r.detail).toContain('test-reviewer');
+      expect(r.detail).not.toContain('code-reviewer');
+      expect(r.detail).not.toContain('security-reviewer');
+    });
+  });
 });

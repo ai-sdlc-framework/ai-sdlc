@@ -17,14 +17,28 @@ const STATUS = {
 
 const EMPTY_TICK = { blockers: [], ingested: [], verdicts: [], escalations: [], reports: [] };
 
-function setup(tickResult: unknown = EMPTY_TICK) {
+function setup(
+  tickResult: unknown = EMPTY_TICK,
+  opts: { binDir?: string; tickFails?: boolean } = {},
+  failSubs: Set<string> = new Set(),
+) {
   const handlers = registerStrict({});
   const kv = new Map<string, any>();
   let timer: (() => Promise<void>) | undefined;
   const runs: string[][] = [];
   let tickOut: unknown = tickResult;
+  let failTick = opts.tickFails === true;
+  const stores: Array<[string, any]> = [];
+  const argvs: string[][] = [];
   const $: any = {
-    env: { get: (k: string) => (k === 'HIERARCHY_ROLE' ? 'operator-dispatch' : undefined) },
+    env: {
+      get: (k: string) =>
+        k === 'HIERARCHY_ROLE'
+          ? 'operator-dispatch'
+          : k === 'CLAUDE_PROJECT_DIR'
+            ? '/proj'
+            : undefined,
+    },
     session: {
       version: async () => '2.1.309',
       identity: async () => null,
@@ -36,7 +50,10 @@ function setup(tickResult: unknown = EMPTY_TICK) {
     },
     store: {
       get: async (k: string) => kv.get(k),
-      set: async (k: string, v: unknown) => void kv.set(k, v),
+      set: async (k: string, v: unknown) => {
+        stores.push([k, v]);
+        kv.set(k, v);
+      },
     },
     command: { run: vi.fn(async () => undefined) },
     prompt: { submit: vi.fn(async () => undefined) },
@@ -61,7 +78,14 @@ function setup(tickResult: unknown = EMPTY_TICK) {
             'process.run: takes argv, a non-empty list of strings naming the command first',
           );
         runs.push(a.slice(1));
+        argvs.push(a);
         const sub = a[2];
+        if (a[1] === '-e' && String(a[2]).includes('.binDir'))
+          return { exitCode: 0, stdout: opts.binDir ?? '' };
+        if (typeof sub === 'string' && failSubs.has(sub))
+          return { exitCode: 1, stdout: '', stderr: `${sub} exploded\n  at x` };
+        if (sub === 'tick' && failTick)
+          return { exitCode: 1, stdout: '', stderr: 'Cannot find module x\n    at foo' };
         if (sub === 'tick') {
           return tickOut === undefined
             ? { exitCode: 0, stdout: '' }
@@ -82,6 +106,10 @@ function setup(tickResult: unknown = EMPTY_TICK) {
     next,
     runs,
     setTick: (v: unknown) => (tickOut = v),
+    setFail: (v: boolean) => (failTick = v),
+    failSubs,
+    stores,
+    argvs,
     start: async () => {
       await handlers.get('session.start')($, { reason: 'startup' }, next);
       next.mockClear();
@@ -389,5 +417,73 @@ describe('dispatch host (AISDLC-1035)', () => {
     expect(classify('to planner: hi')).toEqual({ kind: 'planner', text: 'hi' });
     expect(classify('verdict without id')).toMatchObject({ kind: 'unknown' });
     expect(renderBoard(null, [], [])).toContain('(no sessions)');
+  });
+});
+
+describe('reconcile and sweep failures reach the heartbeat (AISDLC-1357)', () => {
+  const lastHealth = (s: ReturnType<typeof setup>): any =>
+    s.stores.filter(([k]) => k.startsWith('hierarchy/health/')).at(-1)?.[1];
+
+  it('records each failure with its first error line and a later success clears it', async () => {
+    const s = setup();
+    await s.start();
+    s.failSubs.add('reconcile');
+    await s.timer();
+    expect(lastHealth(s)).toMatchObject({
+      state: 'failing',
+      reason: 'reconcile failed: reconcile exploded',
+    });
+    s.failSubs.clear();
+    s.failSubs.add('sweep');
+    await s.timer();
+    expect(lastHealth(s)).toMatchObject({
+      state: 'failing',
+      reason: 'cli-ci sweep failed: sweep exploded',
+    });
+    s.failSubs.clear();
+    await s.timer();
+    expect(lastHealth(s).state).toBe('loaded');
+  });
+});
+
+describe('heartbeat reports the last tick result (AISDLC-1358)', () => {
+  const healths = (s: ReturnType<typeof setup>) =>
+    s.stores.filter(([k]) => k.startsWith('hierarchy/health/')).map(([, v]) => v);
+  const lastHealth = (s: ReturnType<typeof setup>) => healths(s).at(-1);
+
+  it('a failing tick writes no loaded record before it and writes failing with the first error line', async () => {
+    const s = setup(EMPTY_TICK, { tickFails: true });
+    await s.start();
+    const before = healths(s).length;
+    await s.timer();
+    const after = healths(s).slice(before);
+    expect(after.map((h: any) => h.state)).toEqual(['failing']);
+    expect(after[0].reason).toBe('Cannot find module x');
+  });
+
+  it('a tick that returns a result writes loaded; a later failure replaces it with failing', async () => {
+    const s = setup();
+    await s.start();
+    await s.timer();
+    expect(lastHealth(s).state).toBe('loaded');
+    s.setFail(true);
+    await s.timer();
+    expect(lastHealth(s)).toMatchObject({ state: 'failing', reason: 'Cannot find module x' });
+  });
+
+  it('runs the bins from the directory recorded in cli-bin.json', async () => {
+    const s = setup(EMPTY_TICK, { binDir: '/inst/pipeline-cli/bin' });
+    await s.start();
+    await s.timer();
+    const tickRun = s.argvs.filter((a) => a[2] === 'tick').at(-1);
+    expect(tickRun?.[1]).toBe('/inst/pipeline-cli/bin/cli-hierarchy.mjs');
+    expect(lastHealth(s).state).toBe('loaded');
+  });
+
+  it('keeps the repository-relative bin path with no record', async () => {
+    const s = setup();
+    await s.start();
+    await s.timer();
+    expect(s.argvs.some((a) => a[1] === 'pipeline-cli/bin/cli-hierarchy.mjs')).toBe(true);
   });
 });

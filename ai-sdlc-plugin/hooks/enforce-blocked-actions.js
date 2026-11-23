@@ -62,7 +62,9 @@ const {
   isUntrustedRun,
   UNTRUSTED_MARKER_FILE,
 } = require('./lib/governance-resolver');
+const { cliCommand } = require('./lib/cli-command');
 const { evaluateLeasePush, hasForcePushOption } = require('./lib/lease-push-guard');
+const { readFixPrHead } = require('./lib/fix-pr-head');
 const { evaluateVerdictFence } = require('./lib/verdict-ref-fence');
 const { evaluateResumedRoundPush } = require('./lib/resumed-round-fence');
 const {
@@ -82,7 +84,7 @@ function failClosed(why) {
     `Blocked by AI-SDLC governance policy: this run is marked untrusted and the hook hit an ` +
       `internal error (${why}); failing closed ` +
       `(rule AISDLC-720, untrusted-run fail-closed). Next step: do not retry; describe the needed change in the PR or issue body, ` +
-      `or record it with 'node pipeline-cli/bin/cli-decisions.mjs escalate'.\n`,
+      `or record it with '${cliCommand('cli-decisions.mjs')} escalate'.\n`,
   );
   process.exit(2);
 }
@@ -211,6 +213,7 @@ function loadLeasePolicy(rawCommand) {
       cwd,
       command: target.command,
       top: wt.top,
+      mainRoot: wt.mainRoot,
       claimTaskId: wt.claimTaskId || null,
     };
   } catch {
@@ -231,7 +234,7 @@ function forcePushRefusal(why, failing) {
       `force-push is refused because ${key} resolves to never (set explicitly in this repo). ` +
       `Agents must not edit .ai-sdlc/. Next step: do not force-push; push with 'git push origin HEAD:refs/heads/<own-branch>' ` +
       `(after 'git fetch origin main && git rebase origin/main' when no force is needed), or record the need with ` +
-      `'node pipeline-cli/bin/cli-decisions.mjs escalate --task-id <id> --summary <one line> --option <id>:<description>' ` +
+      `'${cliCommand('cli-decisions.mjs')} escalate --task-id <id> --summary <one line> --option <id>:<description>' ` +
       `so the dispatch or planner session routes a change of spec.governance.allowForcePush to leaseOnOwnBranch, which allows ` +
       `'git push --force-with-lease origin HEAD:refs/heads/<own-branch>' on a dispatched task's own branch. Plain force pushes and any ` +
       `push to main/master or a protected branch are never permitted.`
@@ -252,8 +255,11 @@ function forcePushRefusal(why, failing) {
   const cwdCause = loc
     ? `CAUSE (AISDLC-905): the tool's cwd is outside the task worktree: the hook saw ${loc.found}, ` +
       `expected ${loc.expected}. The shell cwd can silently reset to the main checkout between calls. ` +
-      `Fix: run it as a lone command from that worktree (cd <worktree> in a call of its own, then the push by itself, ` +
-      `or git -C <main>/.worktrees/<task-id> push ...). `
+      `Fix: a lone cd does not change the cwd the hook sees, so run the push as one command with ` +
+      `git -C <main>/.worktrees/<task-id> push ... (no pipe or other shell operator), and from a session ` +
+      `rooted at the main checkout bind the task by launching it with AI_SDLC_ACTIVE_TASK_ID=<task-id> ` +
+      `(equal to the worktree's .active-task). A first push of a branch the remote lacks needs no lease: ` +
+      `git push -u origin HEAD:refs/heads/<own-branch>. `
     : '';
   return (
     cwdCause +
@@ -411,7 +417,7 @@ function untrustedMessage(what) {
     `(AI_SDLC_UNTRUSTED_RUN or the git-dir untrusted marker is set for fork PRs, outside authors, or issue-sourced runs). ` +
     `Rule (AISDLC-720, untrusted-run protected paths): untrusted runs cannot change .ai-sdlc/**, .github/workflows/**, .claude/**, .husky/**, ` +
     `ai-sdlc-plugin/hooks/**, .active-task, package.json, lockfiles, .npmrc, pnpm-workspace.yaml, scripts/**, CLAUDE.md or .mcp.json, and cannot write outside their own worktree. Next step: describe the needed change in the PR (a maintainer reviews every PR) ` +
-    `or issue body, or record it with 'node pipeline-cli/bin/cli-decisions.mjs escalate'; do not retry or route around this. ` +
+    `or issue body, or record it with '${cliCommand('cli-decisions.mjs')} escalate'; do not retry or route around this. ` +
     `A trusted CI job (not one that takes outside input) that legitimately needs this sets ` +
     `AI_SDLC_INTERNAL_RUN=1 in the step-level env: of that step only, never at job or workflow ` +
     `level and never via $GITHUB_ENV.`
@@ -544,12 +550,18 @@ function enforceBash(command) {
       leasePushAllowed = verdict.decision === 'allow';
     } else if (lease.mode === 'leaseOnOwnBranch') {
       const top = lease.top;
+      const taskId = top ? readTaskId(top) || lease.claimTaskId || null : null;
+      // AISDLC-1363 (DEC-0421): the PR head branch a fix task was filed against, from the
+      // inflight manifest in the main checkout only.
+      const fixPr = taskId && lease.mainRoot ? readFixPrHead(lease.mainRoot, taskId) : null;
       const verdict = evaluateLeasePush(lease.command, {
+        fixPrBranch: fixPr ? fixPr.prHeadRef : null,
+        fixesPr: fixPr ? fixPr.fixesPr : null,
         ownRef: gitOut(['symbolic-ref', '-q', 'HEAD'], lease.cwd),
         protectedBranches: lease.protectedBranches,
         remotes: (gitOut(['remote'], lease.cwd) || '').split('\n').filter(Boolean),
         aliasLookup: (name) => gitOut(['config', '--get', `alias.${name}`], lease.cwd),
-        taskId: top ? readTaskId(top) || lease.claimTaskId || null : null,
+        taskId,
         worktreeName: top ? basename(top) : null,
         role: process.env.AI_SDLC_HIERARCHY_ROLE,
         refAliasState: (name) => refAliasState(name, lease.cwd),
@@ -584,7 +596,7 @@ function realpathOrDeny(p) {
       deny(
         `path '${p}' has a symlink chain too deep to resolve; refusing the write. Next step: write ` +
           `to a path without the symlink chain, or record the need with ` +
-          `'node pipeline-cli/bin/cli-decisions.mjs escalate'.`,
+          `'${cliCommand('cli-decisions.mjs')} escalate'.`,
       );
     }
     throw e;
@@ -651,7 +663,7 @@ function enforceWriteEdit(filePath) {
         deny(
           `path '${relPath}' matches blockedPaths entry '${glob}' in .ai-sdlc/agent-role.yaml. ` +
             `Next step: if this task needs the file, record it with ` +
-            `'node pipeline-cli/bin/cli-decisions.mjs escalate --task-id <id> --summary <one line> --option <id>:<description>' ` +
+            `'${cliCommand('cli-decisions.mjs')} escalate --task-id <id> --summary <one line> --option <id>:<description>' ` +
             `so the dispatch or planner session routes the change to blockedPaths (or a task that names the file).`,
         );
       }
@@ -697,7 +709,7 @@ function enforceWriteEdit(filePath) {
       `path '${realAbsPath}' is outside the agent's active worktree/project root and not under the ` +
         `active task's permittedExternalPaths (${allowed.join(', ')}). Next step: add the path to ` +
         `'permittedExternalPaths' in the task frontmatter, or record the need with ` +
-        `'node pipeline-cli/bin/cli-decisions.mjs escalate'.`,
+        `'${cliCommand('cli-decisions.mjs')} escalate'.`,
     );
   }
 }

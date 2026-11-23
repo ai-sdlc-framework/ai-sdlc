@@ -268,6 +268,9 @@ export async function prepareReview(
       reason: 'review diff unavailable (git diff failed or came back empty); reviewers not spawned',
     };
   }
+  // AISDLC-1335: one number per round. The recorded-round plan counts rounds across runs, so it
+  // names the round everywhere (progress line, instruction, prompt files, developer reply).
+  const reviewRound = built.roundPlan?.round ?? round;
   writeRunFile(ctx, 'pr-diff.txt', built.diff);
   const pathsFile = writeRunFile(ctx, 'pr-files.txt', built.changedFiles.join('\n') + '\n');
 
@@ -288,7 +291,7 @@ export async function prepareReview(
     return {
       kind: 'nothing-to-spawn',
       review: {
-        round,
+        round: reviewRound,
         spawned: [],
         autoApproved: verdicts.map((v) => ({ agent: String(v.agentId), reviewedSha })),
         headSha: head.stdout.trim(),
@@ -362,7 +365,7 @@ export async function prepareReview(
       : baseHarnessNote;
 
   const baseReview: ReviewRoundState = {
-    round,
+    round: reviewRound,
     spawned: [],
     autoApproved: [],
     headSha,
@@ -446,7 +449,7 @@ export async function prepareReview(
       });
       const promptFile = writeRunFile(
         ctx,
-        `review-r${round}-${agent}.md`,
+        `review-r${reviewRound}-${agent}.md`,
         `${p.prompt}\n\n` +
           `Diff-binding token (for attestation, do not omit from your response): ${nonceMarker}\n`,
       );
@@ -470,7 +473,7 @@ export async function prepareReview(
     // the classifier's normal set runs beside the staged pipeline and is what the envelope covers.
     const beside = spawnedFor(prompts);
     const stagedReview = await startStagedRound(ctx, state, {
-      round,
+      round: reviewRound,
       artifactsDir,
       baseReview,
       security,

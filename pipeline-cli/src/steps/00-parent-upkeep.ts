@@ -18,6 +18,9 @@
 
 import { join } from 'node:path';
 import type { Runner } from '../runtime/exec.js';
+import { changedPathsOf, PARENT_DIRTY_CAUSE, parentDirtyMessage } from './parent-dirty.js';
+
+export { changedPathsOf, PARENT_DIRTY_CAUSE, parentDirtyMessage };
 import { sweepMergedWorktrees } from './00-sweep.js';
 import type { WorktreeSweepConfig } from './00-worktree-disposition.js';
 import { pruneStaleParentDebris, syncParentUntrackedFiles } from './00-5-sync-parent.js';
@@ -111,7 +114,7 @@ const REPAIR =
 export async function assertParentClean(
   workDir: string,
   runner: Runner,
-): Promise<{ ok: true } | { ok: false; reason: string }> {
+): Promise<{ ok: true } | { ok: false; reason: string; cause?: string }> {
   const git = (args: string[]) => runner('git', args, { cwd: workDir, allowFailure: true });
   const branch = await git(['rev-parse', '--abbrev-ref', 'HEAD']);
   if (branch.code !== 0 || branch.stdout.trim() !== 'main') {
@@ -124,7 +127,8 @@ export async function assertParentClean(
   if (status.code !== 0 || status.stdout.trim() !== '') {
     return {
       ok: false,
-      reason: `Step 0 parent check refused: the parent has tracked changes; ${REPAIR}`,
+      reason: parentDirtyMessage(changedPathsOf(status.stdout)),
+      cause: PARENT_DIRTY_CAUSE,
     };
   }
   const behind = await git(['merge-base', '--is-ancestor', 'HEAD', 'origin/main']);

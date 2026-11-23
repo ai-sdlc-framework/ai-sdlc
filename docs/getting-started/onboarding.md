@@ -196,7 +196,6 @@ Expected output (paths may vary):
 [ai-sdlc:init] write .ai-sdlc/dor-config.yaml
 [ai-sdlc:init] write .ai-sdlc/trusted-reviewers.yaml
 [ai-sdlc:init] write .github/workflows/ai-sdlc-gate.yml
-[ai-sdlc:init] write .github/workflows/verify-attestation.yml
 [ai-sdlc:init] write .github/workflows/ai-sdlc-review.yml
 [ai-sdlc:init] write .github/workflows/auto-enable-auto-merge.yml
 [ai-sdlc:init] write CLAUDE.md
@@ -408,6 +407,11 @@ gh secret set AI_SDLC_PAT
 # Or pipe from a file to avoid the token appearing inline:
 gh secret set AI_SDLC_PAT --body-file path/to/token.txt
 ```
+
+> **First pull request:** the pull request that adds `.ai-sdlc/` to your project for the
+> first time is merged by a person. The merge policy is read only from the default branch,
+> where `.ai-sdlc/agent-role.yaml` does not exist yet, so the merge helper refuses. Every
+> later pull request goes through `cli-merge-if-eligible`.
 
 > **Shell-history hygiene:** never pass live secrets as inline arguments
 > (`--body "ghp_..."`, `ANTHROPIC_API_KEY=sk-ant-... command`) — they appear in

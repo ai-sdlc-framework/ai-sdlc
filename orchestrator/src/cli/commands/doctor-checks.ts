@@ -43,7 +43,12 @@
  */
 
 import { readFileSync, readdirSync, statSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
-import { CLIENT_SIDE_ONLY_MESSAGE } from './branch-protection-shared.js';
+import {
+  CLIENT_SIDE_ONLY_MESSAGE,
+  fetchBranchProtectionStatus,
+  isContextPosted,
+  postedContextsFromWorkflows,
+} from './branch-protection-shared.js';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { Ajv2020 } from 'ajv/dist/2020.js';
@@ -62,12 +67,18 @@ import {
 } from '@ai-sdlc/reference';
 import { now as clockNow } from '../../clock.js';
 import {
-  ARTIFACTS_GITIGNORE_ENTRY,
+  RUNTIME_GITIGNORE_PATHS,
+  RUNTIME_GITIGNORE_SENTINEL,
   gitCheckIgnoreArgs,
   gitignoreCovers,
+  hasSentinelLine,
+  insertIntoSentinelBlock,
   interpretCheckIgnoreExit,
+  missingRuntimeGitignorePaths,
 } from '../../runtime-gitignore.js';
+import { diagnoseLegacyWorkflows, migrateLegacyWorkflows } from './init-legacy-workflows.js';
 import {
+  AI_SDLC_GATE_WORKFLOW,
   HUSKY_PREPUSH_SIGN_SNIPPET,
   hasStaleAttestationSignReference,
   stripStaleAttestationSignBlock,
@@ -121,6 +132,10 @@ export interface DoctorCheckAdapters extends DoctorAdapters {
   listFiles?: (path: string) => string[];
   /** Modification time of a file in milliseconds; `null` if missing. Optional so older fixtures compile. */
   fileMtimeMs?: (path: string) => number | null;
+  /** Whether a process is alive (`kill -0`). Optional so older fixtures compile; absent means dead. */
+  isPidAlive?: (pid: number) => boolean;
+  /** Running Node version, e.g. `22.23.2`. Optional; production = `process.versions.node`. */
+  nodeVersion?: () => string;
   /** Production = `node:os.homedir()`. Injectable for hermetic tests. */
   homeDir: () => string;
   /** Production = `process.env`. Injectable so tests don't depend on the real environment. */
@@ -168,6 +183,15 @@ export function buildProductionCheckAdapters(): DoctorCheckAdapters {
         return null;
       }
     },
+    isPidAlive: (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    nodeVersion: () => process.versions.node,
     homeDir: () => homedir(),
     env: process.env,
   };
@@ -264,6 +288,72 @@ export interface ResolvedPluginInstall {
   source: PluginInstallSource;
 }
 
+/** One `ai-sdlc@*` entry of `~/.claude/plugins/installed_plugins.json` (AISDLC-1327). */
+export interface PluginInstallEntry {
+  scope: string;
+  projectPath?: string;
+  installPath: string;
+  version?: string;
+}
+
+/** Read the `ai-sdlc@*` install entries; `undefined` when the registry file is missing or unreadable. */
+function readPluginInstallEntries(ctx: DoctorRunContext): PluginInstallEntry[] | undefined {
+  const registry = readJson(
+    ctx,
+    join(ctx.adapters.homeDir(), '.claude', 'plugins', 'installed_plugins.json'),
+  ) as { plugins?: Record<string, unknown> } | undefined;
+  if (!registry || typeof registry.plugins !== 'object' || registry.plugins === null) {
+    return undefined;
+  }
+  const entries: PluginInstallEntry[] = [];
+  for (const [key, list] of Object.entries(registry.plugins)) {
+    if (!key.startsWith('ai-sdlc@') || !Array.isArray(list)) continue;
+    for (const raw of list) {
+      const e = raw as Record<string, unknown> | null;
+      if (!e || typeof e.installPath !== 'string') continue;
+      entries.push({
+        scope: typeof e.scope === 'string' ? e.scope : '',
+        projectPath: typeof e.projectPath === 'string' ? e.projectPath : undefined,
+        installPath: e.installPath,
+        version: typeof e.version === 'string' ? e.version : undefined,
+      });
+    }
+  }
+  return entries;
+}
+
+/**
+ * The install entry of the project: the `project`/`local` entry whose
+ * `projectPath` is the project dir or its nearest ancestor, else the `user`
+ * entry (AISDLC-1327).
+ */
+function selectPluginInstallEntry(
+  entries: PluginInstallEntry[],
+  projectDir: string,
+): PluginInstallEntry | undefined {
+  const dir = resolve(projectDir);
+  let best: PluginInstallEntry | undefined;
+  for (const e of entries) {
+    if ((e.scope !== 'project' && e.scope !== 'local') || !e.projectPath) continue;
+    const base = resolve(e.projectPath);
+    if (dir !== base && !dir.startsWith(base.endsWith('/') ? base : `${base}/`)) continue;
+    if (!best || resolve(best.projectPath!).length < base.length) best = e;
+  }
+  return best ?? entries.find((e) => e.scope === 'user');
+}
+
+function findRegisteredInstall(ctx: DoctorRunContext): ResolvedPluginInstall | undefined {
+  const entries = readPluginInstallEntries(ctx);
+  if (!entries) return undefined;
+  const entry = selectPluginInstallEntry(entries, ctx.projectDir);
+  if (!entry || !ctx.adapters.exists(entry.installPath)) return undefined;
+  return {
+    path: entry.installPath,
+    version: entry.version ?? readPluginVersion(ctx, entry.installPath),
+    source: 'marketplace',
+  };
+}
+
 /**
  * Scan `~/.claude/plugins/cache/*&#47;ai-sdlc/*` for the marketplace-installed
  * cache, picking the SEMVER-highest version directory (AISDLC-586: a lexical
@@ -306,7 +396,9 @@ function findMarketplaceInstall(ctx: DoctorRunContext): ResolvedPluginInstall | 
  *      Code when running inside a plugin context, or exported manually.
  *      This is the harness's own signal for "this is what got loaded" and
  *      always wins when present.
- *   2. The marketplace cache (`~/.claude/plugins/cache/*&#47;ai-sdlc/*`),
+ *   2. The install entry of the project in
+ *      `~/.claude/plugins/installed_plugins.json` (AISDLC-1327), then, as the
+ *      last resort, the marketplace cache (`~/.claude/plugins/cache/*&#47;ai-sdlc/*`),
  *      SEMVER-highest version directory. This is the real install for the
  *      overwhelming majority of operators and adopters.
  *   3. `<projectDir>/node_modules/ai-sdlc-plugin` — an adopter that vendored
@@ -328,7 +420,7 @@ export function resolvePluginInstall(ctx: DoctorRunContext): ResolvedPluginInsta
     return { path: envRoot, version: readPluginVersion(ctx, envRoot), source: 'env' };
   }
 
-  const marketplace = findMarketplaceInstall(ctx);
+  const marketplace = findRegisteredInstall(ctx) ?? findMarketplaceInstall(ctx);
   if (marketplace) return marketplace;
 
   const nodeModulesDir = join(projectDir, 'node_modules', 'ai-sdlc-plugin');
@@ -678,6 +770,58 @@ export function checkAttestationGovernanceCheck(ctx: DoctorRunContext): DoctorCh
   };
 }
 
+// ── Check: required contexts are posted by a workflow (AISDLC-1352) ──────
+
+/**
+ * Compares the live required status contexts on the protected branch with
+ * the names the repository's workflows post (job names, plus `codecov/*`
+ * when a workflow uses `codecov/codecov-action`). A required context nobody
+ * posts can never pass. Reports `warn` "not checked" (never pass) when the
+ * comparison cannot run.
+ */
+export function checkRequiredContextsPosted(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'required-contexts-posted';
+  const prot = fetchBranchProtectionStatus(ctx.adapters, ctx.projectDir);
+  if (!prot.checked) {
+    return {
+      id,
+      severity: 'warn',
+      title: `required contexts not checked: ${prot.error ?? 'branch protection unreadable'}`,
+      anonymizableEvidence: { checked: false },
+    };
+  }
+  const dir = join(ctx.projectDir, '.github', 'workflows');
+  const files = (ctx.adapters.listFiles?.(dir) ?? []).filter((f) => /\.ya?ml$/.test(f));
+  const texts = files
+    .map((f) => ctx.adapters.readFile(join(dir, f)))
+    .filter((t): t is string => t !== null);
+  if (texts.length === 0) {
+    return {
+      id,
+      severity: 'warn',
+      title: 'required contexts not checked: no workflow files found in .github/workflows',
+      anonymizableEvidence: { checked: false },
+    };
+  }
+  const posted = postedContextsFromWorkflows(texts);
+  const missing = (prot.requiredContexts ?? []).filter((c) => !isContextPosted(c, posted));
+  if (missing.length > 0) {
+    return {
+      id,
+      severity: 'fail',
+      title: `branch protection requires ${missing.map((c) => `\`${c}\``).join(', ')} but no workflow posts it, so no pull request can satisfy protection`,
+      remediation:
+        'Remove the context from the required status checks (Settings > Branches), add a workflow job with that name, or upload coverage with codecov/codecov-action for codecov contexts',
+      anonymizableEvidence: { missing },
+    };
+  }
+  return {
+    id,
+    severity: 'pass',
+    title: 'every required status context is posted by a workflow',
+  };
+}
+
 // ── Check: reviewer-attribution resolver reachability (AISDLC-623) ───────
 
 /**
@@ -721,6 +865,63 @@ export function checkReviewerAttributionResolver(ctx: DoctorRunContext): DoctorC
     remediation:
       'Reinstall or update the plugin: /plugin uninstall ai-sdlc && /plugin install ai-sdlc',
     anonymizableEvidence: { installSource: install.source, resolverPath },
+  };
+}
+
+// ── Check: stale plugin install entries (AISDLC-1327) ─────────────────────
+
+/**
+ * Read-only: reports `ai-sdlc@*` install entries pinned below the newest
+ * cached version, and fails when the current project's entry points at a
+ * missing folder. It never deletes a cache folder or edits the registry.
+ */
+export function checkPluginInstallEntries(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'plugin-install-entries';
+  const entries = readPluginInstallEntries(ctx);
+  if (!entries) {
+    return { id, severity: 'pass', title: 'no plugin install registry found' };
+  }
+
+  const current = selectPluginInstallEntry(entries, ctx.projectDir);
+  if (current && !ctx.adapters.exists(current.installPath)) {
+    return {
+      id,
+      severity: 'fail',
+      title: `install entry of this project points at a missing folder ${current.installPath}`,
+      remediation: 'Reinstall the plugin: /plugin uninstall ai-sdlc && /plugin install ai-sdlc',
+      anonymizableEvidence: { installPath: current.installPath },
+    };
+  }
+
+  const newest = findMarketplaceInstall(ctx)?.version;
+  if (!newest) {
+    return {
+      id,
+      severity: 'pass',
+      title: 'no cached plugin version to compare install entries to',
+    };
+  }
+  const stale = entries.filter((e) => {
+    const v = e.version ?? basename(e.installPath);
+    return compareSemver(v, newest) < 0;
+  });
+  if (stale.length === 0) {
+    return {
+      id,
+      severity: 'pass',
+      title: `every install entry is at the newest version (v${newest})`,
+    };
+  }
+  const described = stale.map(
+    (e) => `${e.projectPath ?? `(${e.scope})`} at v${e.version ?? basename(e.installPath)}`,
+  );
+  return {
+    id,
+    severity: 'warn',
+    title: `install entries pinned below the newest cached v${newest}: ${described.join('; ')}`,
+    remediation:
+      'Update the plugin in each listed project (/plugin update ai-sdlc); doctor never deletes cache folders or edits the registry',
+    anonymizableEvidence: { newest, staleCount: stale.length },
   };
 }
 
@@ -1108,7 +1309,15 @@ const VITEST_WORKER_COMMAND = /\(vitest(?: \d+)?\)|[\\/]vitest[\\/]dist[\\/]work
  */
 export function checkOrphanedVitestWorkers(ctx: DoctorRunContext): DoctorCheckResult[] {
   const ps = ctx.adapters.runCommand('ps', ['-axo', 'pid=,ppid=,etime=,command=']);
-  if (ps.exitCode !== 0) return [];
+  if (ps.exitCode !== 0)
+    return [
+      {
+        id: 'orphaned-vitest-workers',
+        severity: 'warn',
+        title: 'the process table was not read (`ps` failed)',
+        remediation: 'Run `ps -axo pid=,ppid=,etime=,command=` to see the error.',
+      },
+    ];
   const orphans: number[] = [];
   for (const line of ps.stdout.split('\n')) {
     const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line);
@@ -1118,7 +1327,10 @@ export function checkOrphanedVitestWorkers(ctx: DoctorRunContext): DoctorCheckRe
     const age = parseEtimeSeconds(etime);
     if (age !== undefined && age > ORPHAN_MIN_AGE_SECONDS) orphans.push(Number(pid));
   }
-  if (orphans.length === 0) return [];
+  if (orphans.length === 0)
+    return [
+      { id: 'orphaned-vitest-workers', severity: 'pass', title: 'no orphaned vitest workers' },
+    ];
   return [
     {
       id: 'orphaned-vitest-workers',
@@ -1130,40 +1342,70 @@ export function checkOrphanedVitestWorkers(ctx: DoctorRunContext): DoctorCheckRe
   ];
 }
 
-// ── Runtime artifacts ignore entry ──────────────────────────────────────
+// ── Runtime ignore entries ──────────────────────────────────────────────
+
+/** Whether git (or, when it cannot answer, the .gitignore text) ignores `entry`. */
+function runtimeEntryIgnored(
+  ctx: DoctorRunContext,
+  gitignore: string | null,
+  entry: string,
+): boolean {
+  // git is the authority (it sees broader lines, `.ai-sdlc/*` with a later `!`, nested
+  // .gitignore files); the text reading is the fallback when git cannot be asked.
+  const git = interpretCheckIgnoreExit(
+    ctx.adapters.runCommand('git', gitCheckIgnoreArgs(ctx.projectDir, entry)).exitCode,
+  );
+  return git ?? (gitignore !== null && gitignoreCovers(gitignore, entry));
+}
 
 /**
- * `.ai-sdlc/artifacts/` holds the evidence files, assignment logs and replay
- * results the routing commands write (RFC-0050, AISDLC-657.3). A repository whose
- * .gitignore lacks the entry would commit them. Warns, not fails: nothing is
- * broken until someone stages the directory.
+ * Every path in RUNTIME_GITIGNORE_PATHS is written by the framework and never
+ * reviewed (AISDLC-1331). One that git does not ignore shows up as untracked and
+ * makes Step 0.5 refuse to dispatch, so a missing entry is a `fail`.
  */
 export function checkRuntimeGitignore(ctx: DoctorRunContext): DoctorCheckResult {
   const gitignore = ctx.adapters.readFile(join(ctx.projectDir, '.gitignore'));
-  // git is the authority (it sees `artifacts/`, `.ai-sdlc/*` with a later `!`, nested
-  // .gitignore files); the text reading is the fallback when git cannot be asked.
-  const git = interpretCheckIgnoreExit(
-    ctx.adapters.runCommand('git', gitCheckIgnoreArgs(ctx.projectDir, ARTIFACTS_GITIGNORE_ENTRY))
-      .exitCode,
+  const missing = RUNTIME_GITIGNORE_PATHS.filter(
+    (entry) => !runtimeEntryIgnored(ctx, gitignore, entry),
   );
-  const ignored =
-    git ?? (gitignore !== null && gitignoreCovers(gitignore, ARTIFACTS_GITIGNORE_ENTRY));
-  if (ignored) {
+  if (missing.length === 0) {
     return {
       id: 'runtime-gitignore',
       severity: 'pass',
-      title: `.gitignore ignores ${ARTIFACTS_GITIGNORE_ENTRY}`,
+      title: '.gitignore ignores every AI-SDLC runtime path',
     };
   }
   return {
     id: 'runtime-gitignore',
-    severity: 'warn',
-    title:
-      gitignore === null
-        ? `no .gitignore found: ${ARTIFACTS_GITIGNORE_ENTRY} (usage evidence, assignment logs, replay results) would be committed`
-        : `.gitignore does not ignore ${ARTIFACTS_GITIGNORE_ENTRY} (usage evidence, assignment logs, replay results would be committed)`,
-    remediation: `Add \`${ARTIFACTS_GITIGNORE_ENTRY}\` to .gitignore (running \`ai-sdlc execute\` appends it to the runtime block), and remove any later \`!\` line that re-includes it.`,
-    anonymizableEvidence: { gitignorePresent: gitignore !== null },
+    severity: 'fail',
+    title: `${gitignore === null ? 'no .gitignore found' : '.gitignore'}: runtime paths not ignored (untracked, they block Step 0.5): ${missing.join(', ')}`,
+    remediation:
+      'Run `ai-sdlc doctor --fix` (or `ai-sdlc init`, or `ai-sdlc execute`) to add them to the runtime block, and remove any later `!` line that re-includes them.',
+    anonymizableEvidence: { gitignorePresent: gitignore !== null, missingCount: missing.length },
+  };
+}
+
+/** `doctor --fix`: add the missing entries the way `init` does. Idempotent. */
+export function fixRuntimeGitignore(ctx: DoctorRunContext): DoctorFixResult {
+  const existing = ctx.adapters.readFile(join(ctx.projectDir, '.gitignore')) ?? '';
+  const missing = missingRuntimeGitignorePaths(existing, (entry) =>
+    runtimeEntryIgnored(ctx, existing, entry),
+  );
+  if (missing.length === 0) {
+    return { id: 'runtime-gitignore', applied: false, detail: 'every runtime path is ignored' };
+  }
+  let next: string;
+  if (hasSentinelLine(existing)) {
+    next = insertIntoSentinelBlock(existing, missing);
+  } else {
+    const block = `${RUNTIME_GITIGNORE_SENTINEL}\n${missing.join('\n')}\n`;
+    next = existing.length > 0 ? `${existing.trimEnd()}\n${block}` : block;
+  }
+  ctx.adapters.writeFile(join(ctx.projectDir, '.gitignore'), next);
+  return {
+    id: 'runtime-gitignore',
+    applied: true,
+    detail: `added to .gitignore: ${missing.join(', ')}`,
   };
 }
 
@@ -1206,9 +1448,19 @@ function findWorktreesWithoutHooks(ctx: DoctorRunContext): string[] {
  */
 export function checkWorktreeHooks(ctx: DoctorRunContext): DoctorCheckResult[] {
   const main = readHooksState(ctx, ctx.projectDir);
-  if (!main.hasPrePush) return [];
+  if (!main.hasPrePush)
+    return [
+      {
+        id: 'worktree-hooks',
+        severity: 'pass',
+        title: 'not applicable: the main checkout has no pre-push hook',
+      },
+    ];
   const affected = findWorktreesWithoutHooks(ctx);
-  if (affected.length === 0) return [];
+  if (affected.length === 0)
+    return [
+      { id: 'worktree-hooks', severity: 'pass', title: 'every worktree has its pre-push hook' },
+    ];
   const names = affected.map((wt) => basename(wt));
   return [
     {
@@ -1278,14 +1530,30 @@ export function checkCiQueue(ctx: DoctorRunContext): DoctorCheckResult[] {
     '--limit',
     '500',
   ]);
-  if (r.exitCode !== 0) return [];
+  if (r.exitCode !== 0)
+    return [
+      {
+        id: 'ci-queue',
+        severity: 'warn',
+        title: 'the GitHub Actions queue was not read: `gh run list` failed',
+        remediation: 'Run `gh auth login` and check the repository remote.',
+      },
+    ];
   let runs: unknown;
   try {
     runs = JSON.parse(r.stdout);
   } catch {
-    return [];
+    runs = undefined;
   }
-  if (!Array.isArray(runs)) return [];
+  if (!Array.isArray(runs))
+    return [
+      {
+        id: 'ci-queue',
+        severity: 'warn',
+        title: 'the GitHub Actions queue was not read: unexpected gh output',
+        remediation: 'Run `gh run list` to see the error.',
+      },
+    ];
   const times = (runs as Array<{ createdAt?: unknown }>)
     .map((x) => (typeof x.createdAt === 'string' ? Date.parse(x.createdAt) : NaN))
     .filter((t) => !Number.isNaN(t));
@@ -1295,7 +1563,8 @@ export function checkCiQueue(ctx: DoctorRunContext): DoctorCheckResult[] {
       : Math.max(0, Math.floor((clockNow().getTime() - Math.min(...times)) / 60_000));
   const tooMany = runs.length > CI_QUEUE_MAX_QUEUED;
   const tooOld = oldestMin > CI_QUEUE_MAX_OLDEST_MINUTES;
-  if (!tooMany && !tooOld) return [];
+  if (!tooMany && !tooOld)
+    return [{ id: 'ci-queue', severity: 'pass', title: 'GitHub Actions queue is healthy' }];
   return [
     {
       id: 'ci-queue',
@@ -1315,19 +1584,42 @@ export function checkCiQueue(ctx: DoctorRunContext): DoctorCheckResult[] {
  */
 export function checkHierarchyModule(ctx: DoctorRunContext): DoctorCheckResult[] {
   const board = join(ctx.projectDir, '.ai-sdlc', 'dispatch');
+  const id = 'hierarchy-module';
   const raw = ctx.adapters.readFile(join(board, 'hierarchy.json'));
-  if (raw === null) return [];
+  if (raw === null) {
+    return [
+      {
+        id,
+        severity: 'warn',
+        title: 'not set up yet: no hierarchy roster (.ai-sdlc/dispatch/hierarchy.json)',
+        remediation: 'Run `cli-hierarchy up` to start the dispatch host.',
+      },
+    ];
+  }
   let sessions: unknown;
   try {
     sessions = (JSON.parse(raw) as { sessions?: unknown }).sessions;
   } catch {
-    return [];
+    sessions = undefined;
   }
-  if (!Array.isArray(sessions)) return [];
+  if (!Array.isArray(sessions)) {
+    return [
+      {
+        id,
+        severity: 'fail',
+        title:
+          'the hierarchy roster (.ai-sdlc/dispatch/hierarchy.json) is unreadable or has no sessions list',
+        remediation:
+          'Inspect or delete the file, then run `cli-hierarchy down` and `cli-hierarchy up`.',
+      },
+    ];
+  }
   const bad: string[] = [];
+  let running = 0;
   for (const e of sessions as Array<Record<string, unknown>>) {
     if (e.role !== 'operator-dispatch' || e.status !== 'running') continue;
     if (typeof e.name !== 'string') continue;
+    running++;
     let h: { state?: unknown; reason?: unknown; at?: unknown } = {};
     try {
       const text = ctx.adapters.readFile(join(board, 'handoff', `module-${e.name}.json`));
@@ -1338,11 +1630,24 @@ export function checkHierarchyModule(ctx: DoctorRunContext): DoctorCheckResult[]
     const at = typeof h.at === 'string' ? Date.parse(h.at) : NaN;
     const reason = typeof h.reason === 'string' && h.reason ? `: ${h.reason}` : '';
     if (h.state === 'refused') bad.push(`${e.name} refused${reason}`);
+    else if (h.state === 'failing') bad.push(`${e.name} failing${reason}`);
     else if (h.state !== 'loaded') bad.push(`${e.name} absent`);
     else if (Number.isNaN(at) || clockNow().getTime() - at > 120_000)
       bad.push(`${e.name} stale (no heartbeat)`);
   }
-  if (bad.length === 0) return [];
+  if (running === 0) {
+    return [
+      {
+        id,
+        severity: 'warn',
+        title: 'the roster has no running dispatch session, so nothing ticks or wakes',
+        remediation: 'Run `cli-hierarchy up` to start the dispatch host.',
+      },
+    ];
+  }
+  if (bad.length === 0) {
+    return [{ id, severity: 'pass', title: 'the dispatch host hierarchy hooks module is loaded' }];
+  }
   return [
     {
       id: 'hierarchy-module',
@@ -1364,14 +1669,30 @@ export function checkHierarchyModule(ctx: DoctorRunContext): DoctorCheckResult[]
  */
 export function checkHierarchyLaunchEnv(ctx: DoctorRunContext): DoctorCheckResult[] {
   const raw = ctx.adapters.readFile(join(ctx.projectDir, '.ai-sdlc', 'dispatch', 'hierarchy.json'));
-  if (raw === null) return [];
+  if (raw === null)
+    return [
+      {
+        id: 'hierarchy-launch-env',
+        severity: 'warn',
+        title: 'not set up yet: no hierarchy roster',
+        remediation: 'Run `cli-hierarchy up`.',
+      },
+    ];
   let sessions: unknown;
   try {
     sessions = (JSON.parse(raw) as { sessions?: unknown }).sessions;
   } catch {
-    return [];
+    sessions = undefined;
   }
-  if (!Array.isArray(sessions)) return [];
+  if (!Array.isArray(sessions))
+    return [
+      {
+        id: 'hierarchy-launch-env',
+        severity: 'warn',
+        title: 'the hierarchy roster has no sessions list, so launch env was not checked',
+        remediation: 'Run `cli-hierarchy up`.',
+      },
+    ];
   const bare: string[] = [];
   for (const e of sessions as Array<Record<string, unknown>>) {
     const { name, role, tmuxSession, tmuxWindow } = e;
@@ -1397,7 +1718,14 @@ export function checkHierarchyLaunchEnv(ctx: DoctorRunContext): DoctorCheckResul
       bare.push(`${name as string} (${role as string})`);
     }
   }
-  if (bare.length === 0) return [];
+  if (bare.length === 0)
+    return [
+      {
+        id: 'hierarchy-launch-env',
+        severity: 'pass',
+        title: 'every running session carries its hierarchy env',
+      },
+    ];
   return [
     {
       id: 'hierarchy-launch-env',
@@ -1468,7 +1796,14 @@ function vscodeWindowRecords(ctx: DoctorRunContext): VscodeWindowRecord[] {
  */
 export function checkVscodeHierarchyTerminals(ctx: DoctorRunContext): DoctorCheckResult[] {
   const id = 'vscode-hierarchy-terminals';
-  if (ctx.adapters.env['TERM_PROGRAM'] !== 'vscode') return [];
+  if (ctx.adapters.env['TERM_PROGRAM'] !== 'vscode')
+    return [
+      {
+        id: 'vscode-hierarchy-terminals',
+        severity: 'pass',
+        title: 'not applicable: not a VS Code terminal',
+      },
+    ];
   const installed = installedVscodeExtension(ctx);
   if (!installed) {
     return [
@@ -1566,7 +1901,15 @@ export function fixVscodeHierarchyTerminals(ctx: DoctorRunContext): DoctorFixRes
  */
 export function checkStaleRepoBuild(ctx: DoctorRunContext): DoctorCheckResult[] {
   const script = join(ctx.projectDir, 'ai-sdlc-plugin', 'scripts', 'resolve-pipeline-cli.sh');
-  if (!ctx.adapters.exists(script)) return [];
+  if (!ctx.adapters.exists(script)) {
+    return [
+      {
+        id: 'stale-repo-build',
+        severity: 'pass',
+        title: 'not applicable: installed pipeline-cli is used',
+      },
+    ];
+  }
   const r = ctx.adapters.runCommand('bash', [
     '-c',
     'cd "$1" && bash "$2" --strict',
@@ -1574,7 +1917,15 @@ export function checkStaleRepoBuild(ctx: DoctorRunContext): DoctorCheckResult[] 
     ctx.projectDir,
     script,
   ]);
-  if (r.exitCode === 0) return [];
+  if (r.exitCode === 0) {
+    return [
+      {
+        id: 'stale-repo-build',
+        severity: 'pass',
+        title: "this repo's pipeline-cli build is fresh",
+      },
+    ];
+  }
   return [
     {
       id: 'stale-repo-build',
@@ -1598,7 +1949,10 @@ const LEASE_PREFLIGHT_SCRIPT =
  */
 export function checkLeasePushPreflight(ctx: DoctorRunContext): DoctorCheckResult[] {
   const taskId = ctx.taskId;
-  if (!taskId) return [];
+  if (!taskId)
+    return [
+      { id: 'lease-push-preflight', severity: 'pass', title: 'not applicable: no --task given' },
+    ];
   const id = 'lease-push-preflight';
   const worktree = join(ctx.projectDir, '.worktrees', taskId.toLowerCase());
   const module = join(ctx.projectDir, 'ai-sdlc-plugin', 'hooks', 'lib', 'trusted-policy.js');
@@ -1680,7 +2034,26 @@ const DISPATCH_VERDICT_GRACE_MS = 10 * 60 * 1000;
 export function checkDispatchBoard(ctx: DoctorRunContext): DoctorCheckResult[] {
   const board = join(ctx.projectDir, '.ai-sdlc', 'dispatch');
   const { listFiles, fileMtimeMs } = ctx.adapters;
-  if (!ctx.adapters.exists(board) || !listFiles) return [];
+  if (!ctx.adapters.exists(board)) {
+    return [
+      {
+        id: 'dispatch-board',
+        severity: 'warn',
+        title: 'not set up yet: no dispatch board (.ai-sdlc/dispatch)',
+        remediation: 'Run `cli-hierarchy up` to create the board.',
+      },
+    ];
+  }
+  if (!listFiles) {
+    return [
+      {
+        id: 'dispatch-board',
+        severity: 'warn',
+        title: 'the dispatch board was not read: this host has no directory-listing adapter',
+        remediation: 'Run `cli-dispatch status` to inspect the board directly.',
+      },
+    ];
+  }
   const nowMs = clockNow().getTime();
   const readManifests = (sub: string): Array<{ file: string; m: Record<string, unknown> }> =>
     listFiles(join(board, sub))
@@ -1846,9 +2219,19 @@ export function checkParentCheckoutState(ctx: DoctorRunContext): DoctorCheckResu
     '--short',
     'HEAD',
   ]);
-  if (branch.exitCode !== 0 || branch.stdout.trim() !== 'main') return [];
+  if (branch.exitCode !== 0 || branch.stdout.trim() !== 'main')
+    return [
+      {
+        id: 'parent-checkout-state',
+        severity: 'pass',
+        title: 'not applicable: the parent checkout is not on main',
+      },
+    ];
   const paths = readDivergedPaths(ctx);
-  if (paths.length === 0) return [];
+  if (paths.length === 0)
+    return [
+      { id: 'parent-checkout-state', severity: 'pass', title: 'parent checkout matches HEAD' },
+    ];
   const shown = paths.slice(0, 5).join(', ');
   const staleCommit = findProvableStaleIndexCommit(ctx);
   if (staleCommit !== null) {
@@ -2038,6 +2421,69 @@ export function checkForcePushPolicy(ctx: DoctorRunContext): DoctorCheckResult {
         }
       : {}),
     anonymizableEvidence: evidence,
+  };
+}
+
+// ── Merge policy (AISDLC-1351) ──────────────────────────────────────────
+
+const MERGE_POLICY_FILE = '.ai-sdlc/agent-role.yaml';
+
+/**
+ * Reports whether agent-role.yaml states the three merge keys (`allowMerge`,
+ * `mergeAuthors`, `operational`). A file with no `governance` block, or one that
+ * omits a key, fails: the board then never merges and says nothing. Any stated
+ * value passes, including `allowMerge: never`; the title says when merging is off.
+ */
+export function checkMergePolicy(ctx: DoctorRunContext): DoctorCheckResult {
+  const text = ctx.adapters.readFile(join(ctx.projectDir, MERGE_POLICY_FILE));
+  const fail = (detail: string): DoctorCheckResult => ({
+    id: 'merge-policy',
+    severity: 'fail',
+    title: `${MERGE_POLICY_FILE}: ${detail}`,
+    remediation: `State spec.governance.allowMerge (never | onGreenClean), spec.governance.mergeAuthors (list of logins) and spec.governance.operational (list, include land-eligible-prs to let the board land PRs) in ${MERGE_POLICY_FILE}.`,
+  });
+  if (text === null) {
+    // A missing file is the config-manifest check's finding; here it only warns.
+    return {
+      id: 'merge-policy',
+      severity: 'warn',
+      title: `${MERGE_POLICY_FILE} not found, so no merge setting is stated`,
+      remediation: `Run /ai-sdlc:setup to scaffold ${MERGE_POLICY_FILE}.`,
+    };
+  }
+  let gov: Record<string, unknown> | undefined;
+  try {
+    const doc = parseYaml(text) as { spec?: { governance?: unknown } } | null;
+    const g = doc?.spec?.governance;
+    if (g && typeof g === 'object' && !Array.isArray(g)) gov = g as Record<string, unknown>;
+  } catch {
+    return fail('unreadable YAML, so no merge setting can be read');
+  }
+  if (!gov) return fail('no spec.governance block, so the board never merges and says nothing');
+  const missing = ['allowMerge', 'mergeAuthors', 'operational'].filter((k) => !(k in gov));
+  if (missing.length > 0) return fail(`spec.governance does not state ${missing.join(', ')}`);
+  if (gov.allowMerge !== 'never' && gov.allowMerge !== 'onGreenClean') {
+    return fail(
+      `allowMerge is ${JSON.stringify(gov.allowMerge)}; only never or onGreenClean are read, anything else keeps never`,
+    );
+  }
+  if (!Array.isArray(gov.mergeAuthors) || !Array.isArray(gov.operational)) {
+    return fail('mergeAuthors and operational must each be a list');
+  }
+  const off: string[] = [];
+  if (gov.allowMerge === 'never') off.push('allowMerge is never');
+  if (gov.mergeAuthors.length === 0) off.push('mergeAuthors is empty');
+  if (!gov.operational.includes('land-eligible-prs')) {
+    off.push('operational lacks land-eligible-prs');
+  }
+  return {
+    id: 'merge-policy',
+    severity: 'pass',
+    title:
+      off.length === 0
+        ? `${MERGE_POLICY_FILE} states the merge settings (allowMerge: ${gov.allowMerge})`
+        : `${MERGE_POLICY_FILE} states the merge settings; merging is off (${off.join('; ')})`,
+    anonymizableEvidence: { allowMerge: gov.allowMerge, mergingOff: off.length > 0 },
   };
 }
 
@@ -2783,6 +3229,17 @@ function attestationEnabled(ctx: DoctorRunContext): boolean {
 
 export function checkHuskyPrePushGate(ctx: DoctorRunContext): DoctorCheckResult {
   const id = 'husky-pre-push-gate';
+  // AISDLC-1325: a stale signer block is a defect in any project.
+  const staleHook = readPrePushHook(ctx);
+  if (staleHook && hasStaleAttestationSignReference(staleHook.text)) {
+    return {
+      id,
+      severity: 'fail',
+      title: 'pre-push: stale attestation-sign reference',
+      remediation:
+        'The hook names check-attestation-sign.sh, removed with envelope signing (RFC-0061). Run `ai-sdlc doctor --fix` or `ai-sdlc init --add attestation` to rewrite it.',
+    };
+  }
   if (!attestationEnabled(ctx)) {
     return {
       id,
@@ -2840,6 +3297,22 @@ export function fixHuskyPrePushGate(ctx: DoctorRunContext): DoctorFixResult {
   const huskyDir = join(ctx.projectDir, '.husky');
   const hookPath = join(huskyDir, 'pre-push');
   const existing = ctx.adapters.readFile(hookPath);
+  if (!attestationEnabled(ctx)) {
+    // No workflow: only strip the stale block; never append a snippet or create a hook.
+    if (existing == null || !hasStaleAttestationSignReference(existing)) {
+      return { id, applied: false, detail: 'stale signer block is not in .husky/pre-push' };
+    }
+    const stripped = stripStaleAttestationSignBlock(existing);
+    if (hasStaleAttestationSignReference(stripped)) {
+      return {
+        id,
+        applied: false,
+        detail: `${hookPath} still names check-attestation-sign outside the ai-sdlc block — remove that line by hand`,
+      };
+    }
+    ctx.adapters.writeFile(hookPath, stripped);
+    return { id, applied: true, detail: `removed the stale signer block from ${hookPath}` };
+  }
   if (existing == null && !ctx.adapters.exists(huskyDir)) {
     return {
       id,
@@ -2890,11 +3363,6 @@ export function checkFeatureFlags(ctx: DoctorRunContext): DoctorCheckResult {
 /** Feature → the workflow files its init template scaffolds, keyed by an "enabled" artifact. */
 const FEATURE_WORKFLOWS: Array<{ feature: string; enabledBy: string; workflow: string }> = [
   {
-    feature: 'attestation',
-    enabledBy: '.ai-sdlc/trusted-reviewers.yaml',
-    workflow: '.github/workflows/verify-attestation.yml',
-  },
-  {
     feature: 'dor',
     enabledBy: '.ai-sdlc/dor-config.yaml',
     workflow: '.github/workflows/dor-ingress.yml',
@@ -2922,6 +3390,175 @@ export function checkFeatureWorkflows(ctx: DoctorRunContext): DoctorCheckResult 
     title: `enabled feature(s) missing their workflow file: ${missing.map((m) => `${m.feature} (${m.workflow})`).join(', ')}`,
     remediation: 'Run `ai-sdlc init --add workflows` to scaffold the missing workflow files',
     anonymizableEvidence: { missingFeatures: missing.map((m) => m.feature) },
+  };
+}
+
+// ── Check: retired verifier / gate without a verdict job (AISDLC-1353) ────
+
+function legacyIo(ctx: DoctorRunContext) {
+  return {
+    read: (rel: string) => ctx.adapters.readFile(join(ctx.projectDir, rel)),
+    write: (rel: string, contents: string) =>
+      ctx.adapters.writeFile(join(ctx.projectDir, rel), contents),
+    remove: ctx.adapters.removeFile
+      ? (rel: string) => ctx.adapters.removeFile?.(join(ctx.projectDir, rel))
+      : undefined,
+  };
+}
+
+export function checkLegacyWorkflows(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'legacy-workflows';
+  const findings = diagnoseLegacyWorkflows(legacyIo(ctx).read);
+  if (findings.length === 0) {
+    return {
+      id,
+      severity: 'pass',
+      title: 'no retired attestation verifier; the gate checks the review verdict',
+    };
+  }
+  return {
+    id,
+    severity: 'fail',
+    title: findings.map((f) => f.detail).join(' | '),
+    remediation: findings.every((f) => f.pristine)
+      ? 'Run `ai-sdlc doctor --fix` (or re-run `ai-sdlc init`) to replace the old files'
+      : 'Make the listed edits by hand; `ai-sdlc doctor --fix` replaces only files that are byte-identical to the old templates and never overwrites an edited file',
+    anonymizableEvidence: { legacyWorkflows: findings.map((f) => f.kind) },
+  };
+}
+
+export function fixLegacyWorkflows(ctx: DoctorRunContext): DoctorFixResult {
+  const id = 'legacy-workflows';
+  const actions = migrateLegacyWorkflows(legacyIo(ctx), AI_SDLC_GATE_WORKFLOW);
+  if (actions.length === 0) return { id, applied: false, detail: 'nothing to replace' };
+  const done = actions.filter((a) => a.outcome !== 'reported');
+  const left = actions.filter((a) => a.outcome === 'reported');
+  const detail = [
+    ...done.map((a) => `${a.outcome} ${a.finding.path}`),
+    ...left.map((a) => `left ${a.finding.path} unchanged: ${a.finding.detail}`),
+  ].join('; ');
+  return { id, applied: done.length > 0, detail };
+}
+
+// ── Prerequisite checks (AISDLC-1356): a missing prerequisite says so ─────
+
+/** `gh auth status` must exit 0; the CI queue and merge paths silently need it. */
+export function checkGhAuth(ctx: DoctorRunContext): DoctorCheckResult {
+  const r = ctx.adapters.runCommand('gh', ['auth', 'status']);
+  if (r.exitCode === 0) return { id: 'gh-auth', severity: 'pass', title: 'gh is authenticated' };
+  return {
+    id: 'gh-auth',
+    severity: 'fail',
+    title: 'gh is not authenticated (or not installed): PR, CI and merge steps cannot run',
+    remediation: 'Run `gh auth login`.',
+  };
+}
+
+export function checkBacklogTasks(ctx: DoctorRunContext): DoctorCheckResult {
+  const dir = join(ctx.projectDir, 'backlog', 'tasks');
+  if (ctx.adapters.exists(dir)) {
+    return { id: 'backlog-tasks', severity: 'pass', title: 'backlog/tasks/ exists' };
+  }
+  return {
+    id: 'backlog-tasks',
+    severity: 'warn',
+    title: 'backlog/tasks/ is missing: there is nowhere for tasks to live',
+    remediation: 'Run `mkdir -p backlog/tasks` (or `ai-sdlc doctor --fix`).',
+  };
+}
+
+export function fixBacklogTasks(ctx: DoctorRunContext): DoctorFixResult {
+  const dir = join(ctx.projectDir, 'backlog', 'tasks');
+  if (ctx.adapters.exists(dir)) {
+    return { id: 'backlog-tasks', applied: false, detail: 'backlog/tasks/ already exists' };
+  }
+  ctx.adapters.writeFile(join(dir, '.gitkeep'), '');
+  return { id: 'backlog-tasks', applied: true, detail: 'created backlog/tasks/' };
+}
+
+/** Webhook secret and a recorded feed; advisory only, never a failure. */
+export function checkWebhookConfig(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'webhook-config';
+  const missing: string[] = [];
+  if (!ctx.adapters.env.AI_SDLC_WEBHOOK_SECRET) missing.push('AI_SDLC_WEBHOOK_SECRET is not set');
+  const state = readJson(ctx, join(ctx.projectDir, '.ai-sdlc', 'dispatch', 'webhook.json')) as
+    { feed?: { kind?: string } } | undefined;
+  if (!state?.feed || !state.feed.kind) {
+    missing.push('webhook.json records no feed');
+  }
+  if (missing.length === 0) {
+    return { id, severity: 'pass', title: 'webhook secret set and a feed is recorded' };
+  }
+  return {
+    id,
+    severity: 'warn',
+    title: `webhook delivery is not configured: ${missing.join('; ')}`,
+    remediation:
+      'Export AI_SDLC_WEBHOOK_SECRET and run `cli-hierarchy up --feed gh-forward` (polling still works without it).',
+  };
+}
+
+export function checkSchedulerAlive(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'scheduler-alive';
+  const state = readJson(
+    ctx,
+    join(ctx.projectDir, '.ai-sdlc', 'dispatch', 'reconcile-scheduler.json'),
+  ) as { pid?: unknown } | undefined;
+  const pid = typeof state?.pid === 'number' ? state.pid : undefined;
+  if (pid !== undefined && ctx.adapters.isPidAlive?.(pid)) {
+    return { id, severity: 'pass', title: `reconcile scheduler is running (pid ${pid})` };
+  }
+  return {
+    id,
+    severity: 'warn',
+    title:
+      pid === undefined
+        ? 'no reconcile scheduler is recorded'
+        : `the recorded reconcile scheduler (pid ${pid}) is not running`,
+    remediation: 'Run `cli-hierarchy up` to start it.',
+  };
+}
+
+/** `.nvmrc` must be installed under nvm (the rule `up` applies) and Node must meet `engines`. */
+export function checkNodeVersion(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'node-version';
+  const problems: string[] = [];
+  let fix: string | undefined;
+  const nvmrc = ctx.adapters.readFile(join(ctx.projectDir, '.nvmrc'));
+  const wanted = nvmrc === null ? undefined : (nvmrc.split('\n')[0] ?? '').trim().replace(/^v/, '');
+  if (wanted && /^\d+(\.\d+){0,2}$/.test(wanted)) {
+    const nvmDir = ctx.adapters.env.NVM_DIR || join(ctx.adapters.homeDir(), '.nvm');
+    const installed = ctx.adapters
+      .listDir(join(nvmDir, 'versions', 'node'))
+      .map((d) => d.replace(/^v/, ''));
+    if (!installed.some((v) => v === wanted || v.startsWith(`${wanted}.`))) {
+      problems.push(`.nvmrc names Node ${wanted}, which is not installed under nvm`);
+      fix = `nvm install ${wanted}`;
+    }
+  }
+  const pkg = readJson(ctx, join(ctx.projectDir, 'package.json')) as
+    { engines?: { node?: string } } | undefined;
+  const rawFloor = /^>=\s*(\d+(?:\.\d+){0,2})/.exec(pkg?.engines?.node ?? '')?.[1];
+  const floor = rawFloor?.split('.').concat(['0', '0']).slice(0, 3).join('.');
+  const running = ctx.adapters.nodeVersion?.();
+  if (floor && running && compareSemver(running, floor) < 0) {
+    problems.push(`running Node ${running} is below the floor ${floor} (package.json engines)`);
+    fix ??= `nvm install ${floor}`;
+  }
+  if (problems.length === 0) {
+    return { id, severity: 'pass', title: 'Node version meets the repo requirements' };
+  }
+  return { id, severity: 'fail', title: problems.join('; '), remediation: `Run \`${fix}\`.` };
+}
+
+export function checkReviewConfig(ctx: DoctorRunContext): DoctorCheckResult {
+  const present = ctx.adapters.exists(join(ctx.projectDir, '.ai-sdlc', 'review-config.yaml'));
+  return {
+    id: 'review-config',
+    severity: 'pass',
+    title: present
+      ? '.ai-sdlc/review-config.yaml is present'
+      : '.ai-sdlc/review-config.yaml is absent: the built-in default reviewer selection applies',
   };
 }
 
@@ -2970,9 +3607,21 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     run: checkPluginInstallAmbiguity,
   },
   {
+    id: 'plugin-install-entries',
+    description:
+      'WARNs on plugin install entries pinned below the newest cached version; FAILs when the project entry points at a missing folder (AISDLC-1327).',
+    run: checkPluginInstallEntries,
+  },
+  {
     id: 'attestation-governance',
     description: 'Attestation required-but-unconfigured detection (reuses AISDLC-560).',
     run: checkAttestationGovernanceCheck,
+  },
+  {
+    id: 'required-contexts-posted',
+    description:
+      'Every required status context on the protected branch is posted by a workflow (AISDLC-1352).',
+    run: checkRequiredContextsPosted,
   },
   {
     id: 'reviewer-attribution-resolver',
@@ -3009,8 +3658,10 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
   },
   {
     id: 'runtime-gitignore',
-    description: '.gitignore ignores the .ai-sdlc/artifacts/ runtime output directory (RFC-0050).',
+    description:
+      '.gitignore ignores every runtime path the framework writes (artifacts, dispatch, transcripts, worktrees, ...; AISDLC-1331).',
     run: checkRuntimeGitignore,
+    fix: fixRuntimeGitignore,
   },
   {
     id: 'worktree-hooks',
@@ -3118,6 +3769,13 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     run: checkFeatureWorkflows,
   },
   {
+    id: 'legacy-workflows',
+    description:
+      'No retired verify-attestation.yml and a gate with a verdict-check job (RFC-0061, AISDLC-1353).',
+    run: checkLegacyWorkflows,
+    fix: fixLegacyWorkflows,
+  },
+  {
     id: 'hook-env-hygiene',
     description:
       'Every .husky hook drops GIT_DIR and GIT_WORK_TREE before its first gate command (2026-10-30 incident, AISDLC-1129).',
@@ -3130,6 +3788,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     run: checkForcePushPolicy,
   },
   {
+    id: 'merge-policy',
+    description:
+      'agent-role.yaml states allowMerge, mergeAuthors and operational, and says when merging is off (AISDLC-1351).',
+    run: checkMergePolicy,
+  },
+  {
     id: 'judgment-layer',
     description:
       'Judgment layer: disabled state, provider key, model pinning, and enforce judgments the runtime would run as shadow (RFC-0049).',
@@ -3140,6 +3804,38 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Table of registered capabilities; fails when a capability required in .ai-sdlc/capabilities.yaml is degraded or never observed (RFC-0049).',
     run: checkCapabilityLiveness,
+  },
+  {
+    id: 'gh-auth',
+    description: '`gh auth status` exits 0 (AISDLC-1356).',
+    run: checkGhAuth,
+  },
+  {
+    id: 'backlog-tasks',
+    description: 'backlog/tasks/ exists; --fix creates it (AISDLC-1356).',
+    run: checkBacklogTasks,
+    fix: fixBacklogTasks,
+  },
+  {
+    id: 'webhook-config',
+    description: 'Webhook secret is set and webhook.json records a feed (AISDLC-1356).',
+    run: checkWebhookConfig,
+  },
+  {
+    id: 'scheduler-alive',
+    description: 'The recorded reconcile scheduler pid is alive (AISDLC-1356).',
+    run: checkSchedulerAlive,
+  },
+  {
+    id: 'node-version',
+    description: '.nvmrc is installed under nvm and Node meets package.json engines (AISDLC-1356).',
+    run: checkNodeVersion,
+  },
+  {
+    id: 'review-config',
+    description:
+      'Whether review-config.yaml is present or the built-in default applies (AISDLC-1356).',
+    run: checkReviewConfig,
   },
 ];
 

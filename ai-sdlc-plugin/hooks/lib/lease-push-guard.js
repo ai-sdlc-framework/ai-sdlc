@@ -262,6 +262,17 @@ function taskBindingProblem(own, taskId, worktreeName, role) {
   return null;
 }
 
+function isFixPrBranch(own, ctx) {
+  const b = ctx.fixPrBranch;
+  return (
+    typeof b === 'string' &&
+    b === own &&
+    isPlainBranchName(b) &&
+    !b.includes(':') &&
+    !isProtectedBranch(b, ctx.protectedBranches)
+  );
+}
+
 function parseAllowedShape(command, ctx) {
   if (/[^\x20-\x7e\t]/.test(command)) return 'non-printable or non-ASCII characters present';
   if (META_RE.test(command)) return 'shell metacharacters, quoting or expansion present';
@@ -282,8 +293,12 @@ function parseAllowedShape(command, ctx) {
   // `ai-sdlc/{issueIdLower}-{slug}` (DEC-0083).
   // All three must agree; any missing piece denies (operator sessions without a
   // sentinel get no lease push).
+  // AISDLC-1363 (DEC-0421): a fix task works on the head branch of the PR it fixes, recorded by
+  // the filing CLI on the inflight manifest (ctx.fixPrBranch). Only the branch condition is
+  // widened, and only to that exact, non-protected, plain branch name.
   const binding = taskBindingProblem(own, ctx.taskId, ctx.worktreeName, ctx.role);
-  if (binding) return binding.reason;
+  if (binding && !(binding.condition === 'branch' && isFixPrBranch(own, ctx)))
+    return binding.reason;
   // Short-name aliasing: git resolves a bare name against local refs with every
   // rule (refs/tags/<x>, refs/<x>, refs/remotes/<x>, ...). Refuse unless no
   // other local ref answers to the name (unknown counts as colliding).
@@ -456,13 +471,23 @@ function evaluateLeasePush(command, ctx, mode = 'leaseOnOwnBranch') {
   if (why === null) return { decision: 'allow' };
   const ownName = branchFromRef(ctx.ownRef);
   const shown = ownName && isPlainBranchName(ownName) ? ownName : '<own-branch>';
+  const taskBranch = ctx.taskId ? `ai-sdlc/${ctx.taskId}` : 'ai-sdlc/<task-id>';
+  const fixBranch =
+    typeof ctx.fixPrBranch === 'string' && isPlainBranchName(ctx.fixPrBranch)
+      ? ctx.fixPrBranch
+      : null;
+  const allowedBranches =
+    `This task's own branch is '${taskBranch}' (or '${taskBranch}-*')` +
+    (fixBranch
+      ? `; the head branch of the PR it fixes${ctx.fixesPr ? ` (#${ctx.fixesPr})` : ''} is '${fixBranch}'. `
+      : '. ');
   return {
     decision: 'deny',
     reason:
       `force-push under spec.governance.allowForcePush=leaseOnOwnBranch (.ai-sdlc/agent-role.yaml) ` +
       `is limited to a 'git push --force-with-lease' on this task's own branch (non-protected) (${why}). ` +
       `Plain force pushes, +refspecs, pushes to main/master or protected branches, and pushes to a ` +
-      `branch this task does not own are never permitted. From the task worktree, push with ` +
+      `branch this task does not own are never permitted. ${allowedBranches}From the task worktree, push with ` +
       `'git push --force-with-lease origin HEAD:refs/heads/${shown}'.`,
   };
 }

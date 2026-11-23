@@ -10,7 +10,7 @@
 
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -843,5 +843,78 @@ describe('staged review: review-planner and review-synthesizer', () => {
     const text = body('review-planner.md');
     assert.ok(text.includes('The executor enforces two run probes in total at run time'));
     assert.ok(!text.includes('Validation enforces this'));
+  });
+});
+
+describe('codex reviewers report a harness failure, not a rejection (AISDLC-1333)', () => {
+  for (const file of ['code-reviewer-codex.md', 'test-reviewer-codex.md']) {
+    it(`${file} returns the harnessFailed envelope for tool, exit and usage-limit failures`, () => {
+      const text = readFileSync(join(__dirname, file), 'utf8');
+      assert.ok(text.includes('"harnessFailed": true'));
+      assert.ok(text.includes('"retryAfter"'));
+      assert.ok(text.includes('usage limit'));
+      assert.ok(!/"message": "Codex CLI/.test(text), 'no critical finding for a Codex CLI failure');
+      for (const m of text.matchAll(/```json\n([\s\S]*?)```/g)) {
+        if (m[1].includes('harnessFailed')) assert.ok(!m[1].includes('"approved"'));
+      }
+    });
+  }
+});
+
+describe('reviewer transcript attribution (AISDLC-1334)', () => {
+  const dir = __dirname;
+  const files = readdirSync(dir).filter((f) => f.endsWith('.md'));
+
+  it('no agent file invents an UNKNOWN- id', () => {
+    for (const f of files) {
+      assert.ok(
+        !readFileSync(join(dir, f), 'utf-8').includes('UNKNOWN-'),
+        `${f} mentions UNKNOWN-`,
+      );
+    }
+  });
+
+  it('no reviewer writes a transcript to a relative .ai-sdlc/transcripts path', () => {
+    for (const f of files.filter((n) => n.includes('reviewer'))) {
+      const text = readFileSync(join(dir, f), 'utf-8');
+      assert.ok(
+        !/(^|[^\w}>/])\.ai-sdlc\/transcripts/m.test(text),
+        `${f} has a relative .ai-sdlc/transcripts path`,
+      );
+    }
+  });
+
+  it('Bash-capable reviewers pass the prompt id and worktree to the resolver', () => {
+    for (const f of [
+      'code-reviewer.md',
+      'code-reviewer-codex.md',
+      'test-reviewer.md',
+      'test-reviewer-codex.md',
+      'correctness-reviewer.md',
+    ]) {
+      const text = readFileSync(join(dir, f), 'utf-8');
+      assert.ok(text.includes('"$ATTR_TASK_ID" "$ATTR_WORKTREE"'), `${f} passes id and worktree`);
+      assert.ok(
+        text.includes('${ATTR_WORKTREE}/.ai-sdlc/transcripts/'),
+        `${f} writes by absolute path`,
+      );
+    }
+  });
+
+  it('security-reviewer writes no transcript and does not use the Write tool for one', () => {
+    const text = readFileSync(join(dir, 'security-reviewer.md'), 'utf-8');
+    assert.ok(!/\.ai-sdlc\/transcripts/.test(text));
+    assert.ok(!/Use the Write tool/i.test(text));
+    assert.ok(text.includes('You write no transcript'));
+  });
+});
+
+describe('developer.md first push (AISDLC-1365)', () => {
+  const body = readFileSync(join(__dirname, 'developer.md'), 'utf-8');
+  it('tells the developer to push a branch the remote lacks without the lease', () => {
+    assert.ok(body.includes('Push a branch the remote lacks without `--force-with-lease`'));
+  });
+  it('limits the lease form to a branch the remote already has', () => {
+    assert.ok(body.includes('only when the remote already has the branch'));
   });
 });

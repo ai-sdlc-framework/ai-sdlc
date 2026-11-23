@@ -45,6 +45,18 @@ a collision rate that became visible once the merge queue was dropped (AISDLC-40
    push (release-please's own). The cache-rebuild step retries a failed
    install, since the registry can lag `publish` by minutes.
 
+   **SDK version constants (AISDLC-1342):** the release PR may also change
+   `sdk-go/aisdlc.go` and `sdk-python/src/ai_sdlc/__init__.py` (the `extra-files`
+   of `sdk-go` and `sdk-python`), and in each only the quoted version on the one
+   line marked `x-release-please-version`. Any other change, a missing or second
+   marker, or a non-version value is refused by the release content check.
+   **Rule for a new `extra-files` entry:** add its path to
+   `RELEASE_FILE_ALLOWLIST` in `pipeline-cli/src/governance/release-merge.ts`
+   and give it a content rule in `validateReleaseContent`; a test fails when a
+   path in `release-please-config.json` is not on the allowlist. `sdk-go` sets
+   `bump-minor-pre-major`, so a breaking change bumps its minor while below 1.0
+   (DEC-0413).
+
 4. **Operator merges the rolling release PR** when ready to cut a release.
    After merge, `release.yml`'s `publish-npm` job runs and pushes to npm.
 

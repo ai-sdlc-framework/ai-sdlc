@@ -15,4 +15,4 @@
 package aisdlc
 
 // Version is the current version of the AI-SDLC Go SDK.
-const Version = "0.9.0" // x-release-please-version
+const Version = "0.10.0" // x-release-please-version

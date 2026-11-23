@@ -4,6 +4,8 @@
     "index",
     "dor-gate",
     "session-hierarchy",
+    "pr-lifecycle",
+    "workflow-engine",
     "two-tier-pipeline",
     "cross-harness-review",
     "staged-review",
@@ -12,6 +14,12 @@
     "reviewer-independence",
     "zero-trust-untrusted-pr-verification",
     "per-repo-governance",
-    "usage-ledger-model-routing"
+    "usage-ledger-model-routing",
+    "adopter-translators",
+    "design-review-architecture",
+    "spec-driven",
+    "substrate-contract",
+    "untrusted-contributor-verification",
+    "variants"
   ]
 }

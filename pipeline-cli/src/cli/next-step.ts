@@ -9,7 +9,7 @@
 
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ArgumentsCamelCase, CommandModule } from 'yargs';
 import { now } from '../clock.js';
@@ -28,12 +28,51 @@ export function defaultCliBinDir(): string {
   return fileURLToPath(new URL('../../bin', import.meta.url));
 }
 
-/** Plugin scripts dir with the same precedence the command body always used. */
-export function resolvePluginScriptsDir(env: NodeJS.ProcessEnv, cwd: string): string {
-  return join(
-    env.CLAUDE_PLUGIN_DIR || env.CLAUDE_PLUGIN_ROOT || join(cwd, 'ai-sdlc-plugin'),
-    'scripts',
-  );
+const PLUGIN_MARKER = 'resolve-pipeline-cli.sh';
+
+/** Where this module sits: `<plugin>/node_modules/@ai-sdlc/pipeline-cli/dist/cli` when installed. */
+export function defaultModuleDir(): string {
+  return dirname(fileURLToPath(import.meta.url));
+}
+
+/** Candidate plugin roots in precedence order (AISDLC-1328); empty variables are dropped. */
+export function pluginRootCandidates(
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+  moduleDir: string = defaultModuleDir(),
+): string[] {
+  const fromModule = resolve(moduleDir, '..', '..', '..', '..', '..');
+  return [env.CLAUDE_PLUGIN_DIR, env.CLAUDE_PLUGIN_ROOT, fromModule, join(cwd, 'ai-sdlc-plugin')]
+    .filter((c): c is string => typeof c === 'string' && c !== '')
+    .map((c) => join(c, 'scripts'));
+}
+
+/** Thrown when no candidate scripts folder holds the marker; names the variables and every path. */
+export class PluginScriptsNotFoundError extends Error {
+  constructor(readonly tried: string[]) {
+    super(
+      `plugin scripts not found: set CLAUDE_PLUGIN_DIR or CLAUDE_PLUGIN_ROOT to the plugin folder; tried ${tried.join(', ')} (looking for ${PLUGIN_MARKER})`,
+    );
+    this.name = 'PluginScriptsNotFoundError';
+  }
+}
+
+/**
+ * First candidate `scripts` folder holding `resolve-pipeline-cli.sh`: CLAUDE_PLUGIN_DIR,
+ * CLAUDE_PLUGIN_ROOT, the plugin found from this module's location, then
+ * `<cwd>/ai-sdlc-plugin` (monorepo). Throws PluginScriptsNotFoundError when none qualifies.
+ */
+export function resolvePluginScriptsDir(
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+  moduleDir: string = defaultModuleDir(),
+  exists: (p: string) => boolean = existsSync,
+): string {
+  const tried = pluginRootCandidates(env, cwd, moduleDir);
+  for (const dir of tried) {
+    if (exists(join(dir, PLUGIN_MARKER))) return dir;
+  }
+  throw new PluginScriptsNotFoundError(tried);
 }
 
 const stderrLogger: PipelineLogger = {

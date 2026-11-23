@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
@@ -20,16 +21,19 @@ import {
   installForwarder,
 } from './webhook-forwarder.js';
 import {
+  formatWebhookForeign,
   formatWebhookStatus,
   parseFeed,
   trackPrActivity,
   webhookDown,
   webhookHealth,
   webhookPersistence,
+  carriedFeed,
   webhookServe,
   webhookStatus,
   webhookUp,
 } from './webhook.js';
+import { agentPath, resolveRealGh } from './webhook-forwarder.js';
 import { runWebhookHealthTick } from './webhook-health.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -43,6 +47,8 @@ const mk = (env: NodeJS.ProcessEnv, alive = true): HierarchyDeps =>
     env,
     log: (l: string) => lines.push(l),
     isAlive: () => alive,
+    isPortFree: () => true,
+    probeWebhookIdentity: () => ({ repo: null, boardDir: dir }),
     binPath: '/bin/cli-hierarchy.mjs',
   }) as unknown as HierarchyDeps;
 
@@ -75,6 +81,11 @@ describe('cli-hierarchy webhook (AISDLC-880)', () => {
       '--board-dir',
       dir,
     ]);
+    // An unpinned start asks the receiver to scan upward.
+    const unpinned = mk({ AI_SDLC_WEBHOOK_SECRET: 'x' });
+    const sp2 = vi.fn();
+    webhookUp(unpinned, undefined, sp2);
+    expect(sp2.mock.calls[0]![1]).toEqual(expect.arrayContaining(['--scan', 'true']));
     webhookUp(deps, undefined, spawner, { kind: 'gh-forward', pid: 42 });
     expect(spawner).toHaveBeenLastCalledWith(
       process.execPath,
@@ -191,11 +202,26 @@ describe('webhook health (AISDLC-1157)', () => {
     expect(after.signals.refusedDeliveries).toBeUndefined();
   });
 
-  it('is healthy and quiet with no PR activity, even with no events', () => {
+  it('is unverified, not healthy, with no events and no PR activity (AISDLC-1345)', () => {
     receiver({ kind: 'none' });
     const h = webhookHealth(hd(), up);
-    expect(h.class).toBe('healthy');
+    expect(h.class).toBe('unverified');
     expect(h.signals).toMatchObject({ quiet: true, lastEventAgeMin: null, forwarder: 'none' });
+  });
+
+  it('is not healthy with no events and recent PR activity either (AISDLC-1345)', () => {
+    receiver({ kind: 'none' });
+    activity(7, 10);
+    expect(webhookHealth(hd(), up).class).not.toBe('healthy');
+  });
+
+  it('reports the newest event time and the recorded port (AISDLC-1345)', () => {
+    receiver({ kind: 'none' });
+    event(1, 5);
+    const h = webhookHealth(hd(), up);
+    expect(h.class).toBe('healthy');
+    expect(typeof h.signals.lastEventAt).toBe('string');
+    expect(h.signals.receiverPort).toBeDefined();
   });
 
   it('is degraded when a PR changed, no event for the stale window', () => {
@@ -210,7 +236,7 @@ describe('webhook health (AISDLC-1157)', () => {
       quiet: false,
     });
     expect(formatWebhookStatus({ state: 'up', port: 9, pid: 1 }, h)).toBe(
-      'webhook: degraded (port 9, last event 45m, feed none, target http://127.0.0.1:9/webhooks/github)',
+      'webhook: degraded (port 9, repo unknown, last event 45m, feed none, target http://127.0.0.1:9/webhooks/github)',
     );
   });
 
@@ -239,13 +265,17 @@ describe('webhook health (AISDLC-1157)', () => {
     expect(h.signals.forwarder).toBe('dead');
   });
 
-  it('falls back to a process match for the forwarder', () => {
-    receiver({ kind: 'gh-forward' });
-    const alive = hd({ run: () => ({ status: 0, stdout: '123\n', stderr: '' }) });
-    expect(webhookHealth(alive, up).signals.forwarder).toBe('alive');
-    expect(webhookHealth(hd(), up).signals.forwarder).toBe('dead');
+  it('reads liveness from this board record only, never a process match', () => {
+    const other = vi.fn(() => ({ status: 0, stdout: '123\n', stderr: '' }));
     write('webhook.json', { pid: 1, port: 9 });
-    expect(webhookHealth(hd(), up).signals.forwarder).toBe('unknown');
+    const h = webhookHealth(hd({ run: other }), up);
+    expect(h.signals.forwarder).toBe('unknown');
+    expect(h.signals.feed).toBe('none');
+    expect(other.mock.calls.some((c) => (c as unknown[])[0] === 'pgrep')).toBe(false);
+    receiver({ kind: 'gh-forward' });
+    expect(webhookHealth(hd({ run: other }), up).signals.forwarder).toBe('dead');
+    receiver({ kind: 'gh-forward', pid: 1 });
+    expect(webhookHealth(hd(), up).signals.forwarder).toBe('alive');
   });
 
   it('probes the port through run and tracks PR activity from the snapshot', () => {
@@ -308,16 +338,38 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
   });
   afterEach(() => removeFixtureDir(home));
 
+  /** Run the receiver in-process with a gh-forward feed; resolves once it is bound and recorded, then stops it. */
+  const serveFwd = async (
+    d: HierarchyDeps,
+    platform: NodeJS.Platform = 'darwin',
+    port = '0',
+  ): Promise<void> => {
+    const done = webhookServe(d, port, { kind: 'gh-forward' }, { platform });
+    const early = await Promise.race([
+      done.then(
+        () => undefined,
+        (e: Error) => e,
+      ),
+      vi
+        .waitFor(() => {
+          if (!existsSync(path.join(dir, 'webhook.json'))) throw new Error('not yet');
+        })
+        .then(() => undefined),
+    ]);
+    if (early) throw early;
+    process.emit('SIGTERM');
+    await done;
+  };
+
   it('refuses without the secret', () => {
     expect(() =>
       webhookUp(mkd({ HOME: home }), undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin'),
     ).toThrow(/AI_SDLC_WEBHOOK_SECRET/);
   });
 
-  it('deletes only cli hooks, writes the plist with --secret and loads it', () => {
-    const spawner = vi.fn();
-    const deps = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3', AI_SDLC_WEBHOOK_PORT: '9001' });
-    webhookUp(deps, undefined, spawner, { kind: 'gh-forward' }, 'darwin');
+  it('deletes only cli hooks, writes the plist with --secret and loads it', async () => {
+    const deps = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' });
+    await serveFwd(deps, 'darwin', '19001');
     const deletes = calls.filter((c) => c.includes('DELETE'));
     expect(deletes).toEqual([['gh', 'api', '-X', 'DELETE', 'repos/o/r/hooks/1']]);
     const label = forwarderLabel(deps);
@@ -325,21 +377,17 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
     const plist = readFileSync(path.join(home, `Library/LaunchAgents/${label}.plist`), 'utf-8');
     expect(plist).toContain('<string>--secret</string>');
     expect(plist).toContain('<string>s3</string>');
-    expect(plist).toContain('http://127.0.0.1:9001/webhooks/github');
+    expect(plist).toContain('http://127.0.0.1:19001/webhooks/github');
     expect(calls.some((c) => c[0] === 'launchctl' && c[1] === 'bootstrap')).toBe(true);
-    expect(spawner).toHaveBeenCalledWith(
-      process.execPath,
-      expect.arrayContaining(['--feed-agent', label]),
-    );
   });
 
-  it('plist runs the absolute real gh, no env, and no board bin on PATH (AC-1, AC-2)', () => {
+  it('plist runs the absolute real gh, no env, and no board bin on PATH (AC-1, AC-2)', async () => {
     const base = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' });
     const deps = {
       ...base,
       env: { ...base.env, PATH: `${dir}/bin:/opt/bin:/usr/bin` },
     } as HierarchyDeps;
-    webhookUp(deps, undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin');
+    await serveFwd(deps);
     const plist = readFileSync(
       path.join(home, `Library/LaunchAgents/${forwarderLabel(deps)}.plist`),
       'utf-8',
@@ -350,16 +398,14 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
     expect(plist).not.toContain(`${dir}/bin`);
   });
 
-  it('fails naming gh when only the board wrapper exists (AC-3)', () => {
+  it('fails naming gh when only the board wrapper exists (AC-3)', async () => {
     const base = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' });
     const deps = {
       ...base,
       env: { ...base.env, PATH: `${dir}/bin:/usr/bin` },
       isExecutable: (f: string) => f === `${dir}/bin/gh`,
     } as HierarchyDeps;
-    expect(() => webhookUp(deps, undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin')).toThrow(
-      /real gh/,
-    );
+    await expect(serveFwd(deps)).rejects.toThrow(/real gh/);
     expect(calls.some((c) => c[0] === 'launchctl')).toBe(false);
   });
 
@@ -393,12 +439,11 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
     expect(line).not.toContain('persisted: launchd');
   });
 
-  it('webhook up fails with the log tail and exit code when not running (AC-6)', () => {
+  it('a forwarder that is not running is logged with the log tail and recorded without an agent (AC-6)', async () => {
     const deps = crashing();
     writeFileSync(path.join(dir, 'webhook-forward.log'), 'sh: gh: Operation not permitted\n');
-    expect(() => webhookUp(deps, undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin')).toThrow(
-      /not running/,
-    );
+    await serveFwd(deps);
+    expect(lines.join('\n')).toMatch(/not running/);
     let msg = '';
     try {
       installForwarder(deps, 's3', 9001, 'darwin');
@@ -410,15 +455,15 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
     expect(lines.join('\n')).not.toContain('loaded for');
   });
 
-  it('prints the command off macOS and loads nothing', () => {
+  it('prints the command off macOS and loads nothing', async () => {
     const deps = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' });
-    webhookUp(deps, undefined, vi.fn(), { kind: 'gh-forward' }, 'linux');
+    await serveFwd(deps, 'linux');
     expect(lines.join('\n')).toContain('no launchd here');
     expect(lines.join('\n')).not.toContain('s3');
     expect(calls.some((c) => c[0] === 'launchctl')).toBe(false);
   });
 
-  it('fails when launchctl bootstrap fails or the repo is unresolved', () => {
+  it('logs when launchctl bootstrap fails; fails when the repo is unresolved', async () => {
     const base = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' });
     const bad = {
       ...base,
@@ -427,16 +472,14 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
           ? { status: 1, stdout: '', stderr: 'boom' }
           : mkRun()(f, a),
     } as unknown as HierarchyDeps;
-    expect(() => webhookUp(bad, undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin')).toThrow(
-      /boom/,
-    );
+    await serveFwd(bad);
+    expect(lines.join('\n')).toContain('boom');
+    rmSync(path.join(dir, 'webhook.json'), { force: true });
     const norepo = { ...base, run: () => ({ status: 1, stdout: '' }) } as unknown as HierarchyDeps;
-    expect(() => webhookUp(norepo, undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin')).toThrow(
-      /cannot resolve/,
-    );
+    await expect(serveFwd(norepo)).rejects.toThrow(/cannot resolve/);
   });
 
-  it('recovers from bootstrap error 5 by bootout then one retry (AC-1)', () => {
+  it('recovers from bootstrap error 5 by bootout then one retry (AC-1)', async () => {
     const base = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' });
     let boots = 0;
     const deps = {
@@ -452,13 +495,13 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
         return mkRun()(f, a);
       },
     } as unknown as HierarchyDeps;
-    webhookUp(deps, undefined, vi.fn(), { kind: 'gh-forward' }, 'darwin');
+    await serveFwd(deps);
     expect(boots).toBe(2);
     const boots2 = calls.filter((c) => c[0] === 'launchctl' && c[1] === 'bootout');
     expect(boots2.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('a second error 5 reports stderr, plist and manual commands, receiver still starts (AC-2)', () => {
+  it('a second error 5 reports stderr, plist and manual commands, receiver still starts (AC-2)', async () => {
     const base = mkd({ HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' });
     const deps = {
       ...base,
@@ -467,18 +510,12 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
           ? { status: 5, stdout: '', stderr: 'Bootstrap failed: 5: Input/output error' }
           : mkRun()(f, a),
     } as unknown as HierarchyDeps;
-    const spawner = vi.fn();
-    let msg = '';
-    try {
-      webhookUp(deps, undefined, spawner, { kind: 'gh-forward' }, 'darwin');
-    } catch (e) {
-      msg = (e as Error).message;
-    }
+    await serveFwd(deps);
+    const msg = lines.join('\n');
     expect(msg).toContain('Bootstrap failed: 5');
     expect(msg).toContain(forwarderPlistPath(deps));
     expect(msg).toContain('launchctl bootout gui/');
     expect(msg).toContain('launchctl bootstrap gui/');
-    expect(spawner).toHaveBeenCalled();
   });
 
   it('labels are per board dir (AC-3)', () => {
@@ -493,7 +530,9 @@ describe('supervised gh forwarder (AISDLC-1207)', () => {
     expect(webhookPersistence(mkd(env, true), 'darwin')).toMatch(
       /^persisted: launchd com\.ai-sdlc\.webhook\./,
     );
-    expect(webhookPersistence(mkd(env, false), 'darwin')).toMatch(/^persisted: no \(.* not loaded/);
+    expect(webhookPersistence(mkd(env, false), 'darwin')).toMatch(
+      /^persisted: no \(\S+ not installed\)$/,
+    );
     expect(forwarderPersistence(mkd(env), undefined, 'linux')).toMatch(/^persisted: no/);
     const boom = {
       ...mkd(env),
@@ -553,8 +592,8 @@ describe('webhook per-project port selection (AISDLC-1254)', () => {
     const t = up({}, [8765]);
     t.run();
     expect(portArg(t.spawner)).toBe('8766');
-    expect(readFileSync(path.join(dir, 'webhook-port'), 'utf-8').trim()).toBe('8766');
-    // restart: 8765 now free again, the recorded port still wins
+    // the receiver records the port once bound; 8765 is free again and the recorded port wins
+    writeFileSync(path.join(dir, 'webhook-port'), '8766\n');
     const t2 = up({}, []);
     t2.run();
     expect(portArg(t2.spawner)).toBe('8766');
@@ -594,17 +633,321 @@ describe('webhook per-project port selection (AISDLC-1254)', () => {
     expect(line).toContain('target http://127.0.0.1:8766/webhooks/github');
   });
 
-  it('installs the forwarder against the selected port', () => {
-    const calls: string[][] = [];
-    const t = up({}, [8765], { kind: 'gh-forward' });
+  it('a failed free-port probe counts the port as busy (AC-5)', () => {
     const deps = {
-      ...t.deps,
-      run: (f: string, a: string[]) => {
-        calls.push([f, ...a]);
-        return { status: 0, stdout: 'o/r', stderr: '' };
+      ...mk({ AI_SDLC_WEBHOOK_SECRET: 'x' }, false),
+      isPortFree: undefined,
+      run: () => {
+        throw new Error('no node');
       },
     } as unknown as HierarchyDeps;
-    webhookUp(deps, undefined, t.spawner, { kind: 'gh-forward' }, 'linux');
-    expect(lines.join('\n')).toContain('--url http://127.0.0.1:8766/webhooks/github');
+    expect(() => webhookUp(deps, undefined, vi.fn(), undefined, 'linux')).toThrow(
+      /no free webhook port/,
+    );
+  });
+
+  it('a pinned port that binds is written to webhook-port; a held one fails (AC-7)', async () => {
+    const deps = mk({ AI_SDLC_WEBHOOK_SECRET: 'x' });
+    const done = webhookServe(deps, '0');
+    await vi.waitFor(() => expect(webhookStatus(deps).state).toBe('up'));
+    const port = readFileSync(path.join(dir, 'webhook-port'), 'utf-8').trim();
+    expect(Number(port)).toBeGreaterThan(0);
+    process.emit('SIGTERM');
+    await done;
+    const held = await holdPort();
+    try {
+      await expect(webhookServe(deps, String(held.port))).rejects.toThrow(
+        /cannot bind webhook port: port \d+ is held/,
+      );
+    } finally {
+      held.close();
+    }
+  });
+});
+
+/** Hold a real 127.0.0.1 port. */
+async function holdPort(): Promise<{ port: number; close: () => void }> {
+  const net = await import('node:net');
+  const srv = net.createServer();
+  await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+  return { port: (srv.address() as { port: number }).port, close: () => srv.close() };
+}
+
+describe('receiver binds first, then records and installs (AISDLC-1350)', () => {
+  let home: string;
+  const calls: string[][] = [];
+  const mkd = (): HierarchyDeps =>
+    ({
+      ...mk({ PATH: '/opt/bin:/usr/bin', HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' }),
+      now: () => new Date(),
+      run: (f: string, a: readonly string[]) => {
+        calls.push([f, ...a]);
+        if (f === 'gh' && a[0] === 'repo') return { status: 0, stdout: 'o/r\n', stderr: '' };
+        if (f === 'gh') return { status: 0, stdout: '[]', stderr: '' };
+        if (f === 'launchctl' && a[0] === 'print')
+          return { status: 0, stdout: 'state = running\n', stderr: '' };
+        return { status: 0, stdout: '', stderr: '' };
+      },
+      isExecutable: (f: string) => f === '/opt/bin/gh',
+      sleepMs: () => undefined,
+    }) as unknown as HierarchyDeps;
+  beforeEach(() => {
+    calls.length = 0;
+    home = mkdtempSync(path.join(os.tmpdir(), 'wh-home-'));
+  });
+  afterEach(() => removeFixtureDir(home));
+
+  const stopWhenUp = async (done: Promise<void>): Promise<void> => {
+    await vi.waitFor(() => expect(existsSync(path.join(dir, 'webhook.json'))).toBe(true));
+    process.emit('SIGTERM');
+    await done;
+  };
+  const bootstraps = (): string[][] =>
+    calls.filter((c) => c[0] === 'launchctl' && c[1] === 'bootstrap');
+
+  it('binds the next free port when the recorded one is held and names it everywhere (AC-3, AC-4)', async () => {
+    const held = await holdPort();
+    try {
+      const deps = mkd();
+      const done = webhookServe(
+        deps,
+        String(held.port),
+        { kind: 'gh-forward' },
+        {
+          scan: true,
+          platform: 'darwin',
+        },
+      );
+      await vi.waitFor(() => expect(existsSync(path.join(dir, 'webhook.json'))).toBe(true));
+      const state = JSON.parse(readFileSync(path.join(dir, 'webhook.json'), 'utf-8'));
+      expect(state.port).not.toBe(held.port);
+      expect(state.feed.agent).toBe(forwarderLabel(deps));
+      expect(readFileSync(path.join(dir, 'webhook-port'), 'utf-8').trim()).toBe(String(state.port));
+      const plist = readFileSync(
+        path.join(home, `Library/LaunchAgents/${forwarderLabel(deps)}.plist`),
+        'utf-8',
+      );
+      expect(plist).toContain(`http://127.0.0.1:${state.port}/webhooks/github`);
+      expect(plist).not.toContain(`:${held.port}/`);
+      // one forwarder install, after the bind; nothing was recorded for the failed port
+      expect(bootstraps()).toHaveLength(1);
+      process.emit('SIGTERM');
+      await done;
+    } finally {
+      held.close();
+    }
+  });
+
+  it('a pinned held port installs no forwarder and records no port (AC-4, AC-7)', async () => {
+    const held = await holdPort();
+    try {
+      await expect(
+        webhookServe(mkd(), String(held.port), { kind: 'gh-forward' }, { platform: 'darwin' }),
+      ).rejects.toThrow(/cannot bind webhook port/);
+      expect(bootstraps()).toHaveLength(0);
+      expect(existsSync(path.join(dir, 'webhook-port'))).toBe(false);
+    } finally {
+      held.close();
+    }
+  });
+
+  it('plain up after a receiver exit carries the recorded gh-forward feed (AC-1)', () => {
+    writeFileSync(
+      path.join(dir, 'webhook.json'),
+      JSON.stringify({ pid: 99, port: 8765, feed: { kind: 'gh-forward', agent: 'fwd' } }),
+    );
+    const spawner = vi.fn();
+    const deps = { ...mk({ AI_SDLC_WEBHOOK_SECRET: 'x' }, false) } as HierarchyDeps;
+    webhookUp(deps, undefined, spawner, undefined, 'darwin');
+    expect(spawner.mock.calls[0]![1]).toEqual(expect.arrayContaining(['--feed', 'gh-forward']));
+  });
+
+  it('a recorded machine-wide label is replaced by the per-board one with one old bootout (AC-8)', async () => {
+    const deps = mkd();
+    writeFileSync(
+      path.join(dir, 'webhook.json'),
+      JSON.stringify({
+        pid: 99,
+        port: 1,
+        feed: { kind: 'gh-forward', agent: 'io.ai-sdlc.webhook-forward' },
+      }),
+    );
+    const done = webhookServe(
+      deps,
+      '0',
+      carriedFeed({ kind: 'gh-forward', agent: 'io.ai-sdlc.webhook-forward' }),
+      {
+        platform: 'darwin',
+      },
+    );
+    await vi.waitFor(() =>
+      expect(JSON.parse(readFileSync(path.join(dir, 'webhook.json'), 'utf-8')).pid).toBe(
+        process.pid,
+      ),
+    );
+    const state = JSON.parse(readFileSync(path.join(dir, 'webhook.json'), 'utf-8'));
+    expect(state.feed.agent).toBe(forwarderLabel(deps));
+    expect(
+      calls.filter((c) => c[1] === 'bootout' && c[2].endsWith('/io.ai-sdlc.webhook-forward')),
+    ).toHaveLength(1);
+    await stopWhenUp(done);
+  });
+
+  it('a running receiver with the machine-wide label is re-pointed in place (AC-8)', () => {
+    const deps = mkd();
+    writeFileSync(
+      path.join(dir, 'webhook.json'),
+      JSON.stringify({
+        pid: 99,
+        port: 8765,
+        feed: { kind: 'gh-forward', agent: 'io.ai-sdlc.webhook-forward' },
+      }),
+    );
+    webhookUp(deps, undefined, vi.fn(), undefined, 'darwin');
+    const state = JSON.parse(readFileSync(path.join(dir, 'webhook.json'), 'utf-8'));
+    expect(state.feed.agent).toBe(forwarderLabel(deps));
+    expect(
+      calls.filter((c) => c[1] === 'bootout' && c[2].endsWith('/io.ai-sdlc.webhook-forward')),
+    ).toHaveLength(1);
+  });
+});
+
+describe('board identity (AISDLC-1349)', () => {
+  const NOW = Date.parse('2026-11-02T12:00:00Z');
+  const hd = (identity: unknown, spawnless = true) =>
+    ({
+      ...mk({ AI_SDLC_WEBHOOK_SECRET: 'x' }),
+      now: () => new Date(NOW),
+      run: () => ({ status: 1, stdout: '', stderr: '' }),
+      isPortFree: () => spawnless,
+      probeWebhookIdentity: () => identity,
+    }) as unknown as HierarchyDeps;
+  const record = (extra: object = {}): void =>
+    writeFileSync(path.join(dir, 'webhook.json'), JSON.stringify({ pid: 1, port: 9, ...extra }));
+  const up = { probePort: () => true };
+
+  it('reads the repository as unknown when none is recorded, and names it when recorded', () => {
+    record();
+    const own = { repo: null, boardDir: dir };
+    const h = webhookHealth(hd(own), up);
+    expect(h.repo).toBeUndefined();
+    expect(formatWebhookStatus({ state: 'up', port: 9, pid: 1 }, h)).toContain('repo unknown');
+    record({ repo: 'o/a' });
+    const named = webhookHealth(hd(own), up);
+    expect(named.repo).toBe('o/a');
+    expect(formatWebhookStatus({ state: 'up', port: 9, pid: 1 }, named)).toContain('repo o/a');
+  });
+
+  it('a live pid whose port answers as another board, or not at all, is not up and webhookUp starts one', () => {
+    record({ repo: 'o/a' });
+    const other = { repo: 'o/b', boardDir: '/some/other/board' };
+    const h = webhookHealth(hd(other), up);
+    expect(h.class).toBe('down');
+    expect(h.signals.receiver).toBe(false);
+    expect(h.reasons[0]).toMatch(/another board.*o\/b/);
+    const silent = webhookHealth(hd(undefined), up);
+    expect(silent.class).toBe('down');
+    expect(silent.reasons[0]).toMatch(/does not answer \/health/);
+    const st = webhookStatus(hd(other));
+    expect(st).toMatchObject({ state: 'off', reason: 'foreign listener' });
+    expect(formatWebhookStatus(st)).toMatch(/^webhook: down \(.*another board/);
+    expect(webhookStatus(hd(undefined))).toMatchObject({ reason: 'foreign listener' });
+    const spawner = vi.fn();
+    webhookUp(hd(other), undefined, spawner);
+    expect(spawner).toHaveBeenCalledTimes(1);
+  });
+
+  it('the default identity probe asks /health through run and parses the answer', () => {
+    record({ repo: 'o/a' });
+    const via = (r: unknown): HierarchyDeps =>
+      ({
+        ...hd(undefined),
+        probeWebhookIdentity: undefined,
+        run: () => r,
+      }) as unknown as HierarchyDeps;
+    const ok = JSON.stringify({ status: 'ok', repo: 'o/a', boardDir: dir });
+    expect(webhookStatus(via({ status: 0, stdout: ok }))).toMatchObject({ state: 'up' });
+    const foreign = JSON.stringify({ repo: null, boardDir: '/x' });
+    expect(webhookStatus(via({ status: 0, stdout: foreign }))).toMatchObject({
+      reason: 'foreign listener',
+    });
+    expect(webhookStatus(via({ status: 1, stdout: '' }))).toMatchObject({ state: 'off' });
+    expect(webhookStatus(via({ status: 0, stdout: 'not json' }))).toMatchObject({ state: 'off' });
+    expect(webhookStatus(via({ status: 0, stdout: '{"status":"ok"}' }))).toMatchObject({
+      state: 'off',
+    });
+  });
+
+  it('events of another repository do not count as this board last event', () => {
+    record({ repo: 'o/a' });
+    mkdirSync(path.join(dir, 'events'), { recursive: true });
+    const f = path.join(dir, 'events', encodeURIComponent('o/b#3@abc:pull_request:d1') + '.json');
+    writeFileSync(f, '{}');
+    const h = webhookHealth(hd({ repo: 'o/a', boardDir: dir }), up);
+    expect(h.signals.lastEventAt).toBeUndefined();
+  });
+
+  it('status prints the refused foreign deliveries, and nothing when there are none', () => {
+    record({ repo: 'o/a' });
+    const own = { repo: 'o/a', boardDir: dir };
+    expect(formatWebhookForeign(webhookHealth(hd(own), up))).toEqual([]);
+    expect(formatWebhookForeign(undefined)).toEqual([]);
+    writeFileSync(
+      path.join(dir, 'webhook-foreign.json'),
+      JSON.stringify({ at: 'x', count: 3, repo: 'o/b' }),
+    );
+    const lines = formatWebhookForeign(webhookHealth(hd(own), up));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/3 delivery\(ies\) refused for repository o\/b.*o\/a/);
+  });
+});
+
+describe('per-board isolation (AISDLC-1376)', () => {
+  it('uses the real gh when another board wrapper is first on PATH (AC-1)', () => {
+    const other = '/repos/other/.ai-sdlc/dispatch/bin';
+    const deps = {
+      ...mk({ PATH: `${other}:/opt/bin:/usr/bin` }),
+      isExecutable: (f: string) => f === `${other}/gh` || f === '/opt/bin/gh',
+    } as unknown as HierarchyDeps;
+    expect(agentPath(deps)).toBe('/opt/bin:/usr/bin');
+    expect(resolveRealGh(deps)).toBe('/opt/bin/gh');
+  });
+
+  it('two back-to-back up calls spawn one receiver (AC-2)', () => {
+    const spawner = vi.fn(() => 4242);
+    const deps = {
+      ...mk({ AI_SDLC_WEBHOOK_SECRET: 'x', AI_SDLC_WEBHOOK_PORT: '9001' }),
+      now: () => new Date(),
+    } as unknown as HierarchyDeps;
+    webhookUp(deps, undefined, spawner);
+    webhookUp(deps, undefined, spawner);
+    expect(spawner).toHaveBeenCalledTimes(1);
+    expect(lines).toContain('webhook already starting for this board');
+  });
+
+  it('spawns again once the starting marker is stale', () => {
+    const spawner = vi.fn();
+    writeFileSync(path.join(dir, 'webhook-starting'), `4242 ${Date.now() - 60_000}\n`);
+    const deps = {
+      ...mk({ AI_SDLC_WEBHOOK_SECRET: 'x', AI_SDLC_WEBHOOK_PORT: '9001' }),
+      now: () => new Date(),
+    } as unknown as HierarchyDeps;
+    webhookUp(deps, undefined, spawner);
+    expect(spawner).toHaveBeenCalledTimes(1);
+  });
+
+  it('a receiver whose pid is not recorded leaves webhook.json on stop (AC-3)', async () => {
+    const deps = {
+      ...mk({ AI_SDLC_WEBHOOK_SECRET: 's3', HOME: dir, PATH: '/usr/bin' }),
+      now: () => new Date(),
+      run: () => ({ status: 0, stdout: '[]', stderr: '' }),
+    } as unknown as HierarchyDeps;
+    const done = webhookServe(deps, '0', undefined, { scan: true });
+    await vi.waitFor(() => expect(existsSync(path.join(dir, 'webhook.json'))).toBe(true));
+    const live = { pid: process.pid + 1, port: 1 };
+    writeFileSync(path.join(dir, 'webhook.json'), JSON.stringify(live) + '\n');
+    process.emit('SIGTERM');
+    await done;
+    expect(JSON.parse(readFileSync(path.join(dir, 'webhook.json'), 'utf-8'))).toEqual(live);
   });
 });

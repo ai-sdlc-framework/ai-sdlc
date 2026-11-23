@@ -327,6 +327,16 @@ export function resolveGovernanceFromYaml(yamlText: string): {
  * (external GitHub issue / contributor-authored work) and any unrecognised
  * value are untrusted — fail closed.
  */
+/**
+ * AISDLC-1336: appended to the policy-read refusal so a first-time adopter
+ * knows the refusal is expected, not a network fault. The refusal itself and
+ * the main-only policy source are unchanged.
+ */
+export const FIRST_PR_RULE =
+  'When .ai-sdlc/agent-role.yaml is not on the default branch yet, the first pull request ' +
+  'that adds .ai-sdlc/ is merged by a person; every later pull request goes through ' +
+  'cli-merge-if-eligible.';
+
 export type SourceKind = 'backlog' | 'gh-issue' | 'release' | 'decisions-sync' | 'docs' | 'deps';
 
 /** AISDLC-1091: the dependabot lane: a `dependabot/*` head opened and committed by the bot. */
@@ -1508,7 +1518,8 @@ export async function runMergeIfEligible(
     return refusalResult(
       opts.prNumber,
       'could not read .ai-sdlc/agent-role.yaml from main as GitHub serves it (local refs, ' +
-        'working trees and worktree copies are never used) — refusing (fail-closed)',
+        'working trees and worktree copies are never used) — refusing (fail-closed). ' +
+        FIRST_PR_RULE,
       opts.dryRun,
     );
   }

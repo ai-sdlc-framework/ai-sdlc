@@ -7,7 +7,7 @@ allowed-tools:
   - Grep
   - Glob
   - Bash
-  - Agent(developer, code-reviewer, test-reviewer, security-reviewer, review-planner, review-synthesizer)
+  - Agent(ai-sdlc:developer, ai-sdlc:code-reviewer, ai-sdlc:test-reviewer, ai-sdlc:security-reviewer, ai-sdlc:code-reviewer-codex, ai-sdlc:test-reviewer-codex, ai-sdlc:review-planner, ai-sdlc:review-synthesizer)
   - mcp__backlog__task_view
   - mcp__plugin_ai-sdlc_ai-sdlc__task_edit
   - mcp__plugin_ai-sdlc_ai-sdlc__task_complete
@@ -34,7 +34,7 @@ You are a **loop driver, not a pipeline narrator** (AISDLC-762). Steps 0-15 (par
 Items 1-4 and 6 are **governance-configurable per repo** (`.ai-sdlc/agent-role.yaml` `spec.governance`, RFC-0048 / AISDLC-601). Run this first and treat its output as authoritative for the session (no `governance:` section means every rule prints its strict text, except force-push which defaults to `allowForcePush: leaseOnOwnBranch`, AISDLC-710). Items 5 and 7 are **fixed integrity floors**, never configurable (RFC-0048 OQ-3).
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}/scripts/render-governance-hard-rules.mjs"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/render-governance-hard-rules.mjs"
 ```
 
 1. **Merging follows `governance.allowMerge` in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.** Never run `gh pr merge` (any flag form, `--auto` included), and never merge through `gh api .../pulls/<n>/merge` or `curl`. Merge or arm auto-merge only with `node pipeline-cli/bin/cli-merge-if-eligible.mjs <pr> --source-kind backlog [--arm]` (AISDLC-603), which re-checks green + CLEAN + trusted source. The PreToolUse hook enforces this regardless of policy.
@@ -58,21 +58,7 @@ An executor that claims a task whose manifest carries `resume.resumeMode: push-o
 Resolve the pipeline CLI once (every later call uses the absolute `reply` command the CLI prints, so you never re-resolve), then make the first call. `--fresh` discards any stale state from an earlier run of the same argument.
 
 ```bash
-PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}}/scripts"
-# AISDLC-1024: a task labelled pipeline-hotfix runs on the last canary-green build, not HEAD.
-if [ -z "${AI_SDLC_PIPELINE_REF:-}" ] && [ -f "$PLUGIN_SCRIPTS_DIR/hotfix-pipeline-ref.mjs" ]; then
-  AI_SDLC_PIPELINE_REF=$(node "$PLUGIN_SCRIPTS_DIR/hotfix-pipeline-ref.mjs" "$ARGUMENTS" 2>/dev/null || true)
-  [ -n "$AI_SDLC_PIPELINE_REF" ] && export AI_SDLC_PIPELINE_REF || unset AI_SDLC_PIPELINE_REF
-fi
-if [ -z "${PIPELINE_CLI_BIN:-}" ]; then
-  if [ -f "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh" ]; then
-    PIPELINE_CLI_BIN=$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh") || { echo "ERROR: @ai-sdlc/pipeline-cli not found; export PIPELINE_CLI_BIN=/path/to/pipeline-cli/bin" >&2; exit 1; }
-  else
-    PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
-  fi
-fi
-STATE="${TMPDIR:-/tmp}/ai-sdlc-next-step/$(printf '%s' "$ARGUMENTS" | tr -c 'A-Za-z0-9.-' '_').json"
-node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" next-step --task "$ARGUMENTS" --state "$STATE" --fresh
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/execute-next-step.sh" "$ARGUMENTS"
 ```
 
 If it fails with an unknown-command error, the installed `@ai-sdlc/pipeline-cli` predates AISDLC-762: update the runtime (the resolver script prints how) and retry; do not fall back to improvising the pipeline by hand.
@@ -81,13 +67,13 @@ If it fails with an unknown-command error, the installed `@ai-sdlc/pipeline-cli`
 
 ### `spawn-developer`
 
-Read `promptFile`. Spawn ONE `Agent` with `subagent_type: developer`, `prompt` = the file's contents verbatim, and `model` only if the instruction carries one. Its cwd is `cwd` (the worktree); the PreToolUse hook resolves `permittedExternalPaths` from the worktree's `.active-task`. Then report the agent's final message, unmodified: write it verbatim to a scratch file with the `Write` tool (never paste agent output into a shell command or heredoc), and run the instruction's `reply` command with its trailing `--result -` replaced by `--result <that file>`.
+Read `promptFile`. Spawn ONE `Agent` with `subagent_type: ai-sdlc:developer` (the instruction's `agent`), `prompt` = the file's contents verbatim, and `model` only if the instruction carries one. Its cwd is `cwd` (the worktree); the PreToolUse hook resolves `permittedExternalPaths` from the worktree's `.active-task`. Then report the agent's final message, unmodified: write it verbatim to a scratch file with the `Write` tool (never paste agent output into a shell command or heredoc), and run the instruction's `reply` command with its trailing `--result -` replaced by `--result <that file>`.
 
 **Developer round budget (AISDLC-1219, DEC-0392).** `next-step` stamps when it hands out each developer round. A round that returns after more than `AI_SDLC_DEVELOPER_BUDGET_MINUTES` (default 45) yields an `iterate-needed` note with the elapsed minutes, and the next `spawn-developer` round reuses the same worktree and its commits. A stalled claim is never restarted from zero: the stall reap records a diagnostic and does not re-queue (see `docs/operations/cli-hierarchy.md`).
 
 ### `spawn-reviewers`
 
-For EVERY entry of `reviewers`, spawn an `Agent` with `subagent_type` = `agent`, `prompt` = its `bootstrapPrompt` (a short instruction naming `promptFile`; the reviewer reads the file itself, where the diff-binding nonce marker lives; never read and relay the file contents, and never edit the file), and `model` only if the entry has one. Issue ALL of them in a single message so they run in parallel, and note the `agentId` the Agent tool returns for each. Then report one JSON document shaped like `replyShape` (`agent`, that reviewer's `agentId`, `approved`, `findings[]` with `severity` of `critical|major|minor|suggestion`, `summary`), taken from each reviewer's own verdict, written to a scratch file and sent with the same `reply` command and `--result <file>`. Never invent or soften a verdict: a reviewer that returned no parseable verdict is reported `approved: false`. **Staged review (RFC-0052, `reviewerSet: staged`):** the instruction then names ONE agent (`review-planner`, then `review-synthesizer`, then the normal reviewer set last, `security-reviewer` included; staged is advisory and never replaces it, DEC-0149) and its `replyShape` asks for `agent`, `agentId` and `outputFile` instead of a verdict. For `review-planner` and `review-synthesizer`, write the agent's final message VERBATIM to a scratch file with the `Write` tool (never paste it into a shell command) and report that path as `outputFile`; the CLI validates and grounds it, runs the probes, and falls back to the three-reviewer set on its own when the staged review cannot review the change. Report the final normal-set reviewers as usual. The CLI persists transcripts, emits the transcript leaves, aggregates, iterates (max 2 developer passes), rebases and re-reviews when needed, signs, pushes, opens the DRAFT PR and flips it ready.
+For EVERY entry of `reviewers`, spawn an `Agent` with `subagent_type` = the entry's `subagentType` (the registered `ai-sdlc:<agent>` name; keep the bare `agent` value in your report), `prompt` = its `bootstrapPrompt` (a short instruction naming `promptFile`; the reviewer reads the file itself, where the diff-binding nonce marker lives; never read and relay the file contents, and never edit the file), and `model` only if the entry has one. Issue ALL of them in a single message so they run in parallel, and note the `agentId` the Agent tool returns for each. Then report one JSON document shaped like `replyShape` (`agent`, that reviewer's `agentId`, `approved`, `findings[]` with `severity` of `critical|major|minor|suggestion`, `summary`), taken from each reviewer's own verdict, written to a scratch file and sent with the same `reply` command and `--result <file>`. Never invent or soften a verdict: a reviewer that returned no parseable verdict is reported `approved: false`. **Staged review (RFC-0052, `reviewerSet: staged`):** the instruction then names ONE agent (`review-planner`, then `review-synthesizer`, then the normal reviewer set last, `security-reviewer` included; staged is advisory and never replaces it, DEC-0149) and its `replyShape` asks for `agent`, `agentId` and `outputFile` instead of a verdict. For `review-planner` and `review-synthesizer`, write the agent's final message VERBATIM to a scratch file with the `Write` tool (never paste it into a shell command) and report that path as `outputFile`; the CLI validates and grounds it, runs the probes, and falls back to the three-reviewer set on its own when the staged review cannot review the change. Report the final normal-set reviewers as usual. **Single-reviewer re-run (AISDLC-1335):** when one reviewer's transcript did not contain the nonce marker, the CLI refuses to persist it (the marker check is never loosened) and sends `spawn-reviewers` again with ONLY that reviewer, the same `promptFile` and the same `round`. Spawn just that one agent, note its new `agentId`, and report just that reviewer in the same `replyShape`; the other reviewers are not run again and their reports are kept. Each reviewer gets two re-runs per round, after which the run stops naming the reviewer and the attempt count. The CLI persists transcripts, emits the transcript leaves, aggregates, iterates (max 2 developer passes), rebases and re-reviews when needed, signs, pushes, opens the DRAFT PR and flips it ready.
 
 ### `fix-report`
 
@@ -124,6 +110,10 @@ Print a tight summary (task, branch, worktree, developer commit and file count, 
 ## Why this lives in the slash command body (not a subagent)
 
 Plugin subagents cannot use the `Agent` tool (Claude Code filters it one level deep; AISDLC-69.2, AISDLC-98), so only the main session can spawn `developer` and the reviewers, which is the one thing this body still does. Parallelism is per Claude Code session: run `/loop /ai-sdlc execute <task-id>` or several terminals; each run has its own worktree, state file and `.active-task` sentinel, so nothing races.
+
+## Standalone push behaviour (AISDLC-1365)
+
+In a standalone session rooted at the main checkout (no `AI_SDLC_ACTIVE_TASK_ID`, not a hierarchy executor) the PreToolUse hook refuses a lease push from the task worktree, and a lone `cd` does not change the cwd it sees. The developer pushes a first branch with a plain `git push -u origin HEAD:refs/heads/<branch>` (no lease needed), and otherwise runs `git -C <main>/.worktrees/<task-id> push ...` as one command with no pipe. The developer reports a refused push in its `notes` (never as a claim about the PR in `summary`); `next-step` pushes and opens the PR itself, and marks the summary as written before the push.
 
 ## What this command DOES NOT do (intentional)
 

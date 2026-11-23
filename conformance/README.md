@@ -26,6 +26,11 @@ node scripts/generate-parity-manifest.mjs
 
 The Python suite (`sdk-python/tests/test_parity.py`) and the Go suite (`sdk-go/parity_test.go`) check that every manifest name appears in the SDK's own source, or is exempt.
 
+The check runs in both directions:
+
+- Manifest to SDK: every manifest name must appear in the SDK's mapped source file, or be exempt.
+- SDK to manifest: in each section, the set of names the SDK defines must be a subset of the manifest. A name the SDK defines and the reference lacks (for example a Go-only metric name, telemetry name or compliance control id) fails that SDK's suite. There is no exemption list for this direction. Both suites keep a test that adds a name to a patched copy of the source and asserts it is reported.
+
 `parity/exemptions.json` (`{ "python" | "go": { section: [names] } }`) records what an SDK lacks today. It can only shrink: `pnpm parity:check` fails when it gains an entry the base ref does not have, and an SDK test fails when an exempt name becomes defined (remove the entry then).
 
 ## Fixture Naming

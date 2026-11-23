@@ -117,7 +117,7 @@ malformed argument). `--help`, `-h` or `help` prints the usage and exits 0.
 Start the planner and the dispatch session, each in its own detached tmux session, and write
 the roster. No executor is started: dispatch spawns one executor per task with [`spawn`](#spawn)
 (RFC-0059, AISDLC-1075). Idempotent: sessions already running are left alone and
-only the missing ones are started. It also starts the reconcile scheduler (`cli-dispatch reconcile --watch`, which polls `<board>/.reconcile-wake`) as a detached process and records its pid in `<board>/reconcile-scheduler.json`; a second `up` with a live scheduler starts no other.
+only the missing ones are started. It also starts the reconcile scheduler (`cli-dispatch reconcile --watch`, which polls `<board>/.reconcile-wake`) as a detached process and records its pid in `<board>/reconcile-scheduler.json`; a second `up` with a live scheduler starts no other. `up` then ends with one line per missing piece (AISDLC-1357): `webhook: off` when no secret is set, a scheduler warning with the log tail when the process is gone 1.5 s after the spawn, and `warning: context size not read` when that read throws. `scheduler: STALLED` needs work queued and a last tick older than 120 s (the step-in time of three missed intervals plus one check interval); `AI_SDLC_TICK_STALL_MINUTES` still overrides. A failing reconcile or sweep writes a `failing: <first error line>` heartbeat that shows in the MODULE column until the next clean tick.
 
 ```bash
 cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
@@ -129,7 +129,7 @@ cli-hierarchy up [--executors <n>] [--planner-model <m>] [--dispatch-model <m>]
 | Option                          | Meaning                                                                                                                           |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `--executors <n>`               | Deprecated: standing executors, 0 to 5 (default 0); a value above 0 prints a deprecation line and is removed in the next release. |
-| `--planner-model <m>`           | Planner model (default `fable`).                                                                                                  |
+| `--planner-model <m>`           | Planner model (default: the `planner-session` cell of `.ai-sdlc/model-routing.yaml`; see "Model fallback" below).                 |
 | `--dispatch-model <m>`          | Dispatch model (default `sonnet`, per DEC-0068).                                                                                  |
 | `--executor-model <m>`          | Executor model (default `sonnet`).                                                                                                |
 | `--no-planner`                  | Do not start a planner.                                                                                                           |
@@ -262,7 +262,7 @@ When the board directory holds no manifest or verdict but `backlog/completed/` d
 
 Held-task triage (AISDLC-1244): a queued task held on a dependency is printed as `held: <task> (waits on <dep>) [<class>]`. The class is `waiting` (the dependency is on the board and will run), `operator-gated`, `absent` (the dependency is not on the board), `circular` (the dependency's own dependencies lead back to the held task) or `failed-dependency` (`pipeline-cli/src/hierarchy/held-triage.ts`). A hold that cannot clear on its own (any class but `waiting`) is recorded once in `held/<id>--<dependency>.json` and routed to the planner once.
 
-Verify slots (AISDLC-1087): the machine verify run takes one of two slots under `<board>/verify-slots/` (a dead holder's slot is reclaimed), so at most two executors run a suite at once; the second concurrent run gets `AI_SDLC_VITEST_MAX_WORKERS=2`, a lone run 4. `status` prints a `verify slot <n>: held by pid <p>` line per held slot and nothing when none are held. Pre-push runs share these slots (AISDLC-1186): the hook's `test:coverage` run holds a slot and gets the slot's worker cap, waits at most five minutes, then runs with the shared cap of 2; with no board directory or no built `pipeline-cli`, it runs unslotted and prints one line saying so.
+Verify slots (AISDLC-1087): the machine verify run takes one of two slots under `<board>/verify-slots/` (a dead holder's slot is reclaimed), so at most two executors run a suite at once; the second concurrent run gets `AI_SDLC_VITEST_MAX_WORKERS=2`, a lone run 4. `status` prints a `verify slot <n>: held by pid <p>` line per held slot and nothing when none are held. Pre-push runs share these slots (AISDLC-1186): the hook's `test:coverage` run holds a slot and gets the slot's worker cap, waits as long as it takes and never runs unslotted when a board directory exists (a missing `pipeline-cli` build refuses the push with a message); with no board directory it runs unslotted and prints one line saying so. A full-scope machine verify (AISDLC-1378) takes an exclusive marker `<board>/verify-slots/exclusive/`: it waits until no other verify holds a slot and blocks new ones while it runs, so at most one full suite runs per machine; affected-scope runs still share the two slots.
 
 Show the roster with each session's live state (`busy`, `idle`, `starting`, `gone`,
 `unknown`), whether a tmux client is attached, and the board's inflight task, plus the queue
@@ -277,6 +277,8 @@ The last line is the webhook receiver: `webhook: <class> (port N, last event <ag
 class `healthy`, `degraded` or `down` (see `webhook`; a live pid alone is no longer shown as `up`),
 `webhook: off (no secret)` when `AI_SDLC_WEBHOOK_SECRET` is unset. `--json` carries the full signal object as `webhookHealth`.
 The line after it is the reconcile scheduler (the poller of `<board>/.reconcile-wake`): `scheduler: up (pid N)`, `scheduler: STALLED (last tick <age>s ago, pid N)` when the scheduler pid is alive but the last tick is older than the stall limit (below), or `scheduler: off`. Below it, `open PRs:` lists every open PR with lane, action, reason, owner and age. The scheduler writes stdout and stderr to `<board>/log/reconcile.log`, which also receives one row per open PR per run; the same lane, action, reason, owner and `lastActionAt` fields are copied onto each row of `pr-snapshot.json`. The tick forwards to the planner only the routings new in that run. A failed action is retried once on an unchanged head; the second failure routes the PR to the planner once and the row reads `reenter (failed x2)` (AISDLC-1125).
+A `docs site pin: skipped` or `docs site pin: failed` line (AISDLC-1316) appears when the latest completed `docs-source-bump.yml` run did not update the website: `skipped` means the run was green but the site repository was not visible to `AI_SDLC_PAT`, so no bump PR was opened (the run's step summary says so); `failed` means the run failed. Each reconcile pass records the state in `<board>/docs-site-pin.json` and sends the planner one line only when the state changes to `skipped` or `failed`. No line is printed for `ok` or when no state was recorded.
+
 A `worktrees: <count> (<n> removable)` line (AISDLC-1108) gives the number of `.worktrees/*` directories and how many
 the last sweep classed removable but could not remove (written to `.git/ai-sdlc-sweep-status.json`); above the ceiling
 (`hierarchy.worktrees.ceiling`, default 40) an `ALARM:` line follows. `--json` carries the same under `worktrees`.
@@ -296,6 +298,9 @@ no executor state; `down`/`restart` answer the host's "Background work is runnin
 tasks" instead of leaving the pane parked on it.
 The `MODULE` column (AISDLC-1061) is the hierarchy hooks module's heartbeat for the session, read from
 `<board-dir>/handoff/module-<name>.json` (`{state, reason, version, at}`): `loaded`, `refused: <reason>`,
+`failing: <reason>` (dispatch host: the last tick returned no result; `loaded` is written only after a tick
+returned one, AISDLC-1358; `up` records the directory it runs the bins from in `<board-dir>/handoff/cli-bin.json`
+and the module runs them from there, keeping the repository-relative path when there is no record),
 `absent` (no file: the session has no hierarchy role, or the module never ran in it) or, for the dispatch
 host only, `stale: ...` when its per-tick refresh stopped for two minutes. The module's `session.start`
 gate writes the file through `$.process.run`; the dispatch role refreshes it on every tick. `up` ends by
@@ -321,10 +326,12 @@ cli-hierarchy status [--json] [--check]
 
 `--json` prints one JSON object: `{ "rows": [ { "entry": <roster entry>, "state": "...",
 "attached": true|false, "inflightTask": "AISDLC-N", "launchEnv": "ok|missing",
-"nodeVersion": "22.23.2", "nodeMismatch": true, "module": { "state": "loaded|refused|absent|stale", "reason": "..." }, "nextStep": "..." } ], "board": { "queued": n,
+"nodeVersion": "22.23.2", "nodeMismatch": true, "module": { "state": "loaded|refused|failing|absent|stale", "reason": "..." }, "nextStep": "..." } ], "board": { "queued": n,
 "inflight": n, "done": n, "failed": n }, "webhook": { "state": "up", "port": n, "pid": n }, "scheduler": { "state": "up", "pid": n } }`. Read-only. Exit code `0`; with `--check` it exits `1` when a stuck entry is older than `stuckAfterMinutes` (see below).
 
 **Filing PRs are docs-lane (AISDLC-1235).** A `cli-file` filing PR, new (`ai-sdlc/file-<id>`) or `--update` (`ai-sdlc/update-<id>`), is a docs-lane PR even though its title names a task id. Its merge never marks the task landed and never writes or rewrites a `done/` verdict. `cli-file` and the reconciler share the prefixes from `pipeline-cli/src/hierarchy/filing-branches.ts`. To reverse a false landing, run `cli-dispatch remove-verdict --task-id <id> --from done --with-manifest --unland --reason <text>`; it removes the `done/` marker, verdict and manifest, appends the reason to `<board>/board-events.jsonl`, and refuses while the task has a merged code PR.
+
+**Filing PRs land as docs (AISDLC-1374).** A PR from a filing branch (`ai-sdlc/file-*`, `ai-sdlc/update-*`, `docs/*`), including a decision filing PR (`ai-sdlc/file-dec-0422-opened-1200`, title `record DEC-0422 (planner)`), lands with `--source-kind docs`, in the landing pass (`createLander`) and in the reconciler's `arm`. Every other PR keeps `--source-kind backlog`. The docs lane refuses a PR whose diff touches a path outside the docs-only list, so a `file-*` branch that changes a source file is not landed. The decision id in the title is never read as a task id, and the PR is not routed to the planner. In a repository without GitHub auto-merge the reconciler runs no arm command and sends no "arm failed" notice; the landing pass squashes the PR once it is green and CLEAN.
 
 **A failed verdict is retired only by the task's own code (AISDLC-1297).** Both the reconcile pass and the tick step `retireFailedLanded` share one predicate (`isOwnCodePr` in `pipeline-cli/src/dispatch/retire-landed.ts`). A verdict that names a `prNumber` leaves `failed/` only when that pull request lands, or when the task file is under `backlog/completed/` on `origin/main`. A verdict without a `prNumber` is retired by a landing of kind `task` (or unstated) whose head branch is not a filing or docs branch. A merged filing or docs pull request never retires a verdict, whatever kind its landing record carries.
 
@@ -428,31 +435,45 @@ writes nothing. After a record is written, deliveries for the same `(pr, headSha
 and then the file `.ai-sdlc/dispatch/.reconcile-wake` (the file `reconcile --watch` polls) is touched, once. A replayed delivery id or a failed signature touches nothing. The receiver never classifies or acts.
 
 ```bash
-AI_SDLC_WEBHOOK_SECRET=... cli-hierarchy webhook up [--port 8765] [--feed gh-forward|tunnel|none [--feed-pid <pid>]]
+AI_SDLC_WEBHOOK_SECRET=... cli-hierarchy webhook up [--port <n>] [--feed gh-forward|tunnel|none [--feed-pid <pid>] [--feed-agent <label>]]
 cli-hierarchy webhook status [--json]
 cli-hierarchy webhook down
 ```
 
+Per-board isolation (AISDLC-1376): every repository on a machine has its own receiver, `gh`
+forwarder agent and `webhook.json`, and one board's run never touches another's. (1) The forwarder
+agent's `gh` is the real `gh`: every board's `.ai-sdlc/dispatch/bin` wrapper directory is dropped from
+the agent PATH, not only this board's. (2) `webhook up` writes a `webhook-starting` marker in the board
+directory before it spawns a receiver; a second `up` within 30 s logs "already starting" and spawns
+nothing, and the receiver removes the marker once it has bound and recorded itself. (3) A receiver
+deletes `webhook.json` on stop only when the record names its own pid (or no record exists); an orphan
+leaves the live receiver's record in place.
+
 The secret comes only from the `AI_SDLC_WEBHOOK_SECRET` environment variable, never a file in the
 repository. Without it `webhook up` does nothing and dispatch stays poll-only (not an error). The
-receiver binds to `127.0.0.1` only, on `--port` or `AI_SDLC_WEBHOOK_PORT` (default 8765), at path
+receiver binds to `127.0.0.1` only, on `--port` or `AI_SDLC_WEBHOOK_PORT` (unset: the receiver scans upward from the recorded port or the configured default, 8765), at path
 `/webhooks/github`. `cli-hierarchy up` starts it when the secret is set (and always starts the reconcile scheduler that consumes its wake file, see `up`). Subscribed event kinds:
 `pull_request`, `check_suite`, `check_run`, `workflow_run`, `status`, `pull_request_review`.
 
 Several projects on one host (AISDLC-1254): without `--port` or `AI_SDLC_WEBHOOK_PORT`, `webhook up` picks the
 port itself. It starts from the port recorded in the board dir's `webhook-port` file (else `spec.webhook.port`,
 default 8765) and takes the first port that binds, scanning 20 ports upward, so a second project's receiver lands on
-8766 while the first holds 8765. The choice is recorded and reused on every restart, and the forwarder is installed
-against that same port; `webhook status` prints the full target URL (`target http://127.0.0.1:<n>/webhooks/github`).
+8766 while the first holds 8765. The receiver binds first; only then are the port written to `webhook-port` and the
+forwarder installed or re-pointed at the bound port, and a bind lost to another process retries on the next port.
+Every start (`up`, a dispatch restart, `restart --all`) carries the recorded feed forward, and `restart --all` waits
+for its own receiver to release the port, then rescans if another process holds it. A recorded machine-wide launch
+agent (`io.ai-sdlc.webhook-forward`) is replaced by the per-board one. Repair with no recorded port installs nothing; `webhook status` prints the full target URL (`target http://127.0.0.1:<n>/webhooks/github`).
 `--port` and `AI_SDLC_WEBHOOK_PORT` pin the port and win over selection (a held pinned port is an error). When no
 candidate is free, or the receiver loses the bind, `webhook up` exits non-zero naming the port and its owner
 (`lsof`) and `webhook status` reports `webhook: collision (...)` instead of "not running" until the next
 successful start. The forwarder launchd label is per project
 (`com.ai-sdlc.webhook.<board-dir-name>-<hash>`, derived from the board dir), so two projects never collide.
 
+Prerequisites for the feed: the `gh webhook` extension (`gh extension install cli/gh-webhook`) and permission to manage hooks on the repository (admin). A board with no recorded feed gets no events: `up` and `restart` print one line saying so and naming `cli-hierarchy webhook up --feed gh-forward`, and `status` reads `feed none`. Forwarder liveness comes only from this board's own record, never a process-name match.
+
 Reaching it from GitHub: `cli-hierarchy webhook up --feed gh-forward` (AISDLC-1207) installs and loads a
 launchd agent (`com.ai-sdlc.webhook.<project-slug>`, KeepAlive, plist in `~/Library/LaunchAgents`, mode 0600) that runs
-`gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:8765/webhooks/github --secret $AI_SDLC_WEBHOOK_SECRET`,
+`gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:<port>/webhooks/github --secret $AI_SDLC_WEBHOOK_SECRET`,
 so the feed survives a closed terminal, sleep and a network drop. The hook secret must equal the receiver's, or
 every delivery is a 401; a missing `AI_SDLC_WEBHOOK_SECRET` is therefore an error. Before loading, `webhook up`
 deletes stale hooks named `cli` on the repository (a forwarder that died uncleanly leaves one, and the next start
@@ -480,8 +501,15 @@ gui/<uid>/<label>`, or, when the installed agent file differs from the current s
 least 5 minutes apart; each is recorded in `<board-dir>/webhook-health.json`. A decision is opened only when the
 attempts are used up or the agent file is out of date with the secret unset; its body lists the attempts and the tail
 of `webhook-forward.log` with the secret redacted (the secret is never written to the state file either). An arriving
-event returns the class to `healthy`, resets the attempt count and answers the open decision. A named tunnel (for example Cloudflare Tunnel) pointing at
-`127.0.0.1:8765` is the alternative for daily use (`--feed tunnel`).
+event returns the class to `healthy`, resets the attempt count and answers the open decision. Before each kickstart the repair deletes the repository's leftover `cli` hooks (as `webhook up` does), because a forwarder
+that dies on a websocket drop (`close 1006`) leaves its hook on GitHub and every launchd restart would fail with
+`HTTP 422 Hook already exists`. A record with feed `none` (or a `gh-forward` record with no `agent`) is repaired too when
+this board's own agent plist exists and the log shows one of those failures; a successful repair records `gh-forward`
+with the agent label. The repair never asks the operator to restart the service: the escalation point is the decision
+opened after 3 attempts in 60 minutes did not restore deliveries, or when the repair is blocked (no recorded port, or
+an out-of-date agent file with the secret unset).
+A named tunnel (for example Cloudflare Tunnel) pointing at
+`127.0.0.1:<port>` (the selected port) is the alternative for daily use (`--feed tunnel`).
 
 **Forwarder agent hardening (AISDLC-1285).** Four rules keep a crash-looping agent from reading as healthy:
 
@@ -513,6 +541,15 @@ episode with a note. The fix is operator-only (it touches the operator's account
 forwarder agent with `cli-hierarchy webhook up --feed gh-forward`,
 re-register the repository hook, or `cli-hierarchy webhook up` when the receiver itself is down. Meanwhile dispatch
 polls `gh` (about 2,700 calls an hour), which is the cost a degraded feed hides.
+
+### How planner notices arrive (AISDLC-1373)
+
+Reconcile (routed PRs, red main, docs bumps, auto-enqueue), the escalation writer and the canary all
+send through one notifier, `createPlannerNotifier`. When the planner recorded a socket address in
+`<board-dir>/handoff/address-<planner-name>.json`, the notice goes over that socket and never touches
+the pane. Otherwise the notice is typed into the planner pane, but only when the composer is empty.
+If the composer holds text the operator is typing, nothing is typed and no `Enter` is sent; the send
+fails, the item stays undelivered, and a later pass retries it.
 
 ### `attach`
 
@@ -1139,7 +1176,7 @@ Weekly token budget pacer (AISDLC-1072). `usage` reads the Claude Code OAuth cre
 cli-hierarchy usage
 ```
 
-The dispatch `tick` samples at most once per 5 minutes and applies one rule per window. The line is `allowed(t) = 100 * elapsed / total`: a straight line that starts at 0 percent at `resetsAt` minus the window length (7 days or 5 hours) and reaches 100 percent at `resetsAt`. It is computed from the reset time alone; no stored window anchor is read, so a stale or re-anchored sample cannot move it (AISDLC-1184). When utilization is above the line by more than the margin, the tick sets a hold with reason `budget: ...`; when it falls back under the line minus the margin, the tick lifts it (between the two the hold stays as it is). Margins come from `<board>/config.json`: `{ "budget": { "marginPoints": 2, "fiveHourMarginPoints": 10 } }` (seven-day default 2, five-hour default 10). A hold set by anything else is never touched. A budget hold blocks new claims only, like any hold; reports, verdicts and landings continue and inflight manifests are untouched. The pacer does not start work: the drain fills every hour the line allows.
+The dispatch `tick` samples at most once per 5 minutes and applies one rule per window. The line is `allowed(t) = 100 * elapsed / total`: a straight line that starts at 0 percent at `resetsAt` minus the window length (7 days or 5 hours) and reaches 100 percent at `resetsAt`. It is computed from the reset time alone; no stored window anchor is read, so a stale or re-anchored sample cannot move it (AISDLC-1184). When utilization is above the line by more than the margin, the tick sets a hold with reason `budget: ...`; the pacer lifts its own hold on the first tick where no window is above its line by more than its margin (AISDLC-1319); the `resume` event in `hold-events.jsonl` carries `by: "pacer"` and each window's utilization, line, ahead and margin. Inside the band the executor cap of one paces the drain. `status` prints one `HOLD by <who> since <time>: <reason>` line while `.hold` exists (and the `hold` field in `--json`), and none otherwise. Margins come from `<board>/config.json`: `{ "budget": { "marginPoints": 2, "fiveHourMarginPoints": 10 } }` (seven-day default 2, five-hour default 10). A hold set by anything else is never touched. A budget hold blocks new claims only, like any hold; reports, verdicts and landings continue and inflight manifests are untouched. The pacer does not start work: the drain fills every hour the line allows.
 
 `status` prints a `BUDGET` line: both utilizations, the line value, ahead or behind in points, and the projected time the current burn rate (oldest ring sample of the window to now) reaches 100 percent.
 
@@ -2931,3 +2968,18 @@ Every tmux call a tick makes (the `/exit` request, the exit-dialog check, the br
 The reconcile scheduler runs its ticks single-flight and records the running tick as `tick: {pid, startedAt}` in `<board>/reconcile-scheduler.json`. A tick older than the stall limit (default twice the 30 s tick interval; `AI_SDLC_TICK_STALL_MINUTES` to change it) is sent SIGTERM, then SIGKILL after 5 s, a `tick-stalled` event is appended to `<board>/board-events.jsonl`, and the next tick starts. `cli-hierarchy status` prints `scheduler: STALLED (last tick <age>s ago, pid N)` instead of `up` when the last tick is older than that limit.
 
 Manual recovery when a tick still hangs: find the blocked child (`ps -o pid,ppid,command | grep 'tmux '`) and `kill <child pid>`; the tick continues within seconds.
+
+### `model-unavailable` (AISDLC-1364)
+
+The planner session is routed by the `planner-session` cell of `.ai-sdlc/model-routing.yaml`; the `/ai-sdlc planner` command is a separate cell (`planner`) and pins `opus`, because a command `model:` applies to one turn only and a usage limit on its model stops that turn.
+
+When a model hits its limit, record it with its reset time:
+
+```
+cli-hierarchy model-unavailable fable --until 2026-11-24T20:00:00Z [--reason "usage limit reached"]
+cli-hierarchy model-unavailable fable --clear
+```
+
+While the marker is in force, `up` and a planner `restart` launch `claude --model <next weaker model>`, where "weaker" is the `strength` order in `model-routing.yaml` (the only place the order is written). The security reviewer never resolves below its opus floor, and a role with no allowed fallback fails with an error instead of downgrading. An explicit `--planner-model` always wins. `status` and `up` print one `model fallback:` line naming the role, both models, the reason and the reset time, and nothing otherwise. After `until` the marker is ignored; a running session is not switched, so run `cli-hierarchy restart <planner>` or `up` to return to the configured model (a restart keeps the model recorded in the roster, stepping it down only while it is marked).
+
+Claude Code's own `--fallback-model` does not cover rate or usage limits, so it is not used. The fallback only changes the `--model` argument on the same subscription: it never sets or reads `ANTHROPIC_API_KEY` and never chooses usage-credit billing.

@@ -134,6 +134,9 @@ export function developerBudgetMinutes(env: NodeJS.ProcessEnv): number {
 /** A fixable reviewer-report slip may be corrected this many times per run. */
 export const MAX_REPORT_RETRIES = 2;
 
+/** Agent files in `ai-sdlc-plugin/agents/` register under the plugin name (AISDLC-1369). */
+export const PLUGIN_AGENT_PREFIX = 'ai-sdlc:';
+
 export const REPORT_SHAPE =
   '{"reviewers":[{"agent":"<agent name>","agentId":"<agentId the Agent tool returned>","approved":true|false,"findings":[{"severity":"critical|major|minor|suggestion","file":"","line":0,"message":""}],"summary":""}]}';
 
@@ -360,7 +363,7 @@ export function buildSpawnDeveloper(
   return {
     action: 'spawn-developer',
     taskId: state.taskId,
-    agent: 'developer',
+    agent: 'ai-sdlc:developer',
     iteration: state.iteration,
     promptFile,
     cwd: state.worktreePath,
@@ -379,12 +382,15 @@ export function buildSpawnReviewers(
     action: 'spawn-reviewers',
     taskId: state.taskId,
     round: review.round,
-    reviewers: review.spawned.map((r) => ({
-      agent: r.agent,
-      promptFile: r.promptFile,
-      bootstrapPrompt: bootstrapPromptFor(r.promptFile),
-      ...(r.model ? { model: r.model } : {}),
-    })),
+    reviewers: review.spawned
+      .filter((r) => !review.rerun || review.rerun.includes(r.agent))
+      .map((r) => ({
+        agent: r.agent,
+        subagentType: `${PLUGIN_AGENT_PREFIX}${r.agent}`,
+        promptFile: r.promptFile,
+        bootstrapPrompt: bootstrapPromptFor(r.promptFile),
+        ...(r.model ? { model: r.model } : {}),
+      })),
     replyShape:
       review.staged && review.staged.stage !== 'security' ? STAGED_REPORT_SHAPE : REPORT_SHAPE,
     reply: resumeCommand(ctx, state.taskId),
@@ -465,7 +471,7 @@ class Machine {
 
     ctx.logger.progress('step-1', `detected ARG_FORM=backlog-task (${arg.taskId})`);
     const init = await deps.initTask(ctx, arg.taskId);
-    if (!init.ok) return this.early(arg.taskId, init.reason);
+    if (!init.ok) return this.early(arg.taskId, init.reason, init.cause);
 
     const state: NextStepState = {
       schemaVersion: 1,
@@ -531,8 +537,16 @@ class Machine {
   }
 
   /** A failure before any state exists: nothing to persist, nothing to roll back. */
-  private early(taskId: string, reason: string): StopInstruction {
-    return { action: 'stop', taskId, outcome: 'aborted', reason, prUrl: null, notes: reason };
+  private early(taskId: string, reason: string, cause?: string): StopInstruction {
+    return {
+      action: 'stop',
+      taskId,
+      outcome: 'aborted',
+      reason,
+      ...(cause ? { cause } : {}),
+      prUrl: null,
+      notes: reason,
+    };
   }
 
   // ── developer ─────────────────────────────────────────────────────
@@ -656,6 +670,7 @@ class Machine {
     const prep = await deps.prepareReview(ctx, state, state.reviewRound, opts);
     if (prep.kind === 'abort') return this.fail(state, 'aborted', prep.reason);
     state.review = prep.review;
+    state.reviewRound = prep.review.round;
     state.classifierLine = prep.classifierLine;
     if (prep.kind === 'nothing-to-spawn') {
       state.verdict = await aggregateRound(prep.verdicts, prep.review.harnessNote);
@@ -696,6 +711,7 @@ class Machine {
     }
     const fin = await deps.finalizeReview(ctx, state, reports);
     if (!fin.ok) {
+      if (fin.rerun && state.review) return this.spawnReviewers(state, state.review);
       return fin.recoverable
         ? this.fixReport(state, fin.reason)
         : this.fail(state, 'aborted', fin.reason);

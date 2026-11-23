@@ -28,6 +28,7 @@ import {
   readFileSync,
   realpathSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join, dirname, basename, isAbsolute, relative } from 'node:path';
@@ -35,7 +36,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import type { DerivedGates } from '../../compliance/types.js';
 import { BASELINE_DERIVED_GATES } from '../../compliance/types.js';
 import {
-  ADOPTER_TEMPLATE_POSTS_APPROVAL,
+  AI_SDLC_GATE_WORKFLOW,
   ATTESTATION_TEMPLATES,
   BASELINE_WORKFLOW_TEMPLATES,
   CLASSIFIER_TEMPLATES,
@@ -47,9 +48,17 @@ import {
   WORKFLOWS_TEMPLATES,
   type FeatureTemplateSet,
 } from './init-templates.js';
+import { renderWorkflowForPackageManager } from './init-workflow-pm.js';
+import { detectPackageManager, type PackageManager } from '@ai-sdlc/pipeline-cli/verification';
+import { migrateLegacyWorkflows } from './init-legacy-workflows.js';
 import {
   CLIENT_SIDE_ONLY_MESSAGE,
+  REQUIRED_APPROVING_REVIEW_COUNT,
   RECOMMENDED_BRANCH_PROTECTION_BODY,
+  buildBranchProtectionBody,
+  postedContextsFromWorkflows,
+  readWorkflowTextsFs,
+  requiredContextsFor,
   isBranchProtectionUnavailable,
   resolveOwnerRepoSlug,
   readConfiguredTargetBranch,
@@ -857,6 +866,8 @@ export interface FeatureAdapters {
    * directly and refuse when a symlink's target can't be resolved at all.
    */
   isSymlink: (path: string) => boolean;
+  /** Delete a file (AISDLC-1353: replacing a byte-identical old workflow). Production = `node:fs.unlinkSync`. */
+  removeFile?: (path: string) => void;
   /** Test for path existence. Production = `node:fs.existsSync`. */
   exists: (path: string) => boolean;
   /** Run a shell command (used for `gh api`). Production = `execSync`. */
@@ -1040,6 +1051,7 @@ export function buildProductionAdapters(): FeatureAdapters {
     },
     mkdirp: (path) => mkdirSync(path, { recursive: true }),
     exists: (path) => existsSync(path),
+    removeFile: (path) => unlinkSync(path),
     readTextFile: (path) => {
       try {
         return existsSync(path) ? readFileSync(path, 'utf-8') : null;
@@ -1207,7 +1219,7 @@ export async function resolveFeatureSelection(
     sel.branchProtection = true;
   } else {
     sel.branchProtection = await adapters.prompt(
-      'Apply recommended branch protection? (required: ai-sdlc/pr-ready + codecov/patch)',
+      'Apply recommended branch protection? (required: ai-sdlc/pr-ready, plus codecov/patch only when a workflow uploads to Codecov)',
       true,
     );
   }
@@ -1439,6 +1451,38 @@ function projectDeclaresHusky(
 
 // ── Dispatcher ───────────────────────────────────────────────────────────
 
+/**
+ * Delete a byte-identical retired verifier, rewrite a byte-identical old gate,
+ * and print the file and the change for an edited copy (never overwritten).
+ */
+function migrateOldWorkflows(
+  projectDir: string,
+  flags: WizardFlags,
+  adapters: FeatureAdapters,
+): void {
+  const io = {
+    read: (rel: string) => adapters.readTextFile(join(projectDir, rel)),
+    write: (rel: string, contents: string) => {
+      if (!flags.dryRun) adapters.writeFile(join(projectDir, rel), contents);
+    },
+    remove: adapters.removeFile
+      ? (rel: string) => {
+          if (!flags.dryRun) adapters.removeFile?.(join(projectDir, rel));
+        }
+      : undefined,
+  };
+  for (const { finding, outcome } of migrateLegacyWorkflows(io, AI_SDLC_GATE_WORKFLOW)) {
+    if (outcome === 'reported') {
+      adapters.log(`  WARNING ${finding.path} left unchanged: ${finding.detail}`);
+    } else {
+      const verb = outcome === 'deleted' ? 'delete' : 'rewrite';
+      adapters.log(
+        `  ${flags.dryRun ? `would ${verb}` : `${outcome}`} ${finding.path}: ${finding.detail}`,
+      );
+    }
+  }
+}
+
 /** Return value of `applyFeatureSelection` — what was actually written. */
 export interface ApplyResult {
   /** Files that were newly created on this run. */
@@ -1449,6 +1493,11 @@ export interface ApplyResult {
   wouldCreate: string[];
   /** Branch-protection result, if attempted. */
   branchProtection?: BranchProtectionResult;
+}
+
+function contentsOf(sets: FeatureTemplateSet[], relPath: string): string {
+  for (const set of sets) if (set.files[relPath] !== undefined) return set.files[relPath];
+  return '';
 }
 
 /**
@@ -1495,6 +1544,24 @@ export async function applyFeatureSelection(
   // First-set wins (BASELINE comes first, then feature bundles).
   const seenRelPaths = new Set<string>();
 
+  // AISDLC-1362: spell the gate and ingress setup, install and run steps for the repo's manager.
+  const hasPackageJson = adapters.exists(join(projectDir, 'package.json'));
+  const pm: PackageManager = hasPackageJson
+    ? detectPackageManager(
+        (f) => adapters.exists(join(projectDir, f)),
+        (f) => adapters.readTextFile(join(projectDir, f)) ?? undefined,
+      )
+    : 'pnpm';
+  const yarnBerry =
+    pm === 'yarn' &&
+    (adapters.exists(join(projectDir, '.yarnrc.yml')) ||
+      /"packageManager"\s*:\s*"yarn@([2-9]|\d{2,})/.test(
+        adapters.readTextFile(join(projectDir, 'package.json')) ?? '',
+      ));
+
+  // AISDLC-1353: replace a byte-identical old verifier / old gate; report edited copies.
+  migrateOldWorkflows(projectDir, flags, adapters);
+
   for (const set of templateSets) {
     for (const [relPath, contents] of Object.entries(set.files)) {
       if (seenRelPaths.has(relPath)) continue;
@@ -1525,12 +1592,47 @@ export async function applyFeatureSelection(
 
       // mkdir -p the parent
       adapters.mkdirp(dirname(absPath));
-      adapters.writeFile(absPath, contents);
+      adapters.writeFile(
+        absPath,
+        isWorkflowFile && hasPackageJson
+          ? renderWorkflowForPackageManager(contents, pm, yarnBerry)
+          : contents,
+      );
       result.created.push(relPath);
       if (alreadyExists && shouldForce) {
         adapters.log(`  overwrite ${relPath} (--force)`);
       } else {
         adapters.log(`  created ${relPath}`);
+      }
+    }
+  }
+
+  if (!flags.dryRun && hasPackageJson) {
+    const gateWritten = result.created.includes('.github/workflows/ai-sdlc-gate.yml');
+    if (pm !== 'pnpm') {
+      const written = result.created.filter(
+        (r) => r.startsWith('.github/workflows/') && /pnpm/.test(contentsOf(templateSets, r)),
+      );
+      if (written.length > 0) {
+        adapters.log(`  package manager: ${pm}; workflows written for it: ${written.join(', ')}`);
+      }
+    }
+    if (gateWritten) {
+      let hasCoverage = false;
+      try {
+        const scripts = (
+          JSON.parse(adapters.readTextFile(join(projectDir, 'package.json')) ?? '{}') as {
+            scripts?: Record<string, unknown>;
+          }
+        ).scripts;
+        hasCoverage = typeof scripts?.['test:coverage'] === 'string';
+      } catch {
+        // unreadable package.json: say the script is missing
+      }
+      if (!hasCoverage) {
+        adapters.log(
+          '  note: package.json has no test:coverage script; the Coverage job in .github/workflows/ai-sdlc-gate.yml will fail until you add one or edit that job.',
+        );
       }
     }
   }
@@ -1845,6 +1947,20 @@ export async function applyFeatureSelection(
     }
   }
 
+  // AISDLC-1325: a pre-1261 signer block is a defect whether or not the
+  // attestation feature is selected; strip it from the resolved hook.
+  if (!selection.attestation && !flags.dryRun) {
+    const { path: hookPath, relPath: hookRelPath } = resolveHookTarget(projectDir, adapters);
+    const existingHook = adapters.readTextFile(hookPath);
+    if (existingHook != null && hasStaleAttestationSignReference(existingHook)) {
+      const stripped = stripStaleAttestationSignBlock(existingHook);
+      if (stripped !== existingHook) {
+        adapters.writeFile(hookPath, stripped);
+        adapters.log(`  rewrote ${hookRelPath} (removed stale attestation-sign block)`);
+      }
+    }
+  }
+
   // Branch protection (always last — depends on the gate workflow being
   // present so the required check exists when the rule is applied).
   if (selection.branchProtection && flags.noBranchProtection) {
@@ -1863,6 +1979,8 @@ export interface BranchProtectionResult {
   applied: boolean;
   /** The PUT body as a JSON string (always populated for visibility). */
   bodyJson: string;
+  /** Required status-check contexts in the body (AISDLC-1352). */
+  contexts?: string[];
   /** Error message from `gh api`, if non-zero exit. */
   error?: string;
   /**
@@ -1898,13 +2016,20 @@ export { RECOMMENDED_BRANCH_PROTECTION_BODY };
  * forks + renames + custom default branches consistently, and the user
  * needs `gh` on PATH for the PUT to work anyway.
  */
+/** One line for the setup summary: how many reviews are required and who supplies them. */
+function approvalSummary(): string {
+  return `Required approving reviews: ${REQUIRED_APPROVING_REVIEW_COUNT}. No scaffolded workflow posts an approval; a person approves (or an admin bypasses).`;
+}
+
 export async function applyBranchProtection(
   projectDir: string,
   flags: WizardFlags,
   adapters: Pick<FeatureAdapters, 'runCommand' | 'log'>,
-  templatePostsApproval: boolean = ADOPTER_TEMPLATE_POSTS_APPROVAL,
 ): Promise<BranchProtectionResult> {
-  const bodyJson = JSON.stringify(RECOMMENDED_BRANCH_PROTECTION_BODY, null, 2);
+  const contexts = requiredContextsFor(
+    postedContextsFromWorkflows(readWorkflowTextsFs(projectDir)),
+  );
+  const bodyJson = JSON.stringify(buildBranchProtectionBody(contexts), null, 2);
 
   if (flags.dryRun) {
     adapters.log('');
@@ -1916,7 +2041,7 @@ export async function applyBranchProtection(
     adapters.log(
       `  apply with: gh api -X PUT repos/{owner}/{repo}/branches/${dryBranch}/protection ...`,
     );
-    return { applied: false, bodyJson };
+    return { applied: false, bodyJson, contexts };
   }
 
   // Resolve owner/repo via gh (shared with doctor.ts's checkBranchProtection —
@@ -1926,6 +2051,7 @@ export async function applyBranchProtection(
     return {
       applied: false,
       bodyJson,
+      contexts,
       error: ownerRepo.error,
     };
   }
@@ -1951,6 +2077,7 @@ export async function applyBranchProtection(
     return {
       applied: false,
       bodyJson,
+      contexts,
       error: `failed to stage branch-protection body: ${(err as Error).message}`,
     };
   }
@@ -1972,42 +2099,27 @@ export async function applyBranchProtection(
       '  installed: cli-merge-if-eligible refuses unless attestation verifies and checks are green;',
     );
     adapters.log('             the hook keeps blocking direct agent merges.');
-    adapters.log(
-      templatePostsApproval
-        ? '             verify-attestation.yml posts the approving review once server-side protection is available.'
-        : '             The adopter verify-attestation template does not yet post the approving review.',
-    );
+    adapters.log(`  ${approvalSummary()}`);
     adapters.log(`  ${CLIENT_SIDE_ONLY_MESSAGE} (ai-sdlc doctor reports this as an error).`);
     adapters.log('  opt out with: --no-branch-protection');
-    return { applied: false, bodyJson, mode: 'client-side' };
+    return { applied: false, bodyJson, contexts, mode: 'client-side' };
   }
   if (apply.exitCode !== 0) {
     return {
       applied: false,
       bodyJson,
+      contexts,
       error: `gh api PUT failed: ${apply.stdout.trim() || 'unknown error'}`,
     };
   }
 
   adapters.log(`  applied branch protection to ${slug}:${branch} (server-side enforcement)`);
   adapters.log(
-    '  installed: required checks ai-sdlc/pr-ready, codecov/patch + 1 approving review (DEC-0014).',
+    `  installed: required checks ${contexts.join(', ')} + ${REQUIRED_APPROVING_REVIEW_COUNT} approving review(s) (DEC-0014).`,
   );
-  if (templatePostsApproval) {
-    adapters.log(
-      '             verify-attestation.yml posts the approving review once the attestation verifies.',
-    );
-  } else {
-    adapters.log(
-      '             The adopter verify-attestation template does not yet post the approving review,',
-    );
-    adapters.log(
-      '             so a non-admin merge waits on a human review (or an admin bypass) until the',
-    );
-    adapters.log('             template ships the approve job.');
-  }
+  adapters.log(`             ${approvalSummary()}`);
   adapters.log('  opt out with: --no-branch-protection');
-  return { applied: true, bodyJson, mode: 'server', branch };
+  return { applied: true, bodyJson, contexts, mode: 'server', branch };
 }
 
 // ── Next-steps summary ───────────────────────────────────────────────────
@@ -2067,11 +2179,10 @@ export function renderNextSteps(
   }
 
   if (selection.attestation) {
-    lines.push(`${stepN}. Attestation infrastructure was scaffolded in AUDIT-ONLY mode.`);
-    lines.push('     Nothing currently blocks a merge when review attestation is missing —');
-    lines.push('     the verify-attestation.yml workflow is an audit trail,');
-    lines.push('     not an enforcement gate. Run `ai-sdlc doctor` at any time to');
-    lines.push("     see the real state of this repo's attestation governance.");
+    lines.push(`${stepN}. Review verdict gate (RFC-0061).`);
+    lines.push('     The scaffolded ai-sdlc-gate.yml runs a verdict-check job: a code PR with no');
+    lines.push('     valid review verdict record fails ai-sdlc/pr-ready. Run `ai-sdlc doctor` at');
+    lines.push("     any time to see the real state of this repo's attestation governance.");
     // AISDLC-152: removed the optional CI-side signer step (the AISDLC-87
     // CI-attestor was retired in AISDLC-140 sub-4 alongside attestation
     // becoming audit-only). New adopters no longer need to provision the
@@ -2090,14 +2201,16 @@ export function renderNextSteps(
 
   if (selection.workflows) {
     lines.push(`${stepN}. GitHub Actions workflows were scaffolded into .github/workflows/.`);
-    lines.push('     Four files are now in place:');
+    lines.push('     Three files are now in place:');
     lines.push('       - ai-sdlc-gate.yml       — ai-sdlc/pr-ready rollup check');
-    lines.push('       - verify-attestation.yml  — DSSE attestation verifier (audit-only)');
     lines.push('       - ai-sdlc-review.yml      — PR review status (stub: wire your reviewers)');
     lines.push('       - auto-enable-auto-merge.yml — arms auto-merge on same-repo PRs');
     lines.push('     To activate auto-merge:');
     lines.push('       a) Enable "Allow auto-merge" in GitHub Settings → General.');
     lines.push('       b) Set the AI_SDLC_PAT secret with write access to the repo.');
+    lines.push('     The first pull request that adds .ai-sdlc/ is merged by a person (the merge');
+    lines.push('     policy is read only from the default branch); every later pull request goes');
+    lines.push('     through cli-merge-if-eligible.');
     lines.push('     Re-run with --force to overwrite workflows on a pre-261 repo:');
     lines.push('       ai-sdlc init --add workflows --force');
     lines.push('');
@@ -2126,7 +2239,9 @@ export function renderNextSteps(
       lines.push(
         `${stepN}. Branch protection on \`${result.branchProtection.branch ?? 'main'}\` was updated (server-side enforcement).`,
       );
-      lines.push('     Required checks: ai-sdlc/pr-ready, codecov/patch');
+      lines.push(
+        `     Required checks: ${(result.branchProtection.contexts ?? ['ai-sdlc/pr-ready']).join(', ')}`,
+      );
       lines.push('     Opt out with: --no-branch-protection');
     } else if (result.branchProtection?.mode === 'client-side') {
       lines.push(`${stepN}. Branch protection is unavailable for this repo (HTTP 403).`);
