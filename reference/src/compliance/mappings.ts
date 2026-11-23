@@ -155,7 +155,7 @@ export const NIST_AI_RMF_MAPPINGS: readonly ControlMapping[] = [
   {
     controlId: 'human-review',
     framework: 'nist-ai-rmf',
-    frameworkReference: 'GOVERN 3.2 - Human Oversight',
+    frameworkReference: 'MAP 3.5 - Human Oversight',
     description: 'Human review mechanisms provide oversight at critical decision points',
   },
   {

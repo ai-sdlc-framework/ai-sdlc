@@ -62,16 +62,16 @@ var euAIActMappings = []ControlMapping{
 	{ControlID: "provenance-tracking", Framework: FrameworkEUAIAct, FrameworkReference: "Article 13 - Transparency", Description: "Provenance tracking enables transparency of AI-generated outputs"},
 	{ControlID: "human-review", Framework: FrameworkEUAIAct, FrameworkReference: "Article 14 - Human Oversight", Description: "Mandatory human review implements human oversight requirements"},
 	{ControlID: "kill-switch", Framework: FrameworkEUAIAct, FrameworkReference: "Article 14(4)(e) - Interrupt/Override", Description: "Kill switch provides ability to interrupt or override AI system output"},
-	{ControlID: "sandbox-isolation", Framework: FrameworkEUAIAct, FrameworkReference: "Article 54 - AI Regulatory Sandboxes", Description: "Sandbox isolation supports controlled testing environments"},
-	{ControlID: "metrics-collection", Framework: FrameworkEUAIAct, FrameworkReference: "Article 61 - Post-Market Monitoring", Description: "Metrics collection enables post-deployment performance monitoring"},
+	{ControlID: "sandbox-isolation", Framework: FrameworkEUAIAct, FrameworkReference: "Article 57 - AI Regulatory Sandboxes", Description: "Sandbox isolation supports controlled testing environments"},
+	{ControlID: "metrics-collection", Framework: FrameworkEUAIAct, FrameworkReference: "Article 72 - Post-Market Monitoring", Description: "Metrics collection enables post-deployment performance monitoring"},
 }
 
 var nistAIRMFMappings = []ControlMapping{
 	{ControlID: "quality-gates", Framework: FrameworkNISTAIRMF, FrameworkReference: "MEASURE 2.6 - AI System Performance", Description: "Quality gates measure and validate system performance continuously"},
 	{ControlID: "audit-logging", Framework: FrameworkNISTAIRMF, FrameworkReference: "GOVERN 1.4 - Organizational Documentation", Description: "Audit logs document AI system decisions and operations"},
-	{ControlID: "autonomy-governance", Framework: FrameworkNISTAIRMF, FrameworkReference: "GOVERN 1.3 - Roles and Responsibilities", Description: "Autonomy governance defines clear AI/human responsibility boundaries"},
+	{ControlID: "autonomy-governance", Framework: FrameworkNISTAIRMF, FrameworkReference: "GOVERN 2.1 - Roles and Responsibilities", Description: "Autonomy governance defines clear AI/human responsibility boundaries"},
 	{ControlID: "provenance-tracking", Framework: FrameworkNISTAIRMF, FrameworkReference: "MAP 2.3 - AI System Provenance", Description: "Provenance tracking maintains artifact lineage and attribution"},
-	{ControlID: "human-review", Framework: FrameworkNISTAIRMF, FrameworkReference: "MANAGE 2.2 - Human Oversight", Description: "Human review mechanisms provide oversight at critical decision points"},
+	{ControlID: "human-review", Framework: FrameworkNISTAIRMF, FrameworkReference: "MAP 3.5 - Human Oversight", Description: "Human review mechanisms provide oversight at critical decision points"},
 	{ControlID: "kill-switch", Framework: FrameworkNISTAIRMF, FrameworkReference: "MANAGE 4.1 - Incident Response", Description: "Kill switch enables rapid incident response and system halt"},
 	{ControlID: "metrics-collection", Framework: FrameworkNISTAIRMF, FrameworkReference: "MEASURE 1.1 - Measurement Approaches", Description: "Metrics collection provides quantitative measurement of AI performance"},
 	{ControlID: "complexity-routing", Framework: FrameworkNISTAIRMF, FrameworkReference: "MAP 1.5 - Risk Identification", Description: "Complexity routing identifies and mitigates task-level risks"},

@@ -142,7 +142,7 @@ NIST_AI_RMF_MAPPINGS: list[ControlMapping] = [
     ),
     ControlMapping(
         "human-review", "nist-ai-rmf",
-        "GOVERN 3.2 - Human Oversight",
+        "MAP 3.5 - Human Oversight",
         "Human review mechanisms provide oversight at critical decision points",
     ),
     ControlMapping(
