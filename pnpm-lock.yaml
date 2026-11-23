@@ -129,8 +129,8 @@ importers:
         specifier: workspace:*
         version: link:../pipeline-cli
       better-sqlite3:
-        specifier: ^13.1.1
-        version: 13.1.1
+        specifier: ^13.2.0
+        version: 13.2.0
       next:
         specifier: ^16.4.6
         version: 16.4.6(@opentelemetry/api@1.10.0)(@types/node@26.6.6)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -209,8 +209,8 @@ importers:
         specifier: ^1.32.2
         version: 1.32.2(zod@4.6.7)
       better-sqlite3:
-        specifier: ^13.1.1
-        version: 13.1.1
+        specifier: ^13.2.0
+        version: 13.2.0
       zod:
         specifier: ^4.0.0
         version: 4.6.7
@@ -249,8 +249,8 @@ importers:
         specifier: ^8.20.0
         version: 8.20.0
       better-sqlite3:
-        specifier: ^13.1.1
-        version: 13.1.1
+        specifier: ^13.2.0
+        version: 13.2.0
       commander:
         specifier: ^15.1.0
         version: 15.1.0
@@ -289,8 +289,8 @@ importers:
         specifier: workspace:*
         version: link:../reference
       better-sqlite3:
-        specifier: ^13.1.1
-        version: 13.1.1
+        specifier: ^13.2.0
+        version: 13.2.0
       ink:
         specifier: ^8.0.0
         version: 8.0.0(@types/react@19.3.0)(react@19.3.0)
@@ -1567,8 +1567,8 @@ packages:
   before-after-hook@4.0.0:
     resolution: {integrity: sha512-q6tR3RPqIB1pMiTRMFcZwuG5T8vwp+vUvEG0vuI6B+Rikh5BfPp2fQ82c925FOs+b0lcFQ8CFrL+KbilfZFhOQ==}
 
-  better-sqlite3@13.1.1:
-    resolution: {integrity: sha512-JjyLCATp+VLxZVFyWkicyzKYwpEFLCrV4MmshW97xv3JXdhw5jBDcsbEWRGm2L/96E+k7rtjON8q9nml05h3Pw==}
+  better-sqlite3@13.2.0:
+    resolution: {integrity: sha512-Z8Q/9x/uNyKxA1v4FNodyItRVRw1TeKBrmj32JhxhR0ceNcBY+wMobt/Bv7M7TzwPAXjnZRtNaEsATnUZSKWZQ==}
     engines: {node: '>=22'}
 
   body-parser@2.4.0:
@@ -3805,7 +3805,7 @@ snapshots:
 
   before-after-hook@4.0.0: {}
 
-  better-sqlite3@13.1.1:
+  better-sqlite3@13.2.0:
     dependencies:
       node-addon-api: 8.9.2
 
