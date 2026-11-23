@@ -8,7 +8,7 @@ The orchestrator runtime — CLI, agent runners, codebase analysis, and state st
 
 | Module | Description |
 |---|---|
-| [Runners](runners.md) | Agent runners (Claude Code, Copilot, Cursor, Codex, GenericLLM) and runner registry |
+| [Runners](runners.md) | Agent runners (Claude Code, Copilot, Cursor, Codex, Kiro, GenericLLM) and runner registry |
 | [Parallel Execution](parallel-execution.md) | Worktree pool, harness adapter, database branch adapter, subscription plan / ledger (RFC-0010) |
 
 ## SDK (`@ai-sdlc/reference`)
@@ -42,7 +42,7 @@ import { validate, enforce, PipelineBuilder } from '@ai-sdlc/reference';
 
 | Module | Package | Description | Key Exports |
 |---|---|---|---|
-| [Runners](runners.md) | `@ai-sdlc/orchestrator` | Agent runners and registry | `ClaudeCodeRunner`, `CopilotRunner`, `CursorRunner`, `CodexRunner`, `GenericLLMRunner`, `RunnerRegistry`, `createRunnerRegistry` |
+| [Runners](runners.md) | `@ai-sdlc/orchestrator` | Agent runners and registry | `ClaudeCodeRunner`, `CopilotRunner`, `CursorRunner`, `CodexRunner`, `KiroRunner`, `GenericLLMRunner`, `RunnerRegistry`, `createRunnerRegistry` |
 | [Core](core.md) | `@ai-sdlc/reference` | Types, validation, provenance | `validate`, `validateResource`, `createProvenance`, `API_VERSION` |
 | [Builders](builders.md) | `@ai-sdlc/reference` | Fluent resource construction | `PipelineBuilder`, `AgentRoleBuilder`, `QualityGateBuilder`, `AutonomyPolicyBuilder`, `AdapterBindingBuilder` |
 | [Policy](policy.md) | `@ai-sdlc/reference` | Enforcement and authorization | `enforce`, `evaluatePromotion`, `authorize`, `admitResource`, `parseDuration` |

@@ -11,6 +11,7 @@ import { GenericLLMRunner } from './generic-llm.js';
 import { CopilotRunner } from './copilot.js';
 import { CursorRunner } from './cursor.js';
 import { CodexRunner } from './codex.js';
+import { KiroRunner } from './kiro.js';
 import {
   DEFAULT_OPENAI_API_URL,
   DEFAULT_OPENAI_MODEL,
@@ -270,6 +271,17 @@ export class RunnerRegistry {
       this.runners.set('codex', {
         name: 'codex',
         runner: new CodexRunner(),
+        available: true,
+        source: 'env',
+      });
+    }
+
+    // Kiro CLI runner — available when KIRO_API_KEY is set
+    const kiroKey = env.KIRO_API_KEY;
+    if (kiroKey && !this.runners.has('kiro')) {
+      this.runners.set('kiro', {
+        name: 'kiro',
+        runner: new KiroRunner(),
         available: true,
         source: 'env',
       });
