@@ -625,8 +625,9 @@ function createDemoDeps(deps: HierarchyDeps, overrides: Partial<DemoDeps> = {}):
         }
       }),
     idleExecutors: () =>
-      hierarchyStatus(deps).rows.filter((r) => r.entry.role === 'executor' && r.state === 'idle')
-        .length,
+      hierarchyStatus(deps, { rosterOnly: true }).rows.filter(
+        (r) => r.entry.role === 'executor' && r.state === 'idle',
+      ).length,
     taskState: (taskId) => {
       const file = findTaskFileRelative(taskId, deps.cwd);
       if (!file) return null;
@@ -1432,7 +1433,7 @@ export async function runHierarchyCli(
           },
           parentHead: () => readParentHead(repoRoot),
           sessions: () =>
-            hierarchyStatus(deps).rows.map((r) => ({
+            hierarchyStatus(deps, { rosterOnly: true }).rows.map((r) => ({
               name: r.entry.name,
               role: r.entry.role,
               state: r.state,
@@ -1457,7 +1458,7 @@ export async function runHierarchyCli(
             }
           },
           idleExecutors: () =>
-            hierarchyStatus(deps)
+            hierarchyStatus(deps, { rosterOnly: true })
               .rows.filter(
                 (r) => r.entry.role === 'executor' && r.state === 'idle' && !r.inflightTask,
               )
@@ -1667,7 +1668,7 @@ export async function runHierarchyCli(
             ...result,
             holdLifted: result.holdLifted === true,
             eligibleQueued: result.held ? [] : peekQueueOrder(deps.boardDir).map((e) => e.taskId),
-            idleExecutors: hierarchyStatus(deps)
+            idleExecutors: hierarchyStatus(deps, { rosterOnly: true })
               .rows.filter(
                 (r) => r.entry.role === 'executor' && r.state === 'idle' && !r.inflightTask,
               )

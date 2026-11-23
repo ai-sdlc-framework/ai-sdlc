@@ -33,6 +33,7 @@ import { retireBlockedManifest, retireFailedVerdict } from '../dispatch/retire-l
 import { clearRuling, readRuling } from '../dispatch/ruling.js';
 import type { TaskRuling } from '../dispatch/types.js';
 import { DOCS_BRANCH_PREFIXES } from './filing-branches.js';
+import { cachedGh, GH_READ_TTL_MS } from './gh-read-cache.js';
 import type { CommandRunner } from './types.js';
 
 /** Task set: one action per classifier state (RFC-0054 ownership table). */
@@ -797,11 +798,19 @@ export interface MainHealth {
 
 /** The monitor's conclusion for the main head, read through `gh`. Unreadable or no completed run is `unknown`. */
 export function gatherMainHealth(run: CommandRunner, cwd: string): MainHealth {
-  const head = run('gh', ['api', 'repos/{owner}/{repo}/commits/main', '--jq', '.sha'], { cwd });
+  const head = cachedGh(
+    run,
+    `main-sha|${cwd}`,
+    ['api', 'repos/{owner}/{repo}/commits/main', '--jq', '.sha'],
+    { cwd },
+    GH_READ_TTL_MS,
+  );
   const sha = head.status === 0 ? head.stdout.trim() : '';
   if (!sha) return { status: 'unknown' };
-  const listed = run(
-    'gh',
+  // Keyed by sha: a completed run for a sha does not change; a new sha is a new key.
+  const listed = cachedGh(
+    run,
+    `main-health|${cwd}|${sha}`,
     [
       'run',
       'list',
@@ -817,6 +826,7 @@ export function gatherMainHealth(run: CommandRunner, cwd: string): MainHealth {
       'conclusion,url',
     ],
     { cwd },
+    GH_READ_TTL_MS,
   );
   const runs =
     listed.status === 0 ? parse<{ conclusion?: string; url?: string }[]>(listed.stdout) : undefined;
@@ -876,8 +886,9 @@ const DOCS_BUMP_PR_STEP = 'Open or update the bump PR in the site repository';
 
 /** `skipped` when a green run skipped the bump step (site repo not visible to the token). */
 export function gatherDocsBump(run: CommandRunner, cwd: string): DocsBump {
-  const listed = run(
-    'gh',
+  const listed = cachedGh(
+    run,
+    `docs-bump-list|${cwd}`,
     [
       'run',
       'list',
@@ -891,6 +902,7 @@ export function gatherDocsBump(run: CommandRunner, cwd: string): DocsBump {
       'databaseId,conclusion,url',
     ],
     { cwd },
+    GH_READ_TTL_MS,
   );
   if (listed.status !== 0) return { state: 'unknown' };
   const latest = parse<{ databaseId?: number; conclusion?: string; url?: string }[]>(
@@ -900,7 +912,12 @@ export function gatherDocsBump(run: CommandRunner, cwd: string): DocsBump {
   const url = latest.url ? { runUrl: latest.url } : {};
   if (latest.conclusion === 'failure') return { state: 'failed', ...url };
   if (latest.conclusion !== 'success') return { state: 'unknown' };
-  const viewed = run('gh', ['run', 'view', String(latest.databaseId), '--json', 'jobs'], { cwd });
+  const viewed = cachedGh(
+    run,
+    `docs-bump-view|${cwd}|${latest.databaseId}`,
+    ['run', 'view', String(latest.databaseId), '--json', 'jobs'],
+    { cwd },
+  );
   if (viewed.status !== 0) return { state: 'unknown' };
   const jobs = parse<{ jobs?: { steps?: { name?: string; conclusion?: string }[] }[] }>(
     viewed.stdout,
@@ -1494,7 +1511,7 @@ export function allowedAuthors(
     .map((x) => x.trim().toLowerCase())
     .filter(Boolean);
   if (fromEnv.length > 0) return new Set(fromEnv);
-  const me = run('gh', ['api', 'user', '--jq', '.login'], { cwd });
+  const me = cachedGh(run, `login|${cwd}`, ['api', 'user', '--jq', '.login'], { cwd }, 60 * 60_000);
   const login = me.status === 0 ? me.stdout.trim().toLowerCase() : '';
   return login ? new Set([login]) : undefined;
 }
@@ -1621,8 +1638,9 @@ function fillSummaryFromAnnotations(run: CommandRunner, cwd: string, checks: PrC
     if (c.conclusion !== 'failure' || c.summary || c.name === 'ai-sdlc/pr-ready') continue;
     const jid = /\/job\/(\d+)/.exec(c.detailsUrl ?? '')?.[1];
     if (!jid) continue;
-    const r = run(
-      'gh',
+    const r = cachedGh(
+      run,
+      `annotations|${cwd}|${jid}`,
       ['api', `repos/{owner}/{repo}/check-runs/${jid}/annotations`, '--jq', '.[].message'],
       { cwd },
     );
@@ -1659,12 +1677,12 @@ export function gatherFacts(
   let autoMergeProbed: boolean | undefined;
   const autoMergeIsUnavailable = (): boolean => {
     autoMergeProbed ??= (() => {
-      const r = run(
-        'gh',
+      const r = cachedGh(
+        run,
+        `auto-merge|${cwd}`,
         ['repo', 'view', '--json', 'autoMergeAllowed', '--jq', '.autoMergeAllowed'],
-        {
-          cwd,
-        },
+        { cwd },
+        GH_READ_TTL_MS,
       );
       return r.status === 0 && r.stdout.trim() === 'false';
     })();

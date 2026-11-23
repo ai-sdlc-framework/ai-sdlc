@@ -22,6 +22,7 @@ import { completeLandedIterateNeeded } from '../dispatch/complete.js';
 import { resolveTargetRepo, runMergeIfEligible } from '../governance/merge-if-eligible.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { isFilingBranch } from './filing-branches.js';
+import { cachedGh, GH_READ_TTL_MS } from './gh-read-cache.js';
 import { prFingerprint, recordRefusal, refusalStillValid } from './pr-snapshot.js';
 import { taskIdFrom } from './reconcile.js';
 import type { CommandRunner } from './types.js';
@@ -99,9 +100,13 @@ export function noteMissingLandGrant(boardDir: string): void {
 }
 
 function autoMergeAvailable(run: CommandRunner, repoRoot: string): boolean {
-  const r = run('gh', ['repo', 'view', '--json', 'autoMergeAllowed', '--jq', '.autoMergeAllowed'], {
-    cwd: repoRoot,
-  });
+  const r = cachedGh(
+    run,
+    `auto-merge|${repoRoot}`,
+    ['repo', 'view', '--json', 'autoMergeAllowed', '--jq', '.autoMergeAllowed'],
+    { cwd: repoRoot },
+    GH_READ_TTL_MS,
+  );
   return r.status === 0 && r.stdout.trim() === 'true';
 }
 
