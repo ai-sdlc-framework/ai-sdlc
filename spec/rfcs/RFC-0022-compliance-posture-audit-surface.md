@@ -24,7 +24,7 @@ implementedBy:
 # RFC-0022: Compliance Posture + Audit Surface
 
 **Document type:** Normative
-**Status:** Ready for Review v0.2 — operator OQ walkthrough complete 2026-05-16; all 7 §13 OQs resolved (in-tree YAML defaults with adopter override in v1, forced attestedNotes + attestedAt + attestedBy auto-fill, hand-curated control-feature-map with per-RFC reviewer check, single .tar.gz audit export, on-demand export only for v1, single posture per project for v1 with loader API designed for v2 multi-posture additive composition, PR template + reviewer-subagent check). §13.1 codifies the consolidated `.ai-sdlc/compliance.yaml` per-org config schema. Implementation broken into 4 phase tasks (AISDLC-322..325).
+**Status:** Implemented. Previously: Ready for Review v0.2 — operator OQ walkthrough complete 2026-05-16; all 7 §13 OQs resolved (in-tree YAML defaults with adopter override in v1, forced attestedNotes + attestedAt + attestedBy auto-fill, hand-curated control-feature-map with per-RFC reviewer check, single .tar.gz audit export, on-demand export only for v1, single posture per project for v1 with loader API designed for v2 multi-posture additive composition, PR template + reviewer-subagent check). §13.1 codifies the consolidated `.ai-sdlc/compliance.yaml` per-org config schema. Implementation broken into 4 phase tasks (AISDLC-322..325).
 **Lifecycle:** Ready for Review
 **Author:** Dominique Legault (with Claude assist)
 **Created:** 2026-05-03

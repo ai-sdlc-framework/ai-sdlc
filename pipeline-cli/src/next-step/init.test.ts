@@ -172,10 +172,14 @@ describe('initTask', () => {
       expect(existsSync(join(h.root, 'stray.txt'))).toBe(true);
     });
 
-    it('refuses a dirty parent and names the dispatch tick', async () => {
+    it('refuses a dirty parent, names the file and carries the parent-dirty cause', async () => {
       writeFileSync(join(h.root, '.gitignore'), 'changed\n');
       const res = await initTask(session(), 'AISDLC-900');
-      expect(res).toEqual({ ok: false, reason: expect.stringContaining('dispatch tick') });
+      expect(res).toEqual({
+        ok: false,
+        reason: expect.stringContaining('.gitignore'),
+        cause: 'parent-dirty',
+      });
       expect(calls.some((c) => c.includes('worktree add'))).toBe(false);
     });
 

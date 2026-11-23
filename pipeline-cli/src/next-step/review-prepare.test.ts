@@ -17,6 +17,7 @@ import {
   selectByClassifier,
   selectForReview,
   splitReviewPrompt,
+  writeReviewPromptFiles,
 } from './review-prepare.js';
 import {
   TRUST_CHAIN_PATH_PREFIXES,
@@ -456,6 +457,16 @@ spec:
     ...over,
   });
 
+  it('names the round by the recorded-round plan everywhere, not the in-run counter (AISDLC-1335)', async () => {
+    script();
+    const res = await prepareReview(h.ctx, state, 1, { planRound: () => plan({ round: 3 }) });
+    expect(res.kind).toBe('spawn');
+    if (res.kind !== 'spawn') return;
+    expect(res.review.round).toBe(3);
+    expect(res.review.roundPlan?.round).toBe(3);
+    expect(res.review.spawned.every((sp) => sp.promptFile.includes('review-r3-'))).toBe(true);
+  });
+
   it('plans full when the unchanged-content anchor lacks a required reviewer (AISDLC-1196)', async () => {
     script();
     h.runner.on(/ls-remote/, ok('abc\trefs/ai-sdlc/verdicts/headsha\n'));
@@ -618,7 +629,8 @@ describe('reviewPromptPartBytes', () => {
   it('reads AI_SDLC_REVIEW_PROMPT_PART_BYTES and ignores invalid values', () => {
     expect(reviewPromptPartBytes({})).toBe(REVIEW_PROMPT_PART_BYTES);
     expect(reviewPromptPartBytes({ AI_SDLC_REVIEW_PROMPT_PART_BYTES: '5000' })).toBe(5_000);
-    for (const bad of ['abc', '10', '-5000', '5000.5', ''])
+    expect(reviewPromptPartBytes({ AI_SDLC_REVIEW_PROMPT_PART_BYTES: '100000' })).toBe(100_000);
+    for (const bad of ['abc', '10', '-5000', '5000.5', '', '100001', '99999999999'])
       expect(reviewPromptPartBytes({ AI_SDLC_REVIEW_PROMPT_PART_BYTES: bad })).toBe(
         REVIEW_PROMPT_PART_BYTES,
       );
@@ -656,6 +668,22 @@ describe('prepareReview with an oversized prompt', () => {
       expect(s.promptFile.endsWith(`review-r1-${s.agent}.md`)).toBe(true);
       expect(readFileSync(s.promptFile, 'utf8').endsWith(TOKEN_LINE)).toBe(true);
     }
+  });
+
+  it('does not split a prompt of 39,500 bytes (under the limit, over limit minus the frame)', () => {
+    const line = `${'x'.repeat(99)}\n`;
+    const content = line.repeat(395);
+    expect(Buffer.byteLength(content, 'utf8')).toBe(39_500);
+    const files = writeReviewPromptFiles(h.ctx, 'edge-fits', content, REVIEW_PROMPT_PART_BYTES);
+    expect(files).toHaveLength(1);
+    expect(readFileSync(files[0], 'utf8')).toBe(content);
+    const over = writeReviewPromptFiles(
+      h.ctx,
+      'edge-over',
+      line.repeat(405),
+      REVIEW_PROMPT_PART_BYTES,
+    );
+    expect(over.length).toBeGreaterThan(1);
   });
 
   it('splits it into ordered parts with the nonce marker in the last part only', async () => {

@@ -326,26 +326,17 @@ describe('init command — agent-role tiers (AISDLC-79)', () => {
     expect(mockWriteFileSync).not.toHaveBeenCalled();
   });
 
-  it('exposes getAgentRoleYaml + AGENT_ROLE_TIERS from init module', async () => {
-    vi.resetModules();
-    const mod = await import('./init.js');
-    expect(mod.AGENT_ROLE_TIERS).toEqual(['coding', 'research', 'meta']);
-    expect(mod.getAgentRoleYaml('coding')).toContain('coding-agent (default)');
-    expect(mod.getAgentRoleYaml('research')).toContain('research-agent');
-    expect(mod.getAgentRoleYaml('meta')).toContain('meta-agent');
-    // Default arg = 'coding'
-    expect(mod.getAgentRoleYaml()).toBe(mod.getAgentRoleYaml('coding'));
-  });
-
   it('every tier template documents the allowForcePush default without setting it (AISDLC-710)', async () => {
-    vi.resetModules();
-    const mod = await import('./init.js');
-    for (const tier of mod.AGENT_ROLE_TIERS) {
-      const yaml = mod.getAgentRoleYaml(tier);
+    const { AGENT_ROLE_TIERS, renderAgentRole } =
+      await import('@ai-sdlc/pipeline-cli/config-manifest');
+    expect(AGENT_ROLE_TIERS).toEqual(['coding', 'research', 'meta']);
+    for (const tier of AGENT_ROLE_TIERS) {
+      const yaml = renderAgentRole(tier);
       expect(yaml).toContain('allowForcePush defaults');
       expect(yaml).toContain('leaseOnOwnBranch');
-      // Documented, not written: an active governance block would pin the value.
-      expect(yaml).not.toMatch(/^\s*governance:/m);
+      expect(yaml).toContain('never | leaseOnOwnBranch | lease');
+      // Documented, not written: an active allowForcePush key would pin the value.
+      expect(yaml).not.toMatch(/^\s*allowForcePush:/m);
     }
   });
 });

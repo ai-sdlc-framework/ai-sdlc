@@ -49,11 +49,54 @@ export function verificationCommandList(v: VerificationCommands): string[] {
   return VERIFICATION_KEYS.flatMap((k) => (v[k] ? [v[k] as string] : []));
 }
 
-/** Detected defaults for `init`: `package.json` wins over `pyproject.toml`; neither yields none. */
+export type PackageManager = 'pnpm' | 'npm' | 'yarn' | 'bun';
+
+const LOCKFILES: ReadonlyArray<readonly [string, PackageManager]> = [
+  ['pnpm-lock.yaml', 'pnpm'],
+  ['package-lock.json', 'npm'],
+  ['yarn.lock', 'yarn'],
+  ['bun.lockb', 'bun'],
+  ['bun.lock', 'bun'],
+];
+
+/** Lockfile first, then the `packageManager` field of `package.json`, pnpm when neither says. */
+export function detectPackageManager(
+  exists: (file: string) => boolean,
+  readText?: (file: string) => string | undefined,
+): PackageManager {
+  for (const [file, pm] of LOCKFILES) if (exists(file)) return pm;
+  try {
+    const pkg = JSON.parse(readText?.('package.json') ?? '') as { packageManager?: unknown };
+    const name =
+      typeof pkg.packageManager === 'string' ? pkg.packageManager.split('@')[0] : undefined;
+    if (name === 'npm' || name === 'yarn' || name === 'bun' || name === 'pnpm') return name;
+  } catch {
+    // unreadable package.json: fall through to the default
+  }
+  return 'pnpm';
+}
+
+/** The four default commands spelled for a package manager. */
+export function packageManagerCommands(pm: PackageManager): Required<VerificationCommands> {
+  if (pm === 'pnpm') return { ...DEFAULT_VERIFICATION };
+  const run = pm === 'npm' ? 'npm run' : pm === 'yarn' ? 'yarn' : 'bun run';
+  return {
+    build: `${run} build`,
+    test: pm === 'npm' ? 'npm test' : pm === 'yarn' ? 'yarn test' : 'bun run test',
+    lint: `${run} lint`,
+    format: `${run} format:check`,
+  };
+}
+
+/**
+ * Detected defaults for `init`: `package.json` wins over `pyproject.toml` and uses the commands
+ * of the repo's package manager; neither yields none.
+ */
 export function detectVerificationDefaults(
   exists: (file: string) => boolean,
+  readText?: (file: string) => string | undefined,
 ): VerificationCommands | undefined {
-  if (exists('package.json')) return { ...DEFAULT_VERIFICATION };
+  if (exists('package.json')) return packageManagerCommands(detectPackageManager(exists, readText));
   if (exists('pyproject.toml')) {
     return {
       build: 'uv build',

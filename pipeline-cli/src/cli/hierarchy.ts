@@ -67,6 +67,7 @@ import { spawnSync } from 'node:child_process';
 import { launchUsageIngestDetached } from '../usage/launch.js';
 import os from 'node:os';
 import path from 'node:path';
+import { pipelineCliBin } from '../bin-dir.js';
 import { fileURLToPath } from 'node:url';
 import { hotfixTaskId, hotfixTaskMarkdown } from '../hierarchy/canary.js';
 import { runLoopCanaryCommand } from '../hierarchy/loop-canary-run.js';
@@ -196,6 +197,7 @@ import {
   parseFeed,
   trackPrActivity,
   catalogWebhookEscalation,
+  makeWebhookRepair,
   stallChannelNotifier,
   formatWebhookStatus,
   recallTranscript,
@@ -203,11 +205,12 @@ import {
 } from '../hierarchy/index.js';
 import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
-import { routedModel } from '../routing/role-model.js';
+import { resolvePlannerModel } from '../hierarchy/model-fallback.js';
+import { clearModelMarker, writeModelMarker } from '../routing/model-unavailable.js';
 import { defaultRunner } from '../runtime/exec.js';
 import { runParentUpkeep, type ParentUpkeepResult } from '../steps/00-parent-upkeep.js';
 import { sweepDue, sweepMergedWorktrees } from '../steps/00-sweep.js';
-import { resolvePluginScriptsDir } from './next-step.js';
+import { PluginScriptsNotFoundError, resolvePluginScriptsDir } from './next-step.js';
 import {
   fileTurnBudgetDecision,
   hasOpenTurnBudgetDecision,
@@ -233,6 +236,7 @@ Commands:
   sweep-worktrees  Remove merged, closed, no-PR and stale worktrees (branches are never deleted); --dry-run lists only
   down       Stop sessions and return their inflight manifests to the queue
   clear      Empty an executor's context between tasks and restart its loop
+  model-unavailable  Mark a model unusable until a time so the planner steps down (model-unavailable <model> --until <ISO> [--reason <t>] | <model> --clear)
   restart    Stop and start one session or all of them, updating the roster (restart <name>|--all)
   register   Re-record an executor whose process was restarted by hand (register <executor>)
   stall-notice  Alert once when queued work has not moved for N minutes (no relaunch, no model)
@@ -257,7 +261,8 @@ Commands:
 
 Options for up:
   --executors <n>          Deprecated: standing executors, 0 to 5 (default 0); dispatch spawns one per task
-  --planner-model <m>      Planner model (default: the planner cell of model-routing.yaml)
+  --planner-model <m>      Planner model (default: the planner-session cell of model-routing.yaml,
+                           stepped down while a model-unavailable marker is active)
   --dispatch-model <m>     Dispatch model (default sonnet)
   --executor-model <m>     Executor model (default sonnet)
   --no-planner             Do not start a planner
@@ -290,7 +295,12 @@ Options for stall-notice:
   --minutes <n>            Minutes without a verdict or heartbeat before alerting (default 45)
 
 Options for webhook:
-  --port <n>               Local port, bound to 127.0.0.1 (default 8765, or AI_SDLC_WEBHOOK_PORT)
+  --port <n>               Local port, bound to 127.0.0.1. Pinned: it must be free. Unset: scans up to 20 ports from the recorded
+                           port or the configured default (8765) and takes the first that binds
+  --feed <kind>            What feeds the receiver: gh-forward, tunnel or none (needs the \`gh webhook\`
+                           extension and permission to manage hooks on the repository)
+  --feed-pid <pid>         Pid of a hand-started forwarder or tunnel to record with --feed
+  --feed-agent <label>     launchd label supervising the feed (set by gh-forward install)
 
 Options for attach:
   <name>                   Agent name from the roster (planner, operator-dispatch, executor-alpha, ...)
@@ -550,6 +560,31 @@ export function defaultHierarchyDeps(flags: Record<string, string>): HierarchyDe
   };
 }
 
+/** AISDLC-1359: args of the finish verify; the bin is the installed one, not `<repo>/pipeline-cli`. */
+export function finishVerifyArgs(headSha: string, baseSha: string): string[] {
+  return [pipelineCliBin('cli-attestation.mjs'), 'verify', '--head', headSha, '--base', baseSha];
+}
+
+/** AISDLC-1359: options for the tick's usage ingest; the bin is the installed one. */
+export function usageIngestOptions(repoRoot: string): { binPath: string; cwd: string } {
+  return { binPath: pipelineCliBin('cli-usage.mjs'), cwd: repoRoot };
+}
+
+/** AISDLC-1359: the pre-spawn reconcile pass; one warning line when the bin is missing. */
+export function reconcileBeforeSpawn(
+  run: HierarchyDeps['run'],
+  boardDir: string,
+  repoRoot: string,
+  log: (line: string) => void,
+  bin: string = pipelineCliBin('cli-dispatch.mjs'),
+): void {
+  if (!existsSync(bin)) {
+    log(`warning: reconcile skipped, ${bin} is missing`);
+    return;
+  }
+  run(process.execPath, [bin, 'reconcile', '--board-dir', boardDir], { cwd: repoRoot });
+}
+
 /**
  * First argument after the subcommand that is neither a `--flag` nor a flag's
  * value (`parseArgv` treats every non-flag token as a value or drops it).
@@ -590,8 +625,9 @@ function createDemoDeps(deps: HierarchyDeps, overrides: Partial<DemoDeps> = {}):
         }
       }),
     idleExecutors: () =>
-      hierarchyStatus(deps).rows.filter((r) => r.entry.role === 'executor' && r.state === 'idle')
-        .length,
+      hierarchyStatus(deps, { rosterOnly: true }).rows.filter(
+        (r) => r.entry.role === 'executor' && r.state === 'idle',
+      ).length,
     taskState: (taskId) => {
       const file = findTaskFileRelative(taskId, deps.cwd);
       if (!file) return null;
@@ -688,6 +724,7 @@ export async function runHierarchyCli(
     >;
   } = {},
 ): Promise<number> {
+  let pluginScriptsWarned = false; // AISDLC-1328: the missing-plugin warning prints once per run
   const { subcommand, flags } = parseArgv(argv);
   if (
     subcommand === '' ||
@@ -754,18 +791,7 @@ export async function runHierarchyCli(
         verify:
           extras.verifyAttestation ??
           (({ worktree, headSha, baseSha }) => {
-            const r = deps.run(
-              'node',
-              [
-                path.join(repoRoot, 'pipeline-cli', 'bin', 'cli-attestation.mjs'),
-                'verify',
-                '--head',
-                headSha,
-                '--base',
-                baseSha,
-              ],
-              { cwd: worktree },
-            );
+            const r = deps.run('node', finishVerifyArgs(headSha, baseSha), { cwd: worktree });
             const out = r?.stdout ?? '';
             const ok = r?.status === 0 && /^status=valid$/m.test(out);
             const reason = /^reason=(.*)$/m.exec(out)?.[1] ?? (r?.stderr ?? '').split('\n')[0];
@@ -799,10 +825,12 @@ export async function runHierarchyCli(
         } catch {
           /* memory backup is best effort and never blocks up */
         }
+        const planner = resolvePlannerModel(flags['planner-model'], deps);
         const result = await hierarchyUp(
           {
             executors: flags.executors ?? '0',
-            plannerModel: flags['planner-model'] ?? routedModel('planner'),
+            plannerModel: planner.model,
+            ...(planner.line ? { plannerFallbackLine: planner.line } : {}),
             dispatchModel: flags['dispatch-model'] ?? 'sonnet',
             executorModel: flags['executor-model'] ?? 'sonnet',
             noPlanner: flags['no-planner'] === 'true',
@@ -824,6 +852,34 @@ export async function runHierarchyCli(
         // AISDLC-1102: the loop canary runs on the first tick after `up`.
         markCanaryDue(deps.boardDir);
         return result.attachExitCode ?? 0;
+      }
+      case 'model-unavailable': {
+        // AISDLC-1364: record (or clear) a model the account cannot use until its reset time.
+        const model = firstPositional(argv);
+        if (!model) {
+          deps.log('cli-hierarchy model-unavailable: a model name is required');
+          return 2;
+        }
+        if (flags.clear === 'true') {
+          deps.log(
+            clearModelMarker(deps.boardDir, model)
+              ? `cleared the ${model} marker`
+              : `no ${model} marker to clear`,
+          );
+          return 0;
+        }
+        const until = flags.until;
+        if (!until || !Number.isFinite(Date.parse(until))) {
+          deps.log('cli-hierarchy model-unavailable: --until <ISO time> is required');
+          return 2;
+        }
+        writeModelMarker(deps.boardDir, {
+          model,
+          until: new Date(until).toISOString(),
+          reason: flags.reason && flags.reason !== 'true' ? flags.reason : 'usage limit reached',
+        });
+        deps.log(`${model} marked unavailable until ${new Date(until).toISOString()}`);
+        return 0;
       }
       case 'spawn': {
         const taskArg = firstPositional(argv);
@@ -907,7 +963,8 @@ export async function runHierarchyCli(
               ? JSON.stringify({ ...w, ...(h ? { health: h } : {}), persisted })
               : `${formatWebhookStatus(w, h)}\n${persisted}`,
           );
-        } else if (action === 'serve') await webhookServe(deps, flags.port, feed);
+        } else if (action === 'serve')
+          await webhookServe(deps, flags.port, feed, { scan: flags.scan === 'true' });
         else {
           process.stderr.write(`cli-hierarchy: webhook needs up, down or status\n\n${USAGE}`);
           return 2;
@@ -1240,19 +1297,16 @@ export async function runHierarchyCli(
           sleep: deps.sleep,
           log: deps.log,
           notifyPlanner: (text) => {
-            const { roster } = readRosterChecked(deps.boardDir);
-            const planner = roster.sessions.find(
-              (e) => e.role === 'planner' && e.status === 'running',
-            );
-            if (!planner) return;
-            sendToRoster(
-              roster.sessions,
-              planner.name,
-              text,
-              extras.sendBrief ?? createTmuxBriefSender(deps.run),
-              readReceivedAddresses(deps.boardDir),
-              extras.sendSocket,
-            );
+            try {
+              createPlannerNotifier(
+                deps.boardDir,
+                deps.run,
+                extras.sendBrief,
+                extras.sendSocket,
+              )(text);
+            } catch (err) {
+              if (!/no running planner/.test((err as Error).message)) throw err;
+            }
           },
         });
       }
@@ -1379,7 +1433,7 @@ export async function runHierarchyCli(
           },
           parentHead: () => readParentHead(repoRoot),
           sessions: () =>
-            hierarchyStatus(deps).rows.map((r) => ({
+            hierarchyStatus(deps, { rosterOnly: true }).rows.map((r) => ({
               name: r.entry.name,
               role: r.entry.role,
               state: r.state,
@@ -1404,7 +1458,7 @@ export async function runHierarchyCli(
             }
           },
           idleExecutors: () =>
-            hierarchyStatus(deps)
+            hierarchyStatus(deps, { rosterOnly: true })
               .rows.filter(
                 (r) => r.entry.role === 'executor' && r.state === 'idle' && !r.inflightTask,
               )
@@ -1448,10 +1502,7 @@ export async function runHierarchyCli(
             extras.usageIngest ??
             (() => {
               // AISDLC-1191: spaced against the Stop hook and single-instance (see usage/launch.ts).
-              launchUsageIngestDetached({
-                binPath: path.join(repoRoot, 'pipeline-cli', 'bin', 'cli-usage.mjs'),
-                cwd: repoRoot,
-              });
+              launchUsageIngestDetached(usageIngestOptions(repoRoot));
             }),
           // AISDLC-981: the tick owns the parent; the open-PR list is the wake's snapshot.
           parentUpkeep:
@@ -1474,11 +1525,25 @@ export async function runHierarchyCli(
               } catch {
                 /* unreadable list: the sweep asks gh for every branch */
               }
+              let pluginScriptsDir = '';
+              let exists: (p: string) => boolean = existsSync;
+              try {
+                pluginScriptsDir = resolvePluginScriptsDir(deps.env, repoRoot);
+              } catch (err) {
+                if (!(err instanceof PluginScriptsNotFoundError)) throw err;
+                exists = () => false;
+                if (!pluginScriptsWarned) {
+                  pluginScriptsWarned = true;
+                  deps.log(
+                    `warning: parent upkeep skipped the orchestrator-state check: ${err.message}`,
+                  );
+                }
+              }
               return runParentUpkeep({
                 workDir: repoRoot,
                 runner: defaultRunner,
-                pluginScriptsDir: resolvePluginScriptsDir(deps.env, repoRoot),
-                exists: existsSync,
+                pluginScriptsDir,
+                exists,
                 knownOpenBranches: open,
                 worktreeConfig: wtConfig,
                 skipSweep,
@@ -1511,13 +1576,7 @@ export async function runHierarchyCli(
           // AISDLC-1189: one reconcile pass before the spawn step, so repairs queue ahead of new tasks.
           reconcileNow:
             extras.reconcileNow ??
-            (() => {
-              const bin = path.join(repoRoot, 'pipeline-cli', 'bin', 'cli-dispatch.mjs');
-              if (!existsSync(bin)) return;
-              deps.run(process.execPath, [bin, 'reconcile', '--board-dir', deps.boardDir], {
-                cwd: repoRoot,
-              });
-            }),
+            (() => reconcileBeforeSpawn(deps.run, deps.boardDir, repoRoot, deps.log)),
           // AISDLC-1023: a red pipeline canary files its hotfix through cli-file.
           fileHotfix: ({ sha, detail }) => {
             const id = hotfixTaskId(sha);
@@ -1545,6 +1604,7 @@ export async function runHierarchyCli(
               return webhookHealth(deps);
             },
             notify: stallChannelNotifier(deps.boardDir, deps.run, deps.now),
+            repair: makeWebhookRepair(deps),
             ...(isDecisionCatalogEnabled() ? catalogWebhookEscalation(repoRoot) : {}),
           },
           ...(isDecisionCatalogEnabled()
@@ -1608,7 +1668,7 @@ export async function runHierarchyCli(
             ...result,
             holdLifted: result.holdLifted === true,
             eligibleQueued: result.held ? [] : peekQueueOrder(deps.boardDir).map((e) => e.taskId),
-            idleExecutors: hierarchyStatus(deps)
+            idleExecutors: hierarchyStatus(deps, { rosterOnly: true })
               .rows.filter(
                 (r) => r.entry.role === 'executor' && r.state === 'idle' && !r.inflightTask,
               )

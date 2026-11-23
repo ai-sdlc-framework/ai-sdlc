@@ -14,19 +14,20 @@
 
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { taskIdSource } from '../task-prefix.js';
 import type { Reference, ResolveResult, Resolver, ResolverOpts } from '../types.js';
 
 const RFC_RE = /^RFC-\d{4}$/i;
-const AISDLC_RE = /^AISDLC-\d+(?:\.\d+)?$/i;
+const taskIdRe = (workDir?: string): RegExp => new RegExp(`^${taskIdSource(workDir)}$`, 'i');
 
 export const fileExistenceResolver: Resolver = {
   name: 'file-existence',
-  supports(ref: Reference): boolean {
+  supports(ref: Reference, opts?: Pick<ResolverOpts, 'workDir'>): boolean {
     if (ref.kind === 'file-existence') return true;
     if (ref.kind === 'url' || ref.kind === 'github-issue') return false;
     const raw = ref.raw.trim();
     if (RFC_RE.test(raw)) return true;
-    if (AISDLC_RE.test(raw)) return true;
+    if (taskIdRe(opts?.workDir).test(raw)) return true;
     // Heuristic: looks like a repo-relative path (contains `/` and an
     // alphanumeric, ASCII only). Skip absolute paths and anything URL-y.
     if (raw.startsWith('/') || raw.startsWith('http')) return false;
@@ -54,7 +55,7 @@ export const fileExistenceResolver: Resolver = {
     }
 
     // AISDLC-NN — look in backlog/tasks/ + backlog/completed/.
-    if (AISDLC_RE.test(raw)) {
+    if (taskIdRe(workDir).test(raw)) {
       const lower = raw.toLowerCase();
       for (const sub of ['tasks', 'completed']) {
         const dir = join(workDir, 'backlog', sub);

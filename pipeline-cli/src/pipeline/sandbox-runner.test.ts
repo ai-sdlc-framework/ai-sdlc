@@ -49,10 +49,15 @@ import {
   buildDockerRunArgs,
   DOCKER_SECCOMP_PROFILE,
   parseDifferentialTestOutput,
+  tailLines,
+  SANDBOX_OUTPUT_TAIL_BYTES,
   buildDifferentialTestScript,
   buildFetchDockerArgs,
   buildFetchScript,
   resolvePnpmVersion,
+  mapPathsToWorkspacePackages,
+  parseWorkspacePackages,
+  NO_PACKAGE_CHANGED_OUTPUT,
   SandboxFetchPhaseError,
   DIFFERENTIAL_RESULT_SENTINEL,
   type SandboxConfig,
@@ -3771,7 +3776,10 @@ describe('digest-pinned images and base tree staging (AISDLC-1267)', () => {
   it('the script copies the staged base tree into the workspace', () => {
     const script = buildDifferentialTestScript('a'.repeat(40));
     expect(script).toContain('cd "/sandbox/base" && tar cf - --exclude=node_modules .');
-    expect(script).toContain('ln -s "$nm" "repo/$rel"');
+    expect(script).toContain('mkdir -p "repo/$rel"');
+    expect(script).toContain('ln -s "$entry" "repo/$rel/$(basename "$entry")"');
+    // AISDLC-1312: node_modules itself must not be a symlink to the read-only mount.
+    expect(script).not.toContain('ln -s "$nm"');
   });
 });
 
@@ -3796,6 +3804,23 @@ describe('fetch container (AISDLC-1291)', () => {
     expect(joined).not.toMatch(/TOKEN|SIGNING_KEY|API_KEY|AI_SDLC_PAT/);
     expect(fetchArgs).not.toContain('--network=none');
     expect(fetchArgs).toContain('/tmp/base-x:/sandbox/base:ro');
+  });
+
+  it('AISDLC-1294 AC1: fetch /tmp is executable so install scripts can run', () => {
+    const i = fetchArgs.indexOf('--tmpfs');
+    expect(fetchArgs.slice(i, i + 2)).toEqual(['--tmpfs', '/tmp:rw,exec,nosuid,size=1g']);
+  });
+
+  it('AISDLC-1294 AC2: run container keeps noexec on /tmp and the workspace', () => {
+    const runArgs = buildDockerRunArgs({
+      resourceLimits: DEFAULT_RESOURCE_LIMITS,
+      seccompProfileJson: '{}',
+      cidFilePath: '/tmp/cid-x',
+      image: 'node:22',
+      command: ['true'],
+    });
+    expect(runArgs).toContain('/tmp:rw,noexec,nosuid,size=256m');
+    expect(runArgs).toContain('/sandbox/workspace:rw,noexec,nosuid');
   });
 
   it('AC4: reads pnpm version from packageManager, with and without the field', () => {
@@ -3883,5 +3908,142 @@ describe('fetch container (AISDLC-1291)', () => {
     const mount = runList!.find((a) => a.endsWith(':/sandbox/base:ro'))!;
     expect(mount.startsWith(base)).toBe(false);
     await driver.teardown();
+  });
+});
+
+describe('AISDLC-1296: prepared pnpm, build and package scope', () => {
+  it('AC1: fetch script installs pnpm under .sandbox-tools and runs the root build', () => {
+    const script = buildFetchScript('10.4.1');
+    expect(script).toContain(
+      'npm install -g --prefix "/sandbox/prepared/node_modules/.sandbox-tools" pnpm@10.4.1',
+    );
+    expect(script).toContain('corepack pnpm run build');
+    expect(script).toContain('scripts?.build');
+  });
+
+  it('AISDLC-1300: fetch script puts .sandbox-tools/bin on PATH before the build', () => {
+    const script = buildFetchScript('10.4.1');
+    const pathIdx = script.indexOf(
+      'export PATH="/sandbox/prepared/node_modules/.sandbox-tools/bin:$PATH"',
+    );
+    expect(pathIdx).toBeGreaterThan(-1);
+    expect(pathIdx).toBeGreaterThan(script.indexOf('npm install -g'));
+    expect(pathIdx).toBeLessThan(script.indexOf('corepack pnpm run build'));
+  });
+
+  it('AC2: run script puts the prepared pnpm first on PATH; docker run args are unchanged', () => {
+    const script = buildDifferentialTestScript('a'.repeat(40));
+    expect(script).toContain('export PATH="$WORK_DIR/repo/node_modules/.sandbox-tools/bin:$PATH"');
+    const args = buildDockerRunArgs({
+      resourceLimits: DEFAULT_RESOURCE_LIMITS,
+      seccompProfileJson: '/tmp/s.json',
+      cidFilePath: '/tmp/c.cid',
+      image: 'img',
+      baseTreeDir: '/tmp/p',
+      command: ['/bin/sh', '-c', 'x'],
+    });
+    expect(args).toEqual([
+      'run',
+      '--rm',
+      '--cidfile',
+      '/tmp/c.cid',
+      '--network=none',
+      '--cap-drop=ALL',
+      '--read-only',
+      '--tmpfs',
+      '/tmp:rw,noexec,nosuid,size=256m',
+      '--tmpfs',
+      '/sandbox/workspace:rw,noexec,nosuid',
+      '--pids-limit',
+      '512',
+      '--memory',
+      `${DEFAULT_RESOURCE_LIMITS.memoryMb}m`,
+      '--cpus',
+      String(DEFAULT_RESOURCE_LIMITS.cpuCores),
+      '--user',
+      '65534:65534',
+      '--security-opt',
+      'seccomp=/tmp/s.json',
+      '--security-opt',
+      'no-new-privileges',
+      '-e',
+      'SANDBOX_PR_DIFF_B64',
+      '-e',
+      'SANDBOX_FIXTURE_B64',
+      '-v',
+      '/tmp/p:/sandbox/base:ro',
+      'img',
+      '/bin/sh',
+      '-c',
+      'x',
+    ]);
+  });
+
+  it('AC3: maps diff paths to workspace package directories', () => {
+    const dirs = ['orchestrator', 'ai-sdlc-plugin/mcp-server', 'ai-sdlc-plugin/mods'];
+    expect(mapPathsToWorkspacePackages(['orchestrator/src/a.ts'], dirs)).toEqual(['orchestrator']);
+    expect(mapPathsToWorkspacePackages(['ai-sdlc-plugin/mcp-server/x.ts'], dirs)).toEqual([
+      'ai-sdlc-plugin/mcp-server',
+    ]);
+    expect(mapPathsToWorkspacePackages(['docs/a.md', 'ai-sdlc-plugin/README.md'], dirs)).toEqual(
+      [],
+    );
+    expect(
+      mapPathsToWorkspacePackages(['pkgs/a/x.ts', 'pkgs/a/y.ts', 'pkgs/z'], ['pkgs/*']),
+    ).toEqual(['pkgs/a']);
+    expect(() => mapPathsToWorkspacePackages(['we ird/x.ts'], ['we ird'])).toThrow(
+      /disallowed character/,
+    );
+    expect(parseWorkspacePackages("packages:\n  - a\n  - 'b/c' # x\n  - '!d'\nother: 1\n")).toEqual(
+      ['a', 'b/c'],
+    );
+  });
+
+  it('AC4: workspace commands filter per package, with no npm test', () => {
+    const script = buildDifferentialTestScript('a'.repeat(40), 60, undefined, undefined, [
+      'a',
+      'ai-sdlc-plugin/mcp-server',
+    ]);
+    expect(script).toContain(
+      "timeout 60 sh -c 'pnpm --filter ./a test && pnpm --filter ./ai-sdlc-plugin/mcp-server test 2>&1'",
+    );
+    expect(script).not.toContain('npm test');
+    expect(() =>
+      buildDifferentialTestScript('a'.repeat(40), undefined, undefined, undefined, ['a b']),
+    ).toThrow(/invalid package directory/);
+    const none = buildDifferentialTestScript('a'.repeat(40), undefined, undefined, undefined, []);
+    expect(none).toContain(`echo '${NO_PACKAGE_CHANGED_OUTPUT}'`);
+    expect(none).not.toContain('npm test');
+    expect(buildDifferentialTestScript('a'.repeat(40))).toContain('npm test');
+  });
+});
+
+// ── AISDLC-1312: bounded tail of suite output ─────────────────────────────────
+describe('tailLines and output tail (AISDLC-1312)', () => {
+  it('keeps only the last N lines', () => {
+    const text = Array.from({ length: 500 }, (_, i) => `line ${i}`).join('\n');
+    const out = tailLines(text, 200).split('\n');
+    expect(out).toHaveLength(200);
+    expect(out[0]).toBe('line 300');
+    expect(out[199]).toBe('line 499');
+  });
+
+  it('returns short text unchanged', () => {
+    expect(tailLines('a\nb', 200)).toBe('a\nb');
+  });
+
+  it('parser keeps the tail of an over-long suite output', () => {
+    const long = 'x'.repeat(SANDBOX_OUTPUT_TAIL_BYTES) + 'FAILURE-AT-END';
+    const json = JSON.stringify({
+      upstreamPassed: false,
+      upstreamOutput: long,
+      headPassed: false,
+      headOutput: long,
+      coveragePct: 0,
+    });
+    const r = parseDifferentialTestOutput(`---DIFFERENTIAL-RESULT---\n${json}\n`);
+    expect(r.upstreamSuiteOutput).toHaveLength(SANDBOX_OUTPUT_TAIL_BYTES);
+    expect(r.upstreamSuiteOutput.endsWith('FAILURE-AT-END')).toBe(true);
+    expect(r.newTestsOutput.endsWith('FAILURE-AT-END')).toBe(true);
   });
 });

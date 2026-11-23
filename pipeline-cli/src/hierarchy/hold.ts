@@ -73,9 +73,14 @@ export function writeHold(boardDir: string, hold: Hold): void {
 }
 
 /** Remove the hold; returns the hold that was lifted, or null when there was none. */
-export function clearHold(boardDir: string, by: string, at: string): Hold | null {
+export function clearHold(
+  boardDir: string,
+  by: string,
+  at: string,
+  extra: Record<string, unknown> = {},
+): Hold | null {
   const held = readHold(boardDir);
   rmSync(holdPath(boardDir), { force: true });
-  if (held) appendHoldEvent(boardDir, { event: 'resume', by, at, reason: held.reason });
+  if (held) appendHoldEvent(boardDir, { event: 'resume', by, at, reason: held.reason, ...extra });
   return held;
 }

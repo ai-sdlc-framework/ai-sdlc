@@ -16,6 +16,7 @@ import {
   recordLastActionAt,
   type LandingRecord,
 } from './reconcile.js';
+import { readRefusalReason } from './pr-snapshot.js';
 
 /** One open PR's decision, as logged, snapshotted and printed. */
 export interface PrRow {
@@ -121,7 +122,9 @@ export function formatPrTable(
       const row = rowFromRecord(r);
       const rounds = r.kind === 'task' ? ciRoundsOf(r) : 0;
       const ci = rounds > 0 ? ` ci-round ${Math.min(rounds, maxCiRounds)}/${maxCiRounds}` : '';
-      return `  #${row.pr} lane ${row.lane}, action ${row.action}, reason ${row.reason}, owner ${row.owner}${ci}, age ${age(row.lastActionAt, nowMs)}`;
+      const refused = readRefusalReason(boardDir, row.pr);
+      const refusal = refused ? `, merge refused: ${refused.replace(/\s+/g, ' ').trim()}` : '';
+      return `  #${row.pr} lane ${row.lane}, action ${row.action}, reason ${row.reason}, owner ${row.owner}${ci}${refusal}, age ${age(row.lastActionAt, nowMs)}`;
     }),
   ];
 }

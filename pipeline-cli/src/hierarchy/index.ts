@@ -332,6 +332,7 @@ export {
   type WebhookStatus,
 } from './webhook.js';
 export { catalogWebhookEscalation, stallChannelNotifier } from './webhook-health.js';
+export { makeWebhookRepair } from './webhook-repair.js';
 
 export { HOLD_FILENAME, clearHold, readHold, writeHold, type Hold } from './hold.js';
 export {

@@ -6,6 +6,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   packagesToCover,
+  relatedFilesByPackage,
+  coverageArgs,
   main,
   resolveBoardDir,
   gitSafeEnv,
@@ -252,23 +254,25 @@ describe('main verify slot (AISDLC-1186)', () => {
     assert.equal(logs.filter((l) => /unslotted/.test(l)).length, 1);
     assert.equal(envs.length, 2);
   });
-  it('runs unslotted with one line when the module cannot load', async () => {
+  it('refuses to run unslotted when the module cannot load and a board exists', async () => {
     const logs = [];
+    let ran = 0;
     const code = await main({
       boardDir: '/b',
       reuseFacts: () => null,
       loadSlots: async () => {
         throw new Error('nope');
       },
-      run: () => ok,
+      run: () => (ran++, ok),
       changed,
       log: (m) => logs.push(m),
     });
-    assert.equal(code, 0);
-    assert.equal(logs.filter((l) => /unslotted/.test(l)).length, 1);
+    assert.equal(code, 1);
+    assert.equal(ran, 0);
+    assert.ok(logs.some((l) => /refusing to run the coverage suite unslotted/.test(l)));
   });
-  it('runs unslotted when acquiring throws for another reason', async () => {
-    const logs = [];
+  it('refuses when acquiring throws for another reason', async () => {
+    let ran = 0;
     const code = await main({
       boardDir: '/b',
       reuseFacts: () => null,
@@ -277,40 +281,63 @@ describe('main verify slot (AISDLC-1186)', () => {
           throw new Error('mkdir failed');
         },
       }),
-      run: () => ok,
+      run: () => (ran++, ok),
+      changed,
+      log: () => {},
+    });
+    assert.equal(code, 1);
+    assert.equal(ran, 0);
+  });
+  it('waits for a slot and never runs unslotted, even after a long wait', async () => {
+    let t = 0;
+    let polls = 0;
+    let ran = 0;
+    const logs = [];
+    const code = await main({
+      boardDir: '/b',
+      reuseFacts: () => null,
+      loadSlots: async () => ({
+        acquireVerifySlot: async (_d, deps) => {
+          for (let i = 0; i < 5; i++) (polls++, await deps.sleep(500));
+          return { workers: 2, release() {} };
+        },
+      }),
+      now: () => t,
+      sleep: async (ms) => {
+        t += ms * 1e6; // hours of waiting
+      },
+      run: () => (ran++, ok),
       changed,
       log: (m) => logs.push(m),
     });
     assert.equal(code, 0);
-    assert.equal(logs.filter((l) => /unslotted/.test(l)).length, 1);
+    assert.equal(polls, 5);
+    assert.equal(ran, 2);
+    assert.equal(logs.filter((l) => /waiting for a verify slot/.test(l)).length, 1);
+    assert.ok(!logs.some((l) => /unslotted/.test(l)));
   });
-  it('falls back to the shared worker count after the bounded wait', async () => {
+  it('refuses (does not go unslotted) when a finite wait elapses', async () => {
     let t = 0;
-    const envs = [];
-    const logs = [];
-    const slow = async () => ({
-      VERIFY_WORKERS_SHARED: 2,
-      acquireVerifySlot: async (_d, deps) => {
-        for (;;) await deps.sleep(500);
-      },
-    });
+    let ran = 0;
     const code = await main({
       boardDir: '/b',
       reuseFacts: () => null,
-      loadSlots: slow,
+      loadSlots: async () => ({
+        acquireVerifySlot: async (_d, deps) => {
+          for (;;) await deps.sleep(500);
+        },
+      }),
       now: () => t,
       sleep: async (ms) => {
         t += ms * 100;
       },
       waitMs: 1000,
-      run: (_c, _a, o) => (envs.push(o.env), ok),
+      run: () => (ran++, ok),
       changed,
-      log: (m) => logs.push(m),
+      log: () => {},
     });
-    assert.equal(code, 0);
-    assert.ok(t >= 1000);
-    assert.equal(logs.filter((l) => /unslotted/.test(l)).length, 1);
-    for (const e of envs) assert.equal(e.AI_SDLC_VITEST_MAX_WORKERS, '2');
+    assert.equal(code, 1);
+    assert.equal(ran, 0);
   });
   it('resolveBoardDir honours the env var and existence', () => {
     assert.equal(
@@ -575,5 +602,60 @@ describe('verify-record reuse (AISDLC-1187, DEC-0371)', () => {
     assert.ok(f.tree);
     assert.ok(Array.isArray(f.records));
     assert.ok('pipeline-cli' in f.coverageMtimeMs);
+  });
+});
+
+describe('pre-push narrows to related files (AISDLC-1377, DEC-0423)', () => {
+  const ok = { status: 0 };
+  it('passes related files to vitest and still runs the patch gate', async () => {
+    const calls = [];
+    const code = await main({
+      boardDir: null,
+      reuseFacts: () => null,
+      run: (cmd, args) => (calls.push([cmd, ...args]), ok),
+      changed: () => ['pipeline-cli/src/steps/verify-commands.ts'],
+      log: () => {},
+    });
+    assert.equal(code, 0);
+    assert.deepEqual(calls[0].slice(-2), [
+      '--coverage.thresholds.functions=0',
+      'src/steps/verify-commands.ts',
+    ]);
+    assert.match(calls.at(-1)[1], /check-pr-patch-coverage\.mjs$/);
+  });
+  it('relatedFilesByPackage keeps existing files and drops packages with config changes', () => {
+    const exists = (f) => f !== 'pipeline-cli/src/gone.ts';
+    assert.deepEqual(
+      relatedFilesByPackage(
+        ['pipeline-cli', 'orchestrator'],
+        [
+          'pipeline-cli/src/a.ts',
+          'pipeline-cli/src/gone.ts',
+          'orchestrator/package.json',
+          'orchestrator/src/b.ts',
+        ],
+        exists,
+      ),
+      { 'pipeline-cli': ['src/a.ts'] },
+    );
+  });
+  it('coverageArgs uses vitest related, or the whole package without files', () => {
+    assert.ok(coverageArgs('pipeline-cli', ['src/a.ts']).includes('related'));
+    assert.ok(coverageArgs('pipeline-cli', ['src/a.ts']).includes('--passWithNoTests'));
+    assert.deepEqual(coverageArgs('pipeline-cli', []), [
+      '--filter',
+      './pipeline-cli',
+      'test:coverage',
+    ]);
+  });
+  it('still fails when the gate finds an uncovered changed line', async () => {
+    const code = await main({
+      boardDir: null,
+      reuseFacts: () => null,
+      run: (cmd, args) => (/check-pr-patch-coverage/.test(args[0] ?? '') ? { status: 1 } : ok),
+      changed: () => ['pipeline-cli/src/a.ts'],
+      log: () => {},
+    });
+    assert.equal(code, 1);
   });
 });

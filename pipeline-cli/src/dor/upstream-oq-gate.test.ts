@@ -21,10 +21,11 @@ import {
   extractRfcIdsFromBody,
   extractRfcLifecycle,
   extractRfcReferences,
+  findUnresolvedOqEntries,
   findUnresolvedOqs,
   resolveRfcFilePath,
 } from './upstream-oq-gate.js';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
@@ -745,3 +746,98 @@ describe('findUnresolvedOqs prose handling (AISDLC-1175)', () => {
     expect(findUnresolvedOqs(rfc)).toEqual([]);
   });
 });
+
+describe('open-question counting rule (AISDLC-1320)', () => {
+  const head = '# RFC\n\n## 13. Open Questions\n\n';
+  const patterns =
+    '### 15.1 Design Patterns\n\n' +
+    [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `${n}. Pattern ${n}\n`).join('');
+
+  it('does not count a checklist inside a resolved ### OQ question', () => {
+    const rfc =
+      head +
+      '### OQ-11: Trigger\nQ?\n\n**Resolution (2026-05-04):** adopt.\n\n1. Regulatory\n2. Contract\n3. Review\n\n## 14. Next\n';
+    expect(findUnresolvedOqEntries(rfc)).toEqual([]);
+  });
+
+  it('does not count a list under a non-question sub-heading', () => {
+    const rfc =
+      head + '1. Q one\n**Resolution (x):** a\n\n2. Q two\n**Resolution (x):** b\n\n' + patterns;
+    expect(findUnresolvedOqEntries(rfc)).toEqual([]);
+  });
+
+  it('counts one unmarked numbered question with its line, not the pattern list', () => {
+    const rfc = head + '1. Q one\n**Resolution (x):** a\n\n2. Q two no marker\n\n' + patterns;
+    const entries = findUnresolvedOqEntries(rfc);
+    expect(entries).toEqual([{ line: 8, text: '2. Q two no marker' }]);
+  });
+
+  it('refusal text lists file:line for each of three and caps at 20', () => {
+    const mk = (n: number) =>
+      head + Array.from({ length: n }, (_, i) => `${i + 1}. Open ${i + 1}\n`).join('');
+    const run = (n: number) =>
+      checkUpstreamOqs({
+        taskId: 'T-1',
+        frontmatter: 'requires:\n  - RFC-9950\n',
+        body: '',
+        workDir: '/nonexistent',
+        readRfcFile: () => '---\nlifecycle: Implemented\n---\n' + mk(n),
+      });
+    const three = run(3);
+    const msg = three.rejectionSummary ?? '';
+    expect(msg).toContain('3 unresolved OQ(s)');
+    expect(msg).toMatch(/RFC-9950:\d+: 1\. Open 1/);
+    expect(msg).toMatch(/RFC-9950:\d+: 3\. Open 3/);
+    expect(msg).toContain('assumes:');
+    const many = run(25).rejectionSummary ?? '';
+    expect(many).toContain('Open 20');
+    expect(many).not.toContain('Open 21');
+    expect(many).toContain('and 5 more');
+  });
+
+  it('refusal on Ready for Review mentions assumes:, and assumes: is not refused', () => {
+    const rfc = '---\nlifecycle: Ready for Review\n---\n' + head + '1. Open\n';
+    const base = { taskId: 'T-1', body: '', workDir: '/nonexistent', readRfcFile: () => rfc };
+    const req = checkUpstreamOqs({ ...base, frontmatter: 'requires:\n  - RFC-9951\n' });
+    expect(req.rejected).toBe(true);
+    expect(req.rejectionSummary).toContain('list the RFC under `assumes:`');
+    const ass = checkUpstreamOqs({ ...base, frontmatter: 'assumes:\n  - RFC-9951\n' });
+    expect(ass.rejected).toBe(false);
+  });
+
+  describe('real RFC files', () => {
+    const dir = join(__dirname, '../../../spec/rfcs');
+    const files = readdirSync(dir).filter((f) => f.endsWith('.md'));
+    const count = (f: string) => findUnresolvedOqs(readFileSync(join(dir, f), 'utf8')).length;
+
+    it('the two formerly refused RFCs have no open questions', () => {
+      for (const word of ['tessellated-design-intent', 'decision-catalog-operator-routing']) {
+        const f = files.find((x) => x.includes(word));
+        expect(f).toBeDefined();
+        expect(count(f as string)).toBe(0);
+      }
+    });
+
+    it('per-file counts match the recorded list', () => {
+      const actual: Record<string, number> = {};
+      for (const f of files) if (count(f) > 0) actual[f] = count(f);
+      expect(actual).toEqual(EXPECTED_OPEN_COUNTS);
+    });
+  });
+});
+
+// Counts before AISDLC-1320 minus RFC-0009 and RFC-0035 (now zero). RFC-0012 is
+// the Implemented RFC whose four questions carry only a check mark.
+const EXPECTED_OPEN_COUNTS: Record<string, number> = {
+  'RFC-0001-template.md': 2,
+  'RFC-0012-two-tier-pipeline-architecture.md': 4,
+  'RFC-0026-exploration-workstream-pattern.md': 12,
+  'RFC-0027-design-coherence-drift-detection.md': 10,
+  'RFC-0036-spec-kit-bridge-adopter-authoring.md': 2,
+  'RFC-0037-adopter-project-context-inheritance.md': 4,
+  'RFC-0038-adopter-defined-reviewer-extension-point.md': 9,
+  'RFC-0039-adopter-defined-pipeline-gate-extension.md': 8,
+  'RFC-0040-ppa-triage-diagnostic-and-human-curve-signal-sources.md': 4,
+  'RFC-0044-worktree-head-parent-serialization.md': 4,
+  'RFC-0060-distributed-llm-worker-scheduler.md': 10,
+};

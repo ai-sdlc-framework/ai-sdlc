@@ -8,7 +8,15 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
@@ -497,6 +505,23 @@ describe('ai-sdlc-plugin session-start hook — version-aware self-heal gate (AI
 
     return pluginDir;
   }
+
+  it('AISDLC-1370: banner names the MCP cache file and the recovery step after an install, writing nothing outside the plugin dir', () => {
+    const pluginDir = buildStaleButPresentPlugin({
+      staleCheckOutput: '@ai-sdlc/pipeline-cli\t0.20.0\t0.20.1\t^0.20.1\n',
+    });
+    const home = mkdtempSync(join(tmpdir(), 'ai-sdlc-home-'));
+    try {
+      const result = runHook(tempDirEmpty, { CLAUDE_PLUGIN_ROOT: pluginDir, HOME: home });
+      const ctx = JSON.parse(result.output).hookSpecificOutput?.additionalContext ?? '';
+      assert.ok(ctx.includes('mcp-needs-auth-cache.json'), 'banner must name the cache file');
+      assert.ok(ctx.includes('restart Claude Code'), 'banner must give the recovery step');
+      assert.deepEqual(readdirSync(home), [], 'hook must not write anything under HOME');
+    } finally {
+      rmSync(pluginDir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 
   it('a stale-but-present install (sentinel + both bins exist, version check reports drift) still triggers the self-heal', () => {
     const pluginDir = buildStaleButPresentPlugin({

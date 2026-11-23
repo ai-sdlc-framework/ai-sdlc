@@ -33,6 +33,7 @@ import { retireBlockedManifest, retireFailedVerdict } from '../dispatch/retire-l
 import { clearRuling, readRuling } from '../dispatch/ruling.js';
 import type { TaskRuling } from '../dispatch/types.js';
 import { DOCS_BRANCH_PREFIXES } from './filing-branches.js';
+import { cachedGh, GH_READ_TTL_MS } from './gh-read-cache.js';
 import type { CommandRunner } from './types.js';
 
 /** Task set: one action per classifier state (RFC-0054 ownership table). */
@@ -95,6 +96,8 @@ export interface ReconcilePr extends PrFacts {
    * attestation (every reviewer approved); only the push is missing, so the machine owns it.
    */
   reclaimable?: boolean;
+  /** AISDLC-1374: the repo has no GitHub auto-merge; the lander squashes a green CLEAN docs PR itself. */
+  autoMergeUnavailable?: boolean;
   /** AISDLC-1232: reruns already recorded for this head in `reentered.json`. */
   staleRerunCount?: number;
   /**
@@ -242,6 +245,9 @@ export function decide(
       const green = checks.length > 0 && checks.every((k) => k.conclusion === 'success');
       if (!(green && f.mergeStateStatus === 'CLEAN' && !f.autoMergeArmed)) {
         action = 'route-to-planner';
+      } else if (kind === 'docs' && f.autoMergeUnavailable === true) {
+        // No auto-merge to arm: the lander squashes it once green and CLEAN (AISDLC-1374).
+        action = 'none';
       }
     }
     return guardSameHead({ ...base, action }, f, record, maxSameHeadActions);
@@ -502,8 +508,14 @@ export function actionCommands(
         },
       ];
     case 'arm': {
-      // A docs PR with no task id has no sanctioned source kind: route it to the planner.
-      if (ctx.kind !== 'decisions-sync' && ctx.kind !== 'deps' && !ctx.taskId) return null;
+      // A task-kind PR with no task id has no sanctioned source kind: route it to the planner.
+      if (
+        ctx.kind !== 'decisions-sync' &&
+        ctx.kind !== 'deps' &&
+        ctx.kind !== 'docs' &&
+        !ctx.taskId
+      )
+        return null;
       return [
         {
           file: 'node',
@@ -515,7 +527,9 @@ export function actionCommands(
               ? 'decisions-sync'
               : ctx.kind === 'deps'
                 ? 'deps'
-                : 'backlog',
+                : ctx.kind === 'docs'
+                  ? 'docs'
+                  : 'backlog',
             '--arm',
           ],
         },
@@ -697,6 +711,8 @@ export interface ReconcileReport {
   main?: string;
   /** Set once per red sha: the item the tick routes to the planner. */
   routed?: { action: 'route-to-planner'; text: string };
+  /** AISDLC-1316: the line sent to the planner when the docs site pin turned `skipped` or `failed`. */
+  docsBump?: string;
 }
 
 /** Dedupe ledger for planner reports, persisted on the board (AISDLC-924). */
@@ -782,11 +798,19 @@ export interface MainHealth {
 
 /** The monitor's conclusion for the main head, read through `gh`. Unreadable or no completed run is `unknown`. */
 export function gatherMainHealth(run: CommandRunner, cwd: string): MainHealth {
-  const head = run('gh', ['api', 'repos/{owner}/{repo}/commits/main', '--jq', '.sha'], { cwd });
+  const head = cachedGh(
+    run,
+    `main-sha|${cwd}`,
+    ['api', 'repos/{owner}/{repo}/commits/main', '--jq', '.sha'],
+    { cwd },
+    GH_READ_TTL_MS,
+  );
   const sha = head.status === 0 ? head.stdout.trim() : '';
   if (!sha) return { status: 'unknown' };
-  const listed = run(
-    'gh',
+  // Keyed by sha: a completed run for a sha does not change; a new sha is a new key.
+  const listed = cachedGh(
+    run,
+    `main-health|${cwd}|${sha}`,
     [
       'run',
       'list',
@@ -802,6 +826,7 @@ export function gatherMainHealth(run: CommandRunner, cwd: string): MainHealth {
       'conclusion,url',
     ],
     { cwd },
+    GH_READ_TTL_MS,
   );
   const runs =
     listed.status === 0 ? parse<{ conclusion?: string; url?: string }[]>(listed.stdout) : undefined;
@@ -846,6 +871,113 @@ export function reportMainHealth(
   mkdirSync(boardDir, { recursive: true });
   writeFileSync(mainHealthPath(boardDir), JSON.stringify({ redSha: health.sha }) + '\n', 'utf-8');
   return { main: text, routed: { action: 'route-to-planner', text } };
+}
+
+/** AISDLC-1316: outcome of the latest completed docs-source-bump run. */
+export type DocsBumpState = 'ok' | 'skipped' | 'failed';
+
+export interface DocsBump {
+  /** `unknown` (no run, or `gh` failed) records nothing. */
+  state: DocsBumpState | 'unknown';
+  runUrl?: string;
+}
+
+const DOCS_BUMP_PR_STEP = 'Open or update the bump PR in the site repository';
+
+/** `skipped` when a green run skipped the bump step (site repo not visible to the token). */
+export function gatherDocsBump(run: CommandRunner, cwd: string): DocsBump {
+  const listed = cachedGh(
+    run,
+    `docs-bump-list|${cwd}`,
+    [
+      'run',
+      'list',
+      '--workflow',
+      'docs-source-bump.yml',
+      '--status',
+      'completed',
+      '--limit',
+      '1',
+      '--json',
+      'databaseId,conclusion,url',
+    ],
+    { cwd },
+    GH_READ_TTL_MS,
+  );
+  if (listed.status !== 0) return { state: 'unknown' };
+  const latest = parse<{ databaseId?: number; conclusion?: string; url?: string }[]>(
+    listed.stdout,
+  )?.[0];
+  if (!latest?.conclusion) return { state: 'unknown' };
+  const url = latest.url ? { runUrl: latest.url } : {};
+  if (latest.conclusion === 'failure') return { state: 'failed', ...url };
+  if (latest.conclusion !== 'success') return { state: 'unknown' };
+  const viewed = cachedGh(
+    run,
+    `docs-bump-view|${cwd}|${latest.databaseId}`,
+    ['run', 'view', String(latest.databaseId), '--json', 'jobs'],
+    { cwd },
+  );
+  if (viewed.status !== 0) return { state: 'unknown' };
+  const jobs = parse<{ jobs?: { steps?: { name?: string; conclusion?: string }[] }[] }>(
+    viewed.stdout,
+  )?.jobs;
+  const skipped = (jobs ?? []).some((j) =>
+    (j.steps ?? []).some((st) => st.name === DOCS_BUMP_PR_STEP && st.conclusion === 'skipped'),
+  );
+  return { state: skipped ? 'skipped' : 'ok', ...url };
+}
+
+function docsSitePinPath(boardDir: string): string {
+  return path.join(boardDir, 'docs-site-pin.json');
+}
+
+/** The recorded state, or undefined when none was recorded. */
+export function readDocsSitePin(
+  boardDir: string,
+): { state: DocsBumpState; runUrl?: string } | undefined {
+  try {
+    const rec = JSON.parse(readFileSync(docsSitePinPath(boardDir), 'utf-8')) as {
+      state?: string;
+      runUrl?: string;
+    };
+    if (rec.state === 'ok' || rec.state === 'skipped' || rec.state === 'failed')
+      return { state: rec.state, ...(rec.runUrl ? { runUrl: rec.runUrl } : {}) };
+  } catch {
+    /* none recorded */
+  }
+  return undefined;
+}
+
+/**
+ * Record the bump state; the planner gets one line only when the state changes to
+ * `skipped` or `failed`. The state is recorded only after the planner was told.
+ */
+export function reportDocsBump(
+  boardDir: string,
+  bump: DocsBump,
+  notify?: (text: string) => void,
+): string | undefined {
+  if (bump.state === 'unknown') return undefined;
+  const prior = readDocsSitePin(boardDir)?.state;
+  let text: string | undefined;
+  if (prior !== bump.state && bump.state !== 'ok') {
+    text = `docs site pin: ${bump.state}${bump.runUrl ? ` ${bump.runUrl}` : ''}. See cli-hierarchy status.`;
+    if (notify) {
+      try {
+        notify(text);
+      } catch {
+        return text;
+      }
+    }
+  }
+  mkdirSync(boardDir, { recursive: true });
+  writeFileSync(
+    docsSitePinPath(boardDir),
+    JSON.stringify({ state: bump.state, ...(bump.runUrl ? { runUrl: bump.runUrl } : {}) }) + '\n',
+    'utf-8',
+  );
+  return text;
 }
 
 /** One-line summary of the open landing records, for the tick's progress line. */
@@ -918,6 +1050,8 @@ export interface ReconcileOpts {
   stuckAfterMinutes?: number;
   /** AISDLC-1190: delivers a routed PR or a red main to the planner session; throws when it cannot. */
   notifyPlanner?: (text: string) => void;
+  /** AISDLC-1316: latest docs-source-bump outcome. */
+  docsBump?: DocsBump;
   /** AISDLC-1242: enqueues a landed filing's task from its brief; returns the planner line, or undefined when it left the task alone. */
   enqueueFiled?: (pr: number, headBranch: string | undefined) => string | undefined;
 }
@@ -936,6 +1070,10 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
   const stuckMs = (opts.stuckAfterMinutes ?? DEFAULT_ROUTE_STUCK_MINUTES) * 60_000;
   if (opts.mainHealth)
     Object.assign(report, reportMainHealth(opts.boardDir, opts.mainHealth, opts.notifyPlanner));
+  if (opts.docsBump) {
+    const line = reportDocsBump(opts.boardDir, opts.docsBump, opts.notifyPlanner);
+    if (line) report.docsBump = line;
+  }
   const routeOnce = (pr: number, headSha: string | undefined, reason: string): boolean => {
     const first = firstRoute(opts.boardDir, pr, headSha, reason, opts.notifyPlanner);
     if (!first) report.suppressed++;
@@ -1373,7 +1511,7 @@ export function allowedAuthors(
     .map((x) => x.trim().toLowerCase())
     .filter(Boolean);
   if (fromEnv.length > 0) return new Set(fromEnv);
-  const me = run('gh', ['api', 'user', '--jq', '.login'], { cwd });
+  const me = cachedGh(run, `login|${cwd}`, ['api', 'user', '--jq', '.login'], { cwd }, 60 * 60_000);
   const login = me.status === 0 ? me.stdout.trim().toLowerCase() : '';
   return login ? new Set([login]) : undefined;
 }
@@ -1500,8 +1638,9 @@ function fillSummaryFromAnnotations(run: CommandRunner, cwd: string, checks: PrC
     if (c.conclusion !== 'failure' || c.summary || c.name === 'ai-sdlc/pr-ready') continue;
     const jid = /\/job\/(\d+)/.exec(c.detailsUrl ?? '')?.[1];
     if (!jid) continue;
-    const r = run(
-      'gh',
+    const r = cachedGh(
+      run,
+      `annotations|${cwd}|${jid}`,
       ['api', `repos/{owner}/{repo}/check-runs/${jid}/annotations`, '--jq', '.[].message'],
       { cwd },
     );
@@ -1534,6 +1673,21 @@ export function gatherFacts(
   if (!Array.isArray(prs)) return undefined;
   const allowed = allowedAuthors(run, cwd);
   if (!allowed) return undefined;
+  // One probe per pass, and only when a docs PR needs the answer (AISDLC-1374).
+  let autoMergeProbed: boolean | undefined;
+  const autoMergeIsUnavailable = (): boolean => {
+    autoMergeProbed ??= (() => {
+      const r = cachedGh(
+        run,
+        `auto-merge|${cwd}`,
+        ['repo', 'view', '--json', 'autoMergeAllowed', '--jq', '.autoMergeAllowed'],
+        { cwd },
+        GH_READ_TTL_MS,
+      );
+      return r.status === 0 && r.stdout.trim() === 'false';
+    })();
+    return autoMergeProbed;
+  };
   const verdicts = collectVerdicts(boardDir);
   const facts: ReconcilePr[] = [];
   for (const p of prs) {
@@ -1636,6 +1790,7 @@ export function gatherFacts(
       draft: isDraft,
       ...(p.mergeStateStatus === undefined ? {} : { mergeStateStatus: p.mergeStateStatus }),
       autoMergeArmed: p.autoMergeRequest != null,
+      ...(kind === 'docs' && autoMergeIsUnavailable() ? { autoMergeUnavailable: true } : {}),
       changedFiles: files,
       docsOnly: files.length > 0 && files.every((x) => DOCS_FILE_RE.test(x)),
       checks,

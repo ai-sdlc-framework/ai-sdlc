@@ -293,6 +293,16 @@ export async function removeUntrackedIdenticalToMain(
       console.warn(`[step-0.5] untracked ${f} differs from origin/main; left in place`);
       continue;
     }
+    // AISDLC-1343: deleting a copy that HEAD does not hold would leave the event in neither
+    // the tree nor HEAD, so a promotion would look undone and repeat. Keep it until HEAD has it.
+    const head = await runner('git', ['rev-parse', '--verify', '-q', `HEAD:${f}`], {
+      cwd: workDir,
+      allowFailure: true,
+    });
+    if (head.code !== 0 || head.stdout.trim() !== main.stdout.trim()) {
+      console.warn(`[step-0.5] untracked ${f} not in parent HEAD; left in place`);
+      continue;
+    }
     unlinkSync(join(workDir, f));
     console.log(`[step-0.5] removed untracked ${f} (identical to origin/main)`);
     removed.push(f);

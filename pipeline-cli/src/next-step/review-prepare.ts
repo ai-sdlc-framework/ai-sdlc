@@ -268,6 +268,9 @@ export async function prepareReview(
       reason: 'review diff unavailable (git diff failed or came back empty); reviewers not spawned',
     };
   }
+  // AISDLC-1335: one number per round. The recorded-round plan counts rounds across runs, so it
+  // names the round everywhere (progress line, instruction, prompt files, developer reply).
+  const reviewRound = built.roundPlan?.round ?? round;
   writeRunFile(ctx, 'pr-diff.txt', built.diff);
   const pathsFile = writeRunFile(ctx, 'pr-files.txt', built.changedFiles.join('\n') + '\n');
 
@@ -288,7 +291,7 @@ export async function prepareReview(
     return {
       kind: 'nothing-to-spawn',
       review: {
-        round,
+        round: reviewRound,
         spawned: [],
         autoApproved: verdicts.map((v) => ({ agent: String(v.agentId), reviewedSha })),
         headSha: head.stdout.trim(),
@@ -362,7 +365,7 @@ export async function prepareReview(
       : baseHarnessNote;
 
   const baseReview: ReviewRoundState = {
-    round,
+    round: reviewRound,
     spawned: [],
     autoApproved: [],
     headSha,
@@ -446,7 +449,7 @@ export async function prepareReview(
       });
       const files = writeReviewPromptFiles(
         ctx,
-        `review-r${round}-${agent}`,
+        `review-r${reviewRound}-${agent}`,
         `${p.prompt}\n\n` +
           `Diff-binding token (for attestation, do not omit from your response): ${nonceMarker}\n`,
         reviewPromptPartBytes(ctx.env),
@@ -472,7 +475,7 @@ export async function prepareReview(
     // the classifier's normal set runs beside the staged pipeline and is what the envelope covers.
     const beside = spawnedFor(prompts);
     const stagedReview = await startStagedRound(ctx, state, {
-      round,
+      round: reviewRound,
       artifactsDir,
       baseReview,
       security,
@@ -493,10 +496,18 @@ export const REVIEW_PROMPT_PART_BYTES = 40_000;
 /** Lines per prompt file, under the Read tool's default 2,000-line window. */
 export const REVIEW_PROMPT_PART_LINES = 1_500;
 
-/** Part size: `AI_SDLC_REVIEW_PROMPT_PART_BYTES` when it is an integer >= 1,000, else the default. */
+/** Largest accepted override: a bigger part would defeat the split (Read tool token limit). */
+export const REVIEW_PROMPT_PART_BYTES_MAX = 100_000;
+
+/**
+ * Part size: `AI_SDLC_REVIEW_PROMPT_PART_BYTES` when it is an integer in
+ * [1,000, 100,000], else the default.
+ */
 export function reviewPromptPartBytes(env: NodeJS.ProcessEnv): number {
   const raw = Number(env.AI_SDLC_REVIEW_PROMPT_PART_BYTES);
-  return Number.isInteger(raw) && raw >= 1_000 ? raw : REVIEW_PROMPT_PART_BYTES;
+  return Number.isInteger(raw) && raw >= 1_000 && raw <= REVIEW_PROMPT_PART_BYTES_MAX
+    ? raw
+    : REVIEW_PROMPT_PART_BYTES;
 }
 
 /**
@@ -569,8 +580,12 @@ export function writeReviewPromptFiles(
   content: string,
   maxBytes: number,
 ): string[] {
+  // A prompt that fits one Read call stays one file; the per-part frame reserve only applies once
+  // it is split (otherwise a prompt just under the limit would be split needlessly).
+  if (splitReviewPrompt(content, maxBytes).length === 1) {
+    return [writeRunFile(ctx, `${base}.md`, content)];
+  }
   const chunks = splitReviewPrompt(content, Math.max(maxBytes - PART_FRAME_BYTES, 500));
-  if (chunks.length === 1) return [writeRunFile(ctx, `${base}.md`, content)];
   const n = chunks.length;
   const names = chunks.map((_, i) => `${base}.part-${i + 1}-of-${n}.md`);
   return chunks.map((chunk, i) => {

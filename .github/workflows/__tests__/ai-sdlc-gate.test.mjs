@@ -238,8 +238,8 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     );
     assert.match(
       agg.if,
-      /draft\s*==\s*false/,
-      'aggregator must skip on draft PRs (AISDLC-218 — alls-green treats all-skipped as failure)',
+      /needs\.detect\.outputs\.draft\s*!=\s*'true'/,
+      'aggregator must skip on draft PRs by the live state (AISDLC-218 / AISDLC-1301)',
     );
     // `needs` may be parsed as an array of strings.
     const needs = Array.isArray(agg.needs) ? agg.needs : [agg.needs];
@@ -327,7 +327,11 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
       /needs\.detect\.outputs\.tasks\s*==\s*'true'/,
       'must only run when the PR changes a backlog task file',
     );
-    assert.match(job.if, /draft\s*==\s*false/, 'must skip draft PRs like every other gate job');
+    assert.match(
+      job.if,
+      /outputs\.draft\s*!=\s*'true'/,
+      'must skip draft PRs like every other gate job',
+    );
     const needs = Array.isArray(job.needs) ? job.needs : [job.needs];
     assert.ok(needs.includes('detect'), 'must declare needs: [detect]');
     assert.equal(job.permissions?.['pull-requests'], 'write', 'posts the violations comment');
@@ -940,7 +944,7 @@ describe('AISDLC-1172: verdict-check job feeds pr-ready and posts ai-sdlc/attest
     assert.match(cond, /docs_only\s*!=\s*'true'/);
     assert.match(cond, /records_only\s*!=\s*'true'/);
     assert.match(cond, /dependabot\[bot\]/);
-    assert.match(cond, /draft\s*==\s*false/);
+    assert.match(cond, /outputs\.draft\s*!=\s*'true'/);
   });
 
   it('checks out the BASE sha and fetches the head as data only, validating sha and repo first', () => {
@@ -1017,5 +1021,46 @@ describe('ai-sdlc-gate.yml — records-only fast lane (AISDLC-867)', () => {
       rollup.needs.map((n) => [n, { result: SKIPPED.includes(n) ? 'skipped' : 'success' }]),
     );
     assert.equal(allsGreenDecision(needs).passed, true);
+  });
+});
+
+describe('AISDLC-1301: draft decision comes from the live state', () => {
+  const wf = loadYaml(WORKFLOW_PATH);
+
+  it('no job or step condition reads the event payload draft flag', () => {
+    for (const [id, job] of Object.entries(wf.jobs)) {
+      assert.doesNotMatch(String(job.if ?? ''), /pull_request\.draft/, `${id} job if`);
+      for (const st of job.steps ?? []) {
+        assert.doesNotMatch(String(st.if ?? ''), /pull_request\.draft/, `${id} step if`);
+      }
+    }
+  });
+
+  it('detect reads the API in one step first and a failed read fails the job', () => {
+    const first = wf.jobs.detect.steps[0];
+    assert.equal(first.id, 'live');
+    assert.equal(first.if, undefined);
+    assert.match(first.run, /gh api "repos\/\$REPO\/pulls\/\$PR_NUMBER" --jq '\.draft'/);
+    assert.match(first.run, /set -euo pipefail/);
+    assert.match(first.run, /exit 1/);
+    assert.equal(wf.jobs.detect.if, undefined, 'detect must always run');
+    assert.equal(wf.jobs.detect.outputs.draft, '${{ steps.live.outputs.draft }}');
+    for (const st of wf.jobs.detect.steps.slice(1)) {
+      assert.match(String(st.if), /steps\.live\.outputs\.draft != 'true'/);
+    }
+  });
+
+  it('a draft starts no job and the pr-ready rollup runs whenever the live state is ready', () => {
+    for (const [id, job] of Object.entries(wf.jobs)) {
+      if (id === 'detect') continue;
+      assert.ok([].concat(job.needs).includes('detect'), `${id} must need detect`);
+      assert.match(String(job.if), /needs\.detect\.outputs\.draft != 'true'/, `${id} if`);
+    }
+    const agg = wf.jobs['pr-ready'];
+    assert.match(String(agg.if), /always\(\)/);
+    assert.ok(agg.needs.includes('detect'), 'a failed read must fail the rollup');
+    assert.ok(
+      !/allowed-skips[\s\S]*\bdetect\b/.test(JSON.stringify(agg.steps[0].with['allowed-skips'])),
+    );
   });
 });

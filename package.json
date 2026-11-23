@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r --no-bail test && pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm git-env-hygiene:check && pnpm lint:publishable && pnpm knowledge:check",
+    "test": "pnpm -r --no-bail test && pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm parity:check && pnpm git-env-hygiene:check && pnpm lint:publishable && pnpm knowledge:check",
     "test:gates": "node scripts/run-gate-tests.mjs",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint . && node scripts/check-clock-discipline.mjs",
@@ -24,6 +24,7 @@
     "tui": "AI_SDLC_TUI=experimental node pipeline-cli/bin/cli-tui.mjs",
     "validate-schemas": "pnpm -C reference validate-schemas",
     "smoke:first-run": "node scripts/first-run-smoke.mjs",
+    "smoke:bootstrap": "node scripts/bootstrap-smoke.mjs",
     "canary:pipeline": "node scripts/pipeline-canary.mjs",
     "test:pipeline-canary-gate": "node --import ./vitest.git-env.setup.mjs --test scripts/pipeline-canary.test.mjs",
     "test:first-run-smoke-gate": "node --import ./vitest.git-env.setup.mjs --test scripts/first-run-smoke.test.mjs",
@@ -36,6 +37,7 @@
     "test:typecheck-workspace-gate": "node --import ./vitest.git-env.setup.mjs --test scripts/typecheck-workspace.test.mjs",
     "test:publishable": "node --import ./vitest.git-env.setup.mjs --test scripts/check-publishable-package-configs.test.mjs",
     "dark-code:check": "node scripts/check-dark-code.mjs",
+    "parity:check": "node scripts/check-parity.mjs",
     "git-env-hygiene:check": "node scripts/check-git-env-hygiene.mjs",
     "test:git-env-hygiene-gate": "node --import ./vitest.git-env.setup.mjs --test scripts/check-git-env-hygiene.test.mjs",
     "test:clock-discipline-gate": "node --import ./vitest.git-env.setup.mjs --test scripts/check-clock-discipline.test.mjs",
@@ -125,12 +127,12 @@
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.14.0",
+    "eslint": "^10.15.0",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
     "js-yaml": "5.5.0",
-    "lint-staged": "^17.6.0",
-    "prettier": "^3.9.10",
-    "typescript-eslint": "^8.72.1"
+    "lint-staged": "^17.6.1",
+    "prettier": "^3.10.1",
+    "typescript-eslint": "^8.72.2"
   }
 }

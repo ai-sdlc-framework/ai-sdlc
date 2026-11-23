@@ -1,8 +1,8 @@
 ---
 id: RFC-0015
 title: Autonomous Pipeline Orchestrator
-status: Approved
-lifecycle: Signed Off
+status: Withdrawn
+lifecycle: Superseded
 author: Dominique Legault
 created: 2026-05-01
 updated: 2026-05-13
@@ -17,9 +17,11 @@ requiresDocs: []
 
 # RFC-0015: Autonomous Pipeline Orchestrator
 
+> **Superseded by RFC-0051 (AISDLC-1322, 2026-11-18).** The tick loop this RFC specifies was retired as the way to run autonomously (AISDLC-763); the session hierarchy of RFC-0051 replaces it. See `docs/concepts/autonomous-orchestrator.md`.
+
 **Document type:** Normative
-**Status:** Approved (AISDLC-169 umbrella + all 5 phases 169.1–169.5 shipped; design locked + implementation complete behind `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`)
-**Lifecycle:** Signed Off (lifecycle audit 2026-05-13 promoted from Ready for Review; flag default-on promotion gated on AISDLC-253 fixture-leak fix + fresh corpus, not on implementation gap)
+**Status:** Superseded by RFC-0051 (AISDLC-1322). Previously: Approved (AISDLC-169 umbrella + all 5 phases 169.1–169.5 shipped; design locked + implementation complete behind `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`)
+**Lifecycle:** Superseded. Previously: Signed Off (lifecycle audit 2026-05-13 promoted from Ready for Review; flag default-on promotion gated on AISDLC-253 fixture-leak fix + fresh corpus, not on implementation gap)
 **Author:** Dominique Legault (with Claude assist)
 **Created:** 2026-05-01
 **Updated:** 2026-05-13

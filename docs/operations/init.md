@@ -180,6 +180,18 @@ After scaffolding:
 2. Add an `AI_SDLC_PAT` repository secret with write access (used by `auto-enable-auto-merge.yml`).
 3. Commit and push the 4 workflow files.
 
+The first pull request that adds `.ai-sdlc/` to a project is merged by a person.
+The merge policy is read only from the default branch, and `.ai-sdlc/agent-role.yaml`
+is not there yet, so the merge helper refuses (fail-closed). Every later pull request
+goes through `cli-merge-if-eligible`. The `enable-auto-merge` job also fails with a
+line naming `AI_SDLC_PAT` until that secret exists.
+
+## Scaffolded workflows follow the package manager
+
+When `package.json` exists, init writes the setup, install and script steps of the repository's package manager into `ai-sdlc-gate.yml` and `dor-ingress.yml` (lockfile first, then the `packageManager` field, pnpm when neither says; npm uses `npm ci`, yarn uses `--immutable` with `.yarnrc.yml` or yarn 2+, bun uses `oven-sh/setup-bun`) and prints the manager. It also prints a line when `package.json` has no `test:coverage` script, because the Coverage job fails without it. The text below describes the pnpm template, which a pnpm repository and a repository without `package.json` get unchanged. The scaffolded `ai-sdlc-gate.yml` has `lint`, `build-test` and `coverage` jobs that run `pnpm install --frozen-lockfile` and pnpm scripts, and the `ai-sdlc/pr-ready` rollup needs all three. `dor-ingress.yml` has the same setup and install steps. The templates are the same for every project type.
+
+A repository without `package.json` (for example a Python project) must replace the pnpm setup, install and script steps in those jobs with its own commands (for example the `uv` commands in `.ai-sdlc/verification.yaml`), or the jobs fail and `ai-sdlc/pr-ready` never goes green. When init scaffolds these workflows into a repository without `package.json`, it prints a note naming each affected workflow.
+
 ## Verification commands (`.ai-sdlc/verification.yaml`)
 
 The developer prompt (Step 5), the verify gate, the Step 10 summary and the Step 11 PR body read the verification commands from a `verification:` block, so a non-Node repo needs no `package.json` shim.
@@ -194,7 +206,7 @@ verification:
 
 - No file (or no `verification:` block): the pnpm defaults apply (`pnpm build`, `pnpm test`, `pnpm lint`, `pnpm format:check`).
 - An omitted key is skipped; Step 10 and the PR body print `skipped (not configured)` for it.
-- `ai-sdlc init` writes the file with detected defaults: `package.json` gives the pnpm defaults, `pyproject.toml` gives the `uv` commands above. It never overwrites an existing file, and writes nothing when neither manifest exists.
+- `ai-sdlc init` writes the file with detected defaults: `package.json` gives the commands of the package manager it uses (lockfile first: `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `bun.lockb` or `bun.lock`; then the `packageManager` field; pnpm when neither says), `pyproject.toml` gives the `uv` commands above. It never overwrites an existing file, and writes nothing when neither manifest exists.
 - The resolver is `resolveVerification` in `pipeline-cli/src/steps/verify-defaults.ts`.
 
 ## Verifying the install
@@ -260,3 +272,7 @@ disable attestation verification; etc.
 - The `init-features.ts` source — for adopters extending the wizard
   with custom features (the `FeatureTemplateSet` interface is the
   extension point).
+
+## Task prefix
+
+The readiness gates (3, 5 and 7) and the file-existence resolver build their task-id pattern from `task_prefix` in `backlog/config.yml` (AISDLC-1360); without it they use `AISDLC`.

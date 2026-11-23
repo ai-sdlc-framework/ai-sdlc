@@ -83,6 +83,20 @@ already supports — a task whose `blocked.reason` is set skips both the
 upstream-OQ gate (when called from `refineBacklogTask()` /
 `/ai-sdlc execute`) AND the DoR ingress workflow gate.
 
+### What the upstream-OQ gate counts (AISDLC-1320)
+
+An entry is counted only when it is an open question: a question heading, or a
+numbered or bold question item directly in the Open Questions section, with no
+resolution marker. A numbered or bulleted list inside a question, or under a
+sub-heading that is not a question (for example `### 15.1 Design Patterns`), is
+part of that text and is not counted. The refusal prints each counted entry as
+`<file>:<line>: <text>` (at most 20, then `and N more`).
+
+When a task relies on an RFC's design but not on its open questions, the refusal
+says: "If the task only relies on the RFC's design and not on its open questions,
+list the RFC under `assumes:` instead of `requires:`". An `assumes:` RFC is not
+refused on lifecycle or open questions.
+
 Both single-line forms are recognised by `extractBlockedReason()` in
 `pipeline-cli/src/dor/upstream-oq-gate.ts`:
 

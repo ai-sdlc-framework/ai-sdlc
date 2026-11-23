@@ -441,8 +441,11 @@ async function shipInner(
     AI_SDLC_ITERATION_COUNT: String(state.iteration),
     AI_SDLC_HARNESS_NOTE: verdict.harnessNote,
   };
+  // AISDLC-1365: read once; the task file's summary carries the marker only when Step 11b opens the PR.
+  const priorPr = needsHuman ? null : await detectDraftPrForBranch(runner, wt, state.branch);
   if (!needsHuman) {
     const { finalSummary, acceptanceCriteriaCheck } = buildFinalSummary({
+      prOpenedByPipeline: !priorPr,
       taskId: state.taskId,
       workDir: ctx.workDir,
       worktreePath: wt,
@@ -513,7 +516,6 @@ async function shipInner(
     await attachVerdictRecordDraft(ctx, state, verdict);
   }
   // AISDLC-1197: the verdict record names the PR when it already exists (resumed rounds).
-  const priorPr = needsHuman ? null : await detectDraftPrForBranch(runner, wt, state.branch);
   for (let attempt = 0; attempt < PUSH_ATTEMPTS; attempt += 1) {
     // RFC-0061: branch and verdict ref in one atomic push (built per attempt: a pre-push fixup
     // can change the head).
@@ -621,6 +623,7 @@ async function shipInner(
       developerReturn: developer,
       verdict,
       needsHumanAttention: needsHuman,
+      prOpenedByPipeline: true,
     });
     const footer = `\nReferences ${state.taskId}\n`;
     const line = state.classifierLine ? `\n${state.classifierLine}\n` : '';

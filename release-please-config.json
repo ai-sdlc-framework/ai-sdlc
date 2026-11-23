@@ -91,11 +91,14 @@
     },
     "sdk-python": {
       "release-type": "python",
-      "component": "sdk-python"
+      "component": "sdk-python",
+      "extra-files": ["src/ai_sdlc/__init__.py"]
     },
     "sdk-go": {
       "release-type": "go",
-      "component": "sdk-go"
+      "component": "sdk-go",
+      "bump-minor-pre-major": true,
+      "extra-files": ["aisdlc.go"]
     },
     "ai-sdlc-plugin": {
       "release-type": "simple",

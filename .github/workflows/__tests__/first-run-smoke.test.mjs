@@ -109,6 +109,14 @@ describe('ci.yml first-run-smoke job (AISDLC-771)', () => {
     assert.match(runs, /node scripts\/first-run-smoke\.mjs/);
   });
 
+  it('runs the bootstrap smoke after the first-run smoke (AISDLC-1361)', () => {
+    const runs = job.steps.map((s) => s.run ?? '');
+    const first = runs.findIndex((r) => /node scripts\/first-run-smoke\.mjs/.test(r));
+    const boot = runs.findIndex((r) => /node scripts\/bootstrap-smoke\.mjs/.test(r));
+    assert.ok(first >= 0, 'first-run smoke step missing');
+    assert.ok(boot > first, 'bootstrap smoke step must follow the first-run smoke step');
+  });
+
   it('is bounded well above the 5 minute smoke budget but not unbounded', () => {
     assert.ok(job['timeout-minutes'] >= 5 && job['timeout-minutes'] <= 15);
   });

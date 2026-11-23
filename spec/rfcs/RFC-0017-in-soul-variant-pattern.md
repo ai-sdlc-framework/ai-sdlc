@@ -1,8 +1,8 @@
 ---
 id: RFC-0017
 title: In-Soul Variant Pattern
-status: Draft
-lifecycle: Ready for Review
+status: Implemented
+lifecycle: Implemented
 author: Morgan Hirtle
 created: 2026-05-04
 updated: 2026-05-26
@@ -13,14 +13,16 @@ requires:
   - RFC-0025
   - RFC-0029
   - RFC-0035
-requiresDocs: []
+requiresDocs:
+  - concept
+runtimeEvidence: []
 ---
 
 # RFC-0017: In-Soul Variant Pattern
 
 **Document type:** Normative
 **Status:** Signed Off v0.4 — all three Authority sign-offs landed 2026-05-26 (Mo conditional, Dominique Engineering, Alex Product). Mo's condition #1 (§11 practitioner validation) discharges when AISDLC-437 ships its InternalAdopter three-product reference impl. Design Authority editorial pass complete 2026-05-26 (Mo). §6.1 `designOverrides` closed enum revised: `voiceRegister` cut (6/6 leading design systems treat content register outside the visual token surface — see OQ-5 2026-05-26 revisit); `typographyScale`, `motionProfile`, `radiusProfile` added per industry-aligned theming-surface convention (Tailwind / Radix / Material / Carbon / Spectrum / Atlassian). §5.2/§5.4 add the `designImperatives` variant-wins conflict-resolution language as a Design-Authority practitioner judgment call (not schema-enforced). §11 ProductD row deferred to RFC-0018 (temporal-context-bound = Journey, not Variant). Conditional Design-Authority sign-off in §Sign-Off table pending (1) this editorial pass landing + (2) §11 practitioner validation gates resolved on InternalAdopter implementation pass. v0.3 operator OQ walkthrough resolutions otherwise intact. Implementation broken into 5 phase tasks (AISDLC-353 + AISDLC-435..438; the latter four renumbered from AISDLC-352/354/355/356 on 2026-05-26 to fix ID collision with previously-shipped tasks).
-**Lifecycle:** Signed Off
+**Lifecycle:** Implemented
 **Created:** 2026-05-04
 **Updated:** 2026-05-26
 **Authors:** Morgan Hirtle (Design Authority)
@@ -44,6 +46,8 @@ requiresDocs: []
 | Dominique Legault | CTO / Engineering Authority | ✅ **Signed v0.4** — Engineering pillar concerns ratified. Substrate sharing across variants holds per §5.3 inheritance table; complianceFloor inheritance is locked; admission scoring composition decomposes cleanly per §5.4 (variant-scoped Sα₂ inputs layered on soul-level scoring, "variant wins" conflict resolution treated as Design-Authority practitioner judgment rather than schema automation). v0.4 editorial changes — closed `designOverrides` enum (cut `voiceRegister`, added `typographyScale`/`motionProfile`/`radiusProfile`), `designImperatives` conflict-resolution language, §11 ProductD deferral to RFC-0018 — are visual-token-surface and scope refinements. No new substrate, runtime, or compute requirements introduced. Vendor-prefix extension path (OQ-5) composes cleanly with the RFC-0025 OQ-10 pattern. Engineering substrate-shared criterion (§11 #4) continues to apply to the three-product suite; reduced scope is a coherent validation envelope, not a substrate bypass. Variant count limits (soft 5 / hard 20 default, per-org override per §10.1) keep the substrate-divergence blast radius bounded. Phase 1 schema additions (AISDLC-435, formerly AISDLC-352) and Phase 4 reference impl (AISDLC-437, formerly AISDLC-355) remain the load-bearing implementation work; this sign-off does not pre-empt their dispatch-time engineering review. | 2026-05-26 |
 | Alexander Kline | Head of Product Strategy / Product Authority | ✅ Signed v0.2 (PPA-composability scope only; full v1.0+ pending Mo's editorial) | 2026-05-04 |
 | Alexander Kline | Head of Product Strategy / Product Authority | ✅ **Signed v0.4** — v0.2 PPA-composability sign-off carries through. v0.4 editorial changes (closed `designOverrides` enum revision, `designImperatives` conflict-resolution clarification, §11 ProductD deferral to RFC-0018) do not touch PPA scoring, `targetedVariants` semantics, or audience model. No new Product Authority concerns surfaced by the v0.4 diff. With Mo's conditional v0.4 sign-off (v0.4.1, PR #709) + Dominique's Engineering v0.4 ratification (v0.4.2, PR #710) + this Product Authority ratification, all three Authority pillars have signed v0.4 and lifecycle promotes to Signed Off. | 2026-05-26 |
+
+*Note (AISDLC-1322, not a sign-off entry): the condition "§11 practitioner validation gates resolved on InternalAdopter implementation pass (AISDLC-437)" is met on `main`, since AISDLC-437 is in `backlog/completed/` with `status: Done`. No Design Authority line records the discharge.*
 
 ### Product Authority review (PPA-composability scope only)
 
@@ -327,14 +331,14 @@ The "use the existing Soul DID model" answer. **Rejected for the homogeneous-sub
 
 ## 9. Implementation Plan
 
-- [ ] Soul DID schema addition (`variants[]`)
-- [ ] Work Item schema addition (`targetedVariants`)
-- [ ] Admission scorer composition (Sα₁ + Sα₂ variant routing)
-- [ ] Variant inheritance validator (`VariantInheritanceViolation` event)
-- [ ] `Eτ_tessellation_drift` detector extension for variant-scoped scans
-- [ ] InternalAdopter four-product suite as reference implementation (one variant per product, minimum)
-- [ ] Glossary additions (`Variant`, `targetedVariants`, `complianceFloor: inherit`)
-- [ ] Conformance test suite — variant declaration round-trip; admission-scoring composition; inheritance enforcement
+- [x] Soul DID schema addition (`variants[]`)
+- [x] Work Item schema addition (`targetedVariants`)
+- [x] Admission scorer composition (Sα₁ + Sα₂ variant routing)
+- [x] Variant inheritance validator (`VariantInheritanceViolation` event)
+- [x] `Eτ_tessellation_drift` detector extension for variant-scoped scans
+- [x] InternalAdopter four-product suite as reference implementation (one variant per product, minimum)
+- [x] Glossary additions (`Variant`, `targetedVariants`, `complianceFloor: inherit`)
+- [x] Conformance test suite — variant declaration round-trip; admission-scoring composition; inheritance enforcement
 - [ ] Author/update each user-facing doc surface declared in `requiresDocs` (currently `[]` — pending tutorial/runbook decision)
 
 ## 10. Open Questions — resolved (operator walkthrough 2026-05-18)

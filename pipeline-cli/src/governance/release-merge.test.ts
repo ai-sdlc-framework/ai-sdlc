@@ -15,6 +15,7 @@ import {
   jsonContentRefusal,
   jsonDiffPaths,
   tomlContentRefusal,
+  markedVersionLineRefusal,
   isReleaseArtifactPath,
   nonReleaseFiles,
   RELEASE_BOT_EMAIL,
@@ -336,6 +337,7 @@ describe('runReleaseMerge: refusals name the failed check', () => {
   it('unreadable policy', async () => {
     const reason = await refused({}, { policyYaml: null });
     expect(reason).toMatch(/agent-role\.yaml/);
+    expect(reason).toMatch(/first pull request that adds \.ai-sdlc\/ is merged by a person/);
   });
 });
 
@@ -968,5 +970,59 @@ describe('regressions: gh-issue refused, backlog unchanged, release never via th
       expect(r.merged).toBe(false);
     }
     expect(calls.some((c) => c.includes('pr view') || c.includes('pr merge'))).toBe(false);
+  });
+});
+
+describe('SDK version constant files (AISDLC-1342)', () => {
+  const GO = 'sdk-go/aisdlc.go';
+  const PY = 'sdk-python/src/ai_sdlc/__init__.py';
+  const goBase = 'package aisdlc\n\nconst Version = "0.9.0" // x-release-please-version\n';
+  const pyBase = '# doc\n__version__ = "0.3.0"  # x-release-please-version\nA = 1\n';
+  const cfgPath = join(__dirname, '../../../release-please-config.json');
+
+  it('allowlists both paths and every release-please extra-files path', () => {
+    expect(
+      nonReleaseFiles([
+        { path: GO, status: 'modified' },
+        { path: PY, status: 'modified' },
+      ]),
+    ).toEqual([]);
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    for (const [dir, pkg] of Object.entries(cfg.packages) as Array<
+      [string, { 'extra-files'?: Array<string | { path: string }> }]
+    >) {
+      for (const e of pkg['extra-files'] ?? []) {
+        const rel: string = typeof e === 'string' ? e : e.path;
+        const full = rel.startsWith('/') ? rel.slice(1) : `${dir}/${rel}`;
+        expect(isReleaseArtifactPath(full), full).toBe(true);
+      }
+    }
+  });
+
+  it('accepts only the marked version value changing', () => {
+    expect(markedVersionLineRefusal(GO, goBase, goBase.replace('0.9.0', '0.10.0'))).toBeNull();
+    expect(markedVersionLineRefusal(PY, pyBase, pyBase.replace('0.3.0', '0.4.0'))).toBeNull();
+  });
+
+  it('refuses other changes, missing or doubled markers, and non-version values', () => {
+    expect(markedVersionLineRefusal(PY, pyBase, pyBase.replace('A = 1', 'A = 2'))).toMatch(
+      /other than/,
+    );
+    expect(
+      markedVersionLineRefusal(GO, goBase, goBase.replace('0.9.0', '0.10.0') + 'var x = 1\n'),
+    ).toMatch(/other than/);
+    expect(
+      markedVersionLineRefusal(GO, goBase, goBase.replace(' // x-release-please-version', '')),
+    ).toMatch(/exactly one/);
+    expect(markedVersionLineRefusal(GO, 'package a\n', goBase)).toMatch(/exactly one/);
+    expect(markedVersionLineRefusal(GO, goBase, goBase + goBase)).toMatch(/exactly one/);
+    expect(markedVersionLineRefusal(GO, goBase, goBase.replace('0.9.0', 'evil'))).toMatch(
+      /version value/,
+    );
+  });
+
+  it('keeps sdk-go below 1.0 on breaking changes', () => {
+    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+    expect(cfg.packages['sdk-go']['bump-minor-pre-major']).toBe(true);
   });
 });

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { cleanGitEnv } from './runtime/git-env.js';
 import {
   ARTIFACTS_GITIGNORE_ENTRY,
@@ -17,15 +18,63 @@ import {
 } from './runtime-gitignore.js';
 
 describe('runtime gitignore list', () => {
-  it('includes the artifacts directory next to the other runtime paths', () => {
-    expect(RUNTIME_GITIGNORE_PATHS).toEqual([
+  it('names every runtime path the framework writes (AISDLC-1331)', () => {
+    expect([...RUNTIME_GITIGNORE_PATHS]).toEqual([
       '.ai-sdlc/state.db',
       '.ai-sdlc/state/',
       '.ai-sdlc/audit.jsonl',
-      ARTIFACTS_GITIGNORE_ENTRY,
+      '.ai-sdlc/artifacts/',
       '.ai-sdlc/subagent-sessions/',
+      '.ai-sdlc/dispatch/',
+      '.ai-sdlc/transcripts/',
+      '.ai-sdlc/verdicts/',
+      '.ai-sdlc/review-state/',
+      '.ai-sdlc/context-index.db',
+      '.ai-sdlc/context-index.db-wal',
+      '.ai-sdlc/context-index.db-shm',
+      '.ai-sdlc/context/sessions/',
+      '.ai-sdlc/.last-build-sha',
+      '.ai-sdlc/captures-drafts/',
+      '.ai-sdlc/sweep-landed-cache.json',
+      '.active-task',
+      '.worktrees/',
+      'artifacts/_dor/',
+      'artifacts/_capabilities/',
     ]);
     expect(ARTIFACTS_GITIGNORE_ENTRY).toBe('.ai-sdlc/artifacts/');
+  });
+
+  // Entries this repository ignores that are deliberately not in the shared list:
+  // machine-local or monorepo-only, not written in an adopter project.
+  const NAMED_EXCEPTIONS = new Set([
+    '.ai-sdlc/state.db-shm',
+    '.ai-sdlc/state.db-wal',
+    '.ai-sdlc/memory/',
+    '.ai-sdlc/locks/',
+    '.ai-sdlc/runtime/',
+    '.ai-sdlc/knowledge-protected/',
+    '.ai-sdlc/kpi/',
+    '.ai-sdlc/pipeline-builds/',
+    '.ai-sdlc/usage/',
+  ]);
+  // The evaluator-only quarantine under .ai-sdlc/context/ is named by prefix: a test in
+  // pipeline-cli bans spelling its directory outside the eval sources.
+  const EXCEPTION_PREFIXES = ['.ai-sdlc/context/eval-'];
+
+  it("this repository's .gitignore has no .ai-sdlc/ entry outside the list and the named exceptions", () => {
+    const text = readFileSync(fileURLToPath(new URL('../../.gitignore', import.meta.url)), 'utf-8');
+    const shared = new Set(RUNTIME_GITIGNORE_PATHS);
+    const stray = text
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith('.ai-sdlc/') && !l.startsWith('!'))
+      .filter(
+        (l) =>
+          !shared.has(l) &&
+          !NAMED_EXCEPTIONS.has(l) &&
+          !EXCEPTION_PREFIXES.some((x) => l.startsWith(x)),
+      );
+    expect(stray).toEqual([]);
   });
 });
 
@@ -213,10 +262,13 @@ describe('gitignoreCovers without git: broader lines and globs', () => {
 
 describe('missingRuntimeGitignorePaths', () => {
   it('does not report the artifacts entry when a broader line already ignores it', () => {
-    const rest = RUNTIME_GITIGNORE_PATHS.filter((p) => p !== ARTIFACTS_GITIGNORE_ENTRY);
+    const rest = RUNTIME_GITIGNORE_PATHS.filter(
+      (p) => p !== ARTIFACTS_GITIGNORE_ENTRY && !p.startsWith('artifacts/'),
+    );
     expect(missingRuntimeGitignorePaths('artifacts/\n')).toEqual(rest);
-    expect(missingRuntimeGitignorePaths('.ai-sdlc/\n')).toEqual([]);
-    expect(missingRuntimeGitignorePaths('.ai-sdlc/*\n')).toEqual([]);
+    const outsideAiSdlc = RUNTIME_GITIGNORE_PATHS.filter((p) => !p.startsWith('.ai-sdlc/'));
+    expect(missingRuntimeGitignorePaths('.ai-sdlc/\n')).toEqual(outsideAiSdlc);
+    expect(missingRuntimeGitignorePaths('.ai-sdlc/*\n')).toEqual(outsideAiSdlc);
   });
 
   it('reports it when `.ai-sdlc/*` is followed by a negation, so the new line lands after it', () => {
@@ -229,7 +281,9 @@ describe('missingRuntimeGitignorePaths', () => {
     expect(missingRuntimeGitignorePaths('artifacts/\n', () => false)).toEqual([
       ...RUNTIME_GITIGNORE_PATHS,
     ]);
-    const rest = RUNTIME_GITIGNORE_PATHS.filter((p) => p !== ARTIFACTS_GITIGNORE_ENTRY);
+    const rest = RUNTIME_GITIGNORE_PATHS.filter(
+      (p) => p !== ARTIFACTS_GITIGNORE_ENTRY && !p.startsWith('artifacts/'),
+    );
     expect(missingRuntimeGitignorePaths('artifacts/\n', () => null)).toEqual(rest);
   });
 
@@ -257,12 +311,9 @@ describe('missingRuntimeGitignorePaths', () => {
     expect(missingRuntimeGitignorePaths(`${rest}\n  ${entry}\n`)).toEqual([entry]);
   });
 
-  it('reports only the artifacts entry for a repository initialised before it existed', () => {
+  it('reports every later entry for a repository initialised before it existed', () => {
     const old = `${RUNTIME_GITIGNORE_SENTINEL}\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n`;
-    expect(missingRuntimeGitignorePaths(old)).toEqual([
-      ARTIFACTS_GITIGNORE_ENTRY,
-      '.ai-sdlc/subagent-sessions/',
-    ]);
+    expect(missingRuntimeGitignorePaths(old)).toEqual(RUNTIME_GITIGNORE_PATHS.slice(3));
   });
 });
 

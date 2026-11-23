@@ -77,10 +77,16 @@ function readJson<T>(file: string): T | undefined {
 /** Event record names: `<repo>#<pr>@<sha>:<kind>:<delivery>.json`, URI encoded. */
 export function eventEntries(
   boardDir: string,
-): { pr: number | null; id: string; mtimeMs: number; file: string }[] {
+): { pr: number | null; repo: string | null; id: string; mtimeMs: number; file: string }[] {
   const dir = eventsDir(boardDir);
   if (!existsSync(dir)) return [];
-  const out: { pr: number | null; id: string; mtimeMs: number; file: string }[] = [];
+  const out: {
+    pr: number | null;
+    repo: string | null;
+    id: string;
+    mtimeMs: number;
+    file: string;
+  }[] = [];
   for (const f of readdirSync(dir)) {
     if (!f.endsWith('.json')) continue;
     let key: string;
@@ -96,7 +102,14 @@ export function eventEntries(
     } catch {
       continue;
     }
-    out.push({ pr: m && m[1] !== 'none' ? Number(m[1]) : null, id: key, mtimeMs, file: f });
+    const repo = /^([^#]+)#/.exec(key)?.[1] ?? null;
+    out.push({
+      pr: m && m[1] !== 'none' ? Number(m[1]) : null,
+      repo,
+      id: key,
+      mtimeMs,
+      file: f,
+    });
   }
   return out;
 }
@@ -142,34 +155,29 @@ export function pruneEvents(
   return deleted;
 }
 
-/** The newest event id recorded for a PR; empty when none. */
-export function latestEventId(boardDir: string, pr: number): string {
-  const mine = eventEntries(boardDir).filter((e) => e.pr === pr);
-  mine.sort((a, b) => a.mtimeMs - b.mtimeMs || (a.id < b.id ? -1 : 1));
-  return mine.length > 0 ? mine[mine.length - 1]!.id : '';
-}
-
 /** True when the receiver has run and no event record is newer than `sinceMs`. */
 function quietSince(boardDir: string, sinceMs: number): boolean {
   if (!existsSync(eventsDir(boardDir))) return false;
   return eventEntries(boardDir).every((e) => e.mtimeMs <= sinceMs);
 }
 
-/** Head sha, newest event id and a digest of the check rollup. */
+/** Head sha and a digest of the check rollup; a new webhook event alone does not change it (AISDLC-1380). */
 export function prFingerprint(
-  boardDir: string,
+  _boardDir: string,
   p: { number: number; headRefOid?: string; statusCheckRollup?: unknown },
 ): string {
   const digest = createHash('sha256')
     .update(JSON.stringify(p.statusCheckRollup ?? null))
     .digest('hex')
     .slice(0, 16);
-  return `${p.headRefOid ?? ''}|${latestEventId(boardDir, p.number)}|${digest}`;
+  return `${p.headRefOid ?? ''}|${digest}`;
 }
 
 interface Refusal {
   fingerprint: string;
   at: string;
+  /** Why the merge gate refused (AISDLC-1352); absent on records written before it. */
+  reason?: string;
 }
 
 /** True when `pr` was refused with this same fingerprint less than 15 minutes ago. */
@@ -190,15 +198,25 @@ export function recordRefusal(
   pr: number,
   fingerprint: string | undefined,
   now: Date = clock(),
+  reason?: string,
 ): void {
   const all = readJson<Record<string, Refusal>>(fingerprintPath(boardDir)) ?? {};
   if (fingerprint === undefined) {
     if (!(String(pr) in all)) return;
     delete all[String(pr)];
   } else {
-    all[String(pr)] = { fingerprint, at: now.toISOString() };
+    all[String(pr)] = {
+      fingerprint,
+      at: now.toISOString(),
+      ...(reason ? { reason } : {}),
+    };
   }
   writeJson(fingerprintPath(boardDir), all);
+}
+
+/** The stored merge refusal reason for `pr`, if it was refused and not since landed. */
+export function readRefusalReason(boardDir: string, pr: number): string | undefined {
+  return readJson<Record<string, Refusal>>(fingerprintPath(boardDir))?.[String(pr)]?.reason;
 }
 
 function listArgs(args: readonly string[]): { draftOnly: boolean; fields: string[] } | undefined {

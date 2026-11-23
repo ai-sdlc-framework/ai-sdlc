@@ -1043,3 +1043,70 @@ describe('AISDLC-1271: installed runtime dependencies are checked against the pl
     assert.equal(existsSync(join(dir, '.heal-ran')), false);
   });
 });
+
+// ── AISDLC-1327: the install entry of the project beats the cache walk ───────
+
+describe('AISDLC-1327: install entry of the project', () => {
+  function setup(name, registry) {
+    const home = join(tmpDir, `${name}-home`);
+    const cwd = join(tmpDir, `${name}-cwd`);
+    mkdirSync(cwd, { recursive: true });
+    const cache = join(home, '.claude/plugins/cache/mp/ai-sdlc');
+    for (const v of ['1.0.0', '2.0.0']) createFakePipelineBin(join(cache, v, PIPELINE_CLI_REL));
+    if (registry) {
+      writeFileSync(
+        join(home, '.claude/plugins/installed_plugins.json'),
+        JSON.stringify(registry(cache, cwd)),
+      );
+    }
+    return { home, cwd, cache };
+  }
+  const run = (home, cwd) =>
+    runScript({ CLAUDE_PLUGIN_DIR: '', CLAUDE_PLUGIN_ROOT: '', HOME: home }, cwd);
+
+  it('returns the lower version the project entry names', () => {
+    const { home, cwd, cache } = setup('entry-low', (c, p) => ({
+      version: 2,
+      plugins: {
+        'ai-sdlc@mp': [
+          { scope: 'project', projectPath: realpathSync(p), installPath: join(c, '1.0.0') },
+        ],
+      },
+    }));
+    const r = run(home, cwd);
+    assert.equal(r.exitCode, 0);
+    assert.equal(normPath(r.stdout), normPath(join(cache, '1.0.0', PIPELINE_CLI_REL)));
+  });
+
+  it('walks the cache and says no entry matched when the registry has no matching entry', () => {
+    const { home, cwd, cache } = setup('entry-none', (c) => ({
+      plugins: {
+        'ai-sdlc@mp': [
+          { scope: 'project', projectPath: '/elsewhere', installPath: join(c, '1.0.0') },
+        ],
+      },
+    }));
+    const r = run(home, cwd);
+    assert.equal(normPath(r.stdout), normPath(join(cache, '2.0.0', PIPELINE_CLI_REL)));
+    assert.match(r.stderr, /no install entry matched/);
+  });
+
+  it('walks the cache and says no entry matched without a registry file', () => {
+    const { home, cwd, cache } = setup('entry-nofile', null);
+    const r = run(home, cwd);
+    assert.equal(normPath(r.stdout), normPath(join(cache, '2.0.0', PIPELINE_CLI_REL)));
+    assert.match(r.stderr, /no install entry matched/);
+  });
+
+  it('skips an entry whose installPath does not exist', () => {
+    const { home, cwd, cache } = setup('entry-missing', (c, p) => ({
+      plugins: {
+        'ai-sdlc@mp': [
+          { scope: 'project', projectPath: realpathSync(p), installPath: join(c, '0.1.0') },
+        ],
+      },
+    }));
+    const r = run(home, cwd);
+    assert.equal(normPath(r.stdout), normPath(join(cache, '2.0.0', PIPELINE_CLI_REL)));
+  });
+});

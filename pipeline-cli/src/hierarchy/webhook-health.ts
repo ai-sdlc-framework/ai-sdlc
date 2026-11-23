@@ -21,12 +21,24 @@ import { nextDecisionIdDurable, persistDecisionLog } from '../decisions/remote-p
 import { desktopNotice } from './stall-notice.js';
 import type { CommandRunner } from './types.js';
 import type { WebhookClass, WebhookHealth } from './webhook.js';
+import {
+  REPAIR_MAX_ATTEMPTS,
+  REPAIR_MIN_GAP_MIN,
+  REPAIR_WINDOW_MIN,
+  type RepairAttempt,
+  type WebhookRepair,
+} from './webhook-repair.js';
 
 const STATE_FILE = 'webhook-health.json';
 
 /** The command that restarts the feed, as documented in docs/operations/cli-hierarchy.md. */
-export const WEBHOOK_FIX_COMMAND =
-  'gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:8765/webhooks/github';
+const DEFAULT_WEBHOOK_PORT = 8765;
+
+/** The restart command forwarding to `port` (the receiver's recorded port, else the default). */
+export const webhookFixCommand = (port: number = DEFAULT_WEBHOOK_PORT): string =>
+  `gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:${port}/webhooks/github`;
+
+export const WEBHOOK_FIX_COMMAND = webhookFixCommand();
 
 export interface WebhookEscalationInput {
   /** Episode key. */
@@ -48,6 +60,8 @@ export interface WebhookHealthTickDeps {
   closeEpisode?: (decisionId: string | undefined, note: string) => void;
   /** The stall-notice channel (desktop notification and digest line). */
   notify?: (message: string) => void;
+  /** Self-repair of the feed, tried before any decision is opened (AISDLC-1299). */
+  repair?: WebhookRepair;
 }
 
 interface State {
@@ -55,6 +69,10 @@ interface State {
   /** Start of the open episode (class other than healthy). */
   since?: string;
   decisionId?: string;
+  /** A decision was filed (or attempted) in this episode. */
+  escalated?: boolean;
+  /** Repair attempts of this episode inside the rate-limit window (AISDLC-1299). */
+  attempts?: RepairAttempt[];
 }
 
 export interface WebhookHealthTickResult {
@@ -72,50 +90,133 @@ function readState(boardDir: string): State {
 }
 
 /** The escalation body: the cause, the fix and who runs it. */
-export function formatWebhookEscalationBody(h: WebhookHealth): string {
+export function formatWebhookEscalationBody(
+  h: WebhookHealth,
+  repairs?: { attempts: RepairAttempt[]; logTail?: string; reason?: string },
+): string {
+  const tried = repairs
+    ? [
+        repairs.attempts.length > 0
+          ? `Self-repair tried ${repairs.attempts.length} time(s) and the feed is still not delivering: ${repairs.attempts
+              .map(
+                (a) =>
+                  `${a.at} ${a.action} ${a.ok ? 'ok' : 'failed'}${a.detail ? ` (${a.detail})` : ''}`,
+              )
+              .join('; ')}.`
+          : 'Self-repair did not run.',
+        ...(repairs.reason ? [`Reason: ${repairs.reason}.`] : []),
+        `Forwarder log tail (secrets redacted): ${repairs.logTail || '(empty)'}`,
+      ]
+    : [];
   return [
     `Webhook health is ${h.class}: ${h.reasons.join('; ') || 'see signals'}.`,
     `Signals: ${JSON.stringify(h.signals)}.`,
     'Dispatch keeps working by polling gh (about 2,700 calls an hour), which is the rate-limit pressure.',
-    `Fix (operator only; it touches your GitHub account and network): restart the feed with \`${WEBHOOK_FIX_COMMAND}\` ` +
+    `Self-repair restarts the forwarder and removes its stale hook on its own; it could not restore deliveries. To fix by hand, restart the feed with \`${webhookFixCommand(h.signals.receiverPort)}\` ` +
       'and record it with `cli-hierarchy webhook up --feed gh-forward`, or re-register the repository hook ' +
       '(secret equal to AI_SDLC_WEBHOOK_SECRET). If the receiver itself is down run `cli-hierarchy webhook up`.',
+    ...tried,
   ].join(' ');
 }
+
+const withinMin = (iso: string, nowMs: number, min: number): boolean =>
+  nowMs - Date.parse(iso) < min * 60_000;
 
 /** Run once per tick. Its failure must not stop the loop; the caller wraps it. */
 export function runWebhookHealthTick(deps: WebhookHealthTickDeps): WebhookHealthTickResult {
   const h = deps.health();
   if (!h) return {};
   const state = readState(deps.boardDir);
-  if (h.class === state.class) return { health: h };
-
-  const next: State = { class: h.class };
   const nowIso = deps.now().toISOString();
-  let text: string;
+  const nowMs = deps.now().getTime();
+
+  // Unverified says nothing either way: it neither opens nor closes an episode (AISDLC-1345).
+  if (h.class === 'unverified') return { health: h };
+
   if (h.class === 'healthy') {
+    if (h.class === state.class) return { health: h };
+    // Close only on proof: an event received after the episode started.
+    const at = h.signals.lastEventAt ? Date.parse(h.signals.lastEventAt) : NaN;
+    if (state.since && !(at > Date.parse(state.since))) return { health: h };
     // Every open webhook-health record is answered, not only the one this file remembers.
+    // The attempt count is not carried over: a delivery resets it.
     deps.closeEpisode?.(state.decisionId, `webhook health recovered at ${nowIso}`);
-    text = `webhook health: healthy again (was ${state.class} since ${state.since ?? 'unknown'})`;
-  } else {
-    next.since = state.since ?? nowIso;
-    if (state.decisionId) next.decisionId = state.decisionId;
-    const reason = h.reasons.join('; ');
-    text = `webhook health: ${state.class} to ${h.class}: ${reason}`;
-    if (state.class === 'healthy') {
-      const id = deps.escalate?.({
-        since: next.since,
-        class: h.class,
-        summary: `Webhook health ${h.class}: ${reason}`,
-        body: formatWebhookEscalationBody(h),
-      });
-      if (id) next.decisionId = id;
-      deps.notify?.(`Webhook ${h.class}: ${reason}`);
+    writeState(deps.boardDir, { class: 'healthy' });
+    return {
+      health: h,
+      report: {
+        text: `webhook health: healthy again (was ${state.class} since ${state.since ?? 'unknown'})`,
+      },
+    };
+  }
+
+  const filed = !!(state.escalated || state.decisionId);
+  const next: State = { class: h.class, since: state.since ?? nowIso };
+  if (state.decisionId) next.decisionId = state.decisionId;
+  if (filed) next.escalated = true;
+  const attempts = (state.attempts ?? []).filter((a) => withinMin(a.at, nowMs, REPAIR_WINDOW_MIN));
+  if (attempts.length > 0) next.attempts = attempts;
+
+  // Repair first; a decision only once the attempts are used up or the repair is blocked.
+  let escalate = !filed;
+  let reason: string | undefined;
+  if (deps.repair?.eligible(h)) {
+    escalate = false;
+    const last = attempts[attempts.length - 1];
+    if (last?.action === 'blocked') {
+      escalate = !filed;
+      reason = last.detail;
+    } else if (attempts.length >= REPAIR_MAX_ATTEMPTS) {
+      if (!last || !withinMin(last.at, nowMs, REPAIR_MIN_GAP_MIN)) {
+        escalate = !filed;
+        reason = `${REPAIR_MAX_ATTEMPTS} repairs in ${REPAIR_WINDOW_MIN} minutes did not restore deliveries`;
+      }
+    } else if (!last || !withinMin(last.at, nowMs, REPAIR_MIN_GAP_MIN)) {
+      const attempt = deps.repair.run();
+      attempts.push(attempt);
+      next.attempts = attempts;
+      if (attempt.action === 'blocked') {
+        escalate = !filed;
+        reason = attempt.detail;
+      }
     }
   }
-  mkdirSync(deps.boardDir, { recursive: true });
-  writeFileSync(path.join(deps.boardDir, STATE_FILE), JSON.stringify(next) + '\n');
-  return { health: h, report: { text } };
+
+  const changed = h.class !== state.class;
+  const reasonText = h.reasons.join('; ');
+  const repoTag = h.repo ? ` (${h.repo})` : '';
+  if (escalate) {
+    const id = deps.escalate?.({
+      since: next.since!,
+      class: h.class,
+      summary: `Webhook health ${h.class}${repoTag}: ${reasonText}`,
+      body: formatWebhookEscalationBody(
+        h,
+        deps.repair?.eligible(h)
+          ? {
+              attempts,
+              logTail: deps.repair.logTail(),
+              ...(reason ? { reason } : {}),
+            }
+          : undefined,
+      ),
+    });
+    next.escalated = true;
+    if (id) next.decisionId = id;
+    deps.notify?.(`Webhook ${h.class}${repoTag}: ${reasonText}`);
+  }
+  writeState(deps.boardDir, next);
+  return {
+    health: h,
+    ...(changed
+      ? { report: { text: `webhook health: ${state.class} to ${h.class}: ${reasonText}` } }
+      : {}),
+  };
+}
+
+function writeState(boardDir: string, state: State): void {
+  mkdirSync(boardDir, { recursive: true });
+  writeFileSync(path.join(boardDir, STATE_FILE), JSON.stringify(state) + '\n');
 }
 
 /** Scope of the escalation; one open record at a time, the episode start lives in the body. */
@@ -156,7 +257,7 @@ export function catalogWebhookEscalation(
             options: [
               {
                 id: 'restart-feed',
-                description: 'Operator restarts the forwarder or re-registers the hook',
+                description: 'Restart the forwarder or re-register the hook',
               },
               { id: 'accept-poll-only', description: 'Stay poll-only and accept the gh call rate' },
             ],

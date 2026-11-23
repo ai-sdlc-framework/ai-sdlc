@@ -11,6 +11,7 @@ import {
   discoverGateTests,
   findUnscannedTests,
   runGateTests,
+  selectGateTests,
   GATE_TEST_DIRS,
   KNOWN_RED,
 } from './run-gate-tests.mjs';
@@ -129,5 +130,46 @@ describe('KNOWN_RED ratchet (AISDLC-805)', () => {
     const { files } = discoverGateTests(ROOT, GATE_TEST_DIRS, KNOWN_RED);
     assert.ok(files.includes('scripts/run-gate-tests.test.mjs'));
     assert.ok(files.length >= 50, `suspiciously few gate tests: ${files.length}`);
+  });
+});
+
+describe('selectGateTests (AISDLC-1377, DEC-0423)', () => {
+  const files = [
+    'scripts/check-a.test.mjs',
+    'scripts/check-b.test.mjs',
+    'scripts/check-c.test.mjs',
+  ];
+  const sources = {
+    'scripts/check-a.test.mjs': "import './check-a.mjs'",
+    'scripts/check-b.test.mjs': "readFile('docs/operations/guarded.md')",
+    'scripts/check-c.test.mjs': 'nothing',
+  };
+  const read = (f) => sources[f];
+
+  test('a change under a gate guarded path runs that gate and no unrelated gate', () => {
+    assert.deepEqual(selectGateTests('/r', ['scripts/check-a.mjs'], files, read), [files[0]]);
+    assert.deepEqual(selectGateTests('/r', ['docs/operations/guarded.md'], files, read), [
+      files[1],
+    ]);
+  });
+  test('a changed gate test selects itself', () => {
+    assert.deepEqual(selectGateTests('/r', ['scripts/check-c.test.mjs'], files, read), [files[2]]);
+  });
+  test('an unrelated change selects no gate', () => {
+    assert.deepEqual(selectGateTests('/r', ['pipeline-cli/src/z.ts'], files, read), []);
+  });
+  for (const trigger of [
+    'package.json',
+    'pipeline-cli/package.json',
+    'pnpm-lock.yaml',
+    'scripts/run-gate-tests.mjs',
+  ]) {
+    test(`${trigger} runs every gate`, () => {
+      assert.equal(selectGateTests('/r', [trigger], files, read), null);
+    });
+  }
+  test('no change list runs every gate', () => {
+    assert.equal(selectGateTests('/r', [], files, read), null);
+    assert.equal(selectGateTests('/r', null, files, read), null);
   });
 });

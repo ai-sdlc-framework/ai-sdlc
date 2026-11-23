@@ -4,6 +4,7 @@
  */
 
 import { listBoard, peekQueue } from '../dispatch/board.js';
+import { readHold, type Hold } from './hold.js';
 import { listHeld } from './held-triage.js';
 import { listUnbriefed } from './auto-brief.js';
 import type { QueueCounts } from '../dispatch/types.js';
@@ -12,10 +13,11 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { SWEEP_STATUS_FILE, type SweepStatusRecord } from '../steps/00-sweep.js';
 import { loadPrLifecycleConfig } from './pr-lifecycle-config.js';
-import { AGING_WINDOW_MS, listLanding, recordLastActionAt } from './reconcile.js';
+import { AGING_WINDOW_MS, listLanding, readDocsSitePin, recordLastActionAt } from './reconcile.js';
 import { formatPrTable } from './pr-rows.js';
 import { paneNodeVersion, readNvmrc, versionMatches } from './node-pin.js';
 import { hasLaunchEnv } from './up.js';
+import { loadOperationalPolicy, mergeOffLines } from './operational.js';
 import {
   callsPerSession,
   ghCallsPath,
@@ -42,6 +44,7 @@ import {
 import { readLoopState } from './dispatch-loop.js';
 import { formatLastTick, lastTickInfo } from './host-liveness.js';
 import {
+  formatWebhookForeign,
   formatWebhookStatus,
   webhookHealth,
   webhookStatus,
@@ -57,6 +60,7 @@ import {
   type DrainStallRecord,
   type StuckPrRow,
 } from './drain-stall.js';
+import { plannerFallbackLine } from './model-fallback.js';
 import { budgetStatus, formatBudget, type BudgetStatus } from './budget.js';
 import { dynamicExecutors } from './ephemeral-tick.js';
 import { executorCap, formatExecutorCap, type ExecutorCap } from './executor-cap.js';
@@ -121,6 +125,12 @@ export interface StatusResult {
   contextThresholds?: Record<HierarchyRole, number>;
   /** Token budget pace from `usage.json` (AISDLC-1072); absent when never sampled. */
   budget?: BudgetStatus;
+  /** Planner model fallback line (AISDLC-1364); absent when no fallback is active. */
+  modelFallback?: string;
+  /** AISDLC-1316: recorded docs site pin state when the last bump run was skipped or failed. */
+  docsSitePin?: { state: 'skipped' | 'failed'; runUrl?: string };
+  /** The board hold (AISDLC-1319): who set it, since when and why; absent when not held. */
+  hold?: Hold;
   /** Spawn cap: min of executors.max and the pacer allowance (AISDLC-1076). */
   executorCap?: ExecutorCap;
   /** Open task PRs against the limit that holds new tasks (AISDLC-1189). */
@@ -156,6 +166,8 @@ export interface StatusResult {
   spawnErrors?: { taskId: string; error: string }[];
   /** Worktree directories, how many the last sweep could not remove, and the alarm ceiling (AISDLC-1108). */
   worktrees?: { count: number; removable: number; ceiling: number };
+  /** AISDLC-1351: why this board will never merge, one line per cause; absent when merging is configured. */
+  mergeOff?: string[];
 }
 
 /** Count `.worktrees/*` directories and read the last sweep's unremoved-removable count. */
@@ -193,7 +205,10 @@ export function formatWorktrees(w: StatusResult['worktrees']): string[] {
 }
 
 /** Join the roster with the registry, tmux and the board. */
-export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
+export function hierarchyStatus(
+  deps: HierarchyDeps,
+  opts: { rosterOnly?: boolean } = {},
+): StatusResult {
   const checked = readRosterChecked(deps.boardDir);
   const { rejected } = checked;
   let roster = checked.roster;
@@ -249,6 +264,8 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* an unreadable usage file must not break status */
   }
+  const modelFallbackNow = plannerFallbackLine(deps);
+  const boardHold = readHold(deps.boardDir) ?? undefined;
   let resourcesNow: ReturnType<HierarchyDeps['resources']> | undefined;
   try {
     resourcesNow = deps.resources();
@@ -366,7 +383,10 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   }
   let quota: Quota | undefined;
   try {
-    const r = deps.run('gh', ['api', 'rate_limit'], { cwd: deps.cwd });
+    // AISDLC-1380: roster-only callers never print the quota; skip the gh call.
+    const r = opts.rosterOnly
+      ? undefined
+      : deps.run('gh', ['api', 'rate_limit'], { cwd: deps.cwd });
     if (r?.status === 0) quota = parseQuota(r.stdout);
   } catch {
     /* gh missing or offline */
@@ -384,6 +404,7 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
   } catch {
     /* an unreadable board must not break status */
   }
+  const docsPin = readDocsSitePin(deps.boardDir);
   const lastTick = lastTickInfo(deps.boardDir, deps.now());
   const spawnErrors = readLoopState(deps.boardDir).lastSpawnErrors ?? [];
   const nowMs = deps.now().getTime();
@@ -410,8 +431,17 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
       };
     })
     .sort((a, b) => b.waitMs - a.waitMs);
+  let mergeOff: string[] = [];
+  try {
+    mergeOff = mergeOffLines(
+      (deps.loadPolicy ?? ((r: string) => loadOperationalPolicy(r, r)))(deps.cwd),
+    );
+  } catch {
+    /* an unreadable policy must not stop status */
+  }
   return {
     rows,
+    ...(mergeOff.length > 0 ? { mergeOff } : {}),
     ...(routedToPlanner.length > 0 ? { routedToPlanner } : {}),
     ...(agedPrs.length > 0 ? { agedPrs } : {}),
     prTable: formatPrTable(deps.boardDir, nowMs, loadPrLifecycleConfig(deps.cwd).maxCiRounds),
@@ -431,6 +461,11 @@ export function hierarchyStatus(deps: HierarchyDeps): StatusResult {
     ...(lastTick ? { lastTick } : {}),
     contextThresholds: thresholdsByRole,
     ...(budgetNow ? { budget: budgetNow } : {}),
+    ...(modelFallbackNow ? { modelFallback: modelFallbackNow } : {}),
+    ...(boardHold ? { hold: boardHold } : {}),
+    ...(docsPin && docsPin.state !== 'ok'
+      ? { docsSitePin: { ...docsPin, state: docsPin.state } }
+      : {}),
     executorCap: capNow,
     openPrs: openPrState(deps.boardDir, deps.env),
     ...(unbriefed.length > 0 ? { unbriefed } : {}),
@@ -465,7 +500,13 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ]
     : [];
   const budgetLine = [
+    ...(result.hold
+      ? [
+          `HOLD by ${result.hold.by || 'unknown'} since ${result.hold.since || 'unknown'}: ${result.hold.reason}`,
+        ]
+      : []),
     ...(result.budget ? [formatBudget(result.budget)] : []),
+    ...(result.modelFallback ? [result.modelFallback] : []),
     ...(result.executorCap ? [formatExecutorCap(result.executorCap)] : []),
     ...(result.openPrs ? [formatOpenPrs(result.openPrs)] : []),
   ];
@@ -490,6 +531,11 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
           ),
         ]
       : [];
+  const docsPinLine = result.docsSitePin
+    ? [
+        `docs site pin: ${result.docsSitePin.state}${result.docsSitePin.runUrl ? ` (${result.docsSitePin.runUrl})` : ''}; the website was not updated by the last bump run`,
+      ]
+    : [];
   const unownedLine = `unowned PRs: ${result.unowned ?? 0}`;
   const agedLines = (result.agedPrs ?? []).map(
     (a) =>
@@ -508,6 +554,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       'no sessions in the roster',
       ...dynamicLines,
       formatWebhookStatus(result.webhook, result.webhookHealth),
+      ...formatWebhookForeign(result.webhookHealth),
       formatSchedulerStatus(result.scheduler),
       ...formatWorktrees(result.worktrees),
       formatLastTick(result.lastTick),
@@ -518,6 +565,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ...heldLines,
       ...stallLines,
       ...stuckLines,
+      ...docsPinLine,
       unownedLine,
       ...agedLines,
       ...routedLines,
@@ -595,15 +643,18 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
     '',
     `board: ${queued} queued, ${inflight} inflight, ${done} done, ${failed} failed`,
     formatWebhookStatus(result.webhook, result.webhookHealth),
+    ...formatWebhookForeign(result.webhookHealth),
     formatSchedulerStatus(result.scheduler),
     ...formatWorktrees(result.worktrees),
     formatLastTick(result.lastTick),
     ...thresholds,
     ...budgetLine,
+    ...(result.mergeOff ?? []),
     ...unbriefed,
     ...blockedLines,
     ...heldLines,
     ...stallLines,
+    ...docsPinLine,
     unownedLine,
     ...agedLines,
     ...routedLines,

@@ -54,6 +54,9 @@ import { validate, enforce, PipelineBuilder } from '@ai-sdlc/reference';
 | [Telemetry](telemetry.md) | `@ai-sdlc/reference` | OpenTelemetry + structured logging | `withSpan`, `createConsoleLogger`, `createBufferLogger` |
 | [Security](security.md) | `@ai-sdlc/reference` | Enterprise security primitives | `Sandbox`, `KillSwitch`, `JITCredentialIssuer`, `ApprovalWorkflow` |
 | [Compliance](compliance.md) | `@ai-sdlc/reference` | Regulatory framework coverage | `checkCompliance`, `checkAllFrameworks`, `getAllControlIds` |
+| [Capture CLI](capture.md) | `pipeline-cli` | RFC-0024 `cli-capture`, `cli-capture-lifecycle`, `capture-config.yaml` | `file`, `submit`, `tick`, `show-config` |
+| [Compliance Audit](compliance-audit.md) | `pipeline-cli` | RFC-0022 `cli-compliance-audit`, `compliance.yaml` | `export`, `dry-run`, `validate-manifest` |
+| [Quality Monitoring](quality-monitoring.md) | `pipeline-cli` | RFC-0025 `cli-quality`, `quality-monitoring.yaml` | `report-upstream`, `severity-weights` |
 
 ## Resource Types
 

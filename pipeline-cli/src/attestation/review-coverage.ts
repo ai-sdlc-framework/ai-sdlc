@@ -41,6 +41,21 @@ export function computeRequiredReviewers(input: CoverageInput): RequiredReviewer
   };
 }
 
+/** Where the review ran: the same-repo pipeline, or the untrusted-PR clean-room sandbox. */
+export type ReviewOrigin = 'pipeline' | 'clean-room';
+
+/**
+ * AISDLC-1321: the required reviewers for a head, by where the review ran. A clean-room review
+ * always runs the three UCVG reviewers, so its set is the three-reviewer set whatever the paths;
+ * a pipeline head keeps the diff-derived set. The writer and the checker both call this.
+ */
+export function requiredReviewersFor(
+  origin: ReviewOrigin,
+  changedPaths: readonly string[] | null | undefined,
+): RequiredReviewers {
+  return computeRequiredReviewers({ changedPaths: origin === 'clean-room' ? null : changedPaths });
+}
+
 export interface Coverage {
   policy: string;
   required: string[];

@@ -50,7 +50,7 @@ function modelFamily(model: string): string | null {
  * alias, so an entry of the same family (the alias itself or a pinned id)
  * counts; the lowest such index is the floor. -1 when none is present.
  */
-function securityFloorIndex(strength: string[]): number {
+export function securityFloorIndex(strength: string[]): number {
   const def = DEFAULT_ROLE_MODELS[SECURITY_REVIEWER_ROLE];
   const family = modelFamily(def);
   return strength.findIndex((s) => s === def || (family !== null && modelFamily(s) === family));

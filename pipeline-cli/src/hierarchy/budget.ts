@@ -5,8 +5,8 @@
  * credential (login keychain) and one GET of the usage endpoint. The tick samples it at most
  * once per 5 minutes into `<board>/usage.json` (a 24-hour ring). The pacer holds new claims
  * (hold reason `budget: ...`) while a window's burn is above the straight line from the
- * window start to 100 percent at its reset, plus a margin, and lifts the hold when the burn
- * falls under the line minus the margin. The token is never printed, logged or stored.
+ * window start to 100 percent at its reset, plus a margin, and lifts its own hold on the first
+ * tick where no window is above its line by more than its margin (AISDLC-1319). The token is never printed, logged or stored.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -409,8 +409,17 @@ export async function runBudgetPacer(boardDir: string, deps: UsageDeps): Promise
     });
     return { sampled, set: reason };
   }
-  if (budgetHeld && paces.every((p) => p.ahead < -p.margin)) {
-    clearHold(boardDir, 'pacer', nowDate.toISOString());
+  if (budgetHeld) {
+    // AISDLC-1319: no window is above its line plus margin; inside the band the executor cap paces the drain.
+    clearHold(boardDir, 'pacer', nowDate.toISOString(), {
+      windows: paces.map((p) => ({
+        name: p.name,
+        utilization: p.utilization,
+        line: p.line,
+        ahead: p.ahead,
+        margin: p.margin,
+      })),
+    });
     return { sampled, lifted: held.reason };
   }
   return { sampled };

@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { loadConfig, resetStagesDeprecationWarning } from '../../config.js';
 import { parse as parseYaml } from 'yaml';
 import { validate, validateUsageConfig } from '@ai-sdlc/reference';
-import { PIPELINE_YAML } from './init.js';
+import { REQUIRED_CONFIG_MANIFEST } from '@ai-sdlc/pipeline-cli/config-manifest';
 import {
   BASELINE_WORKFLOW_TEMPLATES,
   SIGNAL_INGESTION_CONFIG_STUB,
@@ -32,6 +32,11 @@ import {
   loadSignalIngestionConfig,
   DEFAULT_SIGNAL_INGESTION_CONFIG,
 } from '../../signal-ingestion/config.js';
+
+const PIPELINE_YAML = REQUIRED_CONFIG_MANIFEST.find((e) => e.id === 'pipeline')!.render({
+  org: 'acme',
+  repo: 'widgets',
+});
 
 describe('AISDLC-245.5 — init pipeline.yaml template schema validation', () => {
   it('PIPELINE_YAML template parses as YAML', () => {

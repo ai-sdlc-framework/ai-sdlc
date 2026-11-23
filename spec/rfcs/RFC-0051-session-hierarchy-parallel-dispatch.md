@@ -1,8 +1,8 @@
 ---
 id: RFC-0051
 title: Session Hierarchy for Parallel Dispatch (planner, operator-dispatch, executors)
-status: Approved
-lifecycle: Signed Off
+status: Implemented
+lifecycle: Implemented
 author: 'Dominique Legault'
 created: 2026-09-30
 updated: 2026-09-30
@@ -11,6 +11,16 @@ requires: []
 assumes: [RFC-0012, RFC-0035, RFC-0041, RFC-0048, RFC-0049, RFC-0050]
 requiresDocs:
   - operator-runbook
+  - concept
+runtimeEvidence:
+  - capability: hierarchy.board
+    status: live
+    evidence: 'cli-hierarchy status 2026-11-18: board 226 done, 12 queued, 1 inflight (AISDLC-1323 itself claimed through the board); .ai-sdlc/dispatch/canary-runs/run-1795044654.json status pass'
+    date: '2026-11-18'
+  - capability: hierarchy.clear
+    status: not-applicable
+    evidence: 'RFC-0059 (Signed Off) amends the executor lifecycle: executors are ephemeral, spawned per task and terminated on verdict, so there is no standing executor to clear in the default mode; canary run run-1795044654 passed through the executorCleared stage'
+    date: '2026-11-18'
 ---
 
 # RFC-0051: Session Hierarchy for Parallel Dispatch (planner, operator-dispatch, executors)

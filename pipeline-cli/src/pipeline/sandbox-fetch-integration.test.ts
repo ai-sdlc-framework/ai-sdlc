@@ -1,4 +1,7 @@
 /**
+ * AISDLC-1296: the fixture is a pnpm workspace (packages a and b) whose root test exits 1,
+ * and b imports the build output of a; it proves pnpm, the build and the package scope.
+ *
  * AISDLC-1291 AC-6 — gated integration test for the fetch + run container pair.
  *
  * A fixture repository with a pnpm lockfile, one dependency that ships a native
@@ -35,19 +38,59 @@ describe.skipIf(!ENABLED)('fetch container + run container (AISDLC-1291 AC-6)', 
             name: 'fetch-fixture',
             version: '1.0.0',
             private: true,
-            scripts: { test: 'node --test test/' },
-            devDependencies: { esbuild: '0.24.2' },
+            // The root test cannot pass: only the per-package scope can.
+            scripts: { build: 'pnpm -r build', test: 'exit 1' },
+            devDependencies: { esbuild: '0.24.2', 'gyp-fixture': 'file:./gyp-fixture' },
+            pnpm: { onlyBuiltDependencies: ['gyp-fixture'] },
           },
           null,
           2,
         ),
       );
-      mkdirSync(join(dir, 'test'));
+      writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - a\n  - b\n');
+      // AISDLC-1294: an install script that runs node-gyp needs an executable /tmp in the fetch container.
+      mkdirSync(join(dir, 'gyp-fixture'));
+      writeFileSync(
+        join(dir, 'gyp-fixture', 'package.json'),
+        JSON.stringify({
+          name: 'gyp-fixture',
+          version: '1.0.0',
+          scripts: { install: 'node-gyp --version' },
+        }),
+      );
+      // Package a builds dist/; package b imports that build output (AISDLC-1296).
+      mkdirSync(join(dir, 'a', 'test'), { recursive: true });
+      mkdirSync(join(dir, 'b', 'test'), { recursive: true });
+      writeFileSync(
+        join(dir, 'a', 'package.json'),
+        JSON.stringify({
+          name: 'pkg-a',
+          version: '1.0.0',
+          scripts: {
+            build:
+              "node -e \"require('fs').mkdirSync('dist',{recursive:true});require('fs').writeFileSync('dist/index.js','module.exports=42')\"",
+            test: 'node --test test/',
+          },
+        }),
+      );
+      writeFileSync(
+        join(dir, 'b', 'package.json'),
+        JSON.stringify({
+          name: 'pkg-b',
+          version: '1.0.0',
+          scripts: { test: 'node --test test/' },
+        }),
+      );
       // Executes the native esbuild binary: fails if the prepared tree is not runnable.
       writeFileSync(
-        join(dir, 'test', 'a.test.js'),
+        join(dir, 'a', 'test', 'a.test.js'),
         "const t=require('node:test');const a=require('node:assert');\n" +
           "t('native binary runs',()=>{a.ok(require('esbuild').transformSync('let x=1',{}).code.includes('let x'));});\n",
+      );
+      writeFileSync(
+        join(dir, 'b', 'test', 'b.test.js'),
+        "const t=require('node:test');const a=require('node:assert');\n" +
+          "t('imports the build of a',()=>{a.strictEqual(require('../../a/dist/index.js'),42);});\n",
       );
       execFileSync('pnpm', ['install', '--lockfile-only'], { cwd: dir });
       execFileSync('git', ['init', '-q'], { cwd: dir });
@@ -63,7 +106,7 @@ describe.skipIf(!ENABLED)('fetch container + run container (AISDLC-1291 AC-6)', 
       execFileSync('chmod', ['-R', 'a+rX', baseTree]);
       const sha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD']).toString().trim();
       const diff =
-        'diff --git a/test/b.test.js b/test/b.test.js\nnew file mode 100644\n--- /dev/null\n+++ b/test/b.test.js\n@@ -0,0 +1,2 @@\n' +
+        'diff --git a/b/test/c.test.js b/b/test/c.test.js\nnew file mode 100644\n--- /dev/null\n+++ b/b/test/c.test.js\n@@ -0,0 +1,2 @@\n' +
         "+const t=require('node:test');\n+t('added passes',()=>{});\n";
 
       const result = await runSandbox({

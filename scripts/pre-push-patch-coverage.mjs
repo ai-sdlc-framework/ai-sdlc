@@ -89,8 +89,11 @@ export function sessionScrubbedEnv(env = process.env) {
   return out;
 }
 
-/** How long the hook waits for a verify slot before running unslotted (AISDLC-1186). */
-export const SLOT_WAIT_MS = 5 * 60 * 1000;
+/**
+ * How long the hook waits for a verify slot (AISDLC-1378). Unbounded by default: with a board
+ * directory the coverage run never goes unslotted, it waits its turn.
+ */
+export const SLOT_WAIT_MS = Infinity;
 const SLOTS_MODULE = join(ROOT, 'pipeline-cli', 'dist', 'runtime', 'verify-slots.js');
 
 /** Board directory for the verify slots, or null when there is none. */
@@ -105,7 +108,8 @@ async function loadSlotsModule() {
 
 /**
  * Take a verify slot (shared with the machine verify run, AISDLC-1087) for the coverage run.
- * Returns { env, release } or null (after one log line) when the run must go unslotted.
+ * Returns { env, release }, null only when there is no board directory (one log line), or
+ * { refused } when a board exists but no slot could be taken: it never runs unslotted then.
  */
 async function takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log }) {
   if (!boardDir) {
@@ -116,16 +120,23 @@ async function takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log
   try {
     mod = await loadSlots();
   } catch {
-    log('[patch-coverage] verify-slots module not built; running unslotted');
-    return null;
+    return {
+      refused:
+        'verify-slots module not built; run `pnpm build` so the coverage run can take a slot',
+    };
   }
   const started = now();
   const wait = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  let waitLogged = false;
   try {
     const slot = await mod.acquireVerifySlot(boardDir, {
       ...slotDeps,
       sleep: async (ms) => {
         if (now() - started >= waitMs) throw new Error('slot wait timed out');
+        if (!waitLogged) {
+          waitLogged = true;
+          log('[patch-coverage] waiting for a verify slot');
+        }
         await wait(ms);
       },
     });
@@ -135,12 +146,7 @@ async function takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log
     };
   } catch (e) {
     const timedOut = e instanceof Error && e.message === 'slot wait timed out';
-    log(
-      `[patch-coverage] ${timedOut ? 'no verify slot after the wait' : 'verify slot unavailable'}; running unslotted`,
-    );
-    return timedOut
-      ? { env: { AI_SDLC_VITEST_MAX_WORKERS: String(mod.VERIFY_WORKERS_SHARED) }, release() {} }
-      : null;
+    return { refused: timedOut ? 'no verify slot within the wait' : 'verify slot unavailable' };
   }
 }
 
@@ -223,6 +229,44 @@ export function gatherReuseFacts(packages, env = sessionScrubbedEnv()) {
   }
 }
 
+/** Package-level changes that must keep the whole package under test:coverage (DEC-0423). */
+const FORCE_FULL_FILE = /(^|\/)(package\.json|tsconfig[^/]*\.json|vitest\.[^/]*)$/;
+
+/**
+ * Per package, the changed files `vitest related` should start from (relative to the package),
+ * or nothing for a package that must run in full (config change, or no surviving file).
+ */
+export function relatedFilesByPackage(packages, files, exists = (f) => existsSync(join(ROOT, f))) {
+  const out = {};
+  for (const pkg of packages) {
+    const own = files.filter((f) => f.startsWith(`${pkg}/`));
+    if (own.some((f) => FORCE_FULL_FILE.test(f))) continue;
+    const alive = own
+      .filter((f) => !f.endsWith('.md') && exists(f))
+      .map((f) => f.slice(pkg.length + 1));
+    if (alive.length > 0) out[pkg] = alive;
+  }
+  return out;
+}
+
+/** The pnpm arguments for one package: related files under coverage, else the whole package. */
+export function coverageArgs(pkg, related) {
+  if (!related || related.length === 0) return ['--filter', `./${pkg}`, 'test:coverage'];
+  return [
+    '--filter',
+    `./${pkg}`,
+    'exec',
+    'vitest',
+    'related',
+    '--run',
+    '--passWithNoTests',
+    '--coverage',
+    '--coverage.thresholds.lines=0',
+    '--coverage.thresholds.functions=0',
+    ...related,
+  ];
+}
+
 export async function main({
   reuseFacts = gatherReuseFacts,
   run = spawnSync,
@@ -250,7 +294,10 @@ export async function main({
     env: baseEnv,
   }).trim();
   const base = 'origin/main';
-  const packages = packagesToCover(changed({ base, head, cwd: ROOT }));
+  const changedFiles = changed({ base, head, cwd: ROOT });
+  const packages = packagesToCover(changedFiles);
+  const related =
+    process.env.AI_SDLC_VERIFY_FULL === '1' ? {} : relatedFilesByPackage(packages, changedFiles);
   if (packages.length === 0) {
     log('[patch-coverage] no instrumentable code changed vs origin/main; skipping coverage run');
     return 0;
@@ -261,7 +308,12 @@ export async function main({
     return runCoverage({ run, packages: [], env: baseEnv, base, head, log });
   }
   log(`[patch-coverage] no verify reuse: ${mismatch}`);
-  const slot = await takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log });
+  const taken = await takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log });
+  if (taken?.refused) {
+    log(`[patch-coverage] ${taken.refused}; refusing to run the coverage suite unslotted`);
+    return 1;
+  }
+  const slot = taken;
   const env = slot ? { ...baseEnv, ...slot.env } : baseEnv;
   let released = false;
   const release = () => {
@@ -276,17 +328,17 @@ export async function main({
   const handlers = ['SIGINT', 'SIGTERM'].map((sig) => [sig, onSignal(sig)]);
   if (slot) for (const [sig, h] of handlers) process.on(sig, h);
   try {
-    return runCoverage({ run, packages, env, base, head, log });
+    return runCoverage({ run, packages, env, base, head, log, related });
   } finally {
     release();
     for (const [sig, h] of handlers) process.off(sig, h);
   }
 }
 
-function runCoverage({ run, packages, env, base, head, log }) {
+function runCoverage({ run, packages, env, base, head, log, related = {} }) {
   for (const pkg of packages) {
     log(`[patch-coverage] running test:coverage in ${pkg}`);
-    const r = run('pnpm', ['--filter', `./${pkg}`, 'test:coverage'], {
+    const r = run('pnpm', coverageArgs(pkg, related[pkg]), {
       cwd: ROOT,
       stdio: 'inherit',
       env,

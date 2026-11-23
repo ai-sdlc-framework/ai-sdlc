@@ -7,7 +7,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { peekQueue } from './board.js';
 import { execFileSync } from 'node:child_process';
-import { completedTaskIdsOnMain, retireFailedLanded } from './retire-landed.js';
+import {
+  completedTaskIdsOnMain,
+  retireFailedLanded,
+  retireFailedVerdict,
+  retireLandedSweep,
+} from './retire-landed.js';
 import { landingDir, landingPath } from '../hierarchy/reconcile.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -76,6 +81,94 @@ describe('retireFailedLanded', () => {
     );
     const out = retireFailedLanded(board, { completedOnMain: () => undefined, now });
     expect(out).toEqual(['AISDLC-1121']);
+  });
+
+  describe('filing PR never retires (AISDLC-1381)', () => {
+    const filing = {
+      pr: 2764,
+      taskId: 'AISDLC-1308',
+      landed: '2026-11-18T14:00:00Z',
+      landedSha: '5700aa6b6',
+    };
+    it('refuses a retire when the task file is not in backlog/completed on main', () => {
+      seed('AISDLC-1308');
+      mkdirSync(landingDir(board), { recursive: true });
+      writeFileSync(landingPath(board, 2764), JSON.stringify({ ...filing, kind: 'task' }));
+      expect(retireFailedLanded(board, { completedOnMain: () => new Map(), now })).toEqual([]);
+      expect(existsSync(path.join(board, 'failed', 'AISDLC-1308.verdict.json'))).toBe(true);
+    });
+    it('per-PR path: a filing-branch landing record does not retire', () => {
+      seed('AISDLC-1308');
+      expect(
+        retireFailedVerdict(board, {
+          taskId: 'AISDLC-1308',
+          landedAt: filing.landed,
+          prNumber: 2764,
+          headBranch: 'ai-sdlc/file-aisdlc-1308',
+        }),
+      ).toBe(false);
+    });
+    it('sweep: a filing-branch landing record does not retire', () => {
+      seed('AISDLC-1308');
+      const r = retireLandedSweep(board, [
+        { ...filing, headBranch: 'ai-sdlc/file-aisdlc-1308', kind: 'task' },
+      ]);
+      expect(r.moved).toEqual([]);
+      expect(existsSync(path.join(board, 'failed', 'AISDLC-1308.verdict.json'))).toBe(true);
+    });
+  });
+
+  describe('own code PR only (AISDLC-1297)', () => {
+    const land = (rec: Record<string, unknown>) => {
+      mkdirSync(landingDir(board), { recursive: true });
+      writeFileSync(
+        landingPath(board, rec['pr'] as number),
+        JSON.stringify({ taskId: 'AISDLC-1285', landed: '2026-11-16T21:00:00Z', ...rec }),
+      );
+    };
+    const seedPr = (prNumber?: number) =>
+      writeFileSync(
+        path.join(board, 'failed', 'AISDLC-1285.verdict.json'),
+        JSON.stringify({
+          schemaVersion: 'v1',
+          taskId: 'AISDLC-1285',
+          outcome: 'failed',
+          ...(prNumber === undefined ? {} : { prNumber }),
+        }),
+      );
+    const run = () => retireFailedLanded(board, { completedOnMain: () => new Map(), now });
+
+    it('a landed record of another PR does not retire a verdict with a prNumber', () => {
+      seedPr(2706);
+      land({ pr: 2693, kind: 'task' });
+      expect(run()).toEqual([]);
+      expect(existsSync(path.join(board, 'failed', 'AISDLC-1285.verdict.json'))).toBe(true);
+    });
+
+    it('the verdict own PR retires it', () => {
+      seedPr(2706);
+      land({ pr: 2706, kind: 'task' });
+      // main unreadable: the own-PR landing record is the only evidence (AISDLC-1381)
+      expect(retireFailedLanded(board, { completedOnMain: () => undefined, now })).toEqual([
+        'AISDLC-1285',
+      ]);
+    });
+
+    it('completedOnMain retires with no landing record', () => {
+      seedPr(2706);
+      expect(
+        retireFailedLanded(board, {
+          completedOnMain: () => new Map([['AISDLC-1285', 'abc']]),
+          now,
+        }),
+      ).toEqual(['AISDLC-1285']);
+    });
+
+    it('a filing-branch record does not retire a verdict without a prNumber', () => {
+      seedPr();
+      land({ pr: 2693, kind: 'task', headBranch: 'ai-sdlc/file-aisdlc-1285' });
+      expect(run()).toEqual([]);
+    });
   });
 
   it('AC-3: the 2026-11-08 board shows no failed entries after one tick', () => {

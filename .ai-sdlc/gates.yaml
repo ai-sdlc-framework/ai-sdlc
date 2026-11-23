@@ -233,6 +233,12 @@ gates:
     owner: engineering
     property: no module without a non-test importer
     baseline: true
+  - id: test-chain:pnpm parity:check
+    surface: test-chain
+    origin: AISDLC-1305
+    owner: engineering
+    property: reference names match the parity manifest and SDK exemptions only shrink
+    baseline: true
   - id: test-chain:pnpm git-env-hygiene:check
     surface: test-chain
     origin: AISDLC-1127

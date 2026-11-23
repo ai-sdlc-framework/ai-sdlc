@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-python-v0.3.0...sdk-python-v0.4.0) (2026-11-19)
+
+
+### Features
+
+* **conformance:** classify every reference module as shared or typescript-only (AISDLC-1311) ([#2785](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2785)) ([307a637](https://github.com/ai-sdlc-framework/ai-sdlc/commit/307a6378418d8db16b5ad76e37ad80a4de42a820))
+* **conformance:** parity manifest of the reference checked by Python and Go suites (AISDLC-1305) ([#2781](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2781)) ([91d79f5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/91d79f5e26683dcfc4d7785708becf8ecc6f056b))
+* **sdk-python:** add cost and token metrics and telemetry keys (AISDLC-1304) ([#2784](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2784)) ([b56ceca](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b56cecaeef256644c3066fae2106af5c7eaa684a))
+
+
+### Bug Fixes
+
+* **sdk:** sync Python and Go schemas with spec/schemas and gate on drift (AISDLC-1302) ([#2779](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2779)) ([17b682e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/17b682eace6c611774eea56d7af3a7c1f7a8ee04))
+* **sdk:** sync Python and Go version constants with releases (AISDLC-1303) ([#2783](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2783)) ([350aef1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/350aef15b247a5d22b7ad287b704a371e9066aa6))
+* **spec:** make deprecated Pipeline spec.stages optional (AISDLC-1280) ([#2692](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2692)) ([5bcacd6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5bcacd62cb70435acc9984158de762bade3c989a))
+
 ## [0.3.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-python-v0.2.1...sdk-python-v0.3.0) (2026-11-08)
 
 

@@ -136,7 +136,7 @@ If present, `agentFileHash` was not enforced for the named reviewer(s) on that r
 
 `next-step` (the ship step, and the resume decision) refuses to report a pushed head as done when `.ai-sdlc/attestations/<patch-id>.v6.dsse.json` for the head's patch id is not in the head commit. The message names the head sha and the exact file it looked for. Typical cause: an earlier session rebased and pushed, so the head's patch id no longer matches any envelope on the branch.
 
-**Remedy:** run the sign step on the head (`bash ai-sdlc-plugin/scripts/sign-attestation-if-consumer.sh` in a consumer repo, or push so the pre-push hook signs and commits the envelope), confirm with `git ls-tree HEAD -- .ai-sdlc/attestations/`, then re-run `/ai-sdlc execute <task-id>`. On resume the decision note reads `re-sign required` and the run goes straight to reconcile and re-sign.
+**Remedy:** re-run the review so a fresh verdict record exists for the head, confirm with `git ls-tree HEAD -- .ai-sdlc/attestations/`, then re-run `/ai-sdlc execute <task-id>`. On resume the decision note reads `re-sign required` and the run goes straight to reconcile and re-sign.
 
 ---
 
@@ -153,7 +153,7 @@ git commit -m "chore: commit pending transcript leaves (<TASK-ID>)"           # 
 
 A commit counts as ours only when its subject is `chore: sign attestation` or `chore: commit pending transcript leaves` and it touches only `.ai-sdlc/attestations/`, the transcript leaves and the task's review ledger. If a candidate touches any other path the command refuses (exit 1) and changes nothing.
 
-The same drop runs automatically before the ship step's rebase (10.5), as the `drop-chores` dispatch playbook action (`cli-hierarchy playbook --action drop-chores`, which also lease-pushes), and in consumer repos before `sign-attestation-if-consumer.sh` signs (`ai-sdlc-plugin/scripts/drop-attestation-chores.sh --if-stale`).
+The same drop runs automatically before the ship step's rebase (10.5), as the `drop-chores` dispatch playbook action (`cli-hierarchy playbook --action drop-chores`, which also lease-pushes), and in consumer repos before the review step (`ai-sdlc-plugin/scripts/drop-attestation-chores.sh --if-stale`).
 
 ---
 

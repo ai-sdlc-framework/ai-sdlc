@@ -73,6 +73,16 @@ describe('runHierarchyCli', () => {
     expect(write.mock.calls[0]?.[0]).toContain('Usage: cli-hierarchy');
   });
 
+  it('webhook help names every feed flag and the prerequisites', async () => {
+    const write = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    await runHierarchyCli(['help'], overrides());
+    const text = String(write.mock.calls[0]?.[0]);
+    expect(text).toContain('--feed <kind>');
+    expect(text).toContain('--feed-pid <pid>');
+    expect(text).toContain('--feed-agent <label>');
+    expect(text).toContain('gh webhook');
+  });
+
   it('rejects unknown commands', async () => {
     vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     expect(await runHierarchyCli(['bogus'], overrides())).toBe(2);
@@ -1263,6 +1273,17 @@ describe('clear, tick and route-decision', () => {
       }),
     ).toBe(1);
     expect(String(err.mock.calls.at(-1)?.[0])).toContain('refused');
+  });
+
+  it('tick warns once when no plugin scripts folder is found and continues (AISDLC-1328)', async () => {
+    seedBoardWithBrief();
+    const code = await runHierarchyCli(
+      ['tick', '--worker', 'operator-dispatch', '--work-dir', tmp],
+      overrides({ env: {} }),
+      { ...dispatchCaller, lease, operational: new Set<string>() },
+    );
+    expect(code).toBe(0);
+    expect(logs.filter((l) => l.includes('plugin scripts not found'))).toHaveLength(1);
   });
 
   it('tick --by scheduler is skipped while the host is alive', async () => {

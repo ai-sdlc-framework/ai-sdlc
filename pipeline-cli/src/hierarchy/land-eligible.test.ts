@@ -20,6 +20,7 @@ import {
   readMergeAuthors,
   type LandOutcome,
 } from './land-eligible.js';
+import { readRefusalReason } from './pr-snapshot.js';
 import type { CommandRunner } from './types.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -69,7 +70,7 @@ function writeDone(taskId: string): void {
 
 function deps(
   gh: ReturnType<typeof fakeGh>,
-  land: (n: number, m: 'merge' | 'arm') => Promise<LandOutcome>,
+  land: (n: number, m: 'merge' | 'arm', head?: string) => Promise<LandOutcome>,
   mergeAuthors = ['deefactorial'],
 ) {
   return {
@@ -152,6 +153,24 @@ describe('landEligiblePrs', () => {
     expect(readdirSync(path.join(board, 'notes'))).toHaveLength(2);
   });
 
+  it('stores the refusal reason in the record and a later landing clears it (AISDLC-1352)', async () => {
+    const gh = fakeGh([pr(1)], 'false');
+    await landEligiblePrs(
+      deps(gh, async () => ({
+        merged: false,
+        armed: false,
+        reason: 'required check(s) not green',
+      })),
+    );
+    expect(readRefusalReason(board, 1)).toBe('required check(s) not green');
+    const moved = fakeGh(
+      [pr(1, { statusCheckRollup: [{ name: 'a', conclusion: 'SUCCESS' }] })],
+      'false',
+    );
+    await landEligiblePrs(deps(moved, async () => ({ merged: true, armed: false, reason: 'ok' })));
+    expect(readRefusalReason(board, 1)).toBeUndefined();
+  });
+
   it('reports a thrown lander as a refusal and keeps going', async () => {
     const r = await landEligiblePrs(
       deps(fakeGh([pr(1), pr(2)], 'false'), async (n) => {
@@ -168,7 +187,7 @@ describe('landEligiblePrs', () => {
       throw new Error('must not be called');
     };
     const gh = fakeGh([pr(1)]);
-    expect(await landEligiblePrs(deps(gh, never, []))).toEqual({ landed: [], refused: [] });
+    expect(await landEligiblePrs(deps(gh, never, []))).toMatchObject({ landed: [], refused: [] });
     expect(gh.calls).toEqual([]);
     const bad: CommandRunner = () => ({ status: 0, stdout: 'not json', stderr: '' });
     expect((await landEligiblePrs({ ...deps(gh, never), run: bad })).error).toMatch(/unreadable/);
@@ -222,6 +241,24 @@ describe('landing an iterate-needed task (AISDLC-1030)', () => {
   });
 });
 
+describe('a repo without auto-merge (AISDLC-1374)', () => {
+  it('squashes a decision filing PR in merge mode, runs no arm command and writes no arm notice', async () => {
+    const gh = fakeGh([pr(9, { headRefName: 'ai-sdlc/file-dec-0422-opened-1200' })], 'false');
+    const { calls } = gh;
+    const seen: [string, string | undefined][] = [];
+    const r = await landEligiblePrs(
+      deps(gh, async (_n, mode, head) => {
+        seen.push([mode, head]);
+        return { merged: true, armed: false, reason: 'ok' };
+      }),
+    );
+    expect(seen).toEqual([['merge', 'ai-sdlc/file-dec-0422-opened-1200']]);
+    expect(r.landed).toEqual([{ pr: 9, mode: 'merge' }]);
+    expect(calls.some((c) => c.includes('--arm'))).toBe(false);
+    expect(existsSync(path.join(board, 'notes'))).toBe(false);
+  });
+});
+
 describe('readMergeAuthors', () => {
   it('returns the parsed list, or nothing when the file is unreadable', () => {
     expect(readMergeAuthors(board, () => ['x'])).toEqual([]);
@@ -269,5 +306,26 @@ describe('the governed merge path', () => {
     walk(path.join(root, 'pipeline-cli', 'src'));
     // AISDLC-975 emptied the grandfather list; every arm goes through the gate.
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('an empty mergeAuthors list (AISDLC-1351)', () => {
+  it('records a note naming the key and the file, once, and never calls gh', async () => {
+    const { run, calls } = fakeGh([]);
+    const deps = {
+      boardDir: board,
+      repoRoot: '/repo',
+      run,
+      mergeAuthors: [],
+      land: async () => ({ merged: false, armed: false, reason: '' }),
+    };
+    const report = await landEligiblePrs(deps);
+    expect(calls).toEqual([]);
+    expect(report.disabled).toContain('mergeAuthors');
+    expect(report.disabled).toContain('.ai-sdlc/agent-role.yaml');
+    const note = path.join(board, 'notes', 'land-disabled.mergeAuthors.txt');
+    expect(readFileSync(note, 'utf-8')).toContain('mergeAuthors');
+    await landEligiblePrs(deps);
+    expect(readdirSync(path.join(board, 'notes'))).toEqual(['land-disabled.mergeAuthors.txt']);
   });
 });

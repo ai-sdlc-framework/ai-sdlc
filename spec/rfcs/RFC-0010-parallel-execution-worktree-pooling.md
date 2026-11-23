@@ -27,7 +27,7 @@ requiresDocs:
 # RFC-0010: Parallel Execution and Worktree Pooling
 
 **Document type:** Normative (draft)
-**Status:** Draft v1 — pending review
+**Status:** Implemented. Previously: Draft v1 — pending review
 **Lifecycle:** Implemented (AISDLC-70.1 through 70.9 all Done; sign-off retained engineering-owner-only)
 **Created:** 2026-04-26
 **Authors:** Dominique Legault (CTO / Engineering Authority)

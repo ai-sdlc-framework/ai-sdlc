@@ -521,6 +521,8 @@ export interface SandboxSpawnInput {
    * the upstream suite runs against the base (AISDLC-1267).
    */
   baseTreeDir?: string;
+  /** Receives the fetch container's combined output once it exits (AISDLC-1312). */
+  onFetchOutput?: (output: string) => void;
   /**
    * AISDLC-1293: run this extra suite instead of the Node suite (its image,
    * fetch command and test command). Absent: the Node suite, as before.
@@ -1235,6 +1237,7 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       resourceLimits.perTestTimeoutSeconds,
       undefined,
       input.suite?.testCommand,
+      workspacePackagesFor(input.baseTreeDir, input.prDiff),
     );
 
     // Fetch phase (AISDLC-1291): install the base tree's dependencies in a
@@ -1437,6 +1440,7 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       }
       proc.on('close', (exitCode) => {
         input.abortSignal?.removeEventListener('abort', onAbort);
+        input.onFetchOutput?.(output.slice(-SANDBOX_OUTPUT_TAIL_BYTES));
         if (input.abortSignal?.aborted) {
           reject(new Error('Docker fetch container aborted by wall-clock timeout'));
         } else if (exitCode !== 0) {
@@ -1548,6 +1552,18 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
  *
  * Exported for use in test assertions.
  */
+/** Bytes of each suite's output kept (the tail) in the differential result. */
+export const SANDBOX_OUTPUT_TAIL_BYTES = 20_000;
+
+/**
+ * Last `maxLines` lines of `text` (AISDLC-1312): bounds what a failing sandbox
+ * suite prints to the CI log.
+ */
+export function tailLines(text: string, maxLines: number): string {
+  const lines = text.split('\n');
+  return lines.length <= maxLines ? text : lines.slice(-maxLines).join('\n');
+}
+
 export const DIFFERENTIAL_RESULT_SENTINEL = '---DIFFERENTIAL-RESULT---';
 
 /**
@@ -1665,9 +1681,9 @@ export function parseDifferentialTestOutput(stdout: string): DifferentialTestRes
 
   return {
     upstreamSuitePassed: r['upstreamPassed'] as boolean,
-    upstreamSuiteOutput: (r['upstreamOutput'] as string).slice(0, 2000),
+    upstreamSuiteOutput: (r['upstreamOutput'] as string).slice(-SANDBOX_OUTPUT_TAIL_BYTES),
     newTestsPassed: r['headPassed'] as boolean,
-    newTestsOutput: (r['headOutput'] as string).slice(0, 2000),
+    newTestsOutput: (r['headOutput'] as string).slice(-SANDBOX_OUTPUT_TAIL_BYTES),
     newCodeCoveragePct: clampedCoverage,
   };
 }
@@ -1746,6 +1762,7 @@ export function buildDifferentialTestScript(
   perTestTimeoutSeconds?: number,
   baseSha?: string,
   suiteTestCommand?: string,
+  changedPackages?: readonly string[],
 ): string {
   // Validate the ref before interpolating into the shell script.
   // Throws if the ref is not a valid SHA or URL — prevents shell injection.
@@ -1765,7 +1782,7 @@ export function buildDifferentialTestScript(
   const suiteSh = suiteTestCommand
     ? `sh -c '${suiteTestCommand.replace(/'/g, "'\\''")} 2>&1'`
     : undefined;
-  const baseTestCmd = suiteSh
+  let baseTestCmd = suiteSh
     ? `${timeoutPrefix} ${suiteSh}`.trim()
     : timeoutPrefix
       ? `${timeoutPrefix} sh -c 'pnpm test 2>&1 || npm test 2>&1'`
@@ -1774,11 +1791,27 @@ export function buildDifferentialTestScript(
   // The test runner command for the head (PR) suite WITH coverage.
   // Coverage is passed as a direct flag to pnpm/npm, not after `--` (which
   // would be consumed by the shell, not forwarded to the test runner).
-  const headTestCmd = suiteSh
+  let headTestCmd = suiteSh
     ? baseTestCmd
     : timeoutPrefix
       ? `${timeoutPrefix} sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'`
       : "sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'";
+
+  // Workspace tree (AISDLC-1296): test only the packages the diff touches.
+  if (!suiteSh && changedPackages) {
+    if (changedPackages.length === 0) {
+      baseTestCmd = `echo '${NO_PACKAGE_CHANGED_OUTPUT}'`;
+    } else {
+      const cmds = changedPackages.map((dir) => {
+        if (!/^[A-Za-z0-9._/-]+$/.test(dir)) {
+          throw new Error(`buildDifferentialTestScript: invalid package directory '${dir}'`);
+        }
+        return `pnpm --filter ./${dir} test`;
+      });
+      baseTestCmd = `${timeoutPrefix} sh -c '${cmds.join(' && ')} 2>&1'`.trim();
+    }
+    headTestCmd = baseTestCmd;
+  }
 
   // Single-quote-escape the ref for safe interpolation into the sh script.
   // `validateUpstreamMainRef` already rejects any ref that isn't a hex SHA
@@ -1833,13 +1866,19 @@ elif [ -d "${SANDBOX_BASE_DIR}" ]; then
   # container prepares its dependencies (AISDLC-1291), and the result is mounted
   # read-only. Copy the sources into the writable workspace so the diff can be
   # applied; every node_modules directory stays on the read-only mount (the
-  # workspace is noexec, so native binaries must run from there) and is linked in.
+  # workspace is noexec, so native binaries must run from there). The
+  # node_modules directory itself is created in the writable workspace and each
+  # entry is linked in, so tools can write a cache dir (vite's .vite-temp) there
+  # (AISDLC-1312: a symlinked read-only directory made vitest fail to start).
   mkdir -p repo
   (cd "${SANDBOX_BASE_DIR}" && tar cf - --exclude=node_modules .) | (cd repo && tar xf -)
   find "${SANDBOX_BASE_DIR}" -name node_modules -type d -prune | while IFS= read -r nm; do
     rel="\${nm#${SANDBOX_BASE_DIR}/}"
-    mkdir -p "repo/$(dirname "$rel")"
-    ln -s "$nm" "repo/$rel"
+    mkdir -p "repo/$rel"
+    for entry in "$nm"/* "$nm"/.[!.]*; do
+      [ -e "$entry" ] || [ -L "$entry" ] || continue
+      ln -s "$entry" "repo/$rel/$(basename "$entry")"
+    done
   done
   cd repo
 elif echo "$UPSTREAM_REF" | grep -qE '^(https?|git|ssh)://|^git@'; then
@@ -1866,6 +1905,9 @@ else
     exit 1
   fi
 fi
+
+# pnpm of the prepared tree (AISDLC-1296): the fetch container installed it here.
+export PATH="$WORK_DIR/repo/${SANDBOX_TOOLS_DIR}/bin:$PATH"
 
 # ── 3. Run the upstream (base) test suite BEFORE applying the diff ───────────────
 # This is the differential invariant: upstreamPassed reflects the BASE tree,
@@ -1942,8 +1984,10 @@ fi
 # ── 7. Emit the sentinel + JSON result ──────────────────────────────────────────
 # The TypeScript parser reads everything AFTER the last sentinel occurrence.
 # Escape the output strings for JSON embedding (strip control chars, escape quotes).
-safe_upstream=$(printf '%s' "$UPSTREAM_OUTPUT" | head -c 2000 | tr -d '\\000-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
-safe_head=$(printf '%s' "$HEAD_OUTPUT" | head -c 2000 | tr -d '\\000-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+# Keep the TAIL (a failing suite prints its failures last) and keep newlines as
+# JSON \\n so the host can show the last lines (AISDLC-1312).
+safe_upstream=$(printf '%s' "$UPSTREAM_OUTPUT" | tail -c ${SANDBOX_OUTPUT_TAIL_BYTES} | tr -d '\\000-\\011\\013-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | awk 'BEGIN{ORS="\\\\n"}{print}')
+safe_head=$(printf '%s' "$HEAD_OUTPUT" | tail -c ${SANDBOX_OUTPUT_TAIL_BYTES} | tr -d '\\000-\\011\\013-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | awk 'BEGIN{ORS="\\\\n"}{print}')
 
 echo "${DIFFERENTIAL_RESULT_SENTINEL}"
 printf '{"upstreamPassed":%s,"upstreamOutput":"%s","headPassed":%s,"headOutput":"%s","coveragePct":%s}\\n' \\
@@ -1956,6 +2000,82 @@ printf '{"upstreamPassed":%s,"upstreamOutput":"%s","headPassed":%s,"headOutput":
 /** Mount points inside the fetch container. */
 export const FETCH_BASE_DIR = '/sandbox/base';
 export const FETCH_OUT_DIR = '/sandbox/prepared';
+
+/** Directory of the prepared tree that holds pnpm itself (AISDLC-1296). */
+export const SANDBOX_TOOLS_DIR = 'node_modules/.sandbox-tools';
+
+/** Output of a differential run whose diff touches no workspace package. */
+export const NO_PACKAGE_CHANGED_OUTPUT = 'no workspace package changed; nothing to run';
+
+/**
+ * Map diff paths to workspace package directories (AISDLC-1296). The longest
+ * matching directory wins, so `ai-sdlc-plugin/mcp-server/x.ts` gives
+ * `ai-sdlc-plugin/mcp-server`, not `ai-sdlc-plugin`; a path outside every
+ * package gives none. A directory with a character outside `[A-Za-z0-9._/-]`
+ * is refused because it is interpolated into a shell command.
+ */
+export function mapPathsToWorkspacePackages(
+  paths: readonly string[],
+  workspaceDirs: readonly string[],
+): string[] {
+  const dirs = workspaceDirs.map((d) => d.replace(/^\.\//, '').replace(/\/+$/, ''));
+  const out = new Set<string>();
+  for (const p of paths) {
+    let best: string | undefined;
+    for (const d of dirs) {
+      if (d.endsWith('/*')) {
+        const parent = d.slice(0, -2);
+        const m = p.startsWith(`${parent}/`) ? p.slice(parent.length + 1).split('/') : [];
+        if (m.length > 1 && m[0]) {
+          const cand = `${parent}/${m[0]}`;
+          if (!best || cand.length > best.length) best = cand;
+        }
+      } else if (p.startsWith(`${d}/`) && (!best || d.length > best.length)) {
+        best = d;
+      }
+    }
+    if (best !== undefined) {
+      if (!/^[A-Za-z0-9._/-]+$/.test(best)) {
+        throw new Error(`workspace package directory '${best}' has a disallowed character`);
+      }
+      out.add(best);
+    }
+  }
+  return [...out].sort();
+}
+
+/** `packages:` entries of a pnpm-workspace.yaml (the simple list form). */
+export function parseWorkspacePackages(yamlText: string): string[] {
+  const out: string[] = [];
+  let inPackages = false;
+  for (const line of yamlText.split('\n')) {
+    if (/^packages:\s*$/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (inPackages) {
+      const m = /^\s+-\s+['"]?([^'"#\s]+)['"]?\s*(#.*)?$/.exec(line);
+      if (m) {
+        if (!m[1]!.startsWith('!')) out.push(m[1]!);
+      } else if (/^\S/.test(line)) inPackages = false;
+    }
+  }
+  return out;
+}
+
+/** Changed workspace packages, or undefined when the base tree has no workspace file. */
+function workspacePackagesFor(
+  baseTreeDir: string | undefined,
+  prDiff: string,
+): string[] | undefined {
+  if (!baseTreeDir) return undefined;
+  const file = join(baseTreeDir, 'pnpm-workspace.yaml');
+  if (!existsSync(file)) return undefined;
+  return mapPathsToWorkspacePackages(
+    changedPathsFromDiff(prDiff),
+    parseWorkspacePackages(readFileSync(file, 'utf8')),
+  );
+}
 
 /** pnpm version used when the base tree declares no `packageManager`. */
 export const DEFAULT_PNPM_VERSION = 'latest';
@@ -1997,6 +2117,13 @@ cd "${FETCH_OUT_DIR}"
 if [ -f pnpm-lock.yaml ]; then
   corepack prepare pnpm@${pnpmVersion} --activate
   corepack pnpm install --frozen-lockfile
+  # AISDLC-1296: the run container has no corepack home, so keep pnpm itself in the prepared tree.
+  npm install -g --prefix "${FETCH_OUT_DIR}/${SANDBOX_TOOLS_DIR}" pnpm@${pnpmVersion}
+  # AISDLC-1300: a build script that calls pnpm by name needs the launcher on PATH.
+  export PATH="${FETCH_OUT_DIR}/${SANDBOX_TOOLS_DIR}/bin:$PATH"
+  if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
+    corepack pnpm run build
+  fi
 elif [ -f package-lock.json ]; then
   npm ci
 fi
@@ -2038,7 +2165,7 @@ export function buildFetchDockerArgs(opts: FetchDockerArgsInput): string[] {
     '--cap-drop=ALL',
     '--read-only',
     '--tmpfs',
-    '/tmp:rw,nosuid,size=1g',
+    '/tmp:rw,exec,nosuid,size=1g',
     '--pids-limit',
     '512',
     '--memory',
@@ -2497,6 +2624,8 @@ export interface RunSandboxInput {
   proxyHostArgs?: string[];
   /** Host dir with the exported base tree (mounted read-only; AISDLC-1267). */
   baseTreeDir?: string;
+  /** Receives the fetch container's combined output once it exits (AISDLC-1312). */
+  onFetchOutput?: (output: string) => void;
 }
 
 /**
@@ -2545,6 +2674,7 @@ export async function runSandbox(input: RunSandboxInput): Promise<SandboxResult>
     // container reach the host-side proxy despite --network=none.
     extraDockerArgs: input.proxyHostArgs,
     baseTreeDir: input.baseTreeDir,
+    onFetchOutput: input.onFetchOutput,
   };
 
   // Hard-abort enforcement via Promise.race.
@@ -2650,7 +2780,7 @@ async function runSelectedSuites(
     )
       .concat(results.map((x) => `[${x.name}] ${x.dt[key]}`))
       .join('\n')
-      .slice(0, 2000);
+      .slice(-SANDBOX_OUTPUT_TAIL_BYTES);
 
   return {
     outcome: 'success',

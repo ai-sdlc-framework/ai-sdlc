@@ -1127,6 +1127,8 @@ export interface QueueOrderEntry {
   dispatchedAt: string;
   /** True for a resume (repair) manifest; set only then (AISDLC-1189). */
   repair?: true;
+  /** The task's sequence group; set only for a grouped task (AISDLC-1330). */
+  sequenceGroup?: string;
 }
 
 /**
@@ -1153,6 +1155,7 @@ export function peekQueueOrder(
     priority: typeof manifest.priority === 'number' ? manifest.priority : null,
     dispatchedAt: manifest.dispatchedAt,
     ...(manifest.resume ? { repair: true as const } : {}),
+    ...(manifest.sequenceGroup ? { sequenceGroup: manifest.sequenceGroup } : {}),
   }));
 }
 

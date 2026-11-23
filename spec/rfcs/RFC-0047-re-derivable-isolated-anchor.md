@@ -1,8 +1,8 @@
 ---
 id: RFC-0047
 title: Re-Derivable Isolated-Review Anchor
-status: Draft
-lifecycle: Signed Off
+status: Withdrawn
+lifecycle: Superseded
 author: 'Dominique Legault'
 created: 2026-09-06
 updated: 2026-09-06
@@ -14,7 +14,9 @@ requiresDocs: []
 
 # RFC-0047: Re-Derivable Isolated-Review Anchor
 
-**Status:** Signed Off (2026-09-06, Engineering + Operator) — **all 5 OQs resolved
+> **Superseded by RFC-0061 (AISDLC-1322, 2026-11-18).** The CI-only signer and verifier were deleted with the v6 envelope (AISDLC-1173) and the isolated-review workflow was removed (AISDLC-832); the merge gate reads the review verdict record instead.
+
+**Status:** Superseded by RFC-0061 (AISDLC-1322). Previously: Signed Off (2026-09-06, Engineering + Operator) — **all 5 OQs resolved
 2026-09-06 via operator rubric walkthrough.** The `isolated` anchor is a **CI-only ed25519 key** (private half only
 in a protected GitHub Actions environment; pubkey in `trusted-reviewers.yaml` marked
 `ci-only`) — the security anchor is the *root signature by that key*, which a
@@ -31,7 +33,7 @@ MAJOR). Scope split: RFC-0046 keeps the taxonomy + `none`/`attested` + the
 single "isolated producible" capability gate (`requiredTier: isolated` is
 unsatisfiable until this RFC ships). Sigstore/Rekor is the documented forward
 hardening path.
-**Lifecycle:** Signed Off
+**Lifecycle:** Superseded. Previously: Signed Off
 **Author:** Dominique Legault
 **Created:** 2026-09-06
 
