@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createPlannerNotifier } from './planner-notify.js';
 import { notifyEscalation, writeEscalationFile } from './escalation-file.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -146,5 +147,37 @@ describe('notifyEscalation (AISDLC-1190)', () => {
     expect(notifyEscalation(board, 'T', 'm', 'f', now, bad)).toBe(false);
     const good = vi.fn();
     expect(notifyEscalation(board, 'T', 'm', 'f', now, good)).toBe(true);
+  });
+
+  it('delivers through the planner socket path and never the pane', () => {
+    mkdirSync(path.join(board, 'escalations'), { recursive: true });
+    writeFileSync(
+      path.join(board, 'hierarchy.json'),
+      JSON.stringify({
+        schemaVersion: 'v1',
+        sessions: [
+          {
+            role: 'planner',
+            name: 'planner',
+            tmuxSession: 'planner',
+            tmuxWindow: 'planner',
+            model: 'opus',
+            permissionMode: 'default',
+            startedAt: '2026-11-01T00:00:00Z',
+            status: 'running',
+            paneId: '',
+            pid: 4242,
+            project: 'p',
+          },
+        ],
+      }),
+    );
+    const sock = vi.fn();
+    const pane = vi.fn();
+    const notify = createPlannerNotifier(board, vi.fn() as never, pane, sock, () => true);
+    expect(notifyEscalation(board, 'T', 'm', 'f.json', now, notify)).toBe(true);
+    expect(sock.mock.calls[0]![0]).toBe('uds:/tmp/cc-socks/4242.sock');
+    expect(sock.mock.calls[0]![1]).toContain('Escalation for T');
+    expect(pane).not.toHaveBeenCalled();
   });
 });

@@ -9,10 +9,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { createTmuxBriefSender, type BriefSender } from './brief-notify.js';
+import type { BriefSender } from './brief-notify.js';
 import { readRosterChecked } from './roster.js';
-import { paneScreenAt, resolveSendTarget } from './tmux.js';
-import { readReceivedAddresses, sendToRoster, type SocketSender } from './send.js';
+import { sendToRoster, type SocketSender } from './send.js';
 import type { CommandRunner } from './types.js';
 
 /**
@@ -46,46 +45,63 @@ export function readPlannerAddress(boardDir: string, name: string): string | und
   }
 }
 
-/** Sends one line to the planner; throws when it cannot be delivered, so callers keep the item undelivered. */
+/** Where Claude Code sessions listen: `/tmp/cc-socks/<pid>.sock`. */
+export function sessionSocketAddress(pid: number): string {
+  return `uds:/tmp/cc-socks/${pid}.sock`;
+}
+
+/**
+ * The socket address of the running planner: the address it recorded, else the one derived from its
+ * roster pid. Undefined when there is no running planner or no usable address.
+ */
+export function plannerSocketAddress(boardDir: string): string | undefined {
+  let planner;
+  try {
+    planner = readRosterChecked(boardDir).roster.sessions.find(
+      (e) => e.role === 'planner' && e.status === 'running',
+    );
+  } catch {
+    return undefined;
+  }
+  if (!planner) return undefined;
+  const recorded = readPlannerAddress(boardDir, planner.name);
+  if (recorded) return recorded;
+  return Number.isInteger(planner.pid) && planner.pid > 0
+    ? sessionSocketAddress(planner.pid)
+    : undefined;
+}
+
+/** True when the unix socket behind a `uds:` address exists on disk. */
+export function socketExists(address: string): boolean {
+  return fs.existsSync(address.slice('uds:'.length));
+}
+
+/**
+ * Sends one line to the planner session socket; throws when it cannot be delivered, so callers keep
+ * the item undelivered. It never types into the pane: that interleaves with the operator's typing.
+ */
 export type PlannerNotifier = (text: string) => void;
 
 export function createPlannerNotifier(
   boardDir: string,
-  run: CommandRunner,
-  send?: BriefSender,
+  _run?: CommandRunner,
+  _send?: BriefSender,
   sendSocket?: SocketSender,
+  exists: (address: string) => boolean = socketExists,
 ): PlannerNotifier {
   return (text) => {
     const { roster } = readRosterChecked(boardDir);
     const planner = roster.sessions.find((e) => e.role === 'planner' && e.status === 'running');
     if (!planner) throw new Error('no running planner session in the roster');
-    const address = readPlannerAddress(boardDir, planner.name);
-    if (address) {
-      // A recorded address never touches the pane, so it cannot collide with the operator's typing.
-      sendToRoster(roster.sessions, address, text, noPane, [address], sendSocket);
-      return;
+    const address = plannerSocketAddress(boardDir);
+    if (!address) throw new Error('the planner has no recorded address and no roster pid');
+    if (!exists(address)) {
+      throw new Error(`the planner socket ${address} is missing; notice held back and retried`);
     }
-    const tmuxSend = send ?? createTmuxBriefSender(run);
-    const guarded: BriefSender = (entry, message) => {
-      const target = resolveSendTarget(run, entry.tmuxSession, entry.tmuxWindow, entry.paneId);
-      if (composerHasText(paneScreenAt(run, target))) {
-        throw new Error(
-          `the planner composer holds unsent text; notice held back and retried on a later pass`,
-        );
-      }
-      tmuxSend(entry, message);
-    };
-    sendToRoster(
-      roster.sessions,
-      planner.name,
-      text,
-      guarded,
-      readReceivedAddresses(boardDir),
-      sendSocket,
-    );
+    sendToRoster(roster.sessions, address, text, noPane, [address], sendSocket);
   };
 }
 
 const noPane: BriefSender = () => {
-  throw new Error('a planner notice with a recorded address never types into the pane');
+  throw new Error('a planner notice never types into the pane');
 };
