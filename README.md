@@ -85,7 +85,7 @@ ai-sdlc init
 ai-sdlc doctor
 
 # 4. Dispatch your first task
-/ai-sdlc execute AISDLC-42
+/ai-sdlc:execute AISDLC-42
 ```
 
 Full setup, runner configuration, agent-runner reference, and the session-hierarchy setup are in the documentation:
@@ -110,16 +110,16 @@ Canonical execution paths (when working inside a Claude Code session):
 
 | Use case | Command | Billing |
 |---|---|---|
-| Internal dogfood (backlog tasks) | `/ai-sdlc execute <task-id>` | Subscription |
-| Manual cleanup | `/ai-sdlc cleanup [<task-id>]` | n/a |
-| Autonomous drain (session hierarchy) | `/ai-sdlc hierarchy up` | Subscription |
+| Internal dogfood (backlog tasks) | `/ai-sdlc:execute <task-id>` | Subscription |
+| Manual cleanup | `/ai-sdlc:cleanup [<task-id>]` | n/a |
+| Autonomous drain (session hierarchy) | `/ai-sdlc:hierarchy up` | Subscription |
 | GitHub issue / unattended / CI | `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` | API key |
 
 Rules of thumb to internalize before pushing code:
 
 - **Merging follows `governance.allowMerge`** in `.ai-sdlc/agent-role.yaml`, rendered into the session hard rules; when it permits merging, the only path is `cli-merge-if-eligible`; never run the raw merge command.
 - **Always rebase** feature branches onto main. Never merge main in.
-- **Pattern C**: the parent working tree is read-only. All code work happens in `.worktrees/<task-id>/`. `/ai-sdlc execute` sets this up automatically.
+- **Pattern C**: the parent working tree is read-only. All code work happens in `.worktrees/<task-id>/`. `/ai-sdlc:execute` sets this up automatically.
 - **Attestation is required** on `main`. Code PRs that touch source must carry a DSSE envelope signed by the reviewer chain. Docs-only PRs bypass. See the [review policy](docs/operations/review-policy.md) for what counts as a review, and the [independence policy](docs/operations/independence-policy.md) (`.ai-sdlc/independence-policy.yaml` `requiredTier`) to enforce reviewer independence.
 - **Cross-repo writes** go through `permittedExternalPaths` in the task frontmatter.
 

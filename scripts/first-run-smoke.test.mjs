@@ -123,7 +123,7 @@ describe('README "Getting started" stays in lockstep with the smoke steps', () =
     assert.ok(steps.some((s) => s.startsWith('/plugin install ')));
     assert.ok(steps.includes('ai-sdlc init'));
     assert.ok(steps.includes('ai-sdlc doctor'));
-    assert.ok(steps.some((s) => s.startsWith('/ai-sdlc execute ')));
+    assert.ok(steps.some((s) => s.startsWith('/ai-sdlc:execute ')));
   });
 
   it('the install step names the plugin and marketplace in .claude-plugin/marketplace.json', () => {

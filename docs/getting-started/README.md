@@ -18,7 +18,7 @@ Get up and running with the AI-SDLC Framework.
 AI-SDLC is a **Decision Engine** for autonomous AI software development. It's the **contract-to-shipped** half of a spec-driven development stack: you (or a front-of-funnel tool like [GitHub Spec Kit](https://github.com/github/spec-kit)) hand it a well-specified contract; AI-SDLC dispatches autonomous agents, enforces quality gates, attests every change, and routes every decision to the right human actor. It provides:
 
 - **Decision Engine substrate** — operator-as-decision-steward; every architectural / quality / autonomy decision routes through the [Decision Catalog (RFC-0035)](../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md)
-- **Spec-kit bridge** — `cli-import-spec` / `/ai-sdlc import-spec` consumes spec-kit `tasks.md`, runs the DoR Gate at import, and lands governed backlog tasks ready for dispatch (RFC-0036). **Recommended adopter authoring path.**
+- **Spec-kit bridge** — `cli-import-spec` / `/ai-sdlc:import-spec` consumes spec-kit `tasks.md`, runs the DoR Gate at import, and lands governed backlog tasks ready for dispatch (RFC-0036). **Recommended adopter authoring path.**
 - **Agent-agnostic orchestration** — works with Claude Code, GitHub Copilot, Cursor, OpenAI Codex, or any LLM API
 - **Structured pipelines** that route tasks through defined stages based on complexity
 - **Quality gates** with three-tier enforcement (advisory, soft-mandatory, hard-mandatory)
@@ -34,7 +34,7 @@ Everything is declared as YAML resources validated against JSON Schema, followin
 AI-SDLC supports three artifact altitudes (RFC → Spec → Task; see [`docs/concepts/spec-driven.md`](../concepts/spec-driven.md)). For day-to-day feature work, the recommended path uses **GitHub Spec Kit** as the front-of-funnel tool and the **spec-kit bridge** to land tasks in the AI-SDLC backlog:
 
 ```text
-spec-kit  ──────►  cli-import-spec  ──────►  AI-SDLC backlog  ──────►  /ai-sdlc execute
+spec-kit  ──────►  cli-import-spec  ──────►  AI-SDLC backlog  ──────►  /ai-sdlc:execute
 (idea →            (DoR Gate at                (governed tasks            (autonomous
  contract)          import; refuse              passing the                 dispatch +
                     + emit clarification        quality contract)            reviewers +

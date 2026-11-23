@@ -314,7 +314,7 @@ function makeRunners(ctx) {
       },
     },
     {
-      match: /^\/ai-sdlc execute (\S+)$/,
+      match: /^\/ai-sdlc:execute (\S+)$/,
       run() {
         requireBuilt('pipeline-cli/dist/index.js', 'pipeline-cli/dist/cli/orchestrator.js');
         // The README names an example task id; the smoke files its own toy task.
