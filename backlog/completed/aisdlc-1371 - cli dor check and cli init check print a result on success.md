@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1371
 title: 'cli-dor-check --task and cli-init --check print a result on success'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-21'
 labels:
