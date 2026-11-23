@@ -82,6 +82,8 @@ export async function runInitCli(argv: string[] = hideBin(process.argv)): Promis
       );
     } else if (missing.length > 0) {
       process.stdout.write(`${formatMissingConfig(missing)}\n`);
+    } else {
+      process.stdout.write('[init] config complete: no missing entries\n');
     }
     return missing.length === 0 ? 0 : 1;
   }

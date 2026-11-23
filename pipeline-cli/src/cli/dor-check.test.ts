@@ -44,7 +44,13 @@ describe('cli-dor-check decision-point wiring (AISDLC-785)', () => {
   it('routes decision points after the DoR verdict and leaves a passing result unchanged', async () => {
     refine.mockResolvedValue({ shouldRefuseExecution: false, verdict: {} });
     process.argv = ['node', 'cli-dor-check', '--task', file];
+    const out: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((c) => {
+      out.push(String(c));
+      return true;
+    });
     expect(await runDorCheckCli()).toBe(0);
+    expect(out.join('')).toBe(`[dor-gate] DoR passed: ${file} (AISDLC-785)\n`);
     expect(route).toHaveBeenCalledWith('AISDLC-785', file, dir);
   });
 

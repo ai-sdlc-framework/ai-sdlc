@@ -42,7 +42,11 @@ describe('cli-init', () => {
     }
     out = '';
     expect(await runInitCli(['--check', '--project-dir', dir])).toBe(0);
-    expect(out).toBe('');
+    expect(out).toBe('[init] config complete: no missing entries\n');
+    out = '';
+    expect(await runInitCli(['--check', '--format', 'json', '--project-dir', dir])).toBe(0);
+    expect(JSON.parse(out).missing).toEqual([]);
+    expect(out).not.toContain('config complete');
   });
 
   it('--fix scaffolds only entries that need no input', async () => {
