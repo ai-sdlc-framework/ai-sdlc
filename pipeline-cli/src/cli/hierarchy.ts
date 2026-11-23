@@ -94,7 +94,12 @@ import { backupMemory, backupRepoMemory, memoryBackupHint } from '../memory-drea
 import { resolveMemoryDir } from '../memory-dream/resolve-dir.js';
 import { now as clockNow } from '../clock.js';
 import { runDemo, type DemoDeps } from '../hierarchy/demo.js';
-import { createPlannerNotifier } from '../hierarchy/planner-notify.js';
+import {
+  createPlannerNotifier,
+  plannerSocketAddress,
+  socketExists,
+} from '../hierarchy/planner-notify.js';
+import { heldPlannerRouteCount } from '../hierarchy/reconcile.js';
 import { notifyEscalation, writeEscalationFile } from '../hierarchy/escalation-file.js';
 import {
   fetchUsage,
@@ -915,6 +920,13 @@ export async function runHierarchyCli(
         } else {
           for (const line of formatStatus(result, deps.now().getTime())) deps.log(line);
           for (const s of slots) deps.log(`verify slot ${s.index}: held by pid ${s.pid ?? '?'}`);
+          const held = heldPlannerRouteCount(deps.boardDir);
+          const addr = plannerSocketAddress(deps.boardDir);
+          if (held > 0 && !(addr && socketExists(addr))) {
+            deps.log(
+              `held planner notices: ${held} (planner socket ${addr ?? 'unknown'} unreachable; retried on a later pass)`,
+            );
+          }
         }
         // AISDLC-1156: a failed verdict in no terminal state past stuckAfterMinutes fails the check.
         return flags.check === 'true' && hasStuckViolation(result) ? 1 : 0;

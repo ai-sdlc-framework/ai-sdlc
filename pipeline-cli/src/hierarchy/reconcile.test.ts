@@ -24,6 +24,7 @@ import {
   normaliseCheck,
   readLanding,
   reconcile,
+  heldPlannerRouteCount,
   summariseLanding,
   takeSuppressedNote,
   taskIdFrom,
@@ -1778,5 +1779,22 @@ describe('docs site pin (AISDLC-1316)', () => {
     });
     reconcile([], { ...opts(), docsBump: { state: 'skipped' }, notifyPlanner: notify });
     expect(readDocsSitePin(board)).toBeUndefined();
+  });
+});
+
+describe('heldPlannerRouteCount (AISDLC-1391)', () => {
+  it('counts sent keys that were not delivered', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'held-routes-'));
+    try {
+      expect(heldPlannerRouteCount(dir)).toBe(0);
+      mkdirSync(path.join(dir, 'landing'), { recursive: true });
+      writeFileSync(
+        path.join(dir, 'landing', 'planner-routes.json'),
+        JSON.stringify({ sent: ['1|a|x', '2|b|y'], suppressed: 0, delivered: ['1|a|x'] }),
+      );
+      expect(heldPlannerRouteCount(dir)).toBe(1);
+    } finally {
+      removeFixtureDir(dir);
+    }
   });
 });

@@ -742,6 +742,13 @@ function readRoutes(boardDir: string): PlannerRoutes {
   }
 }
 
+/** Count of routed planner reports not yet delivered to the planner (held for retry). */
+export function heldPlannerRouteCount(boardDir: string): number {
+  const r = readRoutes(boardDir);
+  const delivered = new Set(r.delivered ?? []);
+  return r.sent.filter((k) => !delivered.has(k)).length;
+}
+
 function writeRoutes(boardDir: string, r: PlannerRoutes): void {
   mkdirSync(landingDir(boardDir), { recursive: true });
   const target = routesPath(boardDir);

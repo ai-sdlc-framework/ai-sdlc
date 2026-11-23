@@ -5,7 +5,12 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
-import { composerHasText, createPlannerNotifier } from './planner-notify.js';
+import {
+  composerHasText,
+  createPlannerNotifier,
+  plannerSocketAddress,
+  socketExists,
+} from './planner-notify.js';
 
 let board: string;
 beforeEach(() => {
@@ -84,26 +89,40 @@ describe('planner notice composer guard (AISDLC-1373)', () => {
     writeFileSync(path.join(board, 'handoff', 'address-planner.json'), '"uds:/tmp/p.sock"');
     const { run, calls } = runner('');
     const sock = vi.fn();
-    createPlannerNotifier(board, run as never, undefined, sock)('hello');
+    createPlannerNotifier(board, run as never, undefined, sock, () => true)('hello');
     expect(sock).toHaveBeenCalledWith('uds:/tmp/p.sock', 'hello');
     expect(calls.some((a) => a[0] === 'send-keys')).toBe(false);
   });
 
-  it('holds the notice back when the composer holds text', () => {
+  it('writes to the socket derived from the roster pid and never calls the pane sender', () => {
     writeRoster();
-    const { run, calls } = runner('output\n❯ half typed message\n');
+    const { run, calls } = runner('');
+    const sock = vi.fn();
     const send = vi.fn();
-    expect(() => createPlannerNotifier(board, run as never, send)('hello')).toThrow(/unsent text/);
+    createPlannerNotifier(board, run as never, send, sock, () => true)('hello');
+    expect(sock).toHaveBeenCalledWith('uds:/tmp/cc-socks/1.sock', 'hello');
     expect(send).not.toHaveBeenCalled();
     expect(calls.some((a) => a[0] === 'send-keys')).toBe(false);
   });
 
-  it('types the notice when the composer is empty', () => {
+  it('throws and types nothing when the socket is missing', () => {
     writeRoster();
-    const { run } = runner('output\n│ ❯ │\n');
+    const { run, calls } = runner('');
+    const sock = vi.fn();
     const send = vi.fn();
-    createPlannerNotifier(board, run as never, send)('hello');
-    expect(send).toHaveBeenCalledTimes(1);
+    expect(() =>
+      createPlannerNotifier(board, run as never, send, sock, () => false)('hello'),
+    ).toThrow(/socket/);
+    expect(sock).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(calls.some((a) => a[0] === 'send-keys')).toBe(false);
+  });
+
+  it('plannerSocketAddress and socketExists', () => {
+    expect(plannerSocketAddress(board)).toBeUndefined();
+    writeRoster();
+    expect(plannerSocketAddress(board)).toBe('uds:/tmp/cc-socks/1.sock');
+    expect(socketExists('uds:/nonexistent/x.sock')).toBe(false);
   });
 
   it('composerHasText distinguishes empty and filled prompts', () => {
