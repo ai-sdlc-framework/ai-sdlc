@@ -26,6 +26,7 @@ import {
   parseFeed,
   trackPrActivity,
   webhookDown,
+  webhookGate,
   webhookHealth,
   webhookPersistence,
   carriedFeed,
@@ -151,6 +152,15 @@ describe('webhook health (AISDLC-1157)', () => {
   const receiver = (feed?: unknown): void =>
     write('webhook.json', { pid: 1, port: 9, ...(feed ? { feed } : {}) });
   const up = { probePort: () => true };
+
+  it('webhookGate reports the class and the wake mtime (AISDLC-1379)', () => {
+    const noSecret = { ...hd(), env: {} } as unknown as HierarchyDeps;
+    expect(webhookGate(noSecret)).toEqual({ class: 'none', wakeAtMs: null });
+    write('.reconcile-wake', {});
+    const g = webhookGate(hd());
+    expect(g.class).toBe('down');
+    expect(typeof g.wakeAtMs).toBe('number');
+  });
 
   it('is down when the receiver is dead, or its port does not answer', () => {
     expect(webhookHealth(hd(), up).class).toBe('down');

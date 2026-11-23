@@ -35,6 +35,8 @@ export const WEBHOOK_EVENT_KINDS = [
   'workflow_run',
   'status',
   'pull_request_review',
+  // AISDLC-1379: only a push to the default branch is recorded; it can change what every open PR rebases onto.
+  'push',
   // AISDLC-1023: posted by main-health-monitor.yml, not by GitHub itself.
   'pipeline-canary-red',
   'pipeline-canary-green',
@@ -126,6 +128,12 @@ function extractTarget(
   } else if (kind === 'status') {
     pr = null;
     sha = p.sha;
+  } else if (kind === 'push') {
+    const branch = obj(p.repository)?.default_branch;
+    const def = typeof branch === 'string' && branch ? branch : 'main';
+    if (p.ref !== `refs/heads/${def}`) return undefined;
+    pr = null;
+    sha = p.after;
   } else {
     const run = obj(p[kind]);
     const first = Array.isArray(run?.pull_requests) ? obj(run.pull_requests[0]) : undefined;
@@ -134,6 +142,14 @@ function extractTarget(
   }
   if (pr === undefined || typeof sha !== 'string' || !SHA_RE.test(sha)) return undefined;
   return { repo, pr, headSha: sha };
+}
+
+/** Kinds that name a run on a commit; with no PR they are main-branch noise (AISDLC-1379). */
+const RUN_KINDS: readonly WebhookEventKind[] = ['check_run', 'check_suite', 'workflow_run'];
+
+/** True when the event belongs to no PR and is a run event: recorded for health, but it wakes nothing. */
+export function isNoPrRunEvent(r: { pr: number | null; kind: string }): boolean {
+  return r.pr === null && (RUN_KINDS as readonly string[]).includes(r.kind);
 }
 
 /** `<repo>#<pr>@<headSha>:<kind>:<deliveryId>`, made safe as a file name. */
@@ -247,7 +263,7 @@ export function createReceiver(opts: ReceiverOptions): Receiver {
           ? { detail: payload.detail.slice(0, MAX_DETAIL) }
           : {}),
       };
-      if (writeEventRecord(eventsDir, record)) {
+      if (writeEventRecord(eventsDir, record) && !isNoPrRunEvent(record)) {
         scheduleWake(`${record.repo}#${record.pr ?? 'none'}@${record.headSha}`);
       }
     },

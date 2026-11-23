@@ -116,6 +116,38 @@ describe('webhook receiver (AISDLC-880)', () => {
     expect(wake).toHaveBeenCalledTimes(1);
   });
 
+  it('a no-PR check_run is recorded but does not wake; a push to main does (AISDLC-1379)', async () => {
+    const noPr = JSON.stringify({
+      repository: { full_name: 'o/r' },
+      check_run: { head_sha: SHA, pull_requests: [] },
+    });
+    await post(noPr, good(noPr, 'np-1'));
+    expect(eventFiles()).toHaveLength(1);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(wake).not.toHaveBeenCalled();
+    const feature = JSON.stringify({
+      repository: { full_name: 'o/r' },
+      ref: 'refs/heads/feat/x',
+      after: SHA,
+    });
+    await post(feature, good(feature, 'pu-0', 'push'));
+    expect(eventFiles()).toHaveLength(1);
+    const push = JSON.stringify({
+      repository: { full_name: 'o/r', default_branch: 'main' },
+      ref: 'refs/heads/main',
+      after: SHA,
+    });
+    await post(push, good(push, 'pu-1', 'push'));
+    await vi.waitFor(() => expect(wake).toHaveBeenCalledTimes(1));
+    const dflt = JSON.stringify({
+      repository: { full_name: 'o/r' },
+      ref: 'refs/heads/main',
+      after: 'b'.repeat(40),
+    });
+    await post(dflt, good(dflt, 'pu-2', 'push'));
+    await vi.waitFor(() => expect(wake).toHaveBeenCalledTimes(2));
+  });
+
   it('touches nothing for a replayed delivery id or a failed signature', async () => {
     const body = checkRun();
     await post(body, good(body, 'r-1'));

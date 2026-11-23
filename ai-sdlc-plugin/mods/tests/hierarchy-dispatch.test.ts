@@ -276,6 +276,56 @@ describe('dispatch host (AISDLC-1035)', () => {
     expect(s.runs.filter((a) => a[1] === 'escalation-file')).toHaveLength(1);
   });
 
+  describe('reconcile cadence follows webhook health (AISDLC-1379)', () => {
+    const reconciles = (s: ReturnType<typeof setup>) =>
+      s.runs.filter((a) => a[0].endsWith('cli-dispatch.mjs') && a[1] === 'reconcile').length;
+    const sweeps = (s: ReturnType<typeof setup>) =>
+      s.runs.filter((a) => a[0].endsWith('cli-ci.mjs') && a[1] === 'sweep').length;
+
+    it('healthy with no wake: the timer skips reconcile and sweep until the slow interval passes, a newer wake runs it', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        vi.setSystemTime(new Date('2026-11-23T00:00:00Z'));
+        const s = setup({ ...EMPTY_TICK, webhookGate: { class: 'healthy', wakeAtMs: 1000 } });
+        await s.start();
+        await flush();
+        s.runs.length = 0;
+        for (let i = 0; i < 10; i++) {
+          vi.advanceTimersByTime(30_000);
+          await s.timer();
+        }
+        expect(reconciles(s)).toBe(0);
+        expect(sweeps(s)).toBe(0);
+        s.setTick({ ...EMPTY_TICK, webhookGate: { class: 'healthy', wakeAtMs: 2000 } });
+        await s.timer();
+        expect(reconciles(s)).toBe(1);
+        vi.advanceTimersByTime(15 * 60_000);
+        await s.timer();
+        expect(reconciles(s)).toBe(2);
+        expect(sweeps(s)).toBe(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('down, none, or an absent gate: reconcile runs on every timer fire', async () => {
+      for (const gate of [
+        { class: 'down', wakeAtMs: 1 },
+        { class: 'none', wakeAtMs: null },
+        undefined,
+      ]) {
+        const s = setup({ ...EMPTY_TICK, ...(gate ? { webhookGate: gate } : {}) });
+        await s.start();
+        await flush();
+        s.runs.length = 0;
+        await s.timer();
+        await s.timer();
+        await s.timer();
+        expect(reconciles(s)).toBe(3);
+      }
+    });
+  });
+
   it('renders roster, queue, inflight, done, failed and blockers, refreshed on tick and event', async () => {
     const s = setup({ ...EMPTY_TICK, blockers: ['gh quota low'] });
     await s.start();

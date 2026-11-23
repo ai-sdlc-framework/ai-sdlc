@@ -158,7 +158,12 @@ export function pruneEvents(
 /** True when the receiver has run and no event record is newer than `sinceMs`. */
 function quietSince(boardDir: string, sinceMs: number): boolean {
   if (!existsSync(eventsDir(boardDir))) return false;
-  return eventEntries(boardDir).every((e) => e.mtimeMs <= sinceMs);
+  // AISDLC-1379: a run event with no PR (a main-branch check) changes nothing a PR snapshot holds.
+  return eventEntries(boardDir).every(
+    (e) =>
+      e.mtimeMs <= sinceMs ||
+      (e.pr === null && /:(check_run|check_suite|workflow_run):/.test(e.id)),
+  );
 }
 
 /** Head sha and a digest of the check rollup; a new webhook event alone does not change it (AISDLC-1380). */

@@ -193,6 +193,7 @@ import {
   webhookUp,
   webhookStatus,
   webhookPersistence,
+  webhookGate,
   webhookHealth,
   parseFeed,
   trackPrActivity,
@@ -1673,6 +1674,7 @@ export async function runHierarchyCli(
                 (r) => r.entry.role === 'executor' && r.state === 'idle' && !r.inflightTask,
               )
               .map((r) => r.entry.name),
+            webhookGate: webhookGate(deps),
             identity: { name: worker, planner: planner?.name ?? '' },
             handoff: dispatchHandoff(deps, worker),
             selfClear: selfClearAvailability(deps.env),

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1379
 title: 'Dispatch polls on the RFC-0054 slow interval while the webhook is healthy'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-22'
 labels:
