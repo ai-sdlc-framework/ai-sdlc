@@ -39,7 +39,13 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 import type { PromotedDecision } from '../decisions/escalation-chain.js';
-import { boardStateOf, collectVerdicts, peekQueue, TASK_ID_RE } from '../dispatch/board.js';
+import {
+  boardStateOf,
+  collectVerdicts,
+  loadEligibilityContext,
+  peekQueue,
+  TASK_ID_RE,
+} from '../dispatch/board.js';
 import type { EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { sanitizeVerdict } from '../dispatch/verdict-fields.js';
@@ -86,7 +92,7 @@ import {
   type HumanAttentionRow,
 } from './human-attention.js';
 import type { ClearResult } from './clear.js';
-import type { LandReport } from './land-eligible.js';
+import { noteMissingLandGrant, type LandReport } from './land-eligible.js';
 import type { DispatchTickMarker } from '../usage/dispatch-turns.js';
 import type { MarkReadyReport } from './mark-ready.js';
 import type { PlaybookOutcome } from './playbook.js';
@@ -406,6 +412,8 @@ export function computeBlockers(
   const queueDir = path.join(boardDir, 'queue');
   let queued = 0;
   if (existsSync(queueDir)) {
+    // The same rule the eligible queue uses (AISDLC-1341): landed, or Done on main.
+    const ctx = loadEligibilityContext(boardDir);
     for (const f of readdirSync(queueDir).sort()) {
       if (!f.endsWith('.json')) continue;
       queued += 1;
@@ -415,7 +423,8 @@ export function computeBlockers(
           after?: unknown;
         };
         const waiting = (Array.isArray(m.after) ? m.after : []).filter(
-          (a): a is string => typeof a === 'string' && !isDone(boardDir, a),
+          (a): a is string =>
+            typeof a === 'string' && !ctx.doneTaskIds.has(a) && !ctx.isDoneOnMain?.(a),
         );
         if (m.taskId && waiting.length > 0) {
           out.push(`${m.taskId}: waits on ${waiting.join(', ')}`);
@@ -1132,6 +1141,10 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const landAndRepair = async (): Promise<void> => {
     if (landDone || !readGithub) return;
     landDone = true;
+    if (deps.landEligible && !deps.operational.has('land-eligible-prs')) {
+      // AISDLC-1351: the pass is skipped for lack of a grant; say so once instead of silently.
+      noteMissingLandGrant(deps.boardDir);
+    }
     if (deps.landEligible && deps.operational.has('land-eligible-prs')) {
       try {
         landed = await deps.landEligible();

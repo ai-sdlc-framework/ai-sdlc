@@ -24,7 +24,7 @@ describe('Resource builders', () => {
       expect(pipeline.kind).toBe('Pipeline');
       expect(pipeline.apiVersion).toBe('ai-sdlc.io/v1alpha1');
       expect(pipeline.metadata.name).toBe('dogfood-pipeline');
-      expect(pipeline.spec.stages.length).toBeGreaterThan(0);
+      expect(pipeline.spec.stages?.length).toBeGreaterThan(0);
       expect(pipeline.spec.triggers.length).toBeGreaterThan(0);
     });
 

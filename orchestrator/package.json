@@ -1,6 +1,6 @@
 {
   "name": "@ai-sdlc/orchestrator",
-  "version": "0.42.0",
+  "version": "0.44.0",
   "description": "AI-SDLC Orchestrator — long-running runtime that drives issues through the complete SDLC with AI agents",
   "license": "Apache-2.0",
   "repository": {
@@ -56,20 +56,20 @@
   "dependencies": {
     "@ai-sdlc/pipeline-cli": "workspace:*",
     "@ai-sdlc/reference": "workspace:*",
-    "@inquirer/prompts": "^8.7.5",
+    "@inquirer/prompts": "^8.8.0",
     "ajv": "^8.20.0",
-    "better-sqlite3": "^13.0.3",
-    "commander": "^15.0.0",
+    "better-sqlite3": "^13.2.0",
+    "commander": "^15.1.0",
     "franc": "^6.2.0",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.6",
-    "@vitest/coverage-v8": "^5.1.0",
+    "@vitest/coverage-v8": "^5.1.1",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "vite": "^8.3.6",
-    "vitest": "^5.1.0"
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
   }
 }

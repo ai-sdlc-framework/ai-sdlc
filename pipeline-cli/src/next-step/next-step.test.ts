@@ -7,7 +7,7 @@
  * calls a run costs (AC-2). The collaborators have their own suites.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -19,7 +19,7 @@ import {
 } from '../__test-helpers/next-step-fixtures.js';
 import type { AggregatedVerdict, ReviewerVerdict } from '../types.js';
 import { loadReviewState } from '../incremental-review/review-rounds.js';
-import { approvedWithoutReviewers } from './review-finalize.js';
+import { approvedWithoutReviewers, finalizeReview } from './review-finalize.js';
 import { bootstrapPromptFor } from './review-prepare.js';
 import {
   DEFAULT_DEVELOPER_BUDGET_MINUTES,
@@ -267,7 +267,7 @@ describe('happy path', () => {
     const dev = instructions[0];
     if (dev.action !== 'spawn-developer') throw new Error('unreachable');
     expect(dev).toMatchObject({
-      agent: 'developer',
+      agent: 'ai-sdlc:developer',
       iteration: 1,
       promptFile: '/files/developer-prompt-1.md',
       cwd: worktree,
@@ -283,16 +283,23 @@ describe('happy path', () => {
     expect(rv.reviewers).toEqual([
       {
         agent: 'code-reviewer-codex',
+        subagentType: 'ai-sdlc:code-reviewer-codex',
         promptFile: '/files/review-r1-code.md',
         bootstrapPrompt: bootstrapPromptFor('/files/review-r1-code.md'),
       },
       {
         agent: 'security-reviewer',
+        subagentType: 'ai-sdlc:security-reviewer',
         promptFile: '/files/review-r1-sec.md',
         bootstrapPrompt: bootstrapPromptFor('/files/review-r1-sec.md'),
         model: 'opus',
       },
     ]);
+    const registered = readdirSync(join(process.cwd(), '..', 'ai-sdlc-plugin', 'agents'))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => `ai-sdlc:${f.slice(0, -3)}`);
+    expect(registered).toContain(dev.agent);
+    for (const r of rv.reviewers) expect(registered).toContain(r.subagentType);
     expect(rv.reviewers[0].bootstrapPrompt).toContain('/files/review-r1-code.md');
     expect(rv.reviewers[0].bootstrapPrompt).not.toMatch(/Diff-binding|nonce/i);
     expect(rv.replyShape).toContain('agentId');
@@ -877,6 +884,145 @@ describe('a fixable reviewer report asks for a corrected report instead of faili
       'after 2 corrected reports',
     );
     expect(persisted().phase).toBe('aborted');
+  });
+
+  describe('a reviewer harness failure is not a verdict (AISDLC-1333)', () => {
+    const failedJson = (): string =>
+      JSON.stringify({
+        reviewers: [
+          {
+            agent: 'code-reviewer-codex',
+            harnessFailed: true,
+            reason: 'usage limit reached',
+            retryAfter: 'Nov 19th, 2026 12:22 PM',
+          },
+          { agent: 'security-reviewer', agentId: 'a1', approved: true, findings: [] },
+        ],
+      });
+
+    it('re-asks for the report without a developer round, then stops naming the reviewer', async () => {
+      const d = { ...deps(), finalizeReview };
+      await toReviewers(d);
+      for (let i = 0; i < 2; i++) {
+        const out = await nextStep(ctx, { task: 'AISDLC-900', result: failedJson() }, d);
+        expect(out.instruction.action).toBe('fix-report');
+        expect(persisted()).toMatchObject({ phase: 'awaiting-reviewers', reportRetries: i + 1 });
+        expect(persisted().iteration).toBe(1);
+      }
+      const third = await nextStep(ctx, { task: 'AISDLC-900', result: failedJson() }, d);
+      expect(third.exitCode).toBe(1);
+      const reason = third.instruction.action === 'stop' ? third.instruction.reason : '';
+      expect(reason).toContain('code-reviewer-codex');
+      expect(reason).toContain('codex');
+      expect(reason).toContain('usage limit reached');
+      expect(reason).toContain('Nov 19th, 2026 12:22 PM');
+      expect(reason).toContain('review did not run');
+      expect(persisted().iteration).toBe(1);
+    });
+  });
+
+  describe('a reviewer that leaves out the nonce marker runs again alone (AISDLC-1335)', () => {
+    const reviewerOf = (args: string[]): string => args[args.indexOf('--reviewer') + 1];
+    const securityOnly = (): string =>
+      JSON.stringify({
+        reviewers: [{ agent: 'security-reviewer', agentId: 'a9', approved: true, findings: [] }],
+      });
+
+    function persistedFiles(): void {
+      for (const a of ['code-reviewer-codex', 'security-reviewer']) {
+        h.present.add(join(worktree, '.ai-sdlc', 'transcripts', 'aisdlc-900', `${a}.jsonl`));
+        h.present.add(join(worktree, '.ai-sdlc', 'verdicts', `${a}-aisdlc-900.json`));
+      }
+    }
+
+    it('re-spawns only that reviewer with the same prompt file and nonce, then completes', async () => {
+      persistedFiles();
+      let refusals = 1;
+      h.runner.on(
+        (_c, args) =>
+          !!args[0]?.endsWith('persist-reviewer-artifacts.sh') &&
+          reviewerOf(args) === 'security-reviewer' &&
+          refusals-- > 0,
+        { code: 4, stdout: '', stderr: 'does not contain the nonce marker' },
+      );
+      const d = { ...deps(), finalizeReview };
+      await toReviewers(d);
+      const first = persisted().review!;
+      const out = await nextStep(ctx, { task: 'AISDLC-900', result: reviewersJson() }, d);
+      expect(out.exitCode).toBe(0);
+      if (out.instruction.action !== 'spawn-reviewers') throw new Error('expected a re-spawn');
+      expect(out.instruction.reviewers.map((r) => r.agent)).toEqual(['security-reviewer']);
+      expect(out.instruction.reviewers[0].promptFile).toBe(first.spawned[1].promptFile);
+      expect(out.instruction.round).toBe(first.round);
+      expect(persisted().review?.nonce).toBe(first.nonce);
+      expect(persisted().phase).toBe('awaiting-reviewers');
+      const done = await nextStep(ctx, { task: 'AISDLC-900', result: securityOnly() }, d);
+      // The round completed: both reviewers are in the aggregate, exactly as with no retry.
+      // (This two-reviewer fixture is short of the test-reviewer, so the coverage gate iterates.)
+      expect(done.instruction.action).toBe('spawn-developer');
+      expect(persisted().verdict?.verdicts.slice(0, 2)).toEqual([
+        expect.objectContaining({ agentId: 'code-reviewer-codex', approved: true }),
+        expect.objectContaining({ agentId: 'security-reviewer', approved: true }),
+      ]);
+      expect(persisted().review?.rerun).toBeUndefined();
+    });
+
+    it('aborts after the attempt cap naming the reviewer and the count', async () => {
+      h.runner.on(
+        (_c, args) =>
+          !!args[0]?.endsWith('persist-reviewer-artifacts.sh') &&
+          reviewerOf(args) === 'security-reviewer',
+        { code: 4, stdout: '', stderr: 'does not contain the nonce marker' },
+      );
+      const d = { ...deps(), finalizeReview };
+      await toReviewers(d);
+      let out = await nextStep(ctx, { task: 'AISDLC-900', result: reviewersJson() }, d);
+      for (let i = 0; i < 2; i++) {
+        expect(out.instruction.action).toBe('spawn-reviewers');
+        out = await nextStep(ctx, { task: 'AISDLC-900', result: securityOnly() }, d);
+      }
+      expect(out.exitCode).toBe(1);
+      const reason = out.instruction.action === 'stop' ? out.instruction.reason : '';
+      expect(reason).toContain('security-reviewer after 2 re-runs');
+    });
+  });
+
+  it('numbers the round by the recorded round for the instruction, the plan and the developer reply (AISDLC-1335)', async () => {
+    mkdirSync(join(worktree, '.git'), { recursive: true });
+    const seen: number[] = [];
+    const roundPlan = (round: number) => ({
+      round,
+      mode: 'full' as const,
+      reason: 'first-round' as const,
+      baseSha: null,
+      headSha: 'a'.repeat(40),
+      deltaSize: 0,
+      contentHash: 'b'.repeat(64),
+      headBlobHash: 'c'.repeat(64),
+      prior: null,
+      deltaReviewers: [],
+    });
+    // An earlier run left rounds 1 and 2 on disk: the plan names the next round 3, then 4.
+    const { instructions } = await drive(
+      deps({
+        approvals: [false, true],
+        prepare: async (_c, _s, round) => {
+          seen.push(round);
+          const n = round === 1 ? 3 : round;
+          return {
+            kind: 'spawn',
+            review: { ...reviewRound(n), roundPlan: roundPlan(n) },
+            classifierLine: 'x',
+          };
+        },
+      }),
+    );
+    const rounds = instructions.flatMap((i) => (i.action === 'spawn-reviewers' ? [i.round] : []));
+    expect(rounds).toEqual([3, 4]);
+    expect(seen).toEqual([1, 4]);
+    const recorded = loadReviewState('AISDLC-900', worktree);
+    expect(recorded.rounds.map((r) => r.round)).toEqual([3, 4]);
+    expect(recorded.responses.map((r) => r.round)).toEqual([3]);
   });
 
   it('a non-recoverable finalize failure still stops the run', async () => {

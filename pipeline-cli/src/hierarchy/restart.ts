@@ -47,7 +47,16 @@ import {
   ROLE_PROMPT,
   withProfile,
 } from './up.js';
-import { readState as readWebhookState, webhookDown, webhookUp } from './webhook.js';
+import {
+  logNoFeed,
+  NO_FEED_LINE,
+  carriedFeed,
+  isWebhookPortFree,
+  readState as readWebhookState,
+  webhookDown,
+  webhookUp,
+} from './webhook.js';
+import { restartModel } from './model-fallback.js';
 import { assertModel, assertPermissionMode, splitSessionName } from './validate.js';
 
 /** Options for `restart`. */
@@ -284,14 +293,17 @@ export async function hierarchyRestart(
   const project = entry.project ?? defaultProjectForBoard(deps.boardDir);
   const warnings: string[] = [];
   const others = roster.sessions.filter((e) => e !== entry);
+  const relaunch = restartModel(entry.role, entry.model, deps);
+  if (relaunch.line) deps.log(relaunch.line);
   const launched = await launchSession(
     {
       role: entry.role,
       name: entry.tmuxWindow,
       bare: splitSessionName(entry.tmuxWindow)?.bare ?? entry.tmuxWindow,
-      model: entry.model,
+      model: relaunch.model,
       permissionMode: entry.permissionMode,
       prompt: ROLE_PROMPT[entry.role],
+      ...(entry.taskId ? { taskId: entry.taskId } : {}),
       ...(entry.launchProfile ? withProfile(resolveProfile(deps, entry.launchProfile)) : {}),
     },
     project,
@@ -307,7 +319,9 @@ export async function hierarchyRestart(
       `${launched.failure}; '${entry.name}' was stopped and dropped from the roster. Run cli-hierarchy up to start it again`,
     );
   }
-  const next = launched.entry;
+  const next: RosterEntry = entry.taskId
+    ? { ...launched.entry, taskId: entry.taskId }
+    : launched.entry;
   replaceEntry(deps, entry.name, next);
   verifyRestarted(deps, next);
   deps.emit?.({
@@ -352,9 +366,18 @@ function reRegisterDispatchServices(deps: HierarchyDeps): void {
   if (deps.env.AI_SDLC_WEBHOOK_SECRET) {
     try {
       webhookUp(deps);
+      logNoFeed(deps);
     } catch (err) {
       deps.log(`warning: webhook receiver not started: ${(err as Error).message}`);
     }
+  }
+}
+
+/** Wait up to ~2s for `port` to be released by a receiver that was just signalled. */
+function waitPortReleased(deps: HierarchyDeps, port: number): void {
+  for (let i = 0; i < 10 && !isWebhookPortFree(deps, port); i += 1) {
+    if (deps.sleepMs) deps.sleepMs(200);
+    else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
   }
 }
 
@@ -375,12 +398,15 @@ function restartDispatchServices(deps: HierarchyDeps): void {
       // feed back into up so the receiver keeps its port and the forwarder is reinstalled.
       const recorded = readWebhookState(deps.boardDir);
       webhookDown(deps, deps.killProcess);
+      // The old receiver releases its port just after SIGTERM; wait briefly, then scan from it.
+      if (recorded) waitPortReleased(deps, recorded.port);
       webhookUp(
         deps,
-        recorded ? String(recorded.port) : undefined,
         undefined,
-        recorded?.feed?.agent ? { kind: recorded.feed.kind } : recorded?.feed,
+        undefined,
+        recorded?.feed ? carriedFeed(recorded.feed) : undefined,
       );
+      if (!recorded?.feed) deps.log(NO_FEED_LINE);
     } catch (err) {
       deps.log(`warning: webhook receiver not restarted: ${(err as Error).message}`);
     }

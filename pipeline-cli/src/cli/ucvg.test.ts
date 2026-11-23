@@ -17,7 +17,7 @@
  *   - emit, fail helpers (stdout/stderr/exit)
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -624,6 +624,7 @@ describe('runAstGateCli — ast-gate subcommand', () => {
     vi.mocked(astGateMod.runAstGate).mockReturnValue({
       outcome: 'pass',
       offendingPaths: [],
+      offendingPathReasons: [],
       heuristicFindings: [],
     });
 
@@ -673,6 +674,7 @@ describe('runAstGateCli — ast-gate subcommand', () => {
     vi.mocked(astGateMod.runAstGate).mockReturnValue({
       outcome: 'abort-protected-path',
       offendingPaths: ['.github/workflows/main.yml'],
+      offendingPathReasons: [{ path: '.github/workflows/main.yml', reason: 'protected-path' }],
       heuristicFindings: [],
     });
     vi.mocked(astGateMod.buildBlockedEvent).mockReturnValue({
@@ -1966,5 +1968,57 @@ describe('no /tmp/.ai-sdlc pollution', () => {
     expect(tmpDir).toContain('ucvg-no-pollution-');
     // /tmp/.ai-sdlc must NOT have been created
     expect(existsSync('/tmp/.ai-sdlc')).toBe(false);
+  });
+});
+
+describe('runSandboxAndReview — fetch phase failure (AISDLC-1291)', () => {
+  it('exits with the fetch-phase error, runs no reviewer and writes no report', async () => {
+    const err = new Error('sandbox fetch phase failed: dependency install exited with code 1');
+    err.name = 'SandboxFetchPhaseError';
+    vi.mocked(sandboxRunnerMod.runSandbox).mockRejectedValue(err);
+    vi.mocked(sandboxRunnerMod.loadSandboxConfig).mockReturnValue({
+      sandboxDriver: 'docker',
+      differentialTest: { resourceLimits: { wallClockSeconds: 600, cpuCores: 2, memoryMb: 4096 } },
+    });
+    const factory = vi.fn(
+      () => new FakeModelClient(JSON.stringify({ approved: false, findings: [] })),
+    );
+    _ucvgSeams.modelClientFactory = factory;
+    const sandboxTmp = mkdtempSync(join(tmpdir(), 'ucvg-fetchfail-'));
+    const reportPath = join(sandboxTmp, '.ai-sdlc', 'ucvg', 'reports', '42.unsigned.json');
+    vi.mocked(cleanRoomSignerMod.unsignedReportPath).mockReturnValue(reportPath);
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('exit');
+    }) as never);
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await expect(
+        runUcvgCli([
+          'sandbox-run',
+          '--pr-number',
+          '42',
+          '--head-sha',
+          'a'.repeat(40),
+          '--base-sha',
+          'b'.repeat(40),
+          '--pr-content-dir',
+          sandboxTmp,
+          '--work-dir',
+          sandboxTmp,
+          '--output-dir',
+          sandboxTmp,
+        ]),
+      ).rejects.toThrow('exit');
+      expect(stderr.mock.calls.map((c) => String(c[0])).join('')).toContain(
+        'sandbox fetch phase failed',
+      );
+      expect(factory).not.toHaveBeenCalled();
+      expect(existsSync(reportPath)).toBe(false);
+    } finally {
+      exit.mockRestore();
+      stderr.mockRestore();
+      _ucvgSeams.modelClientFactory = null;
+      removeFixtureDir(sandboxTmp);
+    }
   });
 });

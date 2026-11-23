@@ -40,6 +40,9 @@ let runtimeDepsError = null;
 // both outcomes produced zero operator-visible signal.
 let staleUpgradeSummary = null;
 let staleCheckTimedOut = false;
+// AISDLC-1370: true when this hook ran a successful install, so the banner can tell the
+// operator how to recover if Claude Code already skipped the MCP server.
+let installedThisSession = false;
 
 // Number of packages check-stale-runtime-deps.mjs's own KNOWN_PACKAGES probes
 // (kept in sync manually; a mismatch only affects the outer spawnSync timeout
@@ -183,7 +186,9 @@ try {
           timeout: 120_000,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
-        if (result.status !== 0) {
+        if (result.status === 0) {
+          installedThisSession = true;
+        } else {
           // Stash the error for the warnings array below so the operator
           // sees what went wrong in the session-start governance banner.
           // Truncate to keep the banner readable.
@@ -531,7 +536,22 @@ function sanitizeForContext(text, maxLen = 400) {
   return redacted.length > maxLen ? `${redacted.slice(0, maxLen)}… (truncated)` : redacted;
 }
 
+// AISDLC-1370: when this hook installed dependencies (successfully), Claude Code may have
+// started the MCP server before the install finished and cached the failure. The hook does not
+// touch that cache (it lives outside the plugin directory); the operator removes it.
 function buildRuntimeDepsWarning() {
+  // Local const: the early-exit path calls this before module-level consts initialise.
+  const MCP_CACHE_RECOVERY =
+    'ai-sdlc installed its runtime dependencies during this session start. If the ai-sdlc MCP ' +
+    'server shows as failed or skipped, Claude Code may have cached that result in ' +
+    '~/.claude/mcp-needs-auth-cache.json. Recover with one step: delete that file ' +
+    '(rm ~/.claude/mcp-needs-auth-cache.json), then restart Claude Code.';
+  const base = buildRuntimeDepsWarningBase();
+  if (!installedThisSession) return base;
+  return base ? `${base}\n${MCP_CACHE_RECOVERY}` : MCP_CACHE_RECOVERY;
+}
+
+function buildRuntimeDepsWarningBase() {
   // Prefer the module-local capture; the env var remains a read-only input for
   // tests and cross-process callers. Both are treated as UNTRUSTED data.
   const raw = runtimeDepsError ?? process.env.__AI_SDLC_INSTALL_RUNTIME_DEPS_ERROR;

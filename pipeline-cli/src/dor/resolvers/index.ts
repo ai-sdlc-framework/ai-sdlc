@@ -41,7 +41,7 @@ export async function resolveReference(
   resolvers: Resolver[] = DEFAULT_RESOLVERS,
 ): Promise<ResolveResult> {
   for (const r of resolvers) {
-    if (r.supports(ref)) {
+    if (r.supports(ref, opts)) {
       try {
         return await r.resolve(ref, opts);
       } catch (err) {

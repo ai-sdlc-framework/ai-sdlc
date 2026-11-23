@@ -12,11 +12,15 @@ import {
   missingConfigEntries,
   newestConfigVersion,
   readConfigVersion,
+  AGENT_ROLE_MERGE_DEFAULTS,
+  renderAgentRole,
+  renderAgentRoleGovernance,
   scaffoldConfig,
   type ConfigEntry,
 } from './manifest.js';
 import { CODE_TEST_MERGED_REVIEWER_SET, classifyReviewerSet } from '../steps/reviewer-set.js';
 import { checkReviewerKindCoverage } from '../../attestation-core/review-scope-core.mjs';
+import { parseOperationalPolicy } from '../hierarchy/operational.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const answers = { org: 'acme', repo: 'widgets' };
@@ -170,5 +174,41 @@ describe('verifier and classifier agree on the reviewer set (AC5)', () => {
     expect(c.set).toBe('three');
     expect(checkReviewerKindCoverage(CODE_TEST_MERGED_REVIEWER_SET, 'three').ok).toBe(false);
     expect(checkReviewerKindCoverage(c.reviewers, 'three').ok).toBe(true);
+  });
+});
+
+describe('cli-init pipeline template (AISDLC-1281)', () => {
+  it('has no deprecated stages block and validates against the Pipeline schema', async () => {
+    const entry = REQUIRED_CONFIG_MANIFEST.find((e) => e.path === '.ai-sdlc/pipeline.yaml')!;
+    const text = entry.render({ org: 'acme', repo: 'widgets' });
+    expect(text).not.toMatch(/^\s*stages:/m);
+    const { load: parse } = await import('js-yaml');
+    const { validate } = await import('@ai-sdlc/reference');
+    expect(validate('Pipeline', parse(text)).valid).toBe(true);
+  });
+});
+
+describe('scaffolded agent role states the merge settings (AISDLC-1351)', () => {
+  it('every tier writes the three keys and the resolver reads back the constant', () => {
+    for (const tier of ['coding', 'research', 'meta'] as const) {
+      const text = renderAgentRole(tier);
+      expect(text).toContain('allowMerge:');
+      expect(text).toContain('mergeAuthors:');
+      expect(text).toContain('operational:');
+      const p = parseOperationalPolicy(text);
+      expect(p.allowMerge).toBe(AGENT_ROLE_MERGE_DEFAULTS.allowMerge);
+      expect(p.mergeAuthors).toEqual([...AGENT_ROLE_MERGE_DEFAULTS.mergeAuthors]);
+      expect([...p.operational]).toEqual([...AGENT_ROLE_MERGE_DEFAULTS.operational]);
+    }
+  });
+
+  it('writes a non-empty constant as lists', () => {
+    const text = renderAgentRoleGovernance({
+      allowMerge: 'onGreenClean',
+      mergeAuthors: ['octo'],
+      operational: ['land-eligible-prs'],
+    });
+    expect(text).toContain('      - octo');
+    expect(text).toContain('      - land-eligible-prs');
   });
 });

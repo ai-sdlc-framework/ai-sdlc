@@ -66,8 +66,13 @@ plugin cache and warns on stderr (with the rebuild command
 `pnpm --filter @ai-sdlc/pipeline-cli build`) when that build is stale or missing:
 
 ```bash
-PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_ROOT:+$CLAUDE_PLUGIN_ROOT/scripts}"
-PLUGIN_SCRIPTS_DIR="${PLUGIN_SCRIPTS_DIR:-$(pwd)/ai-sdlc-plugin/scripts}"
+# >>> plugin-root preamble
+unset PLUGIN_SCRIPTS_DIR
+for _c in "${CLAUDE_PLUGIN_DIR:-}" "${CLAUDE_PLUGIN_ROOT}" "$(pwd)/ai-sdlc-plugin" "$(node -e 'const f=require("fs"),p=require("path"),r=(d)=>{try{return f.realpathSync(d)}catch(e){return d}};try{const g=JSON.parse(f.readFileSync(p.join(require("os").homedir(),".claude/plugins/installed_plugins.json"))).plugins,s=[];for(const k in g)if(k.startsWith("ai-sdlc@"))s.push(...g[k]);const o=[];for(let d=process.cwd(),u;u!==d;d=p.dirname(d)){u=d;for(const e of s)if(e.scope!="user"&&e.scope!="managed"&&e.projectPath&&r(e.projectPath)==d)o.push(e)}for(const e of s)if(e.scope=="user")o.push(e);console.log(o.find((e)=>f.existsSync(e.installPath)).installPath)}catch(e){}' 2>/dev/null)"; do
+  [ -n "$_c" ] && [ -d "$_c" ] && PLUGIN_SCRIPTS_DIR="$_c/scripts" && break
+done
+[ -n "${PLUGIN_SCRIPTS_DIR:-}" ] || { echo "ERROR: plugin not found: set CLAUDE_PLUGIN_DIR or CLAUDE_PLUGIN_ROOT, or install it (see ~/.claude/plugins/installed_plugins.json)" >&2; exit 1; }
+# <<< plugin-root preamble
 if RESOLVED_BIN="$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh")"; then
   RESOLVED_VERSION="$(node -p "require('$RESOLVED_BIN/../package.json').version" 2>/dev/null || echo unknown)"
   echo "pipeline-cli build: $RESOLVED_BIN (version $RESOLVED_VERSION)"
@@ -84,7 +89,14 @@ Also print each runtime dependency as installed version against its `plugin.json
 pin (local files only; exit status 1 means at least one exact pin differs):
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}/hooks/check-plugin-version.js" --deps || echo "runtime dependencies differ from the plugin pins"
+# >>> plugin-root preamble
+unset PLUGIN_SCRIPTS_DIR
+for _c in "${CLAUDE_PLUGIN_DIR:-}" "${CLAUDE_PLUGIN_ROOT}" "$(pwd)/ai-sdlc-plugin" "$(node -e 'const f=require("fs"),p=require("path"),r=(d)=>{try{return f.realpathSync(d)}catch(e){return d}};try{const g=JSON.parse(f.readFileSync(p.join(require("os").homedir(),".claude/plugins/installed_plugins.json"))).plugins,s=[];for(const k in g)if(k.startsWith("ai-sdlc@"))s.push(...g[k]);const o=[];for(let d=process.cwd(),u;u!==d;d=p.dirname(d)){u=d;for(const e of s)if(e.scope!="user"&&e.scope!="managed"&&e.projectPath&&r(e.projectPath)==d)o.push(e)}for(const e of s)if(e.scope=="user")o.push(e);console.log(o.find((e)=>f.existsSync(e.installPath)).installPath)}catch(e){}' 2>/dev/null)"; do
+  [ -n "$_c" ] && [ -d "$_c" ] && PLUGIN_SCRIPTS_DIR="$_c/scripts" && break
+done
+[ -n "${PLUGIN_SCRIPTS_DIR:-}" ] || { echo "ERROR: plugin not found: set CLAUDE_PLUGIN_DIR or CLAUDE_PLUGIN_ROOT, or install it (see ~/.claude/plugins/installed_plugins.json)" >&2; exit 1; }
+# <<< plugin-root preamble
+node "$PLUGIN_SCRIPTS_DIR/../hooks/check-plugin-version.js" --deps || echo "runtime dependencies differ from the plugin pins"
 ```
 
 Include those lines in the doctor output.
@@ -102,8 +114,9 @@ Include those lines in the doctor output.
 
 The `config-manifest` check lists every missing entry of the required-config
 manifest with the same wording as the `/ai-sdlc execute` Step 1 preflight, and
-`--fix` scaffolds the entries that need no operator input (review policy,
-reviewer set, agent role). The keyring and pipeline need `/ai-sdlc init`.
+`--fix` scaffolds the entries that need no operator input (review-policy,
+agent-role). Without `.ai-sdlc/review-config.yaml` the built-in default reviewer
+selection applies; the `review-config` check says which is in effect. The keyring and pipeline need `/ai-sdlc init`.
 
 ## Output
 

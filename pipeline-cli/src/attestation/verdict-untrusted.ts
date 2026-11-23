@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { UntrustedPrReport } from '../pipeline/report-validator.js';
-import { computeRequiredReviewers, evaluateCoverage } from './review-coverage.js';
+import { evaluateCoverage, requiredReviewersFor } from './review-coverage.js';
 import {
   LEAVES_FILE,
   RECORD_FILE,
@@ -49,8 +49,8 @@ export function buildCleanRoomVerdict(
     verdict: report.reviewers[k].approved ? ('approved' as const) : ('changes_requested' as const),
   }));
   const approved = reviewers.filter((r) => r.verdict === 'approved').map((r) => r.name);
-  // changedPaths null fails closed to the three-reviewer set, which the UCVG matrix always runs.
-  const coverage = evaluateCoverage(computeRequiredReviewers({ changedPaths: null }), approved);
+  // A clean-room head always requires the three-reviewer set, which the UCVG matrix always runs.
+  const coverage = evaluateCoverage(requiredReviewersFor('clean-room', null), approved);
   const verdict =
     report.consensus.approved && coverage.satisfied ? 'approved' : 'changes_requested';
   return finalizeVerdictRecord(

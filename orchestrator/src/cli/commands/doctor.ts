@@ -87,6 +87,8 @@ export interface BranchProtectionCheck {
   requiresAttestationDirectly?: boolean;
   /** `required_status_checks.contexts` includes `Backlog Drift` (AISDLC-582). */
   requiresBacklogDrift?: boolean;
+  /** Branch whose protection was read. */
+  branch?: string;
   /** Branch-protection API returned 403 (GitHub Free private repo): client-side enforcement only (AISDLC-748). */
   apiUnavailable?: boolean;
   /** Reason the check could not run, or that the API call failed. */
@@ -189,11 +191,9 @@ export function detectAttestationArtifacts(
  * `ai-sdlc doctor`.
  */
 export function checkBranchProtection(
-  // Currently unused — `gh` resolves the repo from cwd via its own
-  // git-remote detection. Threaded through for forward-compat with a
-  // future `--repo` override and to keep the signature symmetric with
-  // `detectAttestationArtifacts`.
-  _projectDir: string,
+  // `gh` resolves the repo from cwd; projectDir is read for
+  // `spec.branching.targetBranch` in `.ai-sdlc/pipeline.yaml`.
+  projectDir: string,
   adapters: Pick<DoctorAdapters, 'runCommand'>,
 ): BranchProtectionCheck {
   // Delegates to the shared helper (AISDLC-578) so this and
@@ -201,7 +201,7 @@ export function checkBranchProtection(
   // The error wording differs slightly from the pre-578 inline
   // implementation (now sourced from `resolveOwnerRepoSlug`'s shared
   // message) — existing tests assert on substrings, not exact text.
-  return fetchBranchProtectionStatus(adapters);
+  return fetchBranchProtectionStatus(adapters, projectDir);
 }
 
 /**
@@ -285,16 +285,17 @@ export function renderDoctorReport(result: AttestationDoctorResult): string[] {
   lines.push('');
 
   lines.push('Enforcement:');
+  const bpBranch = result.branchProtection.branch ?? 'main';
   if (result.branchProtection.checked) {
     lines.push(
-      `  branch protection (main):    requires approving review = ${result.branchProtection.requiresApprovingReview}, requires ai-sdlc/pr-ready = ${result.branchProtection.requiresPrReady}`,
+      `  branch protection (${bpBranch}):    requires approving review = ${result.branchProtection.requiresApprovingReview}, requires ai-sdlc/pr-ready = ${result.branchProtection.requiresPrReady}`,
     );
   } else if (result.branchProtection.apiUnavailable) {
-    lines.push(`  branch protection (main):    unavailable (HTTP 403)`);
+    lines.push(`  branch protection (${bpBranch}):    unavailable (HTTP 403)`);
     lines.push(`  ERROR ${CLIENT_SIDE_ONLY_MESSAGE}`);
   } else {
     lines.push(
-      `  branch protection (main):    unknown (${result.branchProtection.error ?? 'not checked'})`,
+      `  branch protection (${bpBranch}):    unknown (${result.branchProtection.error ?? 'not checked'})`,
     );
   }
   lines.push(`  enforcement configured:      ${result.enforcementConfigured}`);

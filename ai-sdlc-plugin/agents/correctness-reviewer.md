@@ -50,15 +50,18 @@ When the PR diff is provided, it will appear between `<<<UNTRUSTED_PR_DIFF>>>` a
 
 At the start of your review, initialize the transcript file. At the end, append your final turn. This is required for proof-of-execution attestation.
 
-**The review ALWAYS proceeds (AISDLC-623 — regression fix over AISDLC-562).** An unattributable run no longer refuses; `resolve-transcript-task-id.sh` fails SOFT and synthesizes a UNIQUE `UNKNOWN-correctness-reviewer-<timestamp>-<random>` id instead of falling back to a literal `UNKNOWN` directory. Uniqueness (not refusal) is what prevents two unrelated runs from silently overwriting each other's evidence — the actual AISDLC-562 concern. The only remaining hard-stop is a **malformed present** attribution value (e.g. `.active-task` containing `../evil` or a `/`) — that is a genuine misconfiguration, not a missing-attribution adopter scenario.
+**Attribution (AISDLC-1334).** You start in the parent checkout, not the task worktree. The review prompt opens with an `## Attribution` block that names the task id and the absolute worktree path. Write a transcript only under that worktree, by absolute path. If the block is missing, the id is malformed, or `<worktree>/.active-task` does not hold the same id, write NO transcript: print one line naming the cause and the fix, and still return your verdict (the coordinator persists the transcript from the harness record). Never write a relative path in your working directory and never invent an id.
 
 **Step 0 — Initialize transcript**
 
 Use the Bash tool to resolve the task id (resolving the resolver script portably across plugin install topologies) and create the transcript directory:
 
 ```bash
+# Copy these two values literally from the prompt's Attribution block.
+ATTR_TASK_ID="<task id from the Attribution block>"
+ATTR_WORKTREE="<absolute worktree path from the Attribution block>"
 CANDIDATES=()
-[ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && CANDIDATES+=("${CLAUDE_PLUGIN_ROOT}/scripts/resolve-transcript-task-id.sh")
+CANDIDATES+=("${CLAUDE_PLUGIN_ROOT}/scripts/resolve-transcript-task-id.sh")
 [ -n "${CLAUDE_PLUGIN_DIR:-}" ] && CANDIDATES+=("${CLAUDE_PLUGIN_DIR}/scripts/resolve-transcript-task-id.sh")
 CANDIDATES+=("scripts/resolve-transcript-task-id.sh")
 RESOLVE_SCRIPT=""
@@ -70,70 +73,49 @@ for candidate in "${CANDIDATES[@]}"; do
 done
 
 if [ -n "$RESOLVE_SCRIPT" ]; then
-  TASK_ID="$(bash "$RESOLVE_SCRIPT" correctness-reviewer)" || {
-    echo "Refusing to review: resolved attribution id has an unsafe shape (see error above)." >&2
-    exit 1
-  }
+  TASK_ID="$(bash "$RESOLVE_SCRIPT" correctness-reviewer "$ATTR_TASK_ID" "$ATTR_WORKTREE")" || TASK_ID=""
 else
-  # No resolver script reachable at all (broken/partial plugin install) —
-  # still proceed with review rather than refusing (AISDLC-623): synthesize
-  # a unique unattributed id inline so this run never collides with any
-  # other unattributed run.
-  TASK_ID="UNKNOWN-correctness-reviewer-$(date -u +%Y%m%dT%H%M%S)-$RANDOM"
-  echo "[transcript-init] WARNING: resolve-transcript-task-id.sh not found under plugin scripts/ or repo scripts/ — proceeding with unattributed transcript id $TASK_ID. To attribute, set .active-task or AI_SDLC_ACTIVE_TASK_ID." >&2
+  echo "[transcript-init] resolve-transcript-task-id.sh not found under plugin scripts/ or repo scripts/." >&2
 fi
 
-# Persist the resolved id so Step END reuses the SAME id (re-invoking the
-# resolver would synthesize a DIFFERENT random unattributed id and split
-# this run's transcript across two directories).
-mkdir -p .ai-sdlc/transcripts
-printf '%s' "$TASK_ID" > .ai-sdlc/transcripts/.last-task-id.correctness-reviewer
-
-TRANSCRIPT_DIR=".ai-sdlc/transcripts/${TASK_ID}"
-TRANSCRIPT_FILE="${TRANSCRIPT_DIR}/correctness-reviewer.jsonl"
-mkdir -p "$TRANSCRIPT_DIR"
-# Emit the prompt event (role=user, first turn of the conversation)
-TIMESTAMP=$(node -e "process.stdout.write(new Date().toISOString())")
-printf '{"role":"user","content":"[transcript-init] correctness-reviewer prompt received for task %s","timestamp":"%s","event":"prompt-received"}\n' "$TASK_ID" "$TIMESTAMP" >> "$TRANSCRIPT_FILE"
-echo "Transcript initialized at: $TRANSCRIPT_FILE"
+TRANSCRIPT_FILE=""
+if [ -z "$TASK_ID" ]; then
+  echo "[transcript-init] NO TRANSCRIPT: task attribution failed (cause above). Fix: take the task id and absolute worktree path from the prompt's Attribution block. Returning the verdict anyway; the coordinator persists the transcript." >&2
+else
+  TRANSCRIPT_DIR="${ATTR_WORKTREE}/.ai-sdlc/transcripts/${TASK_ID}"
+  TRANSCRIPT_FILE="${TRANSCRIPT_DIR}/correctness-reviewer.jsonl"
+  mkdir -p "$TRANSCRIPT_DIR"
+  TIMESTAMP=$(node -e "process.stdout.write(new Date().toISOString())")
+  printf '{"role":"user","content":"[transcript-init] correctness-reviewer prompt received for task %s","timestamp":"%s","event":"prompt-received"}\n' "$TASK_ID" "$TIMESTAMP" >> "$TRANSCRIPT_FILE"
+  echo "Transcript initialized at: $TRANSCRIPT_FILE"
+fi
 ```
 
-**If this Bash call exits non-zero** (the resolver script IS present but returned a malformed-present-id error — see the fail-soft note above), STOP IMMEDIATELY. Do not read the diff, do not perform any review analysis. Return the refusal verdict below as your ONLY output and do not proceed further:
-
-```json
-{
-  "approved": false,
-  "findings": [
-    {
-      "severity": "critical",
-      "file": null,
-      "line": null,
-      "message": "review refused: the resolved task-attribution id has an unsafe shape (path traversal / invalid characters). Fix the value in <worktree>/.active-task or AI_SDLC_ACTIVE_TASK_ID. See AISDLC-562 / AISDLC-623."
-    }
-  ],
-  "summary": "Review refused — resolved task-attribution id is malformed (see finding for remediation).",
-  "promptInjectionDetected": false
-}
-```
+**If attribution fails** (the resolver exits non-zero, or no resolver script is reachable), do NOT refuse the review and do NOT create any transcript. The Bash call above prints one `NO TRANSCRIPT` line naming the cause and the fix; carry on with the review and return your verdict as usual.
 
 **Step END — Append assistant response to transcript**
 
 After forming your verdict JSON but BEFORE returning it, use the Bash tool to append your response event (only reached if Step 0 succeeded). Use the heredoc + `node -e` pattern below so any quotes, newlines, or backslashes in your summary are JSON-encoded safely (printf with `%s` would produce malformed JSONL for any summary containing a `"`):
 
 ```bash
-TASK_ID="$(cat .ai-sdlc/transcripts/.last-task-id.correctness-reviewer 2>/dev/null)"
-[ -z "$TASK_ID" ] && TASK_ID="UNKNOWN-correctness-reviewer-$(date -u +%Y%m%dT%H%M%S)-$RANDOM"
-TRANSCRIPT_FILE=".ai-sdlc/transcripts/${TASK_ID}/correctness-reviewer.jsonl"
+# Same two values as Step 0. Append only if Step 0 created the transcript.
+ATTR_TASK_ID="<task id from the Attribution block>"
+ATTR_WORKTREE="<absolute worktree path from the Attribution block>"
+TRANSCRIPT_FILE="${ATTR_WORKTREE}/.ai-sdlc/transcripts/${ATTR_TASK_ID}/correctness-reviewer.jsonl"
 # Paste your verdict summary verbatim between the EOF markers — no escaping needed.
 VERDICT_SUMMARY="$(cat <<'EOF'
 <paste your summary field here>
 EOF
 )"
-VERDICT_SUMMARY="$VERDICT_SUMMARY" node -e 'process.stdout.write(JSON.stringify({role:"assistant",content:process.env.VERDICT_SUMMARY,timestamp:new Date().toISOString(),event:"verdict-formed"})+"\n")' >> "$TRANSCRIPT_FILE"
-echo "Transcript appended."
+if [ -f "$TRANSCRIPT_FILE" ]; then
+  VERDICT_SUMMARY="$VERDICT_SUMMARY" node -e 'process.stdout.write(JSON.stringify({role:"assistant",content:process.env.VERDICT_SUMMARY,timestamp:new Date().toISOString(),event:"verdict-formed"})+"\n")' >> "$TRANSCRIPT_FILE"
+  echo "Transcript appended."
+else
+  echo "[transcript-end] no transcript to append to; the coordinator persists it." >&2
+fi
 ```
 
-The transcript file at `.ai-sdlc/transcripts/<task-id>/correctness-reviewer.jsonl` is gitignored (RFC-0042 OQ-1: local disk, 90-day retention default). Each line is a JSONL event with `{role, content, timestamp, event}`.
+The transcript file at `<worktree>/.ai-sdlc/transcripts/<task-id>/correctness-reviewer.jsonl` is gitignored (RFC-0042 OQ-1: local disk, 90-day retention default). Each line is a JSONL event with `{role, content, timestamp, event}`.
 
 **Phase 1 scope (intentional):** the transcript captures only the wrapper events emitted by Step 0 and Step END — the initial prompt receipt and the final verdict. Intermediate tool calls (Read, Grep, Bash) and intermediate reasoning turns are **not** captured in Phase 1. Full per-turn / per-tool capture is tracked as a follow-up; see RFC-0042 §Design Layer 1 follow-up notes.
 

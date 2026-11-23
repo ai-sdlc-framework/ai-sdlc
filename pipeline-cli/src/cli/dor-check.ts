@@ -22,6 +22,7 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { refineBacklogTask } from '../dor/ingress-claude.js';
 import { renderClarificationComment } from '../dor/comment-loop.js';
+import { formatOqEntryLines } from '../dor/upstream-oq-gate.js';
 import { loadDorConfig } from '../dor/dor-config.js';
 import { checkSecurityFindingCompletion } from '../dor/security-finding-dismissal.js';
 import { routeDecisionPointForTaskFile } from '../dor/decision-point.js';
@@ -111,7 +112,10 @@ async function checkOneTaskFile(taskFile: string): Promise<CheckOneResult> {
     comment += `${oq.rejectionSummary ?? 'DoR upstream-OQ gate blocked.'}\n`;
     for (const c of oq.rfcChecks) {
       if (c.rejected && c.unresolvedOqCount > 0) {
-        comment += `  ${c.rfcId}: ${c.unresolvedOqCount} unresolved OQ(s): ${c.unresolvedOqSample.join('; ')}\n`;
+        comment += `  ${c.rfcId}: ${c.unresolvedOqCount} unresolved OQ(s):\n`;
+        const listed = formatOqEntryLines(c);
+        if (listed.length === 0) comment += `  ${c.unresolvedOqSample.join('; ')}\n`;
+        for (const l of listed) comment += `  ${l}\n`;
       }
     }
   }

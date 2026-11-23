@@ -9,17 +9,20 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import path from 'node:path';
 import process from 'node:process';
 
-import { createReceiver } from '../dispatch/webhook-receiver.js';
+import { createReceiver, FOREIGN_FILE, REFUSED_FILE } from '../dispatch/webhook-receiver.js';
 import { DEFAULT_WEBHOOK_PORT, loadPrLifecycleConfig } from './pr-lifecycle-config.js';
 import { eventEntries } from './pr-snapshot.js';
 import type { HierarchyDeps } from './types.js';
 import {
   ForwarderPersistError,
+  resolveRepo,
   forwarderAgentAlive,
   forwarderLabel,
   forwarderPersistence,
   installForwarder,
+  LEGACY_FORWARDER_LABEL,
   removeForwarder,
+  removeLegacyForwarder,
 } from './webhook-forwarder.js';
 
 export const WEBHOOK_SECRET_ENV = 'AI_SDLC_WEBHOOK_SECRET';
@@ -30,7 +33,11 @@ const STATE_FILE = 'webhook.json';
 /** What `status` reports about the receiver. */
 export type WebhookStatus =
   | { state: 'up'; port: number; pid: number }
-  | { state: 'off'; reason: 'no secret' | 'not running' | 'port collision'; detail?: string };
+  | {
+      state: 'off';
+      reason: 'no secret' | 'not running' | 'port collision' | 'foreign listener';
+      detail?: string;
+    };
 
 /** What feeds the receiver: `gh webhook forward`, a tunnel, or nothing known (AISDLC-1157). */
 export interface WebhookFeed {
@@ -45,6 +52,8 @@ const FEED_KINDS: readonly string[] = ['gh-forward', 'tunnel', 'none'];
 interface WebhookState {
   pid: number;
   port: number;
+  /** `owner/repo` the receiver serves; absent when it could not be resolved. */
+  repo?: string;
   feed?: WebhookFeed;
 }
 
@@ -84,6 +93,7 @@ export function readState(boardDir: string): WebhookState | undefined {
       ? {
           pid: s.pid,
           port: s.port,
+          ...(typeof s.repo === 'string' && s.repo ? { repo: s.repo } : {}),
           ...(s.feed && FEED_KINDS.includes(s.feed.kind) ? { feed: s.feed } : {}),
         }
       : undefined;
@@ -92,12 +102,55 @@ export function readState(boardDir: string): WebhookState | undefined {
   }
 }
 
-/** Whether a live receiver is recorded, and whether a secret is set. */
+export interface WebhookIdentity {
+  repo: string | null;
+  boardDir: string;
+}
+
+/** Ask 127.0.0.1:<port>/health who answers, through `deps.run`; undefined when nothing valid answers. */
+function defaultProbeIdentity(deps: HierarchyDeps, port: number): WebhookIdentity | undefined {
+  const script =
+    `require('http').get({host:'127.0.0.1',port:${port},path:'/health',timeout:1000},r=>{` +
+    `let b='';r.on('data',c=>b+=c);r.on('end',()=>{process.stdout.write(b);process.exit(0)})})` +
+    `.on('error',()=>process.exit(1)).on('timeout',()=>process.exit(1));` +
+    `setTimeout(()=>process.exit(1),1500)`;
+  try {
+    const r = deps.run(process.execPath, ['-e', script], { cwd: deps.cwd });
+    if (r?.status !== 0) return undefined;
+    const j = JSON.parse(r.stdout ?? '') as { repo?: unknown; boardDir?: unknown };
+    if (typeof j.boardDir !== 'string') return undefined;
+    return { repo: typeof j.repo === 'string' ? j.repo : null, boardDir: j.boardDir };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Why the listener on `port` is not this board's receiver; undefined when it is. */
+function identityProblem(
+  deps: HierarchyDeps,
+  port: number,
+  probe?: (port: number) => WebhookIdentity | undefined,
+): { reason: string; repo: string | null } | undefined {
+  const id = (probe ?? deps.probeWebhookIdentity ?? ((p) => defaultProbeIdentity(deps, p)))(port);
+  if (!id) return { reason: `port ${port} does not answer /health as a receiver`, repo: null };
+  if (path.resolve(id.boardDir) !== path.resolve(deps.boardDir)) {
+    return {
+      reason: `port ${port} answers as another board's receiver (repository ${id.repo ?? 'unknown'}, board ${id.boardDir})`,
+      repo: id.repo,
+    };
+  }
+  return undefined;
+}
+
+/** Whether a live receiver of this board is recorded, and whether a secret is set. */
 export function webhookStatus(deps: HierarchyDeps): WebhookStatus {
   if (!deps.env[WEBHOOK_SECRET_ENV]) return { state: 'off', reason: 'no secret' };
   const s = readState(deps.boardDir);
-  if (s && (deps.isAlive ?? defaultIsAlive)(s.pid))
-    return { state: 'up', port: s.port, pid: s.pid };
+  if (s && (deps.isAlive ?? defaultIsAlive)(s.pid)) {
+    const problem = identityProblem(deps, s.port);
+    if (!problem) return { state: 'up', port: s.port, pid: s.pid };
+    return { state: 'off', reason: 'foreign listener', detail: problem.reason };
+  }
   const collision = readCollision(deps.boardDir);
   if (collision) return { state: 'off', reason: 'port collision', detail: collision };
   return { state: 'off', reason: 'not running' };
@@ -108,6 +161,8 @@ export const webhookTargetUrl = (port: number): string =>
   `http://127.0.0.1:${port}/webhooks/github`;
 
 const PORT_FILE = 'webhook-port';
+const STARTING_FILE = 'webhook-starting';
+const STARTING_WINDOW_MS = 30_000;
 const COLLISION_FILE = 'webhook-collision.txt';
 /** Candidate ports tried from the recorded or default port when none is pinned. */
 export const WEBHOOK_PORT_SCAN = 20;
@@ -135,17 +190,22 @@ function recordCollision(boardDir: string, message: string): void {
   writeFileSync(path.join(boardDir, COLLISION_FILE), message + '\n');
 }
 
-/** Whether 127.0.0.1:<port> can be bound; an unusable probe counts as free. */
+/** Whether 127.0.0.1:<port> can be bound; an unusable or failed probe counts as busy. */
 function defaultPortFree(deps: HierarchyDeps, port: number): boolean {
   const script =
     `const s=require('net').createServer();` +
     `s.on('error',()=>process.exit(7));` +
     `s.listen(${port},'127.0.0.1',()=>s.close(()=>process.exit(0)))`;
   try {
-    return deps.run(process.execPath, ['-e', script], { cwd: deps.cwd })?.status !== 7;
+    return deps.run(process.execPath, ['-e', script], { cwd: deps.cwd })?.status === 0;
   } catch {
-    return true;
+    return false;
   }
+}
+
+/** Whether `port` can be bound now, through the injected probe when present. */
+export function isWebhookPortFree(deps: HierarchyDeps, port: number): boolean {
+  return (deps.isPortFree ?? ((p: number) => defaultPortFree(deps, p)))(port);
 }
 
 /** Best-effort `<command> (pid N)` of the listener on `port`. */
@@ -163,7 +223,7 @@ function portOwner(deps: HierarchyDeps, port: number): string {
 }
 
 /**
- * Choose the receiver port. A pinned port (flag or env) wins and must be free. Otherwise the
+ * Choose the candidate receiver port; the receiver records it only once it has bound. A pinned port (flag or env) wins and must be free. Otherwise the
  * recorded port is reused, else the configured default, scanning upward to the first free one.
  * All candidates held: throws naming the first port and its owner, and records the collision.
  */
@@ -182,8 +242,6 @@ function selectPort(deps: HierarchyDeps, flag: string | undefined): number {
   const start = readRecordedPort(deps.boardDir) ?? loadPrLifecycleConfig(deps.cwd).webhook.port;
   for (let p = start; p < start + WEBHOOK_PORT_SCAN && p <= 65535; p += 1) {
     if (free(p)) {
-      mkdirSync(deps.boardDir, { recursive: true });
-      writeFileSync(path.join(deps.boardDir, PORT_FILE), `${p}\n`);
       rmSync(path.join(deps.boardDir, COLLISION_FILE), { force: true });
       return p;
     }
@@ -192,7 +250,11 @@ function selectPort(deps: HierarchyDeps, flag: string | undefined): number {
 }
 
 /** Health class of the webhook path (AISDLC-1157). */
-export type WebhookClass = 'healthy' | 'degraded' | 'down';
+/**
+ * `unverified`: the receiver is up but no event was ever delivered and nothing says it should
+ * have been (AISDLC-1345). It is not `healthy`, and it neither opens nor closes a decision.
+ */
+export type WebhookClass = 'healthy' | 'unverified' | 'degraded' | 'down';
 
 /** The five signals the class is computed from. */
 export interface WebhookSignals {
@@ -201,6 +263,10 @@ export interface WebhookSignals {
   port: boolean | null;
   /** Minutes since the newest event file; null when there is none. */
   lastEventAgeMin: number | null;
+  /** When the newest event file arrived (ISO); absent when there is none. */
+  lastEventAt?: string;
+  /** The port the receiver recorded; absent when none is recorded. */
+  receiverPort?: number;
   /** A PR changed head or state within `staleAfterMinutes` and no event names it. */
   prActivityWithoutEvent: boolean;
   /** A PR changed within `staleAfterMinutes`. */
@@ -211,10 +277,16 @@ export interface WebhookSignals {
   feed: WebhookFeed['kind'];
   /** Hook delivery status from GitHub, when one `gh api` call reached it. */
   hookDelivery?: 'ok' | 'failing';
+  /** Deliveries refused for a bad signature since the last accepted event (AISDLC-1285). */
+  refusedDeliveries?: number;
+  /** Signed deliveries refused because they name another repository (AISDLC-1349). */
+  foreignDeliveries?: { count: number; repo: string };
 }
 
 export interface WebhookHealth {
   class: WebhookClass;
+  /** `owner/repo` this board's receiver serves; absent when unknown. */
+  repo?: string;
   signals: WebhookSignals;
   /** When this reading was taken; the tick keeps the episode start. */
   since: string;
@@ -266,6 +338,8 @@ export interface WebhookHealthOptions {
   /** Override the thresholds (defaults from `.ai-sdlc/pr-lifecycle.yaml`). */
   staleAfterMinutes?: number;
   downAfterMinutes?: number;
+  /** Answers who listens on the port (`/health`); default asks over HTTP through `deps.run`. */
+  probeIdentity?: (port: number) => WebhookIdentity | undefined;
   /** Answers whether the port accepts a connection; default probes with a short-lived node process. */
   probePort?: (port: number) => boolean;
 }
@@ -283,6 +357,26 @@ function defaultProbePort(deps: HierarchyDeps, port: number): boolean {
   }
 }
 
+function readRefused(boardDir: string): { at: string; count: number } | undefined {
+  try {
+    const r = JSON.parse(readFileSync(path.join(boardDir, REFUSED_FILE), 'utf-8'));
+    return typeof r.at === 'string' && typeof r.count === 'number' ? r : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readForeign(boardDir: string): { count: number; repo: string } | undefined {
+  try {
+    const r = JSON.parse(readFileSync(path.join(boardDir, FOREIGN_FILE), 'utf-8'));
+    return typeof r.repo === 'string' && typeof r.count === 'number' && r.count > 0
+      ? { count: r.count, repo: r.repo }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function forwarderSignal(
   deps: HierarchyDeps,
   feed: WebhookFeed | undefined,
@@ -291,15 +385,8 @@ function forwarderSignal(
   if (feed?.kind === 'none') return 'none';
   if (feed?.agent) return forwarderAgentAlive(deps, feed.agent) ? 'alive' : 'dead';
   if (feed?.pid !== undefined) return alive(feed.pid) ? 'alive' : 'dead';
-  try {
-    const r = deps.run('pgrep', ['-f', feed?.kind === 'tunnel' ? 'tunnel' : 'gh webhook forward'], {
-      cwd: deps.cwd,
-    });
-    if (r?.status === 0 && (r.stdout ?? '').trim() !== '') return 'alive';
-  } catch {
-    /* pgrep missing */
-  }
-  // A recorded feed with no pid and no process match is gone; with no record we do not know.
+  // Liveness comes only from this board's own record, never a process-name match (another
+  // board's forwarder must not read as ours). A recorded feed with no pid or agent is gone.
   return feed ? 'dead' : 'unknown';
 }
 
@@ -314,11 +401,17 @@ export function webhookHealth(deps: HierarchyDeps, opts: WebhookHealthOptions = 
   const downMin = opts.downAfterMinutes ?? cfg.downAfterMinutes;
   const nowMs = deps.now().getTime();
   const state = readState(deps.boardDir);
-  const receiver = !!state && (deps.isAlive ?? defaultIsAlive)(state.pid);
+  const pidAlive = !!state && (deps.isAlive ?? defaultIsAlive)(state.pid);
   const port =
-    receiver && state ? (opts.probePort ?? ((p) => defaultProbePort(deps, p)))(state.port) : false;
+    pidAlive && state ? (opts.probePort ?? ((p) => defaultProbePort(deps, p)))(state.port) : false;
+  const problem =
+    pidAlive && state && port ? identityProblem(deps, state.port, opts.probeIdentity) : undefined;
+  const receiver = pidAlive && !problem;
+  const repo = state?.repo;
 
-  const events = existsSync(path.join(deps.boardDir, 'events')) ? eventEntries(deps.boardDir) : [];
+  const events = (
+    existsSync(path.join(deps.boardDir, 'events')) ? eventEntries(deps.boardDir) : []
+  ).filter((e) => !repo || e.repo === null || e.repo.toLowerCase() === repo.toLowerCase());
   const newest = events.reduce((m, e) => Math.max(m, e.mtimeMs), 0);
   const ageMin = newest > 0 ? Math.max(0, Math.floor((nowMs - newest) / 60_000)) : null;
 
@@ -339,16 +432,22 @@ export function webhookHealth(deps: HierarchyDeps, opts: WebhookHealthOptions = 
     receiver,
     port: receiver ? port : false,
     lastEventAgeMin: ageMin,
+    ...(newest > 0 ? { lastEventAt: new Date(newest).toISOString() } : {}),
+    ...(state ? { receiverPort: state.port } : {}),
+    ...(readForeign(deps.boardDir) ? { foreignDeliveries: readForeign(deps.boardDir) } : {}),
     prActivityWithoutEvent: withoutEvent,
     prActivity: recent.length > 0,
     quiet: recent.length === 0,
     forwarder,
-    feed: state?.feed?.kind ?? (forwarder === 'alive' ? 'gh-forward' : 'none'),
+    feed: state?.feed?.kind ?? 'none',
   };
 
   const reasons: string[] = [];
   let cls: WebhookClass = 'healthy';
-  if (!receiver) {
+  if (problem) {
+    cls = 'down';
+    reasons.push(problem.reason);
+  } else if (!receiver) {
     cls = 'down';
     reasons.push('receiver process is not running');
   } else if (!port) {
@@ -367,9 +466,27 @@ export function webhookHealth(deps: HierarchyDeps, opts: WebhookHealthOptions = 
   }
   if (cls === 'healthy' && forwarder === 'dead') {
     cls = 'degraded';
-    reasons.push('the forwarder process is gone while the receiver is up');
+    reasons.push('the forwarder is not running while the receiver is up');
   }
-  return { class: cls, signals, since: deps.now().toISOString(), reasons };
+  if (cls === 'healthy' && newest === 0) {
+    cls = 'unverified';
+    reasons.push('no event has been delivered yet, so the feed is unverified');
+  }
+  const refused = readRefused(deps.boardDir);
+  if (refused && Date.parse(refused.at) > newest) {
+    signals.refusedDeliveries = refused.count;
+    if (cls === 'healthy' || cls === 'unverified') cls = 'degraded';
+    reasons.push(
+      `${refused.count} delivery(ies) refused for a bad signature since ${refused.at}: the forwarder secret does not match AI_SDLC_WEBHOOK_SECRET (secret mismatch)`,
+    );
+  }
+  return {
+    class: cls,
+    ...(repo ? { repo } : {}),
+    signals,
+    since: deps.now().toISOString(),
+    reasons,
+  };
 }
 
 /** `5m`, `3h` or `2d`; `never` for no event. */
@@ -386,14 +503,25 @@ function ageText(min: number | null): string {
 export function formatWebhookStatus(w: WebhookStatus, health?: WebhookHealth): string {
   if (w.state !== 'up') {
     if (w.reason === 'port collision') return `webhook: collision (${w.detail ?? 'port held'})`;
+    if (w.reason === 'foreign listener') return `webhook: down (${w.detail ?? w.reason})`;
     return health && health.class === 'down' && health.signals.receiver === false
       ? `webhook: down (${health.reasons[0] ?? w.reason})`
       : `webhook: off (${w.reason})`;
   }
   const h = health;
   return h
-    ? `webhook: ${h.class} (port ${w.port}, last event ${ageText(h.signals.lastEventAgeMin)}, feed ${h.signals.feed}, target ${webhookTargetUrl(w.port)})`
+    ? `webhook: ${h.class} (port ${w.port}, repo ${h.repo ?? 'unknown'}, last event ${ageText(h.signals.lastEventAgeMin)}, feed ${h.signals.feed}, target ${webhookTargetUrl(w.port)})`
     : `webhook: running (port ${w.port}, target ${webhookTargetUrl(w.port)}, health not read)`;
+}
+
+/** The refused-foreign-delivery line; empty when there are none (AISDLC-1349). */
+export function formatWebhookForeign(health?: WebhookHealth): string[] {
+  const f = health?.signals.foreignDeliveries;
+  return f
+    ? [
+        `webhook: ${f.count} delivery(ies) refused for repository ${f.repo} (this board serves ${health?.repo ?? 'an unknown repository'}); a forwarder is posting to the wrong port`,
+      ]
+    : [];
 }
 
 /** The `persisted:` status line (AISDLC-1256). */
@@ -412,49 +540,97 @@ function resolvePort(deps: HierarchyDeps, flag: string | undefined): number {
   return n;
 }
 
-export type Spawner = (file: string, args: readonly string[]) => void;
+/** Starts a detached process; returns its pid when known (the starting marker needs it). */
+export type Spawner = (file: string, args: readonly string[]) => number | void;
 
 const spawnDetached: Spawner = (file, args) => {
-  spawn(file, [...args], { detached: true, stdio: 'ignore' }).unref();
+  const child = spawn(file, [...args], { detached: true, stdio: 'ignore' });
+  child.unref();
+  return child.pid;
 };
+
+/** The line `up` and `restart` print for a board with no recorded feed. */
+export const NO_FEED_LINE =
+  'webhook: no feed is installed, so this board receives no events; run `cli-hierarchy webhook up --feed gh-forward` to install one';
+
+/** Print {@link NO_FEED_LINE} when the board's state file records no feed. */
+export function logNoFeed(deps: HierarchyDeps): void {
+  if (!readState(deps.boardDir)?.feed) deps.log(NO_FEED_LINE);
+}
+
+/** The feed a start carries forward: a supervised forwarder is reinstalled on the bound port. */
+export function carriedFeed(recorded: WebhookFeed): WebhookFeed {
+  if (recorded.kind !== 'gh-forward' || recorded.pid !== undefined) return recorded;
+  // A recorded machine-wide label rides along so the receiver removes it once.
+  return recorded.agent === LEGACY_FORWARDER_LABEL
+    ? { kind: 'gh-forward', agent: recorded.agent }
+    : { kind: 'gh-forward' };
+}
 
 /** Start the receiver in a detached process. No secret: a no-op (poll-only mode). */
 export function webhookUp(
   deps: HierarchyDeps,
   portFlag?: string,
-  spawner: Spawner = spawnDetached,
+  spawner: Spawner = deps.spawnWebhook ?? spawnDetached,
   feed?: WebhookFeed,
   platform: NodeJS.Platform = process.platform,
 ): WebhookStatus {
   const before = webhookStatus(deps);
-  let chosen: number | undefined;
-  let persistError: ForwarderPersistError | undefined;
-  if (feed?.kind === 'gh-forward' && feed.pid === undefined) {
-    const secret = deps.env[WEBHOOK_SECRET_ENV];
-    if (!secret) throw new Error(`${WEBHOOK_SECRET_ENV} is not set: cannot start the forwarder`);
-    const fwdPort = before.state === 'up' ? before.port : selectPort(deps, portFlag);
-    if (before.state !== 'up') chosen = fwdPort;
-    try {
-      const supervised = installForwarder(deps, secret, fwdPort, platform);
-      feed = supervised ? { kind: 'gh-forward', agent: forwarderLabel(deps) } : feed;
-    } catch (e) {
-      if (!(e instanceof ForwarderPersistError)) throw e;
-      // The receiver still starts (foreground session only); the command then exits non-zero.
-      persistError = e;
-    }
+  const recorded = readState(deps.boardDir)?.feed;
+  const legacy = recorded?.agent === LEGACY_FORWARDER_LABEL;
+  const explicitForward = feed?.kind === 'gh-forward' && feed.pid === undefined;
+  if (before.state === 'off' && before.reason === 'no secret') {
+    if (explicitForward)
+      throw new Error(`${WEBHOOK_SECRET_ENV} is not set: cannot start the forwarder`);
+    deps.log(`webhook off: ${WEBHOOK_SECRET_ENV} is not set (poll-only mode)`);
+    return before;
   }
   if (before.state === 'up') {
+    // A running receiver keeps its feed; only a machine-wide label is replaced by the per-board one.
+    if (!feed && recorded?.kind === 'gh-forward' && legacy) feed = carriedFeed(recorded);
+    let persistError: ForwarderPersistError | undefined;
+    if (feed?.kind === 'gh-forward' && feed.pid === undefined) {
+      try {
+        const supervised = installForwarder(
+          deps,
+          deps.env[WEBHOOK_SECRET_ENV],
+          before.port,
+          platform,
+        );
+        feed = supervised ? { kind: 'gh-forward', agent: forwarderLabel(deps) } : feed;
+        if (legacy) removeLegacyForwarder(deps);
+      } catch (e) {
+        if (!(e instanceof ForwarderPersistError)) throw e;
+        persistError = e;
+      }
+    }
     if (feed) recordFeed(deps.boardDir, feed);
     deps.log(`webhook already running on 127.0.0.1:${before.port}`);
     if (persistError) throw persistError;
     return before;
   }
-  if (before.reason === 'no secret') {
-    deps.log(`webhook off: ${WEBHOOK_SECRET_ENV} is not set (poll-only mode)`);
-    return before;
+  // Every start carries the recorded feed forward; the receiver installs the forwarder once bound.
+  if (!feed && recorded) feed = carriedFeed(recorded);
+  // A receiver this board just spawned may still be binding; a second `up` must not start another.
+  const startingFile = path.join(deps.boardDir, STARTING_FILE);
+  try {
+    const [pidText, atText] = readFileSync(startingFile, 'utf-8').trim().split(' ');
+    const at = Number(atText);
+    if (
+      (deps.isAlive ?? defaultIsAlive)(Number(pidText)) &&
+      deps.now().getTime() - at >= 0 &&
+      deps.now().getTime() - at < STARTING_WINDOW_MS
+    ) {
+      deps.log('webhook already starting for this board');
+      return before;
+    }
+  } catch {
+    // no marker: nothing is starting
   }
-  const port = chosen ?? selectPort(deps, portFlag);
-  spawner(process.execPath, [
+  const port = selectPort(deps, portFlag);
+  const raw = portFlag ?? deps.env[WEBHOOK_PORT_ENV];
+  const pinned = raw !== undefined && raw !== '';
+  const child = spawner(process.execPath, [
     deps.binPath ?? process.argv[1] ?? '',
     'webhook',
     'serve',
@@ -462,6 +638,7 @@ export function webhookUp(
     String(port),
     '--board-dir',
     deps.boardDir,
+    ...(pinned ? [] : ['--scan', 'true']),
     ...(feed
       ? [
           '--feed',
@@ -471,13 +648,16 @@ export function webhookUp(
         ]
       : []),
   ]);
+  if (typeof child === 'number') {
+    mkdirSync(deps.boardDir, { recursive: true });
+    writeFileSync(startingFile, `${child} ${deps.now().getTime()}\n`);
+  }
   deps.log(`webhook starting on 127.0.0.1:${port}`);
-  if (persistError) throw persistError;
   return before;
 }
 
 /** Rewrite the recorded feed of a running receiver. */
-function recordFeed(boardDir: string, feed: WebhookFeed): void {
+export function recordFeed(boardDir: string, feed: WebhookFeed): void {
   const s = readState(boardDir);
   if (s) writeFileSync(stateFile(boardDir), JSON.stringify({ ...s, feed }) + '\n');
 }
@@ -499,38 +679,85 @@ export function webhookDown(
   return true;
 }
 
-/** Run the receiver in the foreground until SIGTERM or SIGINT. Needs the secret. */
+/** Options of {@link webhookServe}. */
+export interface ServeOptions {
+  /** Try the next ports when the first is held (an unpinned start). */
+  scan?: boolean;
+  platform?: NodeJS.Platform;
+}
+
+/**
+ * Run the receiver in the foreground until SIGTERM or SIGINT. Needs the secret. The receiver
+ * binds first; only then are the port recorded and a supervised forwarder installed on it.
+ */
 export async function webhookServe(
   deps: HierarchyDeps,
   portFlag?: string,
   feed?: WebhookFeed,
+  opts: ServeOptions = {},
 ): Promise<void> {
   const secret = deps.env[WEBHOOK_SECRET_ENV];
   if (!secret) throw new Error(`${WEBHOOK_SECRET_ENV} is not set`);
-  const receiver = createReceiver({
-    secret,
-    boardDir: deps.boardDir,
-    port: resolvePort(deps, portFlag),
-    debounceMs: loadPrLifecycleConfig(deps.cwd).webhook.debounceMs,
-  });
+  let repo: string | undefined;
   try {
-    await receiver.start();
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
-    if (code === 'EADDRINUSE') {
-      const port = resolvePort(deps, portFlag);
-      const message = `cannot bind webhook port: port ${port} is held by ${portOwner(deps, port)}`;
-      recordCollision(deps.boardDir, message);
-      throw new Error(message, { cause: e });
+    repo = resolveRepo(deps);
+  } catch {
+    /* unresolvable: accept every delivery; status reads the repository as unknown */
+  }
+  const first = resolvePort(deps, portFlag);
+  const attempts = opts.scan && first !== 0 ? WEBHOOK_PORT_SCAN : 1;
+  let receiver: ReturnType<typeof createReceiver> | undefined;
+  for (let i = 0; i < attempts && !receiver; i += 1) {
+    const port = first + i;
+    if (port > 65535) break;
+    const candidate = createReceiver({
+      secret,
+      ...(repo ? { repo } : {}),
+      boardDir: deps.boardDir,
+      port,
+      debounceMs: loadPrLifecycleConfig(deps.cwd).webhook.debounceMs,
+    });
+    try {
+      await candidate.start();
+      receiver = candidate;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw e;
     }
-    throw e;
+  }
+  if (!receiver) {
+    const message = `cannot bind webhook port: port ${first} is held by ${portOwner(deps, first)}`;
+    recordCollision(deps.boardDir, message);
+    throw new Error(message);
   }
   rmSync(path.join(deps.boardDir, COLLISION_FILE), { force: true });
   mkdirSync(deps.boardDir, { recursive: true });
+  writeFileSync(path.join(deps.boardDir, PORT_FILE), `${receiver.port}\n`);
+  let recordedFeed = feed;
+  if (feed?.kind === 'gh-forward' && feed.pid === undefined) {
+    try {
+      const supervised = installForwarder(deps, secret, receiver.port, opts.platform);
+      recordedFeed = supervised ? { kind: 'gh-forward', agent: forwarderLabel(deps) } : feed;
+      if (feed.agent === LEGACY_FORWARDER_LABEL) removeLegacyForwarder(deps);
+    } catch (e) {
+      if (!(e instanceof ForwarderPersistError)) {
+        await receiver.stop();
+        throw e;
+      }
+      // The receiver keeps running; the feed is recorded without an agent, so status says not persisted.
+      deps.log((e as Error).message);
+      recordedFeed = { kind: 'gh-forward' };
+    }
+  }
   writeFileSync(
     stateFile(deps.boardDir),
-    JSON.stringify({ pid: process.pid, port: receiver.port, ...(feed ? { feed } : {}) }) + '\n',
+    JSON.stringify({
+      pid: process.pid,
+      port: receiver.port,
+      ...(repo ? { repo } : {}),
+      ...(recordedFeed ? { feed: recordedFeed } : {}),
+    }) + '\n',
   );
+  rmSync(path.join(deps.boardDir, STARTING_FILE), { force: true });
   deps.log(`webhook listening on 127.0.0.1:${receiver.port}`);
   await new Promise<void>((resolve) => {
     const stop = (): void => resolve();
@@ -538,5 +765,7 @@ export async function webhookServe(
     process.once('SIGINT', stop);
   });
   await receiver.stop();
-  rmSync(stateFile(deps.boardDir), { force: true });
+  // Only the receiver the record names may delete it; an orphan must not erase the live one's record.
+  const current = readState(deps.boardDir);
+  if (!current || current.pid === process.pid) rmSync(stateFile(deps.boardDir), { force: true });
 }

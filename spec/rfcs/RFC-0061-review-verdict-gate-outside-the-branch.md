@@ -17,7 +17,7 @@ requiresDocs:
 
 # RFC-0061: Review verdict as a head-bound gate outside the branch (successor to RFC-0042)
 
-**Status:** Signed Off (v0.3, Engineering and Operator 2026-11-03). All eight Open Questions resolved with the operator on 2026-11-03: error-resistant trust claim (OQ-8); verdict ref pushed atomically by Step 11, CI posts the gate result (OQ-1); clean-replay carry-forward evaluated by the gate (OQ-2); hard v6 cut with names kept (OQ-3); leaves in the verdict ref, derived catch report (OQ-4); merge-queue rule decided, built later (OQ-5); tier derived once at Step 8 (OQ-6); untrusted PRs through a split CI writer (OQ-7).
+**Status:** Implemented. Previously: Signed Off (v0.3, Engineering and Operator 2026-11-03). All eight Open Questions resolved with the operator on 2026-11-03: error-resistant trust claim (OQ-8); verdict ref pushed atomically by Step 11, CI posts the gate result (OQ-1); clean-replay carry-forward evaluated by the gate (OQ-2); hard v6 cut with names kept (OQ-3); leaves in the verdict ref, derived catch report (OQ-4); merge-queue rule decided, built later (OQ-5); tier derived once at Step 8 (OQ-6); untrusted PRs through a split CI writer (OQ-7).
 **Lifecycle:** Signed Off
 **Author:** Dominique Legault
 **Created:** 2026-11-03

@@ -42,6 +42,8 @@ export interface InitSuccess {
 export interface InitFailure {
   ok: false;
   reason: string;
+  /** Cause code for the stop instruction (e.g. `parent-dirty`). */
+  cause?: string;
 }
 
 /** Read the `status:` frontmatter value, defaulting to `To Do`. */
@@ -77,7 +79,13 @@ export async function initTask(
     if (!upkeep.ok) return { ok: false, reason: upkeep.reason };
   } else {
     const parent = await assertParentClean(workDir, runner);
-    if (!parent.ok) return { ok: false, reason: parent.reason };
+    if (!parent.ok) {
+      return {
+        ok: false,
+        reason: parent.reason,
+        ...(parent.cause ? { cause: parent.cause } : {}),
+      };
+    }
   }
 
   // AISDLC-849: decide resume before validating, so a task file the dev already

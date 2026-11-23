@@ -15,10 +15,14 @@
  * re-walkthrough). Prevents regressions where edits to SIGNAL_INGESTION_CONFIG_STUB
  * ship adopters a YAML the orchestrator loader rejects on first parse.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadConfig, resetStagesDeprecationWarning } from '../../config.js';
 import { parse as parseYaml } from 'yaml';
 import { validate, validateUsageConfig } from '@ai-sdlc/reference';
-import { PIPELINE_YAML } from './init.js';
+import { REQUIRED_CONFIG_MANIFEST } from '@ai-sdlc/pipeline-cli/config-manifest';
 import {
   BASELINE_WORKFLOW_TEMPLATES,
   SIGNAL_INGESTION_CONFIG_STUB,
@@ -28,6 +32,11 @@ import {
   loadSignalIngestionConfig,
   DEFAULT_SIGNAL_INGESTION_CONFIG,
 } from '../../signal-ingestion/config.js';
+
+const PIPELINE_YAML = REQUIRED_CONFIG_MANIFEST.find((e) => e.id === 'pipeline')!.render({
+  org: 'acme',
+  repo: 'widgets',
+});
 
 describe('AISDLC-245.5 — init pipeline.yaml template schema validation', () => {
   it('PIPELINE_YAML template parses as YAML', () => {
@@ -231,5 +240,23 @@ describe('usage-config init template', () => {
 
   it('carries no internal task ids', () => {
     expect(USAGE_CONFIG_TEMPLATE_STUB).not.toMatch(/AISDLC-\d+/);
+  });
+});
+
+describe('AISDLC-1281 — init pipeline.yaml sets no deprecated spec.stages', () => {
+  it('template has no stages and loadConfig does not warn about it', () => {
+    expect(parseYaml(PIPELINE_YAML).spec.stages).toBeUndefined();
+    const tmp = mkdtempSync(join(tmpdir(), 'init-nostages-'));
+    resetStagesDeprecationWarning();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      writeFileSync(join(tmp, 'pipeline.yaml'), PIPELINE_YAML);
+      const config = loadConfig(tmp);
+      expect(config.pipeline).toBeDefined();
+      expect(warn.mock.calls.some((c) => String(c[0]).includes('spec.stages'))).toBe(false);
+    } finally {
+      warn.mockRestore();
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

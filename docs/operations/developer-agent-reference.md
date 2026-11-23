@@ -133,7 +133,7 @@ GitHub Actions parses five literal substrings case-insensitively and suppresses 
 
 ## Governance config paths
 
-The PreToolUse hook blocks `.ai-sdlc/**` and `.github/workflows/**` for runs marked untrusted (`AI_SDLC_UNTRUSTED_RUN`; internal sessions may edit governance config when the task names it). `.github/workflows/**` is otherwise refused only when the project's `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths`; it is not blocked by default, so edit workflows when the task needs it and the project permits. Runtime artifacts (attestations, reviews, transcript leaves, the decision log, the dispatch board) are written through their CLIs.
+The PreToolUse hook blocks these paths for runs marked untrusted (`AI_SDLC_UNTRUSTED_RUN`): `.ai-sdlc/**`, `.github/workflows/**`, `.claude/**`, `.husky/**`, `ai-sdlc-plugin/hooks/**`, `.git/hooks`, `.git/config`, `.git/worktrees`, and (AISDLC-1276) `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.npmrc`, `scripts/**`, `CLAUDE.md` and `.mcp.json`. An untrusted run also cannot write outside its own worktree. The list lives in `pipeline-cli/src/steps/untrusted-protected-paths.ts` and `ai-sdlc-plugin/hooks/enforce-blocked-actions.js`. (Internal sessions run without that marker; internal sessions may edit governance config when the task names it). `.github/workflows/**` is otherwise refused only when the project's `.ai-sdlc/agent-role.yaml` lists it under `blockedPaths`; it is not blocked by default, so edit workflows when the task needs it and the project permits. Runtime artifacts (attestations, reviews, transcript leaves, the decision log, the dispatch board) are written through their CLIs.
 
 ## Force-push and merge policy
 

@@ -1,10 +1,12 @@
 # Dependabot configuration — supply-chain hygiene for a low-runtime-dependency
-# pnpm monorepo. Two ecosystems:
+# pnpm monorepo. Three ecosystems:
 #   - npm: scans the root pnpm-lock.yaml (covers every workspace package) for
 #     vulnerable / outdated dependencies.
 #   - github-actions: keeps the SHA-pinned `uses:` references current and is the
 #     ongoing maintenance mechanism for the commit-SHA pinning landed alongside
 #     this file (Dependabot updates the SHA + the `# vN` comment together).
+#   - gomod: keeps the two Go modules (sdk-go, sdk-go/operator) moving with one
+#     grouped weekly minor/patch PR (AISDLC-1289); majors are deferred.
 #
 # Updates are grouped to keep PR volume low; security updates are never grouped
 # so they surface individually for fast triage.
@@ -100,3 +102,28 @@ updates:
           - '*'
     commit-message:
       prefix: 'ci(actions)'
+
+  - package-ecosystem: gomod
+    directories:
+      - '/sdk-go'
+      - '/sdk-go/operator'
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - 'ci:no-issue-required'
+    groups:
+      go-minor-patch:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+    ignore:
+      - dependency-name: '*'
+        update-types:
+          - 'version-update:semver-major'
+    commit-message:
+      prefix: 'chore(deps)'

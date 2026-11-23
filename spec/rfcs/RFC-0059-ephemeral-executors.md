@@ -1,24 +1,26 @@
 ---
 id: RFC-0059
 title: Ephemeral executors, spawn per task and terminate on verdict
-status: Approved
-lifecycle: Signed Off
+status: Implemented
+lifecycle: Implemented
 author: 'Dominique Legault'
 created: 2026-10-23
 updated: 2026-10-23
 requires: [RFC-0051]
 assumes: [RFC-0058]
-requiresDocs: []
+runtimeEvidence: []
+requiresDocs:
+  - concept
 targetSpecVersion: v1alpha1
 ---
 
 # RFC-0059: Ephemeral executors, spawn per task and terminate on verdict
 
-**Status:** Signed Off, v0.1 (2026-10-23). Born Signed Off in one PR with its tasks
+**Status:** Implemented (was Signed Off, v0.1, 2026-10-23). Born Signed Off in one PR with its tasks
 (OQ-3). Three design questions and one interim rule were decided by the operator on
 2026-10-23 by rubric; see Open Questions. Tasks AISDLC-1073 to 1076.
 
-**Lifecycle:** Signed Off
+**Lifecycle:** Implemented
 **Author:** Dominique Legault
 **Created:** 2026-10-23
 **Updated:** 2026-10-23

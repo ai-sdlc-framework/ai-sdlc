@@ -71,23 +71,147 @@ below before analyzing a PR. Edit freely: this file is yours.
 6. **Scope discipline**: do not flag deferred work or unchanged code.
 `;
 
-const AGENT_ROLE_DEFAULT = `apiVersion: ai-sdlc.io/v1alpha1
-kind: AgentRole
-metadata:
-  name: coding-agent
-spec:
-  role: coding-agent
-  goal: Implement backlog tasks under human review
-  backstory: >-
+/**
+ * Tier-based agent-role templates (AISDLC-79, merged into the manifest by
+ * AISDLC-1354 so `/ai-sdlc:setup` and `/ai-sdlc:init` write the same file).
+ * `coding` is the default; higher tiers add tools only when the use-case
+ * justifies the extra surface. See `backlog/decisions/AISDLC-79-agent-role-tools-defaults.md`.
+ */
+export type AgentRoleTier = 'coding' | 'research' | 'meta';
+
+export const AGENT_ROLE_TIERS: readonly AgentRoleTier[] = ['coding', 'research', 'meta'] as const;
+
+/**
+ * The merge settings every scaffolded agent-role.yaml states (AISDLC-1351). The values are
+ * this one constant. They are `never` and empty until the operator decides what a new adopter
+ * gets, so nothing is loosened; `up`, `status`, the landing note and doctor read the resolved
+ * policy, not this constant, and say so when merging is off.
+ */
+export const AGENT_ROLE_MERGE_DEFAULTS: {
+  allowMerge: 'never' | 'onGreenClean';
+  mergeAuthors: readonly string[];
+  operational: readonly string[];
+} = {
+  allowMerge: 'never',
+  mergeAuthors: [],
+  operational: [],
+};
+
+/** Governance block of every scaffolded agent-role.yaml: the merge keys, then the commented lease-push key. */
+export function renderAgentRoleGovernance(d = AGENT_ROLE_MERGE_DEFAULTS): string {
+  const list = (key: string, items: readonly string[]): string =>
+    items.length === 0
+      ? `    ${key}: []\n`
+      : `    ${key}:\n${items.map((i) => `      - ${i}`).join('\n')}\n`;
+  return `  governance:
+    # Merge settings (AISDLC-1351). allowMerge: never | onGreenClean. With \`never\`, an empty
+    # mergeAuthors or an operational list without land-eligible-prs the board never merges;
+    # \`cli-hierarchy up\`, \`status\` and \`doctor\` say so. Set all three to let it land PRs.
+    allowMerge: ${d.allowMerge}
+${list('mergeAuthors', d.mergeAuthors)}${list('operational', d.operational)}    # allowForcePush defaults to leaseOnOwnBranch (a lease push of a dispatched
+    # task's own branch, or the head branch of the PR a fix task was filed to fix;
+    # never main/master/protected branches).
+    # allowForcePush: leaseOnOwnBranch   # never | leaseOnOwnBranch | lease
+`;
+}
+
+const AGENT_ROLE_BACKSTORY = `  backstory: >-
     You are an AI coding agent. You work under strict constraints and every
     change requires review.
-  tools:
-    - code-editor
+`;
+
+const AGENT_ROLE_TOOLS_HEAD = `    - Edit          # write to existing files
+    - Write         # create new files
+    - Read          # read source / configs
+    - Glob          # discover files by pattern
+    - Grep          # search code
+    - Bash          # run tests, lint, build, git
+`;
+
+const AGENT_ROLE_TOOLS_TAIL = `    - code-editor
     - terminal
     - test-runner
-  constraints:
-    maxFilesPerChange: 15
 `;
+
+const AGENT_ROLE_TIER_BODY: Record<
+  AgentRoleTier,
+  { role: string; goal: string; comment: string; tools: string }
+> = {
+  coding: {
+    role: 'developer',
+    goal: 'Implement issue requirements with tests',
+    comment: `  # Tier: coding-agent (default).
+  # Filesystem + shell editing surface only. No web access, no sub-agent
+  # spawning, no Skill loading. This matches the pre-AISDLC-79 default
+  # plus NotebookEdit (parity with the Claude Code SDK's editing surface).
+`,
+    tools: `${AGENT_ROLE_TOOLS_HEAD}    - NotebookEdit  # edit Jupyter notebooks (parity with SDK editing surface)
+    # Excluded by default (opt in via --role research|meta during init):
+    #   - WebFetch    - pulls untrusted remote content into context (research tier)
+    #   - WebSearch   - same (research tier)
+    #   - Task        - spawns sub-agents; cost + reasoning amplification (meta tier)
+    #   - Skill       - loads external skill packs (meta tier)
+`,
+  },
+  research: {
+    role: 'research-developer',
+    goal: 'Investigate, gather references, and implement issue requirements with tests',
+    comment: `  # Tier: research-agent.
+  # Coding-tier surface plus read-only web access. Use for tasks that need
+  # to consult external docs, package registries, or RFCs.
+`,
+    tools: `${AGENT_ROLE_TOOLS_HEAD}    - NotebookEdit  # edit Jupyter notebooks
+    - WebFetch      # fetch a known URL (docs, RFCs, API references)
+    - WebSearch     # discover sources by query
+    # Excluded (use --role meta to opt in):
+    #   - Task        - spawns sub-agents (meta tier)
+    #   - Skill       - loads external skill packs (meta tier)
+`,
+  },
+  meta: {
+    role: 'meta-developer',
+    goal: 'Orchestrate sub-agents, load skill packs, and implement complex multi-step work',
+    comment: `  # Tier: meta-agent.
+  # Full surface: filesystem + shell + web + sub-agent + skill loading.
+  # Use only when the task legitimately needs sub-agent fan-out or external
+  # skill packs. Higher cost amplification and broader attack surface.
+`,
+    tools: `${AGENT_ROLE_TOOLS_HEAD}    - NotebookEdit  # edit Jupyter notebooks
+    - WebFetch      # fetch a known URL
+    - WebSearch     # discover sources by query
+    - Task          # spawn sub-agents for parallel / specialized work
+    - Skill         # load external skill packs (declared capabilities)
+`,
+  },
+};
+
+/** Render agent-role.yaml for a tier (default `coding`). */
+export function renderAgentRole(tier: AgentRoleTier = 'coding'): string {
+  const t = AGENT_ROLE_TIER_BODY[tier];
+  return `apiVersion: ai-sdlc.io/v1alpha1
+kind: AgentRole
+metadata:
+  name: default-agent
+spec:
+  role: ${t.role}
+  goal: ${t.goal}
+${AGENT_ROLE_BACKSTORY}${t.comment}  tools:
+${t.tools}${AGENT_ROLE_TOOLS_TAIL}  constraints:
+    maxFilesPerChange: 15
+    requireTests: true
+    blockedPaths:
+      - .github/workflows/**
+      - .ai-sdlc/**
+${renderAgentRoleGovernance()}`;
+}
+
+function renderAgentRoleFromAnswers(answers: Readonly<Record<string, string>>): string {
+  const tier = (answers.tier ?? 'coding') as AgentRoleTier;
+  if (!AGENT_ROLE_TIERS.includes(tier)) {
+    throw new Error(`invalid tier: ${tier} (expected ${AGENT_ROLE_TIERS.join(', ')})`);
+  }
+  return renderAgentRole(tier);
+}
 
 function requireAnswer(answers: Readonly<Record<string, string>>, key: string): string {
   const v = (answers[key] ?? '').trim();
@@ -101,30 +225,33 @@ function renderPipeline(answers: Readonly<Record<string, string>>): string {
   return `apiVersion: ai-sdlc.io/v1alpha1
 kind: Pipeline
 metadata:
-  name: ${repo}-pipeline
+  name: default
 spec:
   triggers:
     - event: issue.assigned
   providers:
-    github:
+    sourceControl:
       type: github
       config:
         org: ${org}
         repo: ${repo}
-  stages:
-    - name: code
-      agent: coding-agent
-      timeout: PT10M
-      onFailure:
-        strategy: retry
-        maxRetries: 2
-        retryDelay: PT1M
-    - name: review
-      approval:
-        required: true
-        blocking: true
-        timeout: PT24H
-        onTimeout: abort
+  # backlog: holds settings specific to the backlog-task (/ai-sdlc execute)
+  # workflow. These were formerly in a separate pipeline-backlog.yaml file
+  # (deprecated by AISDLC-245.5). Slash commands + pipeline-cli readers
+  # prefer this canonical location.
+  backlog:
+    branching:
+      pattern: 'ai-sdlc/{issueIdLower}-{slug}'
+      targetBranch: main
+      cleanup: on-merge
+    pullRequest:
+      titleTemplate: 'feat: {issueTitle} ({issueId})'
+      descriptionSections:
+        - summary
+        - changes
+        - closes
+      includeProvenance: true
+      closeKeyword: References
 `;
 }
 
@@ -149,13 +276,13 @@ export const REQUIRED_CONFIG_MANIFEST: readonly ConfigEntry[] = [
     description: 'agent role, governance and blocked-path policy read by every hook',
     operatorInput: false,
     prompts: [],
-    render: () => AGENT_ROLE_DEFAULT,
+    render: renderAgentRoleFromAnswers,
   },
   {
     id: 'pipeline',
     path: '.ai-sdlc/pipeline.yaml',
     since: '0.1.0',
-    description: 'pipeline definition (provider, stages) the orchestrator runs',
+    description: 'pipeline definition (triggers, providers) the orchestrator runs',
     operatorInput: true,
     prompts: [
       { key: 'org', question: 'GitHub organization or user' },
@@ -280,6 +407,8 @@ export interface ScaffoldOptions {
   force?: boolean;
   /** Skip operator-input entries (doctor --fix). */
   skipOperatorInput?: boolean;
+  /** Do not write the config-version stamp (callers scaffolding into a custom config dir). */
+  skipVersionStamp?: boolean;
 }
 
 export interface ScaffoldResult {
@@ -302,7 +431,8 @@ export async function scaffoldConfig(opts: ScaffoldOptions): Promise<ScaffoldRes
       result.skipped.push(entry.path);
       continue;
     }
-    const answers: Record<string, string> = {};
+    // Non-prompted defaults (e.g. the agent-role `tier`) reach render() as answers.
+    const answers: Record<string, string> = { ...opts.defaults };
     for (const p of entry.prompts) {
       const def = opts.defaults?.[p.key];
       answers[p.key] = opts.prompt ? await opts.prompt(p.question, def) : (def ?? '');
@@ -319,7 +449,11 @@ export async function scaffoldConfig(opts: ScaffoldOptions): Promise<ScaffoldRes
   }
   // Stamp the version only when nothing required is still missing, so a skipped
   // operator-input entry keeps SessionStart's notice alive.
-  if (result.failed.length === 0 && missingConfigEntries(opts.projectDir, manifest).length === 0) {
+  if (
+    opts.skipVersionStamp !== true &&
+    result.failed.length === 0 &&
+    missingConfigEntries(opts.projectDir, manifest).length === 0
+  ) {
     writeConfigVersion(opts.projectDir, newestConfigVersion(manifest));
   }
   return result;

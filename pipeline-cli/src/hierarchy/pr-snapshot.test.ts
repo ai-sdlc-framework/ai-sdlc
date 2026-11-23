@@ -135,4 +135,24 @@ describe('fingerprints', () => {
     recordRefusal(board, 4, undefined, t0);
     expect(refusalStillValid(board, 4, fp, t0)).toBe(false);
   });
+
+  it('a new webhook event with the same head sha and rollup keeps a refusal (AISDLC-1380)', () => {
+    const p = { number: 4, headRefOid: 'a'.repeat(40), statusCheckRollup: [] };
+    const fp = prFingerprint(board, p);
+    const t0 = new Date('2026-01-01T00:00:00Z');
+    recordRefusal(board, 4, fp, t0);
+    mkdirSync(path.join(board, 'events'));
+    writeEventRecord(path.join(board, 'events'), {
+      repo: 'o/r',
+      pr: 4,
+      headSha: 'a'.repeat(40),
+      kind: 'check_run',
+      deliveryId: 'd9',
+      receivedAt: t0.toISOString(),
+    });
+    expect(prFingerprint(board, p)).toBe(fp);
+    expect(
+      refusalStillValid(board, 4, prFingerprint(board, p), new Date(t0.getTime() + 1000)),
+    ).toBe(true);
+  });
 });

@@ -106,6 +106,10 @@ spec:
     pipeline-status:
       '*': { model: haiku }
     planner:
+      '*': { model: opus }
+    # The long-lived planner session cli-hierarchy launches (AISDLC-1364). Not a command file:
+    # when fable is marked unavailable the launch steps down the strength order above.
+    planner-session:
       '*': { model: fable }
     rebase:
       '*': { model: sonnet }

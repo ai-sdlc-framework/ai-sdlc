@@ -11,7 +11,7 @@ import path from 'node:path';
 
 import type { HierarchyDeps, RosterEntry } from './types.js';
 
-export type ModuleState = 'loaded' | 'refused' | 'absent' | 'stale';
+export type ModuleState = 'loaded' | 'refused' | 'failing' | 'absent' | 'stale';
 
 export interface ModuleHealth {
   state: ModuleState;
@@ -114,7 +114,8 @@ export function readModuleHealth(
     if (raw === undefined) return { state: 'absent' };
   }
   const r = (raw ?? {}) as Record<string, unknown>;
-  const state = r.state === 'loaded' || r.state === 'refused' ? r.state : 'absent';
+  const state =
+    r.state === 'loaded' || r.state === 'refused' || r.state === 'failing' ? r.state : 'absent';
   const health: ModuleHealth = {
     state,
     ...(typeof r.reason === 'string' && r.reason ? { reason: r.reason } : {}),
@@ -130,7 +131,7 @@ export function readModuleHealth(
   return health;
 }
 
-/** `loaded`, `absent`, `refused: <reason>` or `stale: <reason>`. */
+/** `loaded`, `absent`, `refused: <reason>`, `failing: <reason>` or `stale: <reason>`. */
 export function formatModuleHealth(h: ModuleHealth): string {
   return h.reason && h.state !== 'loaded' ? `${h.state}: ${h.reason}` : h.state;
 }

@@ -642,6 +642,10 @@ describe('buildBlockedEvent', () => {
     const gateResult = {
       outcome: 'abort-protected-path' as const,
       offendingPaths: ['.github/workflows/ci.yml', 'pnpm-lock.yaml'],
+      offendingPathReasons: [
+        { path: '.github/workflows/ci.yml', reason: 'protected-path' as const },
+        { path: 'pnpm-lock.yaml', reason: 'protected-path' as const },
+      ],
       heuristicFindings: [],
     };
     const event = buildBlockedEvent(42, 'attacker', gateResult, new Date('2026-06-02T10:00:00Z'));
@@ -660,6 +664,10 @@ describe('buildBlockedComment', () => {
     const gateResult = {
       outcome: 'abort-protected-path' as const,
       offendingPaths: ['.github/workflows/ci.yml', 'package.json'],
+      offendingPathReasons: [
+        { path: '.github/workflows/ci.yml', reason: 'protected-path' as const },
+        { path: 'package.json', reason: 'protected-path' as const },
+      ],
       heuristicFindings: [],
     };
     const comment = buildBlockedComment(gateResult, 'contributor123');
@@ -674,6 +682,7 @@ describe('buildBlockedComment', () => {
     const gateResult = {
       outcome: 'abort-protected-path' as const,
       offendingPaths: [],
+      offendingPathReasons: [],
       heuristicFindings: [
         {
           type: 'packageJsonLifecycleScript' as const,
@@ -693,6 +702,7 @@ describe('buildBlockedComment', () => {
     const gateResult = {
       outcome: 'abort-protected-path' as const,
       offendingPaths: [],
+      offendingPathReasons: [],
       heuristicFindings: [
         {
           type: 'packageJsonLifecycleScript' as const,
@@ -714,6 +724,7 @@ describe('buildBlockedComment', () => {
     const gateResult = {
       outcome: 'abort-protected-path' as const,
       offendingPaths: ['.github/ci.yml'],
+      offendingPathReasons: [{ path: '.github/ci.yml', reason: 'protected-path' as const }],
       heuristicFindings: [],
     };
     const comment = buildBlockedComment(gateResult, 'user');
@@ -721,6 +732,61 @@ describe('buildBlockedComment', () => {
     // Comments must not include internal tracker IDs
     expect(comment).not.toMatch(/AISDLC-\d+/);
     expect(comment).not.toMatch(/DEC-\d+/);
+  });
+
+  it('does not call a file-type-only block protected and says a maintainer reviews it', () => {
+    const gateResult = runAstGate([{ path: 'scripts/run.py', status: 'modified' }]);
+    const comment = buildBlockedComment(gateResult, 'user');
+
+    expect(comment).toContain('scripts/run.py');
+    expect(comment).not.toContain('are protected');
+    expect(comment).toContain('a maintainer reviews them by hand');
+  });
+
+  it('prints a path containing a space once and whole', () => {
+    const gateResult = runAstGate([{ path: 'docs/my notes.py', status: 'modified' }]);
+    const comment = buildBlockedComment(gateResult, 'user');
+
+    expect(comment.split('`docs/my notes.py`').length - 1).toBe(1);
+    expect(comment).not.toContain('`docs/my`');
+  });
+
+  it('renders the invalid-path section', () => {
+    const gateResult = runAstGate([{ path: '../escape.ts', status: 'modified' }]);
+    const comment = buildBlockedComment(gateResult, 'user');
+
+    expect(comment).toContain('could not be read as a normal repository path');
+    expect(comment).toContain('../escape.ts');
+  });
+
+  it('points at the workflow logs when nothing specific is known', () => {
+    const comment = buildBlockedComment(
+      {
+        outcome: 'abort-protected-path',
+        offendingPaths: [],
+        offendingPathReasons: [],
+        heuristicFindings: [],
+      },
+      'user',
+    );
+    expect(comment).toContain('see workflow logs');
+  });
+});
+
+describe('runAstGate offendingPathReasons', () => {
+  it('records protected-path, file-type-not-allowed and invalid-path per path', () => {
+    const result = runAstGate([
+      { path: 'package.json', status: 'modified' },
+      { path: 'tool.py', status: 'modified' },
+      { path: '../escape.ts', status: 'modified' },
+    ]);
+
+    expect(result.offendingPathReasons).toEqual([
+      { path: 'package.json', reason: 'protected-path' },
+      { path: 'tool.py', reason: 'file-type-not-allowed' },
+      { path: '../escape.ts', reason: 'invalid-path' },
+    ]);
+    expect(result.offendingPaths).toEqual(['package.json', 'tool.py', '../escape.ts']);
   });
 });
 
@@ -871,5 +937,27 @@ describe.skipIf(!existsSync(BUILT_DIST))('Stage 1 gate from built dist under pla
     } finally {
       removeFixtureDir(workDir);
     }
+  });
+});
+
+describe('runAstGate — repository configuration for the SDK sources (AISDLC-1295)', () => {
+  const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
+  const config = loadAstGateConfig(repoRoot);
+  const run = (path: string) => runAstGate([{ path, status: 'modified' }], config).outcome;
+
+  it.each(['sdk-python/src/ai_sdlc/compliance/mappings.py', 'sdk-go/operator/main.go'])(
+    'passes Stage 1 for %s',
+    (path) => {
+      expect(run(path)).toBe('pass');
+    },
+  );
+
+  it.each([
+    'scripts/tool.py',
+    'sdk-go/go.mod',
+    'sdk-python/pyproject.toml',
+    '.github/workflows/ci.yml',
+  ])('still blocks %s', (path) => {
+    expect(run(path)).toBe('abort-protected-path');
   });
 });

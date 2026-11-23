@@ -70,6 +70,10 @@ export interface RfcOqCheckResult {
   unresolvedOqCount: number;
   /** Summary of unresolved OQ headings (up to 5 for brevity). */
   unresolvedOqSample: string[];
+  /** AISDLC-1320: every unresolved OQ with its file line. */
+  unresolvedOqEntries?: UnresolvedOqEntry[];
+  /** AISDLC-1320: path of the RFC file, for `<file>:<line>` output. */
+  rfcFilePath?: string;
   /** True when either lifecycleBlocked or unresolvedOqCount > 0. */
   rejected: boolean;
   /**
@@ -367,45 +371,76 @@ const RESOLUTION_MARKERS = [
  * Returns an array of unresolved OQ heading strings.
  */
 export function findUnresolvedOqs(rfcContent: string): string[] {
+  return findUnresolvedOqEntries(rfcContent).map((e) => e.text);
+}
+
+/** An open question with its 1-based line in the RFC file. */
+export interface UnresolvedOqEntry {
+  line: number;
+  text: string;
+}
+
+/**
+ * AISDLC-1320: like `findUnresolvedOqs`, with the file line of each entry.
+ *
+ * Counting rule: an entry is an open question only when it is a question
+ * heading, or a numbered or bold question item directly in the section. A
+ * list inside a heading-form question, or under a sub-heading that is not a
+ * question, is part of that text and is never counted.
+ */
+export function findUnresolvedOqEntries(rfcContent: string): UnresolvedOqEntry[] {
   const sectionMatch = rfcContent.match(OQ_SECTION_RE);
   if (!sectionMatch || sectionMatch.index === undefined) return [];
 
-  // Grab everything after the OQ heading until the next ## heading.
-  const after = rfcContent.slice(sectionMatch.index + sectionMatch[0].length);
-  // The section ends at the next heading of the same or a shallower level, so
-  // `### OQ-n` sub-headings stay inside a `## Open Questions` section.
+  const headingEnd = sectionMatch.index + sectionMatch[0].length;
+  // Line number (1-based) of the Open Questions heading itself.
+  const baseLine = rfcContent.slice(0, headingEnd).split('\n').length;
+  // Grab everything after the OQ heading until the next heading of the same
+  // or a shallower level, so `### OQ-n` sub-headings stay inside a `##` section.
+  const after = rfcContent.slice(headingEnd);
   const level = Math.min(3, sectionMatch[0].match(/^#+/)?.[0].length ?? 2);
   const nextHeadingMatch = after.match(new RegExp(`^#{1,${level}}\\s`, 'm'));
   const oqSectionText = nextHeadingMatch ? after.slice(0, nextHeadingMatch.index) : after;
 
-  // Split the OQ section into per-question blocks by finding question
-  // headings and taking everything up to the next question heading.
+  type Block = { heading: string; line: number; headingForm: boolean; lines: string[] };
   const lines = oqSectionText.split('\n');
-  const blocks: Array<{ heading: string; lines: string[] }> = [];
-  let current: { heading: string; lines: string[] } | null = null;
+  const blocks: Block[] = [];
+  let current: Block | null = null;
+  // True under a sub-heading that is not a question: list items there are text.
+  let suppress = false;
 
-  for (const line of lines) {
-    if (isQuestionHeading(line)) {
+  lines.forEach((line, i) => {
+    const isHeadingLine = /^#{1,6}\s/.test(line);
+    const isQuestion = isQuestionHeading(line);
+    let starts = false;
+    if (isQuestion) {
+      if (isHeadingLine) {
+        starts = true;
+        suppress = false;
+      } else {
+        starts = !suppress && !current?.headingForm;
+      }
+    } else if (isHeadingLine) {
+      suppress = true;
+    }
+    if (starts) {
       if (current) blocks.push(current);
-      current = { heading: line.trim(), lines: [] };
+      current = { heading: line.trim(), line: baseLine + i, headingForm: isHeadingLine, lines: [] };
     } else if (current) {
       current.lines.push(line);
     }
-  }
+  });
   if (current) blocks.push(current);
 
-  // For each block, check if a resolution marker appears anywhere in the
-  // block — including the heading line itself. RFC-0011's §13 uses inline
-  // resolution markers (`1. **Q1: ...** ✅ **RESOLVED (date)** — answer`)
-  // where the marker sits on the heading line, not on a separate body line;
-  // missing this case falsely rejected every task referencing RFC-0011
+  // A resolution marker anywhere in the block (including the heading line)
+  // resolves it. RFC-0011's §13 uses inline markers on the heading line
   // (AISDLC-296 inline code-review MAJOR fix).
-  const unresolved: string[] = [];
+  const unresolved: UnresolvedOqEntry[] = [];
   for (const block of blocks) {
     const blockText = [block.heading, ...block.lines].join('\n');
     const hasResolution = RESOLUTION_MARKERS.some((re) => re.test(blockText));
     if (!hasResolution) {
-      unresolved.push(block.heading);
+      unresolved.push({ line: block.line, text: block.heading });
     }
   }
 
@@ -445,9 +480,9 @@ export function checkRfc(input: RfcOqCheckInput): RfcOqCheckResult {
 
   const lifecycle = extractRfcLifecycle(content);
   const lifecycleBlocked = BLOCKED_LIFECYCLES.has(lifecycle);
-  const unresolvedOqs = findUnresolvedOqs(content);
-  const unresolvedOqCount = unresolvedOqs.length;
-  const unresolvedOqSample = unresolvedOqs.slice(0, 5).map((h) => h.slice(0, 120));
+  const unresolvedOqEntries = findUnresolvedOqEntries(content);
+  const unresolvedOqCount = unresolvedOqEntries.length;
+  const unresolvedOqSample = unresolvedOqEntries.slice(0, 5).map((e) => e.text.slice(0, 120));
   const rejected = lifecycleBlocked || unresolvedOqCount > 0;
 
   return {
@@ -456,6 +491,8 @@ export function checkRfc(input: RfcOqCheckInput): RfcOqCheckResult {
     lifecycleBlocked,
     unresolvedOqCount,
     unresolvedOqSample,
+    unresolvedOqEntries,
+    rfcFilePath: input.rfcFilePath,
     rejected,
   };
 }
@@ -608,6 +645,19 @@ function deduplicate(refs: string[]): string[] {
   return [...seen.values()];
 }
 
+const MAX_LISTED_OQS = 20;
+
+/** `<file>:<line>: <text>` lines for an RFC's open questions, capped at 20. */
+export function formatOqEntryLines(c: RfcOqCheckResult): string[] {
+  const entries = c.unresolvedOqEntries ?? [];
+  const file = c.rfcFilePath || c.rfcId;
+  const out = entries
+    .slice(0, MAX_LISTED_OQS)
+    .map((e) => `${file}:${e.line}: ${e.text.slice(0, 120)}`);
+  if (entries.length > MAX_LISTED_OQS) out.push(`and ${entries.length - MAX_LISTED_OQS} more`);
+  return out;
+}
+
 function buildRejectionSummary(checks: RfcOqCheckResult[]): string {
   const parts: string[] = [];
   for (const c of checks) {
@@ -617,8 +667,12 @@ function buildRejectionSummary(checks: RfcOqCheckResult[]): string {
       reasons.push(`lifecycle is '${c.lifecycle}' (not Signed Off or Implemented)`);
     }
     if (c.unresolvedOqCount > 0) {
+      const listed = formatOqEntryLines(c);
       reasons.push(
-        `${c.unresolvedOqCount} unresolved OQ(s): ${c.unresolvedOqSample.slice(0, 3).join('; ')}`,
+        `${c.unresolvedOqCount} unresolved OQ(s):` +
+          (listed.length > 0
+            ? `\n${listed.map((l) => `  ${l}`).join('\n')}\n`
+            : ` ${c.unresolvedOqSample.slice(0, 3).join('; ')}`),
       );
     }
     parts.push(`${c.rfcId}: ${reasons.join('; ')}`);
@@ -626,6 +680,7 @@ function buildRejectionSummary(checks: RfcOqCheckResult[]): string {
   return (
     `DoR upstream-OQ gate blocked — referenced RFC(s) have open OQs or are not Signed Off. ` +
     `Resolve these before dispatching: ${parts.join(' | ')}. ` +
+    `If the task only relies on the RFC's design and not on its open questions, list the RFC under \`assumes:\` instead of \`requires:\`; \`assumes:\` is not refused on lifecycle or open questions. ` +
     `Override by adding \`blocked.reason\` to the task's frontmatter with an explicit operator note.`
   );
 }

@@ -26,7 +26,7 @@ export function createPipelineReconciler(
   deps: PipelineReconcilerDeps,
 ): (resource: Pipeline) => Promise<ReconcileResult> {
   return async (pipeline: Pipeline): Promise<ReconcileResult> => {
-    const stages = pipeline.spec.stages;
+    const stages = pipeline.spec.stages ?? [];
     if (stages.length === 0) {
       return { type: 'success' };
     }

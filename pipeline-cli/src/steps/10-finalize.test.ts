@@ -58,6 +58,22 @@ function blocked(): AggregatedVerdict {
 }
 
 describe('Step 10 — buildFinalSummary', () => {
+  it('carries the before-push marker only when the pipeline opened the PR (AISDLC-1365)', () => {
+    const o = {
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      task,
+      developerReturn: dev,
+      verdict: approved(),
+      iterations: 1,
+    };
+    const marked = buildFinalSummary({ ...o, prOpenedByPipeline: true }).finalSummary;
+    expect(marked).toContain('written before the pipeline pushed this branch');
+    expect(marked.indexOf('written before')).toBeLessThan(marked.indexOf('shipped X'));
+    expect(buildFinalSummary(o).finalSummary).not.toContain('written before the pipeline pushed');
+  });
+
   it('renders the canonical CLAUDE.md template', () => {
     const r = buildFinalSummary({
       taskId: 'AISDLC-1',
@@ -100,6 +116,49 @@ describe('Step 10 — buildFinalSummary', () => {
       iterations: 1,
     });
     expect(r.finalSummary).toContain('⚠ test note');
+  });
+});
+
+describe('Step 10 — reviews line (AISDLC-1369)', () => {
+  const run = (verdict: AggregatedVerdict) =>
+    buildFinalSummary({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      task,
+      developerReturn: dev,
+      verdict,
+      iterations: 1,
+    }).finalSummary;
+
+  it('states the actual count and harness of each reviewer', () => {
+    const out = run({
+      ...approved(),
+      verdicts: [
+        { agentId: 'code-reviewer', harness: 'claude-code', approved: true, findings: [] },
+        {
+          agentId: 'test-reviewer',
+          harness: 'claude-code',
+          plannedHarness: 'codex',
+          approved: true,
+          findings: [],
+        },
+      ],
+    });
+    expect(out).toContain('- 2 reviews approved');
+    expect(out).toContain('code-reviewer=claude-code');
+    expect(out).toContain('test-reviewer=claude-code (fell back from codex)');
+    expect(out).not.toContain('3 parallel');
+  });
+
+  it('has no "(;" fragment without a harness note', () => {
+    const out = run({
+      ...approved(),
+      verdicts: [{ agentId: 'code-reviewer', harness: 'codex', approved: true, findings: [] }],
+    });
+    expect(out).toContain('- 1 review approved (harness: code-reviewer=codex)');
+    expect(out).not.toContain('(;');
+    expect(run({ ...approved(), harnessNote: 'note' })).toContain('- 0 reviews approved (note)');
   });
 });
 

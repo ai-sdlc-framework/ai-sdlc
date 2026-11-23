@@ -46,7 +46,12 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runReviewerMatrixInContainer } from '../pipeline/reviewer-container.js';
 import { classifyTrust } from '../pipeline/trust-classifier.js';
-import { runAstGate, loadAstGateConfig, buildBlockedEvent } from '../pipeline/ast-gate.js';
+import {
+  runAstGate,
+  loadAstGateConfig,
+  buildBlockedEvent,
+  buildBlockedComment,
+} from '../pipeline/ast-gate.js';
 import type { ChangedFile } from '../pipeline/ast-gate.js';
 import {
   DEFAULT_MAX_DIFF_BYTES,
@@ -178,7 +183,12 @@ async function runAstGateCli(args: {
 
     if (paths.length === 0) {
       // No changed files → trivially pass
-      emit({ outcome: 'pass', offendingPaths: [], heuristicFindings: [] });
+      emit({
+        outcome: 'pass',
+        offendingPaths: [],
+        offendingPathReasons: [],
+        heuristicFindings: [],
+      });
       return;
     }
 
@@ -196,7 +206,9 @@ async function runAstGateCli(args: {
     emit({
       outcome: result.outcome,
       offendingPaths: result.offendingPaths,
+      offendingPathReasons: result.offendingPathReasons,
       heuristicFindings: result.heuristicFindings,
+      comment: buildBlockedComment(result, args.author),
     });
 
     if (result.outcome === 'abort-protected-path') {
@@ -218,7 +230,17 @@ async function runAstGateCli(args: {
     emit({
       outcome: 'abort-protected-path',
       offendingPaths: [],
+      offendingPathReasons: [],
       heuristicFindings: [],
+      comment: buildBlockedComment(
+        {
+          outcome: 'abort-protected-path',
+          offendingPaths: [],
+          offendingPathReasons: [],
+          heuristicFindings: [],
+        },
+        args.author,
+      ),
       configError: (err as Error).message,
     });
     process.exit(1);
@@ -370,6 +392,8 @@ async function runSandboxAndReview(args: {
       : stageBaseTree(args.prContentDir, args.baseSha);
     // A sandbox `error`/`resource-breach` outcome is a rejection, never a pass:
     // extractDifferentialTestResult sets sandboxError. A throw writes no report.
+    // AISDLC-1291: a failed fetch phase (dependency install) throws; no reviewer
+    // runs and no report is written. Cleanup runs before fail() exits the process.
     const sandboxResult = await runSandbox({
       prNumber: args.prNumber,
       prDiff,
@@ -381,6 +405,13 @@ async function runSandboxAndReview(args: {
       sandboxEnv,
       proxyHostArgs,
       baseTreeDir,
+    }).catch(async (err: unknown) => {
+      if (err instanceof Error && err.name === 'SandboxFetchPhaseError') {
+        if (baseTreeDir) rmSync(baseTreeDir, { recursive: true, force: true });
+        if (proxy !== null) await proxy.stop();
+        return fail(err.message);
+      }
+      throw err;
     });
 
     // Extract differential test result from sandbox output.

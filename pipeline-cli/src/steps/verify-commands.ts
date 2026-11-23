@@ -145,11 +145,128 @@ export interface RunVerifyOptions {
 }
 
 const ROOT_TEST_CHAIN_REST =
-  'pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm git-env-hygiene:check && pnpm lint:publishable && pnpm knowledge:check';
+  'pnpm test:gates && pnpm rfc:check && pnpm dark-code:check && pnpm parity:check && pnpm git-env-hygiene:check && pnpm lint:publishable && pnpm knowledge:check';
 
 /** Patch gate command, run after the tests (AISDLC-1185). */
 export function patchGateCommand(headSha: string): string {
   return `node scripts/check-pr-patch-coverage.mjs --base origin/main --head ${headSha}`;
+}
+
+/** What a first verify round needs to run (DEC-0423): packages, related test files, gate base. */
+export interface FirstRoundScope {
+  /** Package dirs whose vitest suites run: changed packages plus their dependents. */
+  packages: string[];
+  /** Changed files per package dir (relative to the package) handed to `vitest related`. */
+  related: Record<string, string[]>;
+  /** Merge-base with origin/main; the gate runner selects gates from the diff against it. */
+  base: string;
+}
+
+/**
+ * Paths whose change can alter every package's behaviour or the gate runner itself: a first
+ * round that touches one runs the full suite (DEC-0423 forced-full triggers).
+ */
+const FORCE_FULL =
+  /(^|\/)(package\.json|tsconfig[^/]*\.json|vitest\.[^/]*)$|^(pnpm-lock\.yaml|pnpm-workspace\.yaml|\.husky\/|\.ai-sdlc\/|scripts\/run-gate-tests\.mjs$|\.github\/(?!workflows\/__tests__\/))/;
+
+/** Paths outside a package that only gate tests, or nothing, depend on. */
+const GATE_OR_DOC = /^(scripts\/|\.github\/workflows\/__tests__\/|docs\/|backlog\/|spec\/)|\.md$/;
+
+/** Single-quote a path for `sh -c`. */
+function shQuote(f: string): string {
+  return `'${f.replace(/'/g, "'\\''")}'`;
+}
+
+/** Command for one touched package: related test files under coverage, else the whole package. */
+export function coverageCommand(pkg: string, related?: readonly string[]): string {
+  if (!related || related.length === 0) return `pnpm --filter ./${pkg} test:coverage`;
+  // CI keeps the package-wide floors; a related-only run cannot meet them.
+  return `pnpm --filter ./${pkg} exec vitest related --run --passWithNoTests --coverage --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 ${related.map(shQuote).join(' ')}`;
+}
+
+/** The gate runner invocation that runs only the gates related to the diff against `base`. */
+export function gateCommand(base: string): string {
+  return `node scripts/run-gate-tests.mjs --affected-from ${base}`;
+}
+
+function owningPackageDir(cwd: string, file: string): string {
+  let dir = dirname(file);
+  while (dir !== '.' && !existsSync(join(cwd, dir, 'package.json'))) dir = dirname(dir);
+  return dir;
+}
+
+/**
+ * Scope of a first verify round (DEC-0423, extends DEC-0372): changed packages plus dependents,
+ * related test files per touched package, gates selected from the diff. `undefined` means run
+ * everything; it fails closed on every doubt (no merge-base, git or pnpm failure, a forced-full
+ * path, an unowned path that is neither gate-guarded nor documentation, or AI_SDLC_VERIFY_FULL=1).
+ */
+export async function firstRoundScope(
+  runner: Runner,
+  cwd: string,
+  touched: readonly string[],
+): Promise<FirstRoundScope | undefined> {
+  if (process.env['AI_SDLC_VERIFY_FULL'] === '1') return undefined;
+  const git = (args: string[]) =>
+    runner('git', args, { cwd, allowFailure: true, env: strippedSessionEnv() }).catch(() => ({
+      code: 1,
+      stdout: '',
+      stderr: '',
+    }));
+  const mb = await git(['merge-base', 'origin/main', 'HEAD']);
+  const base = mb.stdout.trim();
+  if (mb.code !== 0 || !base) return undefined;
+  const diff = await git(['diff', '--name-only', base]);
+  const untracked = await git(['ls-files', '--others', '--exclude-standard']);
+  if (diff.code !== 0 || untracked.code !== 0) return undefined;
+  const files = `${diff.stdout}\n${untracked.stdout}`
+    .split('\n')
+    .map((f) => f.trim())
+    .filter(Boolean);
+  if (files.length === 0) return undefined;
+  for (const file of files) {
+    if (FORCE_FULL.test(file)) return undefined;
+    if (owningPackageDir(cwd, file) === '.' && !GATE_OR_DOC.test(file)) return undefined;
+  }
+  const packages = await pnpmAffected(runner, cwd, base);
+  if (!packages) return undefined;
+  const related: Record<string, string[]> = {};
+  for (const pkg of touched) {
+    const own = files
+      .filter((f) => f.startsWith(`${pkg}/`) && !f.endsWith('.md') && existsSync(join(cwd, f)))
+      .map((f) => f.slice(pkg.length + 1));
+    if (own.length > 0) related[pkg] = own;
+  }
+  return { packages, related, base };
+}
+
+async function pnpmAffected(
+  runner: Runner,
+  cwd: string,
+  ref: string,
+): Promise<string[] | undefined> {
+  try {
+    const r = await runner(
+      'pnpm',
+      ['ls', '-r', '--depth', '-1', '--json', '--filter', `...[${ref}]`],
+      {
+        cwd,
+        allowFailure: true,
+        env: strippedSessionEnv(),
+      },
+    );
+    if (r.code !== 0) return undefined;
+    const parsed: unknown = JSON.parse(r.stdout);
+    if (!Array.isArray(parsed)) return undefined;
+    return parsed
+      .map((x) => (x as { path?: unknown }).path)
+      .filter((x): x is string => typeof x === 'string')
+      .map((x) => relative(cwd, x))
+      .filter((x) => x !== '' && !x.startsWith('..'))
+      .sort();
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -162,6 +279,7 @@ export function expandVerifyCommands(
   packages: readonly string[],
   headSha: string,
   affected?: readonly string[],
+  first?: FirstRoundScope,
 ): string[] {
   const i = commands.indexOf('pnpm test');
   if (i < 0 || (packages.length === 0 && !affected)) return [...commands];
@@ -174,9 +292,11 @@ export function expandVerifyCommands(
     : [`pnpm -r --no-bail ${packages.map((p) => `--filter '!./${p}'`).join(' ')} test`];
   return [
     ...commands.slice(0, i),
-    ...packages.map((p) => `pnpm --filter ./${p} test:coverage`),
+    ...packages.map((p) => coverageCommand(p, first?.related[p])),
     ...plainCmd,
-    ROOT_TEST_CHAIN_REST,
+    first
+      ? ROOT_TEST_CHAIN_REST.replace('pnpm test:gates', gateCommand(first.base))
+      : ROOT_TEST_CHAIN_REST,
     ...(packages.length > 0 ? [patchGateCommand(headSha)] : []),
     ...commands.slice(i + 1),
   ];
@@ -220,24 +340,7 @@ export async function affectedPackages(
     if (dir === '.') return undefined;
   }
   if (files.length === 0) return [];
-  try {
-    const r = await runner(
-      'pnpm',
-      ['ls', '-r', '--depth', '-1', '--json', '--filter', `...[${prevSha}]`],
-      { cwd, allowFailure: true, env: strippedSessionEnv() },
-    );
-    if (r.code !== 0) return undefined;
-    const parsed: unknown = JSON.parse(r.stdout);
-    if (!Array.isArray(parsed)) return undefined;
-    const out = parsed
-      .map((x) => (x as { path?: unknown }).path)
-      .filter((x): x is string => typeof x === 'string')
-      .map((x) => relative(cwd, x))
-      .filter((x) => x !== '' && !x.startsWith('..'));
-    return out.sort();
-  } catch {
-    return undefined;
-  }
+  return pnpmAffected(runner, cwd, prevSha);
 }
 
 async function gitOut(runner: Runner, cwd: string, args: string[]): Promise<string> {
@@ -287,25 +390,32 @@ export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyR
     return { ok: true, skipped: 'docs-only', results: [], verifications, ...base };
   }
   let slot: VerifySlot | undefined;
-  if (opts.boardDir) {
-    try {
-      slot = await acquireVerifySlot(opts.boardDir, opts.slotDeps);
-    } catch {
-      // best effort: an unwritable board runs unlimited rather than blocking the gate
-    }
-  }
   try {
     const before = await snapshot(runner, opts.cwd);
     let commands = opts.commands;
     let affected: string[] | undefined;
     if (before.headSha && commands.includes('pnpm test')) {
-      if (opts.narrowFrom) affected = await affectedPackages(runner, opts.cwd, opts.narrowFrom);
-      commands = expandVerifyCommands(
-        commands,
-        await coveragePackages(runner, opts.cwd),
-        before.headSha,
-        affected,
-      );
+      // Only a repo with the framework's own script gets the chain and patch gate (AISDLC-1360).
+      const hasFrameworkScripts = existsSync(join(opts.cwd, 'scripts/list-coverage-packages.mjs'));
+      const touched = await coveragePackages(runner, opts.cwd);
+      let first: FirstRoundScope | undefined;
+      if (opts.narrowFrom && hasFrameworkScripts) {
+        affected = await affectedPackages(runner, opts.cwd, opts.narrowFrom);
+      } else if (hasFrameworkScripts) {
+        first = await firstRoundScope(runner, opts.cwd, touched);
+        affected = first?.packages;
+      }
+      commands = expandVerifyCommands(commands, touched, before.headSha, affected, first);
+    }
+    // A full-scope run holds the machine alone; an affected-scope run shares (AISDLC-1378).
+    if (opts.boardDir) {
+      try {
+        slot = await acquireVerifySlot(opts.boardDir, opts.slotDeps, {
+          exclusive: !affected && opts.commands.includes('pnpm test'),
+        });
+      } catch {
+        // best effort: an unwritable board runs unlimited rather than blocking the gate
+      }
     }
     const run = await runAll({ ...opts, commands }, runner, timeout, verifications, base, slot);
     const after = await snapshot(runner, opts.cwd);

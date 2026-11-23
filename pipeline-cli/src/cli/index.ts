@@ -107,6 +107,23 @@ function parseJsonOption<T>(raw: unknown, optionName: string): T {
 }
 
 /**
+ * yargs treats a bare `-` as a positional, so `--result -` loses its value.
+ * Rewrite it to `--result=-` (AISDLC-1337) so stdin is selectable as documented.
+ */
+export function normalizeLoneDashResult(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--result' && args[i + 1] === '-') {
+      out.push('--result=-');
+      i++;
+    } else {
+      out.push(args[i]);
+    }
+  }
+  return out;
+}
+
+/**
  * Build the yargs program. Exported so tests can drive the parser without
  * going through `process.argv`.
  */
@@ -114,7 +131,7 @@ export function buildCli(): Argv {
   const cwdDefault = (): string => process.cwd();
 
   return (
-    yargs(hideBin(process.argv))
+    yargs(normalizeLoneDashResult(hideBin(process.argv)))
       .scriptName('ai-sdlc-pipeline')
       .usage('Usage: $0 <command> [options]')
       .option('work-dir', {

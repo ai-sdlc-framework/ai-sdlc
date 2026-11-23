@@ -109,6 +109,7 @@ allowedMutationGlobs:
 contentHeuristics:
   packageJsonLifecycleScripts: abort  # preinstall/postinstall/prepare added → abort
   newGithubActionUses: abort          # any new `uses:` reference → abort
+maxDiffBytes: 200000                  # default; size cap on the PR diff
 ```
 
 **Deny wins.** A protected-path match takes priority over an
@@ -179,3 +180,16 @@ Options:
 - `.github/workflows/trusted-reviewers-drift.yml` — drift detection
 - `pipeline-cli/src/pipeline/trust-classifier.ts` — Stage 0 implementation
 - `pipeline-cli/src/pipeline/ast-gate.ts` — Stage 1 implementation
+
+## Required reviewers for the merge gate (AISDLC-1321)
+
+The merge gate's verdict check asks `requiredReviewersFor(origin, changedPaths)` in
+`pipeline-cli/src/attestation/review-coverage.ts`, and the clean-room writer calls the same function.
+
+- **Fork head (clean-room):** the required set is always `code-reviewer`, `test-reviewer` and
+  `security-reviewer`, whatever paths the diff touches, because the UCVG matrix always runs those three.
+  The checker reads the clean-room flag from its own input (the workflow), never from the record.
+- **Same-repo head:** the diff-derived set. A diff with no trust-chain path needs `correctness-reviewer`
+  and `security-reviewer`; a trust-chain path needs the three-reviewer set.
+
+A `coverage-short` refusal names only the required reviewers that are missing or not approving.

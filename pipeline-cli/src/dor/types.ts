@@ -243,7 +243,7 @@ export interface Resolver {
   /** Stable name used in registry lookups + log lines. */
   name: 'github-issue' | 'file-existence' | 'url';
   /** Returns true when this resolver handles the reference shape. */
-  supports(ref: Reference): boolean;
+  supports(ref: Reference, opts?: Pick<ResolverOpts, 'workDir'>): boolean;
   resolve(ref: Reference, opts: ResolverOpts): Promise<ResolveResult>;
 }
 

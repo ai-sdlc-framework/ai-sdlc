@@ -10,6 +10,8 @@ status: "Published"
 reference: "RFC-0042"
 ---
 
+> **Update 2026-11-18:** the signed v6 envelope this paper describes was replaced by a review verdict record held in `refs/ai-sdlc/verdicts/*`, with no signing key and nothing committed to the branch ([RFC-0061](https://github.com/ai-sdlc-framework/ai-sdlc/blob/main/spec/rfcs/RFC-0061-review-verdict-gate-outside-the-branch.md)). Read the rest as the RFC-0042 design and its threat model.
+
 # Proof of Execution
 
 *Verifiable Evidence That Your AI Reviewers Actually Ran*

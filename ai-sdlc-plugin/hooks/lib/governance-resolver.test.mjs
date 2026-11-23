@@ -186,10 +186,7 @@ describe('renderSessionStartHardRules', () => {
       allowForcePush: false,
       allowMerge: 'onGreenClean',
     });
-    assert.match(
-      text,
-      /node pipeline-cli\/bin\/cli-merge-if-eligible\.mjs <pr> --source-kind backlog \[--arm\]/,
-    );
+    assert.match(text, /node \S*cli-merge-if-eligible\.mjs <pr> --source-kind backlog \[--arm\]/);
     assert.doesNotMatch(text, /only humans merge|human to merge|human to click merge/i);
     assert.doesNotMatch(text, /forbids agent merges/);
   });

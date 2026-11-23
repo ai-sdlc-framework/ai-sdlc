@@ -1,6 +1,6 @@
 {
   "name": "@ai-sdlc/plugin-mcp-server",
-  "version": "0.42.0",
+  "version": "0.44.0",
   "description": "MCP server for the AI-SDLC Claude Code plugin — governance tools for Claude",
   "license": "Apache-2.0",
   "repository": {
@@ -45,10 +45,10 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
-    "@vitest/coverage-v8": "^5.1.0",
+    "@vitest/coverage-v8": "^5.1.1",
     "esbuild": "^0.28.2",
     "typescript": "^6.0.3",
-    "vite": "^8.3.6",
-    "vitest": "^5.1.0"
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
   }
 }

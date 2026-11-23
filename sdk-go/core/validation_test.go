@@ -1,6 +1,9 @@
 package core
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,7 +30,7 @@ func TestValidateInvalidPipeline(t *testing.T) {
 		"apiVersion": "ai-sdlc.io/v1alpha1",
 		"kind":       "Pipeline",
 		"metadata":   map[string]interface{}{"name": "test-pipeline"},
-		"spec": map[string]interface{}{
+		"spec":       map[string]interface{}{
 			// missing required "triggers", "providers", "stages"
 		},
 	}
@@ -211,4 +214,15 @@ func TestValidateMetadataNamePattern(t *testing.T) {
 
 	result := Validate(KindPipeline, data)
 	assert.False(t, result.Valid)
+}
+
+func TestEmbeddedSchemasMatchSpec(t *testing.T) {
+	for _, name := range []string{"adapter-binding", "agent-role", "autonomy-policy", "common", "pipeline", "quality-gate"} {
+		file := name + ".schema.json"
+		want, err := os.ReadFile(filepath.Join("..", "..", "spec", "schemas", file))
+		assert.NoError(t, err)
+		got, err := schemaFS.ReadFile("schemas/" + file)
+		assert.NoError(t, err)
+		assert.True(t, bytes.Equal(want, got), "%s differs from spec/schemas", file)
+	}
 }

@@ -328,7 +328,10 @@ differentialTest:
     cpuCores: 4              # larger runner
     memoryMb: 8192           # 8 GB for memory-intensive suites
     perTestTimeoutSeconds: 120  # optional per-test cap
+maxDiffBytes: 200000         # default; size cap on the PR diff the gate accepts
 ```
+
+`maxDiffBytes` (default `200000`) caps the diff size the gate processes; the default comes from `DEFAULT_MAX_DIFF_BYTES` in `sandbox-runner.ts`.
 
 ### Reading `Decision: untrusted-pr-resource-exhausted` patterns
 
@@ -431,6 +434,10 @@ The clean-room signer (`pipeline-cli/src/pipeline/clean-room-signer.ts`) enforce
 
 3. **Approval check:** The signer reads `consensus.approved` from the validated report and refuses to sign if it is `false`. This is belt-and-suspenders with the workflow's post-signing check.
 
+4. **Differential-test check:** Independent of the consensus value, the signer refuses to sign unless both the upstream suite and the new tests passed (`differentialTest.upstreamSuitePassed` and `differentialTest.newTestsPassed` must be `true`).
+
+**Sandbox image.** The sandbox image is pinned by digest (`DEFAULT_SANDBOX_IMAGE` in `pipeline-cli/src/pipeline/sandbox-runner.ts`, a `node:22-bookworm@sha256:...` reference). Set `AI_SDLC_SANDBOX_IMAGE` to override it; use a digest-pinned reference, never a floating tag.
+
 ### What happens if the signer rejects
 
 Common rejection reasons and their root causes:
@@ -482,18 +489,23 @@ Additionally, `promptInjectionDetected: true` is set in the reviewer verdict.
 
 4. **Consider escalating.** A deliberate injection attempt may indicate a malicious contributor. Document the incident and consider adding the author to a blocklist.
 
-### Reviewer execution model (in-sandbox, inference.local)
+### Reviewer execution model (host process, inference proxy)
 
-The reviewers of the configured set (see [reviewer-set-flag.md](./reviewer-set-flag.md); `security-reviewer` always runs) run
-**inside the same sandbox as Stage 2** so they are subject to the same
-credential-stripping and network isolation. Provider credentials are injected
-by the `inference.local` proxy out-of-process — the reviewer process connects
-to `inference.local` for model inference and never holds the `ANTHROPIC_API_KEY`
-directly. This matches RFC-0043's credential-withholding design intent and keeps
-the agentic-review upgrade path open.
+The reviewers of the configured set (see [reviewer-set-flag.md](./reviewer-set-flag.md); `security-reviewer` always runs)
+run in the **host process on the runner** by default: `cli-ucvg sandbox-run`
+(`pipeline-cli/src/cli/ucvg.ts`) runs Stage 2 in the sandbox and then the Stage 3
+reviewer matrix itself. A host-side inference proxy (`inference.local`) holds the
+provider credential and forwards model calls; the reviewer code reaches the model
+through that proxy. The Stage 2 sandbox never holds `ANTHROPIC_API_KEY`.
+
+**`AI_SDLC_UCVG_REVIEWERS_IN_CONTAINER=1`** moves the reviewers into a separate
+proxy-only container (strict isolation). It takes effect only when the inference
+proxy is running and its port and session token are set; otherwise the reviewers
+run in the host process. `.github/workflows/untrusted-pr-gate.yml` does not set
+this variable, so the shipped workflow uses the host-process default.
 
 Implemented in Phase 7 task AISDLC-510 (`inference.local` proxy) and AISDLC-511
-(in-sandbox fan-out wiring).
+(reviewer fan-out wiring).
 
 ### Reviewer prompt hardening (sandwich framing)
 

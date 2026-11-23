@@ -7,6 +7,7 @@ import { executePipeline, type ExecuteOptions, type PipelineResult } from './exe
 import { startWatch, type WatchOptions, type WatchHandle } from './watch.js';
 import { executeFixCI, type FixCIOptions } from './fix-ci.js';
 import { loadConfig, type AiSdlcConfig } from './config.js';
+import { validateConfigFiles } from './validate-config.js';
 import { StateStore } from './state/index.js';
 import { createLogger, type Logger } from './logger.js';
 import type { SecurityContext } from './security.js';
@@ -300,7 +301,17 @@ export class Orchestrator {
     try {
       const configDir = this.config.configDir ?? `${this.config.workDir ?? '.'}/.ai-sdlc`;
       loadConfig(configDir);
-      configValid = true;
+      // loadConfig is tolerant (missing dir -> {}, bad files -> warnings), so
+      // use the same per-file validation as `ai-sdlc validate` (AISDLC-1279).
+      const failures = validateConfigFiles(configDir).filter((r) => !r.valid);
+      for (const f of failures) {
+        for (const e of f.errors) {
+          errors.push(
+            `Config: ${f.file}: ${e.message}${e.path && e.path !== '/' ? ` (${e.path})` : ''}`,
+          );
+        }
+      }
+      configValid = failures.length === 0;
     } catch (err) {
       errors.push(`Config: ${err instanceof Error ? err.message : String(err)}`);
     }

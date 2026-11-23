@@ -1,8 +1,8 @@
 ---
 id: RFC-0036
 title: Spec-Kit Bridge and Adopter Spec-Authoring Surface
-status: Draft
-lifecycle: Ready for Review
+status: Implemented
+lifecycle: Implemented
 author: Dominique Legault
 created: 2026-05-13
 updated: 2026-05-18
@@ -10,13 +10,15 @@ targetSpecVersion: v1alpha1
 requires: [RFC-0010, RFC-0011, RFC-0024, RFC-0025, RFC-0035]
 # Adopter-facing positioning + tooling RFC. Tutorial + getting-started surfaces
 # land at sign-off; intentionally empty at Draft stage.
-requiresDocs: []
+requiresDocs:
+  - concept
+runtimeEvidence: []
 ---
 
 # RFC-0036: Spec-Kit Bridge and Adopter Spec-Authoring Surface
 
 **Status:** Ready for Review v0.2 — operator OQ walkthrough complete 2026-05-16; all 12 §14 OQs resolved. **Cross-cutting framing:** every operator-impacting resolution is **routed through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md)** — strict outcomes (tasks.md only, no fallback; drift requires explicit operator decision; full DoR rubric at import; strict schema versioning) are preserved while all "blocking + operator confirm" patterns are reshaped as Decisions with auto-resolution OR timeboxed default-on-silence. Pipeline never halts on RFC-0036 operations. §14.1 codifies the per-org config schema. Implementation broken into 11 phase tasks (AISDLC-326..336).
-**Lifecycle:** Ready for Review
+**Lifecycle:** Implemented
 **Author:** Dominique Legault
 **Created:** 2026-05-13
 **Updated:** 2026-05-16
@@ -448,17 +450,17 @@ Require an RFC for every adopter feature; gate task creation on RFC sign-off. Re
 
 Phased rollout behind feature flag `AI_SDLC_ADOPTER_AUTHORING=experimental` (mirrors RFC-0014 / RFC-0015 promotion convention):
 
-- [ ] **Phase 1.** `docs/concepts/spec-driven.md` + three-tier authoring model + altitude rubric (docs-only; no code)
-- [ ] **Phase 2.** `ai-sdlc rfc init` CLI + adopter RFC template + tutorial
-- [ ] **Phase 3.** Backlog task schema: add optional `specRef:` field; update JSON Schema
-- [ ] **Phase 4.** `ai-sdlc import-spec --from <path>` CLI for spec-kit `tasks.md` import (no reconcile yet)
-- [ ] **Phase 5.** DoR Gate runs at import time; failure surfacing with upstream-clarification hints
-- [ ] **Phase 6.** `ai-sdlc import-spec --reconcile` for drift handling
-- [ ] **Phase 7.** `docs/tutorials/N-spec-kit-bridge.md` walkthrough; getting-started revision
+- [x] **Phase 1.** `docs/concepts/spec-driven.md` + three-tier authoring model + altitude rubric (docs-only; no code)
+- [x] **Phase 2.** `ai-sdlc rfc init` CLI + adopter RFC template + tutorial
+- [x] **Phase 3.** Backlog task schema: add optional `specRef:` field; update JSON Schema
+- [x] **Phase 4.** `ai-sdlc import-spec --from <path>` CLI for spec-kit `tasks.md` import (no reconcile yet)
+- [x] **Phase 5.** DoR Gate runs at import time; failure surfacing with upstream-clarification hints
+- [x] **Phase 6.** `ai-sdlc import-spec --reconcile` for drift handling
+- [x] **Phase 7.** `docs/tutorials/N-spec-kit-bridge.md` walkthrough; getting-started revision
 - [ ] **Phase 8.** Position-update PR sweep: README, top-level positioning, `content/docs/concepts/` (ai-sdlc-io repo)
-- [ ] **Phase 9.** Optional `ai-sdlc rfc index` integration with RFC-0035 Decision Catalog (depends on RFC-0035 Phase 1+)
-- [ ] **Phase 10.** Adapter-pattern documentation for non-spec-kit upstreams (Linear, Notion, plain markdown templates)
-- [ ] **Phase 11.** Hybrid promotion runbook to flip default-on (`docs/operations/cli-hierarchy.md`)
+- [x] **Phase 9.** Optional `ai-sdlc rfc index` integration with RFC-0035 Decision Catalog (depends on RFC-0035 Phase 1+)
+- [x] **Phase 10.** Adapter-pattern documentation for non-spec-kit upstreams (Linear, Notion, plain markdown templates)
+- [x] **Phase 11.** Hybrid promotion runbook to flip default-on (`docs/operations/cli-hierarchy.md`)
 
 ## 14. Open Questions — resolved (operator walkthrough 2026-05-16)
 

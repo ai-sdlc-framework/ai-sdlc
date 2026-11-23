@@ -216,6 +216,29 @@ describe('leaseOnOwnBranch - allowed', () => {
     assert.ok(denied(out), out);
   });
 
+  it('AISDLC-1365: a lone plain first push from a worktree cwd is allowed with no task binding', () => {
+    const out = run(`git push -u origin HEAD:refs/heads/${OWN}`, {
+      cwd: leaseRepo.wt,
+      projectDir: leaseRepo.root,
+      env: { AI_SDLC_ACTIVE_TASK_ID: '' },
+    });
+    assert.ok(!denied(out), out);
+  });
+
+  it('AISDLC-1365: a main-rooted lone lease push refusal names git -C and AI_SDLC_ACTIVE_TASK_ID, not a lone cd', () => {
+    const out = run(L(), {
+      cwd: leaseRepo.root,
+      projectDir: leaseRepo.root,
+      env: { AI_SDLC_ACTIVE_TASK_ID: '' },
+    });
+    assert.ok(denied(out), out);
+    const reason = JSON.parse(out).hookSpecificOutput.permissionDecisionReason;
+    assert.match(reason, /git -C <main>\/\.worktrees\/<task-id> push/);
+    assert.match(reason, /no pipe/);
+    assert.match(reason, /AI_SDLC_ACTIVE_TASK_ID/);
+    assert.doesNotMatch(reason, /cd <worktree> in a call of its own/);
+  });
+
   it('plain non-force push of own branch is unaffected', () => {
     const out = run(`git push origin ${OWN}`, { cwd: leaseRepo.wt, projectDir: leaseRepo.root });
     assert.ok(!denied(out), out);
@@ -426,7 +449,11 @@ describe('never / unset / malformed - behaves exactly as before', () => {
     for (const reason of reasons) {
       assert.match(reason, /spec\.governance\.allowForcePush/, reason);
       assert.match(reason, /leaseOnOwnBranch/, reason);
-      assert.doesNotMatch(reason, /SKIP_|AI_SDLC_|bypass|--no-verify|--mirror/i, reason);
+      assert.doesNotMatch(
+        reason,
+        /SKIP_|AI_SDLC_(?!ACTIVE_TASK_ID)|bypass|--no-verify|--mirror/i,
+        reason,
+      );
       assert.doesNotMatch(reason, /--force(?![-\w])/, reason);
       assert.doesNotMatch(reason, /(^|\s)-f(\s|$)/, reason);
     }
@@ -1493,7 +1520,7 @@ describe('AISDLC-861: lease push resolves the worktree from -C or the active tas
     assert.match(out, /tool's cwd is outside the task worktree/);
     assert.match(out, /expected a direct child of/);
     assert.ok(out.includes(leaseRepo.root), 'names the cwd it saw');
-    assert.match(out, /run it as a lone command from that worktree/);
+    assert.match(out, /git -C <main>\/\.worktrees\/<task-id> push/);
   });
 
   it('does not resolve a worktree from AI_SDLC_ACTIVE_TASK_ID alone (executed cwd would differ)', () => {
@@ -1512,5 +1539,79 @@ describe('AISDLC-861: lease push resolves the worktree from -C or the active tas
         ),
       ),
     );
+  });
+});
+
+describe('leaseOnOwnBranch - fix task on the PR head branch (AISDLC-1363, DEC-0421)', () => {
+  const HEAD = 'ai-sdlc/acs-13-feature';
+  const push = (b = HEAD) => `git push --force-with-lease origin HEAD:refs/heads/${b}`;
+  let repo;
+  const writeManifest = (m) => {
+    const dir = join(repo.root, '.ai-sdlc', 'dispatch', 'inflight');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'AISDLC-1.dispatch.json'),
+      typeof m === 'string' ? m : JSON.stringify(m),
+    );
+  };
+  const clearManifest = () =>
+    rmSync(join(repo.root, '.ai-sdlc', 'dispatch'), { recursive: true, force: true });
+  const go = (cmd, env = {}) => run(cmd, { cwd: repo.wt, projectDir: repo.root, env });
+
+  before(() => {
+    repo = makeRepo('fixpr', roleYaml(LEASE));
+    // A fix task works on the PR head branch, not on a branch carrying its own id.
+    git(repo.wt, 'checkout', '-q', '-b', HEAD);
+  });
+  after(() => clearManifest());
+
+  it('allows the push when the inflight manifest records fixesPr and prHeadRef', () => {
+    writeManifest({ id: 'AISDLC-1', fixesPr: 262, prHeadRef: HEAD });
+    const out = go(push());
+    assert.ok(!denied(out), out);
+  });
+
+  it('ignores a fixesPr or branch given in the environment or on the command line', () => {
+    clearManifest();
+    const out = go(push(), { AI_SDLC_FIXES_PR: '262', AI_SDLC_PR_HEAD_REF: HEAD });
+    assert.ok(denied(out), out);
+    assert.ok(
+      denied(go(`git push --force-with-lease --fixes-pr=262 origin HEAD:refs/heads/${HEAD}`)),
+    );
+  });
+
+  it('refuses when the manifest is missing, malformed, lacks prHeadRef or names another branch', () => {
+    clearManifest();
+    assert.ok(denied(go(push())), 'missing');
+    writeManifest('{nope');
+    assert.ok(denied(go(push())), 'malformed');
+    writeManifest({ id: 'AISDLC-1', fixesPr: 262 });
+    assert.ok(denied(go(push())), 'no prHeadRef');
+    writeManifest({ id: 'AISDLC-1', fixesPr: 262, prHeadRef: 'ai-sdlc/acs-99-x' });
+    assert.ok(denied(go(push())), 'different branch');
+  });
+
+  it('refuses a foreign recorded head and still refuses force shapes', () => {
+    writeManifest({ id: 'AISDLC-1', fixesPr: 262, prHeadRef: 'owner:feature' });
+    assert.ok(denied(go(push())), 'foreign');
+    writeManifest({ id: 'AISDLC-1', fixesPr: 262, prHeadRef: HEAD });
+    for (const cmd of [
+      `git push --force origin ${HEAD}`,
+      `git push -f origin ${HEAD}`,
+      `git push origin +${HEAD}`,
+      `git push --force-with-lease origin :refs/heads/${HEAD}`,
+      `git push --force-with-lease origin ${HEAD}`,
+      push('main'),
+    ]) {
+      assert.ok(denied(go(cmd)), cmd);
+    }
+  });
+
+  it('a refusal names the task own branch and the recorded PR branch', () => {
+    writeManifest({ id: 'AISDLC-1', fixesPr: 262, prHeadRef: HEAD });
+    const out = go(push('other'));
+    assert.ok(denied(out));
+    assert.match(out, /own branch is 'ai-sdlc\/aisdlc-1'/);
+    assert.match(out, /ai-sdlc\/acs-13-feature/);
   });
 });

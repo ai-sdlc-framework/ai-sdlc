@@ -10,9 +10,15 @@ import { cleanGitEnv } from './runtime/git-env.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ensureRuntimeGitignore } from './execute.js';
+import { RUNTIME_GITIGNORE_PATHS } from './runtime-gitignore.js';
 
 const SENTINEL = '# ai-sdlc:runtime-gitignore';
 const OLD_BLOCK = `${SENTINEL}\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n.ai-sdlc/subagent-sessions/\n`;
+
+const FULL = `${SENTINEL}\n${RUNTIME_GITIGNORE_PATHS.join('\n')}\n`;
+const MISSING_FROM_OLD = RUNTIME_GITIGNORE_PATHS.filter(
+  (p) => !OLD_BLOCK.split('\n').includes(p),
+).join('\n');
 
 let dir: string;
 const gitignore = () => join(dir, '.gitignore');
@@ -29,9 +35,7 @@ describe('ensureRuntimeGitignore', () => {
   it('writes the runtime block, artifacts directory included, when there is no .gitignore', () => {
     ensureRuntimeGitignore(dir);
     const out = readFileSync(gitignore(), 'utf-8');
-    expect(out).toBe(
-      `${SENTINEL}\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n.ai-sdlc/artifacts/\n.ai-sdlc/subagent-sessions/\n`,
-    );
+    expect(out).toBe(FULL);
   });
 
   it('appends the artifacts entry once to a sentinel block that lacks it, and not again on a second run', () => {
@@ -42,7 +46,7 @@ describe('ensureRuntimeGitignore', () => {
     expect(count(first, '.ai-sdlc/artifacts/')).toBe(1);
     expect(count(first, SENTINEL)).toBe(1);
     // under the existing heading, not after the unrelated content that follows it
-    expect(first).toBe(`node_modules/\n\n${OLD_BLOCK}.ai-sdlc/artifacts/\n\n# build\ndist/\n`);
+    expect(first).toBe(`node_modules/\n\n${OLD_BLOCK}${MISSING_FROM_OLD}\n\n# build\ndist/\n`);
 
     ensureRuntimeGitignore(dir);
     expect(readFileSync(gitignore(), 'utf-8')).toBe(first);
@@ -70,7 +74,7 @@ describe('ensureRuntimeGitignore', () => {
   });
 
   it('does not fight a deliberate negation: no duplicate entry, no growth on any run', () => {
-    const negated = `${OLD_BLOCK}.ai-sdlc/artifacts/\n!.ai-sdlc/artifacts/\n`;
+    const negated = `${FULL}!.ai-sdlc/artifacts/\n`;
     writeFileSync(gitignore(), negated);
     ensureRuntimeGitignore(dir);
     ensureRuntimeGitignore(dir);
@@ -78,7 +82,7 @@ describe('ensureRuntimeGitignore', () => {
   });
 
   it('leaves a complete .gitignore byte-for-byte alone', () => {
-    const complete = `${OLD_BLOCK}.ai-sdlc/artifacts/\n`;
+    const complete = FULL;
     writeFileSync(gitignore(), complete);
     ensureRuntimeGitignore(dir);
     expect(readFileSync(gitignore(), 'utf-8')).toBe(complete);
@@ -93,7 +97,7 @@ describe('ensureRuntimeGitignore', () => {
 
 // DEC-0020: a broader line already ignores the directory, so `execute` must not append a
 // redundant block (the edit would otherwise land in an unrelated agent PR).
-const STATE_ONLY = `${SENTINEL}\n.ai-sdlc/state.db\n.ai-sdlc/state/\n.ai-sdlc/audit.jsonl\n.ai-sdlc/subagent-sessions/\n`;
+const STATE_ONLY = FULL.replace('.ai-sdlc/artifacts/\n', '');
 // Git calls strip GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE (husky pre-push exports them
 // from a worktree), and a fresh repository takes no template (so no seeded info/exclude).
 const gitEnv = cleanGitEnv();
@@ -113,12 +117,17 @@ describe.skipIf(!gitAvailable)('ensureRuntimeGitignore in a git repository', () 
     },
   );
 
-  it('adds only the three other entries when `artifacts/` is the only line', () => {
+  it('adds only the other entries when `artifacts/` is the only line', () => {
     initRepo();
     writeFileSync(gitignore(), 'artifacts/\n');
     ensureRuntimeGitignore(dir);
     const out = readFileSync(gitignore(), 'utf-8');
-    expect(out).toBe(`artifacts/\n${STATE_ONLY}`);
+    // `artifacts/` also covers the root-level artifacts/_dor and artifacts/_capabilities entries.
+    const stateOnlyNoRoot = STATE_ONLY.replace('artifacts/_dor/\n', '').replace(
+      'artifacts/_capabilities/\n',
+      '',
+    );
+    expect(out).toBe(`artifacts/\n${stateOnlyNoRoot}`);
     expect(count(out, '.ai-sdlc/artifacts/')).toBe(0);
   });
 

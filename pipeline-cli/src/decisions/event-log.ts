@@ -201,6 +201,22 @@ export function appendDecisionEvent(event: DecisionEvent, opts: AppendEventOpts 
   const line = JSON.stringify(event);
   const path = join(resolveEventsDir(opts.workDir), eventFileName(event, line));
   ensureParentDir(path);
+  if (event.type === 'routing-changed') {
+    // AISDLC-1344: an exact repeat of the latest move writes nothing; a loop of them would
+    // otherwise become a stream of sync pull requests.
+    const prior = readDecisionEvents({ workDir: opts.workDir })
+      .events.filter(
+        (e): e is RoutingChangedEvent =>
+          e.type === 'routing-changed' && e.decisionId === event.decisionId,
+      )
+      .sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0))
+      .pop();
+    if (prior && prior.fromTier === event.fromTier && prior.toTier === event.toTier) {
+      throw new Error(
+        `[decisions] ${event.decisionId} already moved ${event.fromTier} to ${event.toTier} in its latest routing-changed event; refusing the repeat`,
+      );
+    }
+  }
   if (event.type !== 'decision-opened') {
     writeFileSync(path, line + '\n', { encoding: 'utf8' });
     return path;

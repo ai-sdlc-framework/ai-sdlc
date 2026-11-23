@@ -41,7 +41,7 @@ runtimeEvidence:
 
 # RFC-0035: Decision Catalog and Operator Decision Routing
 
-**Status:** Draft (v0.2 — all 14 OQs resolved via operator walkthrough 2026-05-15; §15.1 Design Patterns codifies the architectural coherence)
+**Status:** Implemented. Previously: Draft (v0.2 — all 14 OQs resolved via operator walkthrough 2026-05-15; §15.1 Design Patterns codifies the architectural coherence)
 **Lifecycle:** Ready for Review (14/14 OQs resolved; awaiting per-owner sign-off)
 **Author:** Dominique Legault
 **Created:** 2026-05-08

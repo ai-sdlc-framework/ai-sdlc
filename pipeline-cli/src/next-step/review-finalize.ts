@@ -34,6 +34,12 @@ export interface ReviewerReport {
   approved: boolean;
   findings?: ReviewerFinding[];
   summary?: string;
+  /** AISDLC-1333: the reviewer could not run (usage limit, not signed in, crash); not a verdict. */
+  harnessFailed?: boolean;
+  /** One-line cause when `harnessFailed`. */
+  failureReason?: string;
+  /** Text saying when to retry (for example a usage-limit reset time), when `harnessFailed`. */
+  retryAfter?: string | null;
   /** Model the reporting agent ran on; recorded on the leaf when a fallback ran (AISDLC-911). */
   model?: string;
   /** Staged stages only (RFC-0052): the agent's final message, inline. */
@@ -68,11 +74,22 @@ function asReport(raw: unknown, fallbackAgent?: string): ReviewerReport | null {
         ];
       })
     : [];
+  const failed = nested.harnessFailed === true;
   return {
     agent,
+    ...(failed
+      ? {
+          harnessFailed: true,
+          failureReason:
+            typeof nested.reason === 'string' && nested.reason !== ''
+              ? nested.reason
+              : 'no reason given',
+          retryAfter: typeof nested.retryAfter === 'string' ? nested.retryAfter : null,
+        }
+      : {}),
     ...(typeof r.agentId === 'string' && r.agentId !== '' ? { agentId: r.agentId } : {}),
-    approved: nested.approved === true,
-    findings,
+    approved: !failed && nested.approved === true,
+    findings: failed ? [] : findings,
     ...(typeof nested.summary === 'string' ? { summary: nested.summary } : {}),
     ...(typeof r.output === 'string' ? { output: r.output } : {}),
     ...(typeof r.outputFile === 'string' ? { outputFile: r.outputFile } : {}),
@@ -222,7 +239,12 @@ function markerRoots(worktreePath: string): string[] {
 export type ReviewFinalizeResult =
   | { ok: true; verdict: AggregatedVerdict; warnings: string[] }
   /** `recoverable`: nothing was persisted yet, so re-sending a corrected report is safe. */
-  | { ok: false; reason: string; recoverable?: boolean };
+  | { ok: false; reason: string; recoverable?: boolean; rerun?: string[] };
+
+/** AISDLC-1335: a reviewer whose transcript lacks the nonce marker may run again this many times. */
+export const MAX_REVIEWER_RERUNS = 2;
+/** `persist-reviewer-artifacts.sh` exit code for a transcript without the nonce marker. */
+const EXIT_NO_NONCE_MARKER = 4;
 
 function zeroCounts(): Record<Severity, number> {
   return { critical: 0, major: 0, minor: 0, suggestion: 0 };
@@ -265,10 +287,15 @@ function resolveActual(
 export async function finalizeReview(
   ctx: NextStepContext,
   state: NextStepState,
-  reports: ReviewerReport[],
+  newReports: ReviewerReport[],
 ): Promise<ReviewFinalizeResult> {
   const review = state.review;
   if (!review) return { ok: false, reason: 'review-finalize called with no review round in state' };
+  // AISDLC-1335: after a single-reviewer re-run only that reviewer reports; keep the others.
+  const reports: ReviewerReport[] = [
+    ...(review.heldReports ?? []).filter((h) => !newReports.some((n) => n.agent === h.agent)),
+    ...newReports,
+  ];
   const warnings: string[] = [];
   // v6 is the default: a missing leaf fails the round here, not at signing. v5 needs no leaves.
   const v5Legacy = process.env.AI_SDLC_V5_LEGACY === '1';
@@ -277,6 +304,25 @@ export async function finalizeReview(
   const verdicts: ReviewerVerdict[] = [];
   const tiers: Record<string, IndependenceTier> = {};
   const wtAiSdlc = join(state.worktreePath, '.ai-sdlc');
+
+  // AISDLC-1333: a reviewer whose harness failed produced no verdict. Nothing is persisted,
+  // emitted or counted; the round asks for that reviewer's report again (capped retry path).
+  const notRun = review.spawned.flatMap((sp) => {
+    const report = reports.find((r) => r.agent === sp.agent || r.agent === sp.reviewer);
+    return report?.harnessFailed ? [{ sp, report }] : [];
+  });
+  if (notRun.length > 0) {
+    const parts = notRun.map(
+      ({ sp, report }) =>
+        `reviewer ${sp.agent} (harness ${sp.harness}) did not run: ${report.failureReason}; ` +
+        `retry after ${report.retryAfter ?? 'unknown'}`,
+    );
+    return {
+      ok: false,
+      recoverable: true,
+      reason: `Step 7b.5: the review did not run: ${parts.join('; ')}. No verdict was recorded; re-run the reviewer and report again.`,
+    };
+  }
 
   // Resolve every reviewer's harness agent id BEFORE touching disk, so a reporting slip
   // (a missing id) is fixable by re-sending the report with no half-persisted state.
@@ -302,6 +348,79 @@ export async function finalizeReview(
     state.worktreePath,
     [...agentIds].map(([agent, agentId]) => ({ agent, agentId })),
   );
+
+  // 7b.5 — persist transcript + verdict (coordinator side) for every reviewer first, so a
+  // reviewer whose transcript lacks the nonce marker (exit 4) is asked to run again alone
+  // before any leaf is emitted (AISDLC-1335). The marker check itself is never loosened.
+  const needRerun: string[] = [];
+  const rerunReports: ReviewerReport[] = [];
+  for (const sp of review.spawned) {
+    const report = reports.find((r) => r.agent === sp.agent || r.agent === sp.reviewer);
+    if (!report || reused.get(sp.agent)) continue;
+    const actual = resolveActual(sp, report);
+    const agentId = agentIds.get(sp.agent)!;
+    const verdictScratch = writeRunFile(
+      ctx,
+      `verdict-${actual.agent}.json`,
+      JSON.stringify({
+        approved: report.approved,
+        findings: report.findings ?? [],
+        summary: report.summary ?? '',
+      }),
+    );
+    const persist = await ctx.runner(
+      'bash',
+      [
+        join(ctx.pluginScriptsDir, 'persist-reviewer-artifacts.sh'),
+        '--worktree',
+        state.worktreePath,
+        '--task-id',
+        state.taskId,
+        '--reviewer',
+        actual.agent,
+        '--agent-id',
+        agentId,
+        '--verdict-file',
+        verdictScratch,
+        '--nonce-marker',
+        nonceMarkerLiteral(review.nonce),
+      ],
+      { cwd: ctx.workDir, allowFailure: true },
+    );
+    if (persist.code === 0) continue;
+    const detail = (persist.stderr || persist.stdout).trim();
+    if (persist.code !== EXIT_NO_NONCE_MARKER) {
+      return {
+        ok: false,
+        reason: `Step 7b.5: persist-reviewer-artifacts failed for ${sp.agent}: ${detail}`,
+      };
+    }
+    const attempts = (review.rerunAttempts ?? {})[sp.agent] ?? 0;
+    if (attempts >= MAX_REVIEWER_RERUNS) {
+      return {
+        ok: false,
+        reason:
+          `Step 7b.5: persist-reviewer-artifacts failed for ${sp.agent} after ${attempts} re-runs ` +
+          `(${attempts + 1} attempts): ${detail}`,
+      };
+    }
+    review.rerunAttempts = { ...review.rerunAttempts, [sp.agent]: attempts + 1 };
+    needRerun.push(sp.agent);
+    rerunReports.push(report);
+  }
+  if (needRerun.length > 0) {
+    review.rerun = needRerun;
+    review.heldReports = reports.filter((r) => !rerunReports.includes(r));
+    return {
+      ok: false,
+      rerun: needRerun,
+      reason:
+        `Step 7b.5: the transcript of ${needRerun.join(', ')} does not contain the nonce marker; ` +
+        `run ${needRerun.join(', ')} again alone with the same prompt file`,
+    };
+  }
+  delete review.rerun;
+  delete review.heldReports;
 
   for (const sp of review.spawned) {
     const report = reports.find((r) => r.agent === sp.agent || r.agent === sp.reviewer);
@@ -342,43 +461,6 @@ export async function finalizeReview(
       findings: report.findings ?? [],
       ...(report.summary !== undefined ? { summary: report.summary } : {}),
     });
-
-    // 7b.5 — persist transcript + verdict (coordinator side).
-    const agentId = agentIds.get(sp.agent)!;
-    const verdictScratch = writeRunFile(
-      ctx,
-      `verdict-${actual.agent}.json`,
-      JSON.stringify({
-        approved: report.approved,
-        findings: report.findings ?? [],
-        summary: report.summary ?? '',
-      }),
-    );
-    const persist = await ctx.runner(
-      'bash',
-      [
-        join(ctx.pluginScriptsDir, 'persist-reviewer-artifacts.sh'),
-        '--worktree',
-        state.worktreePath,
-        '--task-id',
-        state.taskId,
-        '--reviewer',
-        actual.agent,
-        '--agent-id',
-        agentId,
-        '--verdict-file',
-        verdictScratch,
-        '--nonce-marker',
-        nonceMarkerLiteral(review.nonce),
-      ],
-      { cwd: ctx.workDir, allowFailure: true },
-    );
-    if (persist.code !== 0) {
-      return {
-        ok: false,
-        reason: `Step 7b.5: persist-reviewer-artifacts failed for ${sp.agent}: ${(persist.stderr || persist.stdout).trim()}`,
-      };
-    }
 
     // 7c — one transcript leaf per reviewer that really ran.
     const transcript = join(wtAiSdlc, 'transcripts', state.taskIdLower, `${actual.agent}.jsonl`);

@@ -14,7 +14,10 @@ import { validateHierarchyRoster } from '@ai-sdlc/reference';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { landingPath } from './reconcile.js';
+import { resolvePlannerModel } from './model-fallback.js';
+import { writeModelMarker } from '../routing/model-unavailable.js';
 import { schedulerDown, schedulerStatus } from './reconcile-scheduler.js';
+import { hostStallMs, schedulerLateMs } from './host-liveness.js';
 
 import {
   ensureBoardDirs,
@@ -70,8 +73,14 @@ import {
 } from './index.js';
 import { executorStart } from './executor-start.js';
 import { isNodeInstalled, paneNodeVersion, readNvmrc } from './node-pin.js';
+import { overContextWarnings } from './context-size.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 import { resolveSendTarget } from './tmux.js';
+
+vi.mock('./context-size.js', async (orig) => {
+  const real = await orig<typeof import('./context-size.js')>();
+  return { ...real, overContextWarnings: vi.fn(real.overContextWarnings) };
+});
 
 const NOW = new Date('2026-09-30T12:00:00.000Z');
 
@@ -253,6 +262,7 @@ const baseOpts: UpOptions = {
 };
 
 let schedulerSpawns: string[][];
+let webhookSpawns: string[][];
 
 beforeEach(() => {
   // Never read the ambient executor session (AISDLC-1137).
@@ -269,6 +279,10 @@ beforeEach(() => {
   attached = [];
   deps = {
     run: (f, a, o) => fake.run(f, a, o),
+    isPortFree: () => true,
+    spawnWebhook: (_f, a) => {
+      webhookSpawns.push([...a]);
+    },
     boardDir,
     cwd: '/repo',
     resolveRoot: (c) => c,
@@ -296,6 +310,7 @@ beforeEach(() => {
     },
   };
   schedulerSpawns = [];
+  webhookSpawns = [];
 });
 
 afterEach(() => {
@@ -352,6 +367,45 @@ function legacyEntry(name: string, role: 'planner' | 'operator-dispatch' | 'exec
     paneId: '',
   });
 }
+
+describe('formatStatus MODULE column (AISDLC-1358)', () => {
+  it('prints failing: <reason>', () => {
+    const lines = formatStatus({
+      rows: [
+        {
+          entry: {
+            role: 'operator-dispatch',
+            name: 'p-dispatch',
+            tmuxSession: 'x',
+            tmuxWindow: 'x',
+            model: 'sonnet',
+            permissionMode: 'bypassPermissions',
+            startedAt: '2026-10-27T11:55:00Z',
+          },
+          state: 'busy',
+          attached: false,
+          module: { state: 'failing', reason: 'Cannot find module' },
+        },
+      ],
+      board: { queued: 0, inflight: 0, done: 0, failed: 0 },
+      webhook: { running: false },
+      scheduler: { running: false },
+    } as never);
+    expect(lines.join('\n')).toContain('failing: Cannot find module');
+  });
+});
+
+describe('up records the cli bin directory (AISDLC-1358)', () => {
+  it('writes cli-bin.json with the bin directory and rewrites it on a second up', async () => {
+    deps.binPath = '/inst/one/bin/cli-hierarchy.mjs';
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    const file = path.join(boardDir, 'handoff', 'cli-bin.json');
+    expect(JSON.parse(readFileSync(file, 'utf8')).binDir).toBe('/inst/one/bin');
+    deps.binPath = '/inst/two/bin/cli-hierarchy.mjs';
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    expect(JSON.parse(readFileSync(file, 'utf8')).binDir).toBe('/inst/two/bin');
+  });
+});
 
 describe('formatStatus dynamic executors (AISDLC-1075)', () => {
   it('lists each dynamic executor with its task id and age', () => {
@@ -597,6 +651,54 @@ describe('hierarchy up', () => {
       [Q('executor-alpha'), Q('executor-alpha')],
       [Q('executor-beta'), Q('executor-beta')],
     ]);
+  });
+
+  it('up and status print a merge-off line per cause and none when merging is configured (AISDLC-1351)', async () => {
+    const policies = {
+      never: { allowMerge: 'never', mergeAuthors: ['a'], operational: ['land-eligible-prs'] },
+      noAuthors: {
+        allowMerge: 'onGreenClean',
+        mergeAuthors: [],
+        operational: ['land-eligible-prs'],
+      },
+      noGrant: { allowMerge: 'onGreenClean', mergeAuthors: ['a'], operational: [] },
+      ok: { allowMerge: 'onGreenClean', mergeAuthors: ['a'], operational: ['land-eligible-prs'] },
+    };
+    const run = async (p: (typeof policies)[keyof typeof policies]) => {
+      const out: string[] = [];
+      const d = {
+        ...deps,
+        log: (l: string) => void out.push(l),
+        loadPolicy: () => ({ forcePushMode: 'lease', ...p }),
+      };
+      await hierarchyUp({ ...baseOpts, executors: 0, noPlanner: true }, d);
+      const up = out.filter((l) => l.includes('merge off'));
+      const status = formatStatus(hierarchyStatus(d)).filter((l) => l.includes('merge off'));
+      return { up, status };
+    };
+    const never = await run(policies.never);
+    expect(never.up).toHaveLength(1);
+    expect(never.up[0]).toContain('allowMerge');
+    expect(never.status).toEqual(never.up.map((l) => l.replace('warning: ', '')));
+    const noAuthors = await run(policies.noAuthors);
+    expect(noAuthors.up[0]).toContain('mergeAuthors');
+    expect(noAuthors.status).toHaveLength(1);
+    const noGrant = await run(policies.noGrant);
+    expect(noGrant.up[0]).toContain('land-eligible-prs');
+    expect(noGrant.status).toHaveLength(1);
+    const ok = await run(policies.ok);
+    expect(ok.up).toEqual([]);
+    expect(ok.status).toEqual([]);
+  });
+
+  it('a roster-only status makes no rate_limit call (AISDLC-1380)', async () => {
+    await hierarchyUp(baseOpts, deps);
+    const rateLimit = () => fake.calls.filter((c) => c.args.includes('rate_limit')).length;
+    const before = rateLimit();
+    hierarchyStatus(deps, { rosterOnly: true });
+    expect(rateLimit()).toBe(before);
+    hierarchyStatus(deps);
+    expect(rateLimit()).toBe(before + 1);
   });
 
   it('never emits a global option from up, status, attach or down', async () => {
@@ -918,6 +1020,23 @@ describe('hierarchy status', () => {
     const result = hierarchyStatus(deps);
     expect(formatStatus(result)[0]).toBeDefined();
     expect(formatStatus(result).join('\n')).toContain('BUDGET 7d 91%');
+    // AISDLC-1319: no hold, no HOLD line; with a hold exactly one line names who, since when and why.
+    expect(result.hold).toBeUndefined();
+    expect(formatStatus(result).filter((l) => l.startsWith('HOLD'))).toEqual([]);
+    writeFileSync(
+      path.join(boardDir, '.hold'),
+      JSON.stringify({ reason: 'budget: x', since: '2026-11-17T20:30:16Z', by: 'pacer' }),
+    );
+    const heldResult = hierarchyStatus(deps);
+    expect(heldResult.hold).toEqual({
+      reason: 'budget: x',
+      since: '2026-11-17T20:30:16Z',
+      by: 'pacer',
+    });
+    expect(formatStatus(heldResult).filter((l) => l.startsWith('HOLD'))).toEqual([
+      'HOLD by pacer since 2026-11-17T20:30:16Z: budget: x',
+    ]);
+    rmSync(path.join(boardDir, '.hold'));
     const byName = Object.fromEntries(result.rows.map((r) => [r.entry.name, r]));
     expect(byName[Q('executor-alpha')]).toMatchObject({
       state: 'idle',
@@ -2566,6 +2685,32 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(validateHierarchyRoster(after).valid).toBe(true);
   });
 
+  it('a restarted dynamic executor keeps its taskId and AI_SDLC_EXECUTOR_TASK (AISDLC-1340)', async () => {
+    const dyn = 'ai-sdlc-executor-acs-4';
+    const roster = readRoster(boardDir);
+    const base = entryOf(alpha) as RosterEntry;
+    writeRoster(boardDir, {
+      ...roster,
+      sessions: [
+        ...roster.sessions,
+        { ...base, name: dyn, tmuxSession: dyn, tmuxWindow: dyn, taskId: 'ACS-4' },
+      ],
+    });
+    fake.calls.length = 0;
+    await hierarchyRestart({ session: dyn }, deps);
+    const fresh = entryOf(dyn) as RosterEntry;
+    expect(fresh.taskId).toBe('ACS-4');
+    expect(unsafeEntryReason(fresh)).toBeUndefined();
+    expect(readRosterChecked(boardDir).rejected).toHaveLength(0);
+    expect(newWindowCommands()[0]).toContain("AI_SDLC_EXECUTOR_TASK='ACS-4'");
+  });
+
+  it('a restarted standing executor still has no taskId (AISDLC-1340)', async () => {
+    await hierarchyRestart({ session: 'executor-alpha' }, deps);
+    expect((entryOf(alpha) as RosterEntry).taskId).toBeUndefined();
+    expect(newWindowCommands()[0]).not.toContain('AI_SDLC_EXECUTOR_TASK');
+  });
+
   it('records the new pane, pid and startedAt, and send reaches the restarted session at once (AISDLC-1258)', async () => {
     const old = entryOf(alpha) as RosterEntry;
     fake.startedAtMs = later;
@@ -2796,6 +2941,30 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(logs.some((l) => l.includes('webhook starting'))).toBe(true);
   });
 
+  it('up and restart print one no-feed line only when no feed is recorded', async () => {
+    deps.env = { AI_SDLC_WEBHOOK_SECRET: 's', HOME: path.join(boardDir, 'home') };
+    const noFeed = () => logs.filter((l) => l.includes('no feed is installed'));
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    expect(noFeed()).toHaveLength(1);
+    expect(noFeed()[0]).toContain('cli-hierarchy webhook up --feed gh-forward');
+    logs.length = 0;
+    await hierarchyRestartAll({}, deps);
+    expect(noFeed()).toHaveLength(1);
+    logs.length = 0;
+    await hierarchyRestart({ session: Q('operator-dispatch') }, deps);
+    expect(noFeed()).toHaveLength(1);
+    // A recorded feed prints nothing.
+    writeFileSync(
+      path.join(boardDir, 'webhook.json'),
+      JSON.stringify({ pid: 7777, port: 4567, feed: { kind: 'tunnel', pid: 5 } }) + '\n',
+    );
+    deps.isAlive = (p) => p === 7777;
+    logs.length = 0;
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    await hierarchyRestart({ session: Q('operator-dispatch') }, deps);
+    expect(noFeed()).toEqual([]);
+  });
+
   it('restart --all keeps the recorded webhook port and forwarder feed', async () => {
     await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
     deps.env = { AI_SDLC_WEBHOOK_SECRET: 's', HOME: path.join(boardDir, 'home') };
@@ -2809,6 +2978,7 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
       stateFile,
       JSON.stringify({ pid: 7777, port: 4567, feed: { kind: 'gh-forward', agent: 'fwd' } }) + '\n',
     );
+    writeFileSync(path.join(boardDir, 'webhook-port'), '4567\n');
     const events: string[] = [];
     deps.isAlive = (p) => p === 7777;
     deps.killProcess = (pid) => events.push(`kill ${pid}`);
@@ -2818,6 +2988,35 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(logs.some((l) => l.includes('webhook stopped (port 4567)'))).toBe(true);
     expect(logs.some((l) => l.includes('webhook starting on 127.0.0.1:4567'))).toBe(true);
     expect(logs.filter((l) => l.includes('warning: webhook receiver'))).toEqual([]);
+    expect(webhookSpawns.at(-1)).toEqual(expect.arrayContaining(['--feed', 'gh-forward']));
+  });
+
+  it('restart --all rescans when the recorded port is held and reuses it when free (AC-6)', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    deps.env = { AI_SDLC_WEBHOOK_SECRET: 's' };
+    deps.sleepMs = () => undefined;
+    writeFileSync(path.join(boardDir, 'webhook-port'), '4567\n');
+    deps.isPortFree = (p) => p !== 4567;
+    logs.length = 0;
+    await hierarchyRestartAll({}, deps);
+    expect(logs.some((l) => l.includes('webhook starting on 127.0.0.1:4568'))).toBe(true);
+    writeFileSync(path.join(boardDir, 'webhook-port'), '4567\n');
+    deps.isPortFree = () => true;
+    logs.length = 0;
+    await hierarchyRestartAll({}, deps);
+    expect(logs.some((l) => l.includes('webhook starting on 127.0.0.1:4567'))).toBe(true);
+  });
+
+  it('a dispatch restart keeps the recorded gh-forward feed (AC-2)', async () => {
+    await hierarchyUp({ ...baseOpts, executors: 1 }, deps);
+    deps.env = { AI_SDLC_WEBHOOK_SECRET: 's' };
+    writeFileSync(
+      path.join(boardDir, 'webhook.json'),
+      JSON.stringify({ pid: 7777, port: 4567, feed: { kind: 'gh-forward', agent: 'fwd' } }) + '\n',
+    );
+    deps.isAlive = (p) => p !== 7777 && p > 0;
+    await hierarchyRestart({ session: Q('operator-dispatch') }, deps);
+    expect(webhookSpawns.at(-1)).toEqual(expect.arrayContaining(['--feed', 'gh-forward']));
   });
 
   it('restart <name> leaves the scheduler alone; a scheduler failure warns only', async () => {
@@ -3098,5 +3297,170 @@ describe('hierarchy status gh calls (AISDLC-963)', () => {
       quota: { core: 4000, graphql: 12 },
     } as Parameters<typeof formatStatus>[0]);
     expect(lines).toContain('gh calls last hour: b 9, a 2; remaining core 4000, graphql 12');
+  });
+});
+
+describe('up and status name every missing piece (AISDLC-1357)', () => {
+  const opts = { ...baseOpts, executors: 0, noPlanner: true };
+  const feedLines = () => logs.filter((l) => l.startsWith('webhook: off'));
+  const stalledAt = (sec: number, env: NodeJS.ProcessEnv = {}) => {
+    deps.env = env;
+    deps.isAlive = (p) => p === 4242;
+    writeFileSync(
+      path.join(boardDir, 'operator-dispatch.state.json'),
+      JSON.stringify({
+        schemaVersion: 'v1',
+        ingested: {},
+        rejected: {},
+        handled: [],
+        lastTickAt: new Date(NOW.getTime() - sec * 1000).toISOString(),
+      }),
+    );
+    mkdirSync(path.join(boardDir, 'queue'), { recursive: true });
+    writeFileSync(path.join(boardDir, 'queue', 'AISDLC-1.dispatch.json'), '{}');
+    return schedulerStatus(deps);
+  };
+
+  it('prints one webhook: off line without the secret, none with it', async () => {
+    await hierarchyUp(opts, deps);
+    expect(feedLines()).toHaveLength(1);
+    expect(feedLines()[0]).toContain('AI_SDLC_WEBHOOK_SECRET');
+    expect(feedLines()[0]).toContain('webhook up');
+    logs.length = 0;
+    deps.env = { AI_SDLC_WEBHOOK_SECRET: 's' };
+    await hierarchyUp(opts, deps);
+    expect(feedLines()).toHaveLength(0);
+  });
+
+  it('a throwing context read prints one warning and up still returns', async () => {
+    vi.mocked(overContextWarnings).mockImplementationOnce(() => {
+      throw new Error('boom');
+    });
+    await expect(hierarchyUp(opts, deps)).resolves.toBeDefined();
+    expect(logs.filter((l) => l === 'warning: context size not read')).toHaveLength(1);
+  });
+
+  it('a scheduler dead at the liveness check warns with the log tail and status reads off', async () => {
+    mkdirSync(path.join(boardDir, 'log'), { recursive: true });
+    writeFileSync(
+      path.join(boardDir, 'log', 'reconcile.log'),
+      'one\nCannot find module cli-dispatch\n',
+    );
+    await hierarchyUp(opts, deps);
+    const w = logs.filter((l) => l.includes('reconcile scheduler exited right after'));
+    expect(w).toHaveLength(1);
+    expect(w[0]).toContain('Cannot find module cli-dispatch');
+    expect(schedulerStatus(deps)).toEqual({ state: 'off' });
+  });
+
+  it('a live scheduler prints no warning and status reads up', async () => {
+    deps.isAlive = (p) => p === 4242;
+    await hierarchyUp(opts, deps);
+    expect(logs.some((l) => l.includes('exited right after'))).toBe(false);
+    expect(formatStatus(hierarchyStatus(deps))).toContain('scheduler: up (pid 4242)');
+  });
+
+  it('is not STALLED at 61s, 90s and 119s with queued work, and is at 125s', async () => {
+    await hierarchyUp(opts, deps);
+    for (const sec of [61, 90, 119]) {
+      expect(stalledAt(sec)).toEqual({ state: 'up', pid: 4242 });
+    }
+    expect(stalledAt(125)).toEqual({ state: 'up', pid: 4242, stalled: { ageSec: 125 } });
+  });
+
+  it('AI_SDLC_TICK_STALL_MINUTES=1 still sets the limit; the running-tick limit is twice the interval', async () => {
+    await hierarchyUp(opts, deps);
+    expect(stalledAt(61, { AI_SDLC_TICK_STALL_MINUTES: '1' })).toMatchObject({
+      stalled: { ageSec: 61 },
+    });
+    expect(hostStallMs(undefined, {})).toBe(60_000);
+    expect(schedulerLateMs({})).toBe(120_000);
+  });
+});
+
+describe('planner model fallback (AISDLC-1364)', () => {
+  const routing = `apiVersion: ai-sdlc.io/v1alpha1
+kind: ModelRouting
+metadata:
+  name: model-routing
+spec:
+  strength: [haiku, sonnet, opus, fable]
+  exploreShare: 0
+  salt: s
+  cells:
+    planner-session:
+      '*': { model: fable }
+`;
+  const marker = {
+    model: 'fable',
+    until: '2026-11-24T20:00:00.000Z',
+    reason: 'usage limit reached',
+  };
+  const fallbackLines = () => logs.filter((l) => l.startsWith('model fallback:'));
+
+  beforeEach(() => {
+    deps.readRoutingTable = () => routing;
+  });
+
+  it('up launches claude --model opus and prints one line while the marker is active', async () => {
+    writeModelMarker(boardDir, marker);
+    const planner = resolvePlannerModel(undefined, deps);
+    await hierarchyUp(
+      {
+        ...baseOpts,
+        plannerModel: planner.model,
+        ...(planner.line ? { plannerFallbackLine: planner.line } : {}),
+      },
+      deps,
+    );
+    expect(newWindowCommands()[0]).toContain("--model 'opus'");
+    expect(fallbackLines()).toEqual([
+      'model fallback: planner-session runs opus instead of fable (usage limit reached); fable resets 2026-11-24T20:00:00.000Z',
+    ]);
+  });
+
+  it('up prints nothing and launches fable without a marker', async () => {
+    const planner = resolvePlannerModel(undefined, deps);
+    await hierarchyUp({ ...baseOpts, plannerModel: planner.model }, deps);
+    expect(newWindowCommands()[0]).toContain("--model 'fable'");
+    expect(fallbackLines()).toEqual([]);
+    expect(formatStatus(hierarchyStatus(deps)).join('\n')).not.toContain('model fallback:');
+  });
+
+  it('an explicit --planner-model wins over the marker', () => {
+    writeModelMarker(boardDir, marker);
+    expect(resolvePlannerModel('fable', deps)).toEqual({ model: 'fable' });
+  });
+
+  it('a planner restart launches opus while the marker is active, and status prints the line', async () => {
+    await hierarchyUp({ ...baseOpts, plannerModel: 'fable' }, deps);
+    writeModelMarker(boardDir, marker);
+    fake.calls.length = 0;
+    logs.length = 0;
+    await hierarchyRestart({ session: Q('planner') }, deps);
+    expect(newWindowCommands()[0]).toContain("--model 'opus'");
+    expect(fallbackLines()).toHaveLength(1);
+    const status = formatStatus(hierarchyStatus(deps)).filter((l) =>
+      l.startsWith('model fallback:'),
+    );
+    expect(status).toHaveLength(1);
+    expect(status[0]).toContain('planner-session');
+  });
+
+  it('the fallback never touches ANTHROPIC_API_KEY', async () => {
+    writeModelMarker(boardDir, marker);
+    deps.env = { ...deps.env, ANTHROPIC_API_KEY: 'sk-test' };
+    const planner = resolvePlannerModel(undefined, deps);
+    await hierarchyUp({ ...baseOpts, plannerModel: planner.model }, deps);
+    expect(newWindowCommands().join('\n')).not.toContain('ANTHROPIC_API_KEY');
+    expect(newWindowCommands().join('\n')).not.toContain('sk-test');
+  });
+
+  it('a non-planner restart keeps its recorded model', async () => {
+    await hierarchyUp(baseOpts, deps);
+    writeModelMarker(boardDir, { ...marker, model: 'sonnet' });
+    fake.calls.length = 0;
+    await hierarchyRestart({ session: 'executor-alpha' }, deps);
+    expect(newWindowCommands()[0]).toContain("--model 'sonnet'");
   });
 });

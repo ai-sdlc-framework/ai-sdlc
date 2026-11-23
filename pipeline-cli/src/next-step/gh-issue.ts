@@ -77,16 +77,18 @@ export async function runGhIssue(
     return failure(
       taskId,
       `/ai-sdlc execute <gh-issue> requires the \`claude\` CLI on PATH (subscription billing path). ` +
-        `Refusing to fall back to ANTHROPIC_API_KEY-based dispatch without explicit operator opt-in. ` +
-        `For the API-key path use: pnpm --filter @ai-sdlc/dogfood watch --issue ${issueNumber}`,
+        `Refusing to fall back to ANTHROPIC_API_KEY-based dispatch without explicit operator opt-in.` +
+        (ctx.exists(join(ctx.workDir, 'dogfood'))
+          ? ` For the API-key path use: pnpm --filter @ai-sdlc/dogfood watch --issue ${issueNumber}`
+          : ''),
     );
   }
   const dist = join(ctx.workDir, 'dogfood', 'dist', 'dispatch-from-issue.js');
   if (!ctx.exists(dist)) {
-    return failure(
-      taskId,
-      `dogfood dist missing at ${dist}. Run \`pnpm --filter @ai-sdlc/dogfood build\` to fix.`,
-    );
+    const fix = ctx.exists(join(ctx.workDir, 'dogfood'))
+      ? `Run \`pnpm --filter @ai-sdlc/dogfood build\` to fix.`
+      : `This path is not available outside the ai-sdlc repository.`;
+    return failure(taskId, `dogfood dist missing at ${dist}. ${fix}`);
   }
   let fetched: FetchedIssue;
   try {

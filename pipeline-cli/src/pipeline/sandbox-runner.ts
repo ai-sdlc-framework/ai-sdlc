@@ -63,10 +63,12 @@
  * @module pipeline/sandbox-runner
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync, chmodSync } from 'node:fs';
 import { spawn, execFileSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
+import { globToRegex } from './ast-gate.js';
 
 // ── Sandbox driver types ──────────────────────────────────────────────────────
 
@@ -112,6 +114,114 @@ export interface SandboxConfig {
    * are refused before any model call.
    */
   maxDiffBytes?: number;
+
+  /**
+   * AISDLC-1293: extra test suites (other languages) the gate runs next to the
+   * root Node suite. Absent or empty: only the Node suite runs, as before.
+   */
+  sandboxSuites?: SandboxSuite[];
+}
+
+/**
+ * One extra suite. It starts (fetch container included) only when the PR
+ * changes a file matching `paths`; the Node suite starts only when the PR
+ * changes a file that belongs to no suite.
+ */
+export interface SandboxSuite {
+  /** Unique, lowercase; named in the report when the suite fails. */
+  name: string;
+  /** Globs (same syntax as `protectedPaths`) of the files this suite covers. */
+  paths: string[];
+  /** Stock image, pinned by digest (`repo:tag@sha256:<64 hex>`). */
+  image: string;
+  /** Runs in the fetch container (network, base tree only), cwd = prepared tree. */
+  fetchCommand: string;
+  /** Runs in the run container (no network), cwd = the patched repo root. */
+  testCommand: string;
+}
+
+/** Thrown when `sandboxSuites` is invalid; the config load refuses to continue. */
+export class SandboxSuiteConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SandboxSuiteConfigError';
+  }
+}
+
+const IMAGE_DIGEST_RE = /@sha256:[0-9a-f]{64}$/;
+
+/** Validate the raw `sandboxSuites` value. Throws `SandboxSuiteConfigError`. */
+export function parseSandboxSuites(raw: unknown): SandboxSuite[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new SandboxSuiteConfigError('sandboxSuites must be a list');
+  const seen = new Set<string>();
+  return raw.map((entry: unknown, i) => {
+    const e = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+    const name = typeof e['name'] === 'string' ? e['name'] : '';
+    const label = name ? `sandboxSuites entry "${name}"` : `sandboxSuites entry #${String(i)}`;
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+      throw new SandboxSuiteConfigError(`${label}: name must match [a-z0-9][a-z0-9-]*`);
+    }
+    if (seen.has(name)) throw new SandboxSuiteConfigError(`${label}: duplicate name`);
+    seen.add(name);
+    const image = e['image'];
+    if (typeof image !== 'string' || !IMAGE_DIGEST_RE.test(image)) {
+      throw new SandboxSuiteConfigError(
+        `${label}: image must be pinned by digest (<repo>:<tag>@sha256:<64 hex>)`,
+      );
+    }
+    const paths = e['paths'];
+    if (
+      !Array.isArray(paths) ||
+      paths.length === 0 ||
+      !paths.every((p) => typeof p === 'string' && p.length > 0)
+    ) {
+      throw new SandboxSuiteConfigError(`${label}: paths must be a non-empty list of globs`);
+    }
+    for (const key of ['fetchCommand', 'testCommand'] as const) {
+      const v = e[key];
+      if (typeof v !== 'string' || v.trim().length === 0) {
+        throw new SandboxSuiteConfigError(`${label}: ${key} must be a non-empty string`);
+      }
+    }
+    return {
+      name,
+      paths: paths as string[],
+      image,
+      fetchCommand: e['fetchCommand'] as string,
+      testCommand: e['testCommand'] as string,
+    };
+  });
+}
+
+/** File paths a unified diff touches (both sides of a rename). */
+export function changedPathsFromDiff(diff: string): string[] {
+  const out = new Set<string>();
+  for (const line of diff.split('\n')) {
+    const m = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
+    if (m) {
+      out.add(m[1]!);
+      out.add(m[2]!);
+    }
+  }
+  return [...out];
+}
+
+/** The suites a diff needs: extra suites by path, and whether Node runs. */
+export function selectSuites(
+  suites: readonly SandboxSuite[],
+  paths: readonly string[],
+): { node: boolean; suites: SandboxSuite[] } {
+  const matchers = suites.map((s) => ({ suite: s, res: s.paths.map((g) => globToRegex(g)) }));
+  const selected = new Set<SandboxSuite>();
+  let node = false;
+  for (const p of paths) {
+    const owners = matchers.filter((m) => m.res.some((re) => re.test(p)));
+    if (owners.length === 0) node = true;
+    for (const o of owners) selected.add(o.suite);
+  }
+  if (!node && selected.size === 0) node = true;
+  return { node, suites: suites.filter((s) => selected.has(s)) };
 }
 
 /** Built-in default for `maxDiffBytes`. */
@@ -313,6 +423,10 @@ function parseSandboxConfig(yamlText: string): SandboxConfig {
       result.maxDiffBytes = maxDiff;
     }
 
+    // sandboxSuites (AISDLC-1293): invalid entries throw out of the loader.
+    const suites = parseSandboxSuites(doc['sandboxSuites']);
+    if (suites.length > 0) result.sandboxSuites = suites;
+
     // differentialTest.resourceLimits
     const dt = doc['differentialTest'];
     if (dt && typeof dt === 'object') {
@@ -343,7 +457,8 @@ function parseSandboxConfig(yamlText: string): SandboxConfig {
     }
 
     return result;
-  } catch {
+  } catch (err) {
+    if (err instanceof SandboxSuiteConfigError) throw err;
     return DEFAULT_SANDBOX_CONFIG;
   }
 }
@@ -406,6 +521,13 @@ export interface SandboxSpawnInput {
    * the upstream suite runs against the base (AISDLC-1267).
    */
   baseTreeDir?: string;
+  /** Receives the fetch container's combined output once it exits (AISDLC-1312). */
+  onFetchOutput?: (output: string) => void;
+  /**
+   * AISDLC-1293: run this extra suite instead of the Node suite (its image,
+   * fetch command and test command). Absent: the Node suite, as before.
+   */
+  suite?: SandboxSuite;
 }
 
 /**
@@ -937,6 +1059,17 @@ export const DOCKER_SECCOMP_PROFILE: Record<string, unknown> = {
  *   - `--security-opt seccomp=<json>`      syscall allowlist
  *   - `--security-opt no-new-privileges`   prevent privilege escalation
  */
+/**
+ * Thrown when the fetch container (dependency install) fails. It propagates out
+ * of the driver so the caller writes no report and runs no reviewer.
+ */
+export class SandboxFetchPhaseError extends Error {
+  constructor(message: string) {
+    super(`sandbox fetch phase failed: ${message}`);
+    this.name = 'SandboxFetchPhaseError';
+  }
+}
+
 export class DockerSandboxDriver extends BaseSandboxDriver {
   readonly kind: SandboxDriverKind = 'docker';
 
@@ -955,6 +1088,12 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
    * Lives in an isolated mkdtemp directory; cleaned up in `teardown()`.
    */
   private cidFilePath: string | null = null;
+
+  /** Host dir holding the fetch container output (removed in `teardown()`). */
+  private preparedDir: string | null = null;
+
+  /** Name of the running fetch container, for abort-time `docker rm -f`. */
+  private fetchContainerName: string | null = null;
 
   /**
    * Thin spawn seam — wraps `child_process.spawn` so tests can override it
@@ -1004,6 +1143,7 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       const durationMs = Date.now() - start;
       return { outcome: 'success', differentialTest: result, durationMs };
     } catch (err) {
+      if (err instanceof SandboxFetchPhaseError && !input.abortSignal?.aborted) throw err;
       // Distinguish abort-triggered kills from genuine errors
       if (input.abortSignal?.aborted) {
         return {
@@ -1095,7 +1235,20 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
     const inContainerScript = buildDifferentialTestScript(
       input.upstreamMainRef,
       resourceLimits.perTestTimeoutSeconds,
+      undefined,
+      input.suite?.testCommand,
+      workspacePackagesFor(input.baseTreeDir, input.prDiff),
     );
+
+    // Fetch phase (AISDLC-1291): install the base tree's dependencies in a
+    // networked container that sees only the base tree, then mount the result
+    // read-only into the no-network run container below.
+    const image =
+      input.suite?.image ?? process.env['AI_SDLC_SANDBOX_IMAGE'] ?? DEFAULT_SANDBOX_IMAGE;
+    let runTreeDir = input.baseTreeDir;
+    if (input.baseTreeDir) {
+      runTreeDir = await this.runFetchContainer(input, image);
+    }
 
     // Build the docker run arguments.
     // extraDockerArgs carries AQ2 proxy host entries (e.g. --add-host=inference.local:<ip>)
@@ -1107,8 +1260,8 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
       // the inline JSON — see the seccompFilePath comment above.
       seccompProfileJson: seccompFilePath,
       cidFilePath,
-      image: process.env['AI_SDLC_SANDBOX_IMAGE'] ?? DEFAULT_SANDBOX_IMAGE,
-      baseTreeDir: input.baseTreeDir,
+      image,
+      baseTreeDir: runTreeDir,
       command: ['/bin/sh', '-c', inContainerScript],
       extraDockerArgs: input.extraDockerArgs,
     });
@@ -1229,6 +1382,103 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
   }
 
   /**
+   * Run the fetch container: network on, base tree read-only, prepared tree
+   * read-write. Returns the host dir holding the prepared tree. Rejects with
+   * `SandboxFetchPhaseError` on a non-zero exit or spawn error. The spawn env
+   * carries only PATH: no diff, fixture or credential reaches this container.
+   */
+  private async runFetchContainer(
+    input: SandboxSpawnInput & { abortSignal?: AbortSignal },
+    image: string,
+  ): Promise<string> {
+    const baseTreeDir = input.baseTreeDir as string;
+    const outDir = mkdtempSync(join(tmpdir(), 'ai-sdlc-prepared-'));
+    this.preparedDir = outDir;
+    // The container runs as nobody and must write here.
+    chmodSync(outDir, 0o777);
+    const containerName = `ai-sdlc-fetch-${randomBytes(6).toString('hex')}`;
+    this.fetchContainerName = containerName;
+    const args = buildFetchDockerArgs({
+      resourceLimits: input.resourceLimits,
+      image,
+      containerName,
+      baseTreeDir,
+      outDir,
+      pnpmVersion: input.suite ? undefined : resolvePnpmVersion(baseTreeDir),
+      script: input.suite ? buildSuiteFetchScript(input.suite.fetchCommand) : undefined,
+      user:
+        typeof process.getuid === 'function' &&
+        typeof process.getgid === 'function' &&
+        process.getuid() !== 0
+          ? `${process.getuid()}:${process.getgid()}`
+          : undefined,
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const proc = this._spawnProcess('docker', args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { PATH: process.env['PATH'] ?? '/usr/local/bin:/usr/bin:/bin' },
+      });
+      let output = '';
+      const collect = (chunk: Buffer) => {
+        output += chunk.toString();
+      };
+      proc.stdout?.on('data', collect);
+      proc.stderr?.on('data', collect);
+
+      const onAbort = () => {
+        this.removeFetchContainer().catch(() => {});
+        proc.kill('SIGKILL');
+        reject(new Error('Docker fetch container aborted by wall-clock timeout'));
+      };
+      if (input.abortSignal) {
+        if (input.abortSignal.aborted) {
+          onAbort();
+          return;
+        }
+        input.abortSignal.addEventListener('abort', onAbort, { once: true });
+      }
+      proc.on('close', (exitCode) => {
+        input.abortSignal?.removeEventListener('abort', onAbort);
+        input.onFetchOutput?.(output.slice(-SANDBOX_OUTPUT_TAIL_BYTES));
+        if (input.abortSignal?.aborted) {
+          reject(new Error('Docker fetch container aborted by wall-clock timeout'));
+        } else if (exitCode !== 0) {
+          reject(
+            new SandboxFetchPhaseError(
+              `dependency install exited with code ${exitCode}: ${output.slice(-4000)}`,
+            ),
+          );
+        } else {
+          resolve();
+        }
+      });
+      proc.on('error', (err) => {
+        input.abortSignal?.removeEventListener('abort', onAbort);
+        reject(new SandboxFetchPhaseError(err.message));
+      });
+    });
+
+    // The run container runs as nobody too; make the result readable.
+    try {
+      execFileSync('chmod', ['-R', 'a+rX', outDir]);
+    } catch {
+      // best-effort: a failure surfaces as a run-container error
+    }
+    return outDir;
+  }
+
+  private async removeFetchContainer(): Promise<void> {
+    const name = this.fetchContainerName;
+    if (!name) return;
+    await new Promise<void>((resolve) => {
+      const proc = this._spawnProcess('docker', ['rm', '-f', name], { stdio: 'ignore' });
+      proc.on('close', () => resolve());
+      proc.on('error', () => resolve());
+    });
+  }
+
+  /**
    * Kill the container by ID (used on abort signal).
    * Idempotent — errors are swallowed so teardown() can also attempt rm -f.
    */
@@ -1251,8 +1501,22 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
   async teardown(): Promise<void> {
     const id = this.containerId;
     const cidFilePath = this.cidFilePath;
+    const preparedDir = this.preparedDir;
     this.containerId = null;
     this.cidFilePath = null;
+    this.preparedDir = null;
+
+    if (this.fetchContainerName) {
+      await this.removeFetchContainer();
+      this.fetchContainerName = null;
+    }
+    if (preparedDir) {
+      try {
+        rmSync(preparedDir, { recursive: true, force: true });
+      } catch {
+        // best-effort
+      }
+    }
 
     if (id) {
       await new Promise<void>((resolve) => {
@@ -1288,6 +1552,18 @@ export class DockerSandboxDriver extends BaseSandboxDriver {
  *
  * Exported for use in test assertions.
  */
+/** Bytes of each suite's output kept (the tail) in the differential result. */
+export const SANDBOX_OUTPUT_TAIL_BYTES = 20_000;
+
+/**
+ * Last `maxLines` lines of `text` (AISDLC-1312): bounds what a failing sandbox
+ * suite prints to the CI log.
+ */
+export function tailLines(text: string, maxLines: number): string {
+  const lines = text.split('\n');
+  return lines.length <= maxLines ? text : lines.slice(-maxLines).join('\n');
+}
+
 export const DIFFERENTIAL_RESULT_SENTINEL = '---DIFFERENTIAL-RESULT---';
 
 /**
@@ -1405,9 +1681,9 @@ export function parseDifferentialTestOutput(stdout: string): DifferentialTestRes
 
   return {
     upstreamSuitePassed: r['upstreamPassed'] as boolean,
-    upstreamSuiteOutput: (r['upstreamOutput'] as string).slice(0, 2000),
+    upstreamSuiteOutput: (r['upstreamOutput'] as string).slice(-SANDBOX_OUTPUT_TAIL_BYTES),
     newTestsPassed: r['headPassed'] as boolean,
-    newTestsOutput: (r['headOutput'] as string).slice(0, 2000),
+    newTestsOutput: (r['headOutput'] as string).slice(-SANDBOX_OUTPUT_TAIL_BYTES),
     newCodeCoveragePct: clampedCoverage,
   };
 }
@@ -1485,6 +1761,8 @@ export function buildDifferentialTestScript(
   upstreamMainRef: string,
   perTestTimeoutSeconds?: number,
   baseSha?: string,
+  suiteTestCommand?: string,
+  changedPackages?: readonly string[],
 ): string {
   // Validate the ref before interpolating into the shell script.
   // Throws if the ref is not a valid SHA or URL — prevents shell injection.
@@ -1500,16 +1778,40 @@ export function buildDifferentialTestScript(
 
   // The test runner command for the upstream (base) suite — no coverage needed.
   // Tries pnpm first, falls back to npm test.
-  const baseTestCmd = timeoutPrefix
-    ? `${timeoutPrefix} sh -c 'pnpm test 2>&1 || npm test 2>&1'`
-    : "sh -c 'pnpm test 2>&1 || npm test 2>&1'";
+  // An extra suite (AISDLC-1293) replaces the pnpm/npm command with its own.
+  const suiteSh = suiteTestCommand
+    ? `sh -c '${suiteTestCommand.replace(/'/g, "'\\''")} 2>&1'`
+    : undefined;
+  let baseTestCmd = suiteSh
+    ? `${timeoutPrefix} ${suiteSh}`.trim()
+    : timeoutPrefix
+      ? `${timeoutPrefix} sh -c 'pnpm test 2>&1 || npm test 2>&1'`
+      : "sh -c 'pnpm test 2>&1 || npm test 2>&1'";
 
   // The test runner command for the head (PR) suite WITH coverage.
   // Coverage is passed as a direct flag to pnpm/npm, not after `--` (which
   // would be consumed by the shell, not forwarded to the test runner).
-  const headTestCmd = timeoutPrefix
-    ? `${timeoutPrefix} sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'`
-    : "sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'";
+  let headTestCmd = suiteSh
+    ? baseTestCmd
+    : timeoutPrefix
+      ? `${timeoutPrefix} sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'`
+      : "sh -c 'pnpm test --coverage 2>&1 || npm test --coverage 2>&1'";
+
+  // Workspace tree (AISDLC-1296): test only the packages the diff touches.
+  if (!suiteSh && changedPackages) {
+    if (changedPackages.length === 0) {
+      baseTestCmd = `echo '${NO_PACKAGE_CHANGED_OUTPUT}'`;
+    } else {
+      const cmds = changedPackages.map((dir) => {
+        if (!/^[A-Za-z0-9._/-]+$/.test(dir)) {
+          throw new Error(`buildDifferentialTestScript: invalid package directory '${dir}'`);
+        }
+        return `pnpm --filter ./${dir} test`;
+      });
+      baseTestCmd = `${timeoutPrefix} sh -c '${cmds.join(' && ')} 2>&1'`.trim();
+    }
+    headTestCmd = baseTestCmd;
+  }
 
   // Single-quote-escape the ref for safe interpolation into the sh script.
   // `validateUpstreamMainRef` already rejects any ref that isn't a hex SHA
@@ -1549,7 +1851,7 @@ if [ -n "\${SANDBOX_FIXTURE_B64:-}" ]; then
   # Fixture-demo mode (RFC-0043 AQ2 live demo — option B). The trusted base
   # tree is a tiny zero-dependency repo supplied as a base64 gzip tarball via
   # the SANDBOX_FIXTURE_B64 env var. This is offline-safe under --network=none
-  # (no clone, no dependency install). We materialize it into repo/ and let the
+  # (no clone, no dependency fetch). We materialize it into repo/ and let the
   # existing base-test → git-apply → head-test sequence run against it.
   # NOTE: 'git apply' applies to plain working files and does NOT require a git
   # repository, so no 'git init' is needed (keeps the image footprint minimal).
@@ -1560,11 +1862,24 @@ if [ -n "\${SANDBOX_FIXTURE_B64:-}" ]; then
     exit 1
   fi
 elif [ -d "${SANDBOX_BASE_DIR}" ]; then
-  # Staged base tree (AISDLC-1267): the host exports the base commit and mounts
-  # it read-only. Copy it into the writable workspace so the upstream suite
-  # runs against the base, then the diff is applied for the head run.
+  # Staged base tree (AISDLC-1267): the host exports the base commit, the fetch
+  # container prepares its dependencies (AISDLC-1291), and the result is mounted
+  # read-only. Copy the sources into the writable workspace so the diff can be
+  # applied; every node_modules directory stays on the read-only mount (the
+  # workspace is noexec, so native binaries must run from there). The
+  # node_modules directory itself is created in the writable workspace and each
+  # entry is linked in, so tools can write a cache dir (vite's .vite-temp) there
+  # (AISDLC-1312: a symlinked read-only directory made vitest fail to start).
   mkdir -p repo
-  cp -R "${SANDBOX_BASE_DIR}/." repo/
+  (cd "${SANDBOX_BASE_DIR}" && tar cf - --exclude=node_modules .) | (cd repo && tar xf -)
+  find "${SANDBOX_BASE_DIR}" -name node_modules -type d -prune | while IFS= read -r nm; do
+    rel="\${nm#${SANDBOX_BASE_DIR}/}"
+    mkdir -p "repo/$rel"
+    for entry in "$nm"/* "$nm"/.[!.]*; do
+      [ -e "$entry" ] || [ -L "$entry" ] || continue
+      ln -s "$entry" "repo/$rel/$(basename "$entry")"
+    done
+  done
   cd repo
 elif echo "$UPSTREAM_REF" | grep -qE '^(https?|git|ssh)://|^git@'; then
   # URL path: clone then check out the pinned base SHA (baseSha) if supplied.
@@ -1591,15 +1906,8 @@ else
   fi
 fi
 
-# ── 2. Install dependencies for the BASE tree (offline where possible) ──────────
-if [ -f "pnpm-lock.yaml" ]; then
-  pnpm install --frozen-lockfile --offline 2>&1 || \
-  pnpm install --frozen-lockfile 2>&1 || true
-elif [ -f "package-lock.json" ]; then
-  npm ci --prefer-offline 2>&1 || true
-elif [ -f "yarn.lock" ]; then
-  yarn install --frozen-lockfile --offline 2>&1 || true
-fi
+# pnpm of the prepared tree (AISDLC-1296): the fetch container installed it here.
+export PATH="$WORK_DIR/repo/${SANDBOX_TOOLS_DIR}/bin:$PATH"
 
 # ── 3. Run the upstream (base) test suite BEFORE applying the diff ───────────────
 # This is the differential invariant: upstreamPassed reflects the BASE tree,
@@ -1647,16 +1955,9 @@ if ! git apply --reject --ignore-whitespace "$DIFF_FILE" 2>&1; then
   exit 1
 fi
 
-# ── 5. Install dependencies for the HEAD tree (after diff applied) ───────────────
-# Re-run install in case the PR modified lock files or package.json.
-if [ -f "pnpm-lock.yaml" ]; then
-  pnpm install --frozen-lockfile --offline 2>&1 || \
-  pnpm install --frozen-lockfile 2>&1 || true
-elif [ -f "package-lock.json" ]; then
-  npm ci --prefer-offline 2>&1 || true
-elif [ -f "yarn.lock" ]; then
-  yarn install --frozen-lockfile --offline 2>&1 || true
-fi
+# Dependencies come from the fetch container (AISDLC-1291); the head tree's
+# dependencies are always those of the base tree because package.json and
+# lockfiles are protected paths. This no-network container fetches nothing.
 
 # ── 6. Run the head (PR) test suite with coverage ──────────────────────────────
 # headPassed reflects the PATCHED tree (post-apply). Coverage is forwarded as a
@@ -1683,12 +1984,221 @@ fi
 # ── 7. Emit the sentinel + JSON result ──────────────────────────────────────────
 # The TypeScript parser reads everything AFTER the last sentinel occurrence.
 # Escape the output strings for JSON embedding (strip control chars, escape quotes).
-safe_upstream=$(printf '%s' "$UPSTREAM_OUTPUT" | head -c 2000 | tr -d '\\000-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
-safe_head=$(printf '%s' "$HEAD_OUTPUT" | head -c 2000 | tr -d '\\000-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+# Keep the TAIL (a failing suite prints its failures last) and keep newlines as
+# JSON \\n so the host can show the last lines (AISDLC-1312).
+safe_upstream=$(printf '%s' "$UPSTREAM_OUTPUT" | tail -c ${SANDBOX_OUTPUT_TAIL_BYTES} | tr -d '\\000-\\011\\013-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | awk 'BEGIN{ORS="\\\\n"}{print}')
+safe_head=$(printf '%s' "$HEAD_OUTPUT" | tail -c ${SANDBOX_OUTPUT_TAIL_BYTES} | tr -d '\\000-\\011\\013-\\037' | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g' | awk 'BEGIN{ORS="\\\\n"}{print}')
 
 echo "${DIFFERENTIAL_RESULT_SENTINEL}"
 printf '{"upstreamPassed":%s,"upstreamOutput":"%s","headPassed":%s,"headOutput":"%s","coveragePct":%s}\\n' \\
   "$UPSTREAM_PASSED" "$safe_upstream" "$HEAD_PASSED" "$safe_head" "$COVERAGE_PCT"
+`;
+}
+
+// ── Fetch container (AISDLC-1291) ─────────────────────────────────────────────
+
+/** Mount points inside the fetch container. */
+export const FETCH_BASE_DIR = '/sandbox/base';
+export const FETCH_OUT_DIR = '/sandbox/prepared';
+
+/** Directory of the prepared tree that holds pnpm itself (AISDLC-1296). */
+export const SANDBOX_TOOLS_DIR = 'node_modules/.sandbox-tools';
+
+/** Output of a differential run whose diff touches no workspace package. */
+export const NO_PACKAGE_CHANGED_OUTPUT = 'no workspace package changed; nothing to run';
+
+/**
+ * Map diff paths to workspace package directories (AISDLC-1296). The longest
+ * matching directory wins, so `ai-sdlc-plugin/mcp-server/x.ts` gives
+ * `ai-sdlc-plugin/mcp-server`, not `ai-sdlc-plugin`; a path outside every
+ * package gives none. A directory with a character outside `[A-Za-z0-9._/-]`
+ * is refused because it is interpolated into a shell command.
+ */
+export function mapPathsToWorkspacePackages(
+  paths: readonly string[],
+  workspaceDirs: readonly string[],
+): string[] {
+  const dirs = workspaceDirs.map((d) => d.replace(/^\.\//, '').replace(/\/+$/, ''));
+  const out = new Set<string>();
+  for (const p of paths) {
+    let best: string | undefined;
+    for (const d of dirs) {
+      if (d.endsWith('/*')) {
+        const parent = d.slice(0, -2);
+        const m = p.startsWith(`${parent}/`) ? p.slice(parent.length + 1).split('/') : [];
+        if (m.length > 1 && m[0]) {
+          const cand = `${parent}/${m[0]}`;
+          if (!best || cand.length > best.length) best = cand;
+        }
+      } else if (p.startsWith(`${d}/`) && (!best || d.length > best.length)) {
+        best = d;
+      }
+    }
+    if (best !== undefined) {
+      if (!/^[A-Za-z0-9._/-]+$/.test(best)) {
+        throw new Error(`workspace package directory '${best}' has a disallowed character`);
+      }
+      out.add(best);
+    }
+  }
+  return [...out].sort();
+}
+
+/** `packages:` entries of a pnpm-workspace.yaml (the simple list form). */
+export function parseWorkspacePackages(yamlText: string): string[] {
+  const out: string[] = [];
+  let inPackages = false;
+  for (const line of yamlText.split('\n')) {
+    if (/^packages:\s*$/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (inPackages) {
+      const m = /^\s+-\s+['"]?([^'"#\s]+)['"]?\s*(#.*)?$/.exec(line);
+      if (m) {
+        if (!m[1]!.startsWith('!')) out.push(m[1]!);
+      } else if (/^\S/.test(line)) inPackages = false;
+    }
+  }
+  return out;
+}
+
+/** Changed workspace packages, or undefined when the base tree has no workspace file. */
+function workspacePackagesFor(
+  baseTreeDir: string | undefined,
+  prDiff: string,
+): string[] | undefined {
+  if (!baseTreeDir) return undefined;
+  const file = join(baseTreeDir, 'pnpm-workspace.yaml');
+  if (!existsSync(file)) return undefined;
+  return mapPathsToWorkspacePackages(
+    changedPathsFromDiff(prDiff),
+    parseWorkspacePackages(readFileSync(file, 'utf8')),
+  );
+}
+
+/** pnpm version used when the base tree declares no `packageManager`. */
+export const DEFAULT_PNPM_VERSION = 'latest';
+
+/**
+ * Read the pnpm version from `packageManager` of the base tree's package.json
+ * (`pnpm@10.4.1+sha512...` -> `10.4.1`). Falls back to `DEFAULT_PNPM_VERSION`
+ * when the field is absent, not pnpm, or malformed.
+ */
+export function resolvePnpmVersion(baseTreeDir: string): string {
+  try {
+    const pkg = JSON.parse(readFileSync(join(baseTreeDir, 'package.json'), 'utf8')) as {
+      packageManager?: unknown;
+    };
+    if (typeof pkg.packageManager === 'string') {
+      const m = /^pnpm@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\+.*)?$/.exec(pkg.packageManager);
+      if (m) return m[1]!;
+    }
+  } catch {
+    // no package.json or unparseable: fall through to the default
+  }
+  return DEFAULT_PNPM_VERSION;
+}
+
+/**
+ * In-container script for the fetch container: copy the base tree into the
+ * output mount and install its dependencies with network access. The pnpm
+ * version is validated by `resolvePnpmVersion` before interpolation.
+ */
+export function buildFetchScript(pnpmVersion: string): string {
+  if (!/^(latest|\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)$/.test(pnpmVersion)) {
+    throw new Error(`buildFetchScript: invalid pnpm version '${pnpmVersion}'`);
+  }
+  return `set -e
+export HOME=/tmp/home COREPACK_HOME=/tmp/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=true
+mkdir -p "$HOME" "$COREPACK_HOME"
+cp -R "${FETCH_BASE_DIR}/." "${FETCH_OUT_DIR}/"
+cd "${FETCH_OUT_DIR}"
+if [ -f pnpm-lock.yaml ]; then
+  corepack prepare pnpm@${pnpmVersion} --activate
+  corepack pnpm install --frozen-lockfile
+  # AISDLC-1296: the run container has no corepack home, so keep pnpm itself in the prepared tree.
+  npm install -g --prefix "${FETCH_OUT_DIR}/${SANDBOX_TOOLS_DIR}" pnpm@${pnpmVersion}
+  # AISDLC-1300: a build script that calls pnpm by name needs the launcher on PATH.
+  export PATH="${FETCH_OUT_DIR}/${SANDBOX_TOOLS_DIR}/bin:$PATH"
+  if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
+    corepack pnpm run build
+  fi
+elif [ -f package-lock.json ]; then
+  npm ci
+fi
+`;
+}
+
+export interface FetchDockerArgsInput {
+  resourceLimits: ResourceLimits;
+  image: string;
+  /** Unique container name so the driver can `docker rm -f` it on abort. */
+  containerName: string;
+  /** Host dir holding the exported base tree; mounted read-only. */
+  baseTreeDir: string;
+  /** Host dir receiving the prepared tree; mounted read-write. */
+  outDir: string;
+  pnpmVersion?: string;
+  /** In-container script of an extra suite (AISDLC-1293); replaces the pnpm one. */
+  script?: string;
+  /**
+   * `uid:gid` the fetch container runs as. Defaults to 65534:65534; the driver
+   * passes the host user so it can chmod and remove the files the install wrote.
+   */
+  user?: string;
+}
+
+/**
+ * Docker arguments for the fetch container. It has network access (to install
+ * dependencies of the base tree, which is a commit of main) but sees ONLY the
+ * base tree: no PR diff, no fixture, no proxy host entry, no secret.
+ */
+export function buildFetchDockerArgs(opts: FetchDockerArgsInput): string[] {
+  const { resourceLimits, image, containerName, baseTreeDir, outDir, pnpmVersion, script, user } =
+    opts;
+  return [
+    'run',
+    '--rm',
+    '--name',
+    containerName,
+    '--cap-drop=ALL',
+    '--read-only',
+    '--tmpfs',
+    '/tmp:rw,exec,nosuid,size=1g',
+    '--pids-limit',
+    '512',
+    '--memory',
+    `${resourceLimits.memoryMb}m`,
+    '--cpus',
+    String(resourceLimits.cpuCores),
+    '--user',
+    user ?? '65534:65534',
+    '--security-opt',
+    'no-new-privileges',
+    '-v',
+    `${baseTreeDir}:${FETCH_BASE_DIR}:ro`,
+    '-v',
+    `${outDir}:${FETCH_OUT_DIR}:rw`,
+    image,
+    '/bin/sh',
+    '-c',
+    script ?? buildFetchScript(pnpmVersion ?? DEFAULT_PNPM_VERSION),
+  ];
+}
+
+/**
+ * Fetch script of an extra suite (AISDLC-1293): copy the base tree into the
+ * output mount, then run the configured command there with network access.
+ * The command is operator configuration, never contributor input.
+ */
+export function buildSuiteFetchScript(fetchCommand: string): string {
+  return `set -e
+export HOME=/tmp/home CI=true
+mkdir -p "$HOME"
+cp -R "${FETCH_BASE_DIR}/." "${FETCH_OUT_DIR}/"
+cd "${FETCH_OUT_DIR}"
+${fetchCommand}
 `;
 }
 
@@ -2114,6 +2624,8 @@ export interface RunSandboxInput {
   proxyHostArgs?: string[];
   /** Host dir with the exported base tree (mounted read-only; AISDLC-1267). */
   baseTreeDir?: string;
+  /** Receives the fetch container's combined output once it exits (AISDLC-1312). */
+  onFetchOutput?: (output: string) => void;
 }
 
 /**
@@ -2162,6 +2674,7 @@ export async function runSandbox(input: RunSandboxInput): Promise<SandboxResult>
     // container reach the host-side proxy despite --network=none.
     extraDockerArgs: input.proxyHostArgs,
     baseTreeDir: input.baseTreeDir,
+    onFetchOutput: input.onFetchOutput,
   };
 
   // Hard-abort enforcement via Promise.race.
@@ -2211,7 +2724,11 @@ export async function runSandbox(input: RunSandboxInput): Promise<SandboxResult>
 
   let result: SandboxResult;
   try {
-    const driverPromise = driver.spawn(spawnInputWithSignal as SandboxSpawnInput);
+    const driverPromise = runSelectedSuites(
+      driver,
+      spawnInputWithSignal as SandboxSpawnInput,
+      input.config.sandboxSuites,
+    );
     result = wallClockTimeoutPromise
       ? await Promise.race([driverPromise, wallClockTimeoutPromise])
       : await driverPromise;
@@ -2222,4 +2739,58 @@ export async function runSandbox(input: RunSandboxInput): Promise<SandboxResult>
   }
 
   return result;
+}
+
+/**
+ * AISDLC-1293: run what the diff needs. With no `sandboxSuites` this is one
+ * Node spawn, exactly as before. Otherwise suites run one after another (each
+ * with its own fetch and run container, torn down in between); any `error` or
+ * `resource-breach` ends the run, and the report passes only when every suite
+ * that ran passed on base and on head.
+ */
+async function runSelectedSuites(
+  driver: SandboxDriver,
+  spawnInput: SandboxSpawnInput,
+  suites: readonly SandboxSuite[] | undefined,
+): Promise<SandboxResult> {
+  if (!suites || suites.length === 0) return driver.spawn(spawnInput);
+
+  const plan = selectSuites(suites, changedPathsFromDiff(spawnInput.prDiff));
+  const runs: Array<{ name: string; suite?: SandboxSuite }> = [
+    ...(plan.node ? [{ name: 'node' }] : []),
+    ...plan.suites.map((suite) => ({ name: suite.name, suite })),
+  ];
+
+  const results: Array<{ name: string; dt: DifferentialTestResult; durationMs: number }> = [];
+  for (const run of runs) {
+    const r = await driver.spawn({ ...spawnInput, suite: run.suite });
+    await driver.teardown();
+    if (r.outcome !== 'success') return r;
+    results.push({ name: run.name, dt: r.differentialTest, durationMs: r.durationMs });
+  }
+
+  const failed = (pick: (d: DifferentialTestResult) => boolean) =>
+    results.filter((x) => !pick(x.dt)).map((x) => x.name);
+  const upstreamFailed = failed((d) => d.upstreamSuitePassed);
+  const headFailed = failed((d) => d.newTestsPassed);
+  const describeRun = (verdict: string[], key: 'upstreamSuiteOutput' | 'newTestsOutput') =>
+    (verdict.length > 0
+      ? [`failed suite(s): ${verdict.join(', ')}`]
+      : [`all suites passed: ${results.map((x) => x.name).join(', ')}`]
+    )
+      .concat(results.map((x) => `[${x.name}] ${x.dt[key]}`))
+      .join('\n')
+      .slice(-SANDBOX_OUTPUT_TAIL_BYTES);
+
+  return {
+    outcome: 'success',
+    durationMs: results.reduce((n, x) => n + x.durationMs, 0),
+    differentialTest: {
+      upstreamSuitePassed: upstreamFailed.length === 0,
+      upstreamSuiteOutput: describeRun(upstreamFailed, 'upstreamSuiteOutput'),
+      newTestsPassed: headFailed.length === 0,
+      newTestsOutput: describeRun(headFailed, 'newTestsOutput'),
+      newCodeCoveragePct: Math.min(...results.map((x) => x.dt.newCodeCoveragePct)),
+    },
+  };
 }

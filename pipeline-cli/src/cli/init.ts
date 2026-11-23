@@ -33,7 +33,9 @@ function git(projectDir: string, args: string[]): string {
 
 /** Defaults an operator would otherwise type: git remote. */
 export function gatherDefaults(projectDir: string): Record<string, string> {
-  const out: Record<string, string> = {};
+  // Stand-ins when no remote is configured, so cli-init and the orchestrator
+  // init write the same file (AISDLC-1354).
+  const out: Record<string, string> = { org: 'your-org', repo: 'your-repo' };
   const remote = git(projectDir, ['remote', 'get-url', 'origin']);
   const m = remote.match(/[:/]([^/:]+)\/([^/]+?)(?:\.git)?$/);
   if (m) {

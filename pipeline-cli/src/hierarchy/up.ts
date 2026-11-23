@@ -7,16 +7,21 @@
  */
 
 import { ghCallsPath, GH_CALL_LOG_ENV, installGhShim } from './gh-calls.js';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { routedLaunchProfile } from '../routing/role-model.js';
 import type { LaunchProfile } from '../routing/default-table.js';
 
-import { loadOperationalPolicy } from './operational.js';
+import { loadOperationalPolicy, mergeOffLines } from './operational.js';
 import { verifiedMainRoot } from './trusted-root.js';
 import { loadPrLifecycleConfig } from './pr-lifecycle-config.js';
-import { schedulerUp } from './reconcile-scheduler.js';
-import { webhookUp } from './webhook.js';
+import {
+  SCHEDULER_LIVENESS_MS,
+  schedulerLivenessWarning,
+  schedulerStatus,
+  schedulerUp,
+} from './reconcile-scheduler.js';
+import { logNoFeed, webhookUp } from './webhook.js';
 import { attachEntry } from './attach.js';
 import { findStartedSession, readSessionRegistry, reconcileStartingEntries } from './registry.js';
 import { checkCrossSessionInbound, evaluateResourceGate, readSettingsView } from './preflight.js';
@@ -68,6 +73,8 @@ import {
 export interface UpOptions {
   executors: number | string;
   plannerModel: string;
+  /** Line naming a planner model fallback (AISDLC-1364); logged once when present. */
+  plannerFallbackLine?: string;
   dispatchModel: string;
   executorModel: string;
   noPlanner: boolean;
@@ -485,6 +492,7 @@ export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): P
       'warning: allowForcePush resolves to never; executors cannot lease-push. Check .ai-sdlc/agent-role.yaml in the repository root',
     );
   }
+  for (const line of mergeOffLines(policy)) deps.log(`warning: ${line}`);
   ensureFreshRepoBuild(deps, opts.rebuild === true);
   const count = parseExecutorCount(opts.executors);
   if (count > 0) {
@@ -492,6 +500,7 @@ export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): P
       `deprecated: --executors ${count} starts standing executors; dispatch now spawns one executor per task (RFC-0059), so the default is 0 and this option is removed in the next release`,
     );
   }
+  if (opts.plannerFallbackLine) deps.log(opts.plannerFallbackLine);
   assertModel(opts.plannerModel, '--planner-model');
   assertModel(opts.dispatchModel, '--dispatch-model');
   assertModel(opts.executorModel, '--executor-model');
@@ -679,11 +688,36 @@ export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): P
     deps.log(`already running ${e.role} '${e.tmuxWindow}' (session left alone)`);
   for (const w of warnings) deps.log(`warning: ${w}`);
 
+  // AISDLC-1358: the module runs the three bins from the directory `up` runs from.
+  try {
+    const binDir = path.dirname(deps.binPath ?? process.argv[1] ?? '');
+    mkdirSync(path.join(deps.boardDir, 'handoff'), { recursive: true });
+    writeFileSync(
+      path.join(deps.boardDir, 'handoff', 'cli-bin.json'),
+      JSON.stringify({ binDir, at: deps.now().toISOString() }),
+    );
+  } catch (err) {
+    deps.log(`warning: could not record the cli bin directory: ${(err as Error).message}`);
+  }
+
   // The consumer of the webhook wake file; runs whether or not a secret is set (AISDLC-932).
   try {
+    const wasUp = schedulerStatus(deps).state === 'up';
     schedulerUp(deps, deps.spawnScheduler);
+    if (!wasUp) {
+      await deps.sleep(SCHEDULER_LIVENESS_MS);
+      const w = schedulerLivenessWarning(deps);
+      if (w) deps.log(`warning: ${w}`);
+    }
   } catch (err) {
     deps.log(`warning: reconcile scheduler not started: ${(err as Error).message}`);
+  }
+
+  // Poll-only mode when no secret is set is valid (AISDLC-880), but say so (AISDLC-1357).
+  if (!deps.env.AI_SDLC_WEBHOOK_SECRET) {
+    deps.log(
+      'webhook: off (board polls only); set AI_SDLC_WEBHOOK_SECRET and run `cli-hierarchy webhook up` for push wakes',
+    );
   }
 
   if (opts.vscodeTasks) {
@@ -705,10 +739,10 @@ export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): P
     }
   }
 
-  // Poll-only mode when no secret is set; this is not an error (AISDLC-880).
   if (deps.env.AI_SDLC_WEBHOOK_SECRET) {
     try {
       webhookUp(deps);
+      logNoFeed(deps);
     } catch (err) {
       deps.log(`warning: webhook receiver not started: ${(err as Error).message}`);
     }
@@ -722,7 +756,8 @@ export async function hierarchyUp(opts: UpOptions, launchDeps: HierarchyDeps): P
   try {
     for (const line of overContextWarnings(deps, roster.sessions)) deps.log(line);
   } catch {
-    /* a context read must never fail up */
+    // A context read never fails up, but it says it was skipped (AISDLC-1357).
+    deps.log('warning: context size not read');
   }
 
   let attachExitCode: number | undefined;

@@ -894,7 +894,7 @@ async function executePipelineBody(
   };
 
   // Sandbox isolation around agent execution
-  const codeStage = config.pipeline?.spec.stages.find((s) => s.name === 'code');
+  const codeStage = config.pipeline?.spec.stages?.find((s) => s.name === 'code');
   let sandboxId: string | undefined;
   let result;
   try {

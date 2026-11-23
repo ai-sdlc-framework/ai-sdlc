@@ -20,6 +20,8 @@ export const RETIRED_TOKENS = [
   'orchestrator-tick',
   'AI_SDLC_AUTONOMOUS_ORCHESTRATOR',
   'AI_SDLC_TUI',
+  'init-signing-key',
+  '.v6.dsse.json',
   'execute-parallel',
   'dispatch-worker',
   'Pattern Z',
@@ -37,8 +39,16 @@ const EXCLUDED_DIRS = new Set(['audits', 'upstream-bug-reports', 'whitepapers'])
  * concurrent edits that shift line numbers do not break the gate.
  */
 export const ALLOWLIST = {
-  'docs/concepts/autonomous-orchestrator.md':
-    'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
+  'docs/operations/attestation-troubleshooting.md':
+    'still names init-signing-key or .v6.dsse.json as current (AISDLC-1313 left it out of the 15-file budget); fix the page, then delete this entry',
+  'docs/operations/init.md':
+    'still names init-signing-key or .v6.dsse.json as current (AISDLC-1313 left it out of the 15-file budget); fix the page, then delete this entry',
+  'docs/operations/remote-agents-readonly.md':
+    'still names init-signing-key or .v6.dsse.json as current (AISDLC-1313 left it out of the 15-file budget); fix the page, then delete this entry',
+  'docs/operations/review-policy.md':
+    'still names init-signing-key or .v6.dsse.json as current (AISDLC-1313 left it out of the 15-file budget); fix the page, then delete this entry',
+  'docs/operations/transcript-leaves-migration.md':
+    'still names init-signing-key or .v6.dsse.json as current (AISDLC-1313 left it out of the 15-file budget); fix the page, then delete this entry',
   'docs/operations/backlog-and-execution-reference.md':
     'sibling docs sweep (stale orchestrator and flag sentences) owns the rewrite; allowlisted so this gate can land',
   'docs/operations/gate-audit-2026-10.md':

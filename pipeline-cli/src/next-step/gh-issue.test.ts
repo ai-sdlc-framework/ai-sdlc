@@ -7,6 +7,7 @@ import { runGhIssue, type GhIssueDeps } from './gh-issue.js';
 let h: Harness;
 beforeEach(() => {
   h = makeHarness();
+  h.present.add(join(h.root, 'dogfood'));
   h.present.add(join(h.root, 'dogfood', 'dist', 'dispatch-from-issue.js'));
 });
 afterEach(() => h.cleanup());
@@ -74,9 +75,19 @@ describe('runGhIssue (AISDLC-393)', () => {
 
   it('tells the operator to build dogfood when its dist is missing', async () => {
     h.present.clear();
-    const strict = makeHarness({ exists: () => false });
+    const strict = makeHarness({ exists: (p) => p.endsWith('/dogfood') });
     const out = await runGhIssue(strict.ctx, 612, deps());
     expect(out.action === 'stop' && out.reason).toContain('pnpm --filter @ai-sdlc/dogfood build');
+    strict.cleanup();
+  });
+
+  it('names no dogfood pnpm command when dogfood/ is absent (AISDLC-1359)', async () => {
+    const strict = makeHarness({ exists: () => false });
+    const noDist = await runGhIssue(strict.ctx, 612, deps());
+    expect(noDist.action === 'stop' && noDist.reason).toContain('not available outside');
+    expect(noDist.action === 'stop' && noDist.reason).not.toContain('@ai-sdlc/dogfood');
+    const noClaude = await runGhIssue(strict.ctx, 612, deps({ claudeOnPath: async () => false }));
+    expect(noClaude.action === 'stop' && noClaude.reason).not.toContain('@ai-sdlc/dogfood');
     strict.cleanup();
   });
 

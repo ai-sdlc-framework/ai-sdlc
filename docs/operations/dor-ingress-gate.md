@@ -33,6 +33,17 @@ task-breakdown PR (the AISDLC-377 phase files) shipped with Gate-3
 unresolved-reference violations on every task and the merge state was
 CLEAN — auto-merge armed against the violations.
 
+## Issue rerun on edit and the bug form default (AISDLC-1287)
+
+`dor-ingress.yml` runs on `issues` with types `opened` and `edited` only; no
+workflow listens for issue comments. Editing the issue is what reruns the
+readiness check, and both the clarification comment and the stale warning say
+so. Gate 1 needs at least one checklist line (`- [ ] ...`), so the bug report
+form (`.github/ISSUE_TEMPLATE/bug-report.yml`) carries a required
+`Acceptance Criteria` field whose default is a two-line checklist: "The
+reported behavior no longer occurs" and "A test covers the fix". A bug filed
+with the defaults passes gate 1.
+
 ## Issue path and Stage B call graph (AISDLC-979)
 
 External GitHub issues enter only through `/ai-sdlc execute gh:<n>` run by a local agent; no CI trigger fires on an issue label (the `ai-eligible` label is removed).
@@ -71,6 +82,20 @@ The override is the SAME mechanic the
 already supports — a task whose `blocked.reason` is set skips both the
 upstream-OQ gate (when called from `refineBacklogTask()` /
 `/ai-sdlc execute`) AND the DoR ingress workflow gate.
+
+### What the upstream-OQ gate counts (AISDLC-1320)
+
+An entry is counted only when it is an open question: a question heading, or a
+numbered or bold question item directly in the Open Questions section, with no
+resolution marker. A numbered or bulleted list inside a question, or under a
+sub-heading that is not a question (for example `### 15.1 Design Patterns`), is
+part of that text and is not counted. The refusal prints each counted entry as
+`<file>:<line>: <text>` (at most 20, then `and N more`).
+
+When a task relies on an RFC's design but not on its open questions, the refusal
+says: "If the task only relies on the RFC's design and not on its open questions,
+list the RFC under `assumes:` instead of `requires:`". An `assumes:` RFC is not
+refused on lifecycle or open questions.
 
 Both single-line forms are recognised by `extractBlockedReason()` in
 `pipeline-cli/src/dor/upstream-oq-gate.ts`:

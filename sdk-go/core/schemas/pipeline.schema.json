@@ -18,7 +18,7 @@
     },
     "spec": {
       "type": "object",
-      "required": ["triggers", "providers", "stages"],
+      "required": ["triggers", "providers"],
       "properties": {
         "triggers": {
           "type": "array",
@@ -77,7 +77,8 @@
         },
         "stages": {
           "type": "array",
-          "description": "Ordered list of execution stages.",
+          "description": "Ordered list of execution stages. Deprecated (RFC-0056 phase 3): pipeline-cli never executed it; the Workflow document (`.ai-sdlc/workflow.yaml`) replaces it. Still accepted for one release; loading a Pipeline that sets it logs one deprecation warning.",
+          "deprecated": true,
           "minItems": 1,
           "items": {
             "type": "object",
@@ -108,6 +109,99 @@
               },
               "approval": {
                 "$ref": "#/$defs/ApprovalPolicy"
+              },
+              "type": {
+                "type": "string",
+                "description": "Stage type (e.g., design-system, design-review, quality-gate, usability-test)."
+              },
+              "condition": {
+                "type": "string",
+                "deprecated": true,
+                "description": "Expression that must evaluate to true for the stage to execute. Deprecated (RFC-0056): replaced by Workflow edge `when`; accepted for one release with spec.stages, then removed."
+              },
+              "context": {
+                "type": "object",
+                "description": "Context configuration for the stage.",
+                "additionalProperties": true
+              },
+              "constraints": {
+                "type": "object",
+                "description": "Stage-specific constraints for agent execution.",
+                "properties": {
+                  "requireStory": {
+                    "type": "boolean",
+                    "description": "Require Storybook story output."
+                  },
+                  "requireTokenUsage": {
+                    "type": "boolean",
+                    "description": "Require design token usage (no hardcoded values)."
+                  },
+                  "preferComposition": {
+                    "type": "boolean",
+                    "description": "Prefer composing existing components over creating new ones."
+                  }
+                },
+                "additionalProperties": true
+              },
+              "config": {
+                "type": "object",
+                "description": "Stage-specific configuration.",
+                "additionalProperties": true
+              },
+              "model": {
+                "type": "string",
+                "description": "Per-stage model alias (haiku, sonnet, opus, opus[1m]) or 'inherit' to defer to Pipeline.spec.defaultModel. RFC-0010 §6.3 / §11."
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["agent", "review-classifier", "review-fanout"],
+                "description": "Stage kind. Defaults to 'agent'. review-classifier and review-fanout drive RFC-0010 §12 conditional review behavior."
+              },
+              "maxBudgetUsd": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "description": "Per-stage cost ceiling. When exceeded the orchestrator emits BudgetExceeded and applies onFailure. RFC-0010 §6.3 / §11.5."
+              },
+              "harness": {
+                "type": "string",
+                "enum": ["claude-code", "codex", "gemini-cli", "opencode", "aider", "generic-api", "inherit"],
+                "description": "Per-stage harness selection. Defaults to 'inherit' (Pipeline.spec.defaultHarness, default 'claude-code'). RFC-0010 §6.3 / §13."
+              },
+              "harnessFallback": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["claude-code", "codex", "gemini-cli", "opencode", "aider", "generic-api"]
+                },
+                "description": "Ordered fallback chain on availability failures. RFC-0010 §13.5."
+              },
+              "requiresIndependentHarnessFrom": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Upstream stage names whose resolved harness MUST be excluded from this stage's effective chain (cross-harness review independence per RFC §13.10 / Q8)."
+              },
+              "schedule": {
+                "type": "string",
+                "enum": ["now", "off-peak", "quota-permitting", "defer-if-low-priority"],
+                "default": "now",
+                "description": "Subscription-aware dispatch hint per RFC §6.3 / §14.3."
+              },
+              "estimatedTokens": {
+                "type": "object",
+                "properties": {
+                  "input": { "type": "integer", "minimum": 0 },
+                  "output": { "type": "integer", "minimum": 0 },
+                  "frozen": { "type": "boolean" }
+                },
+                "required": ["input", "output"],
+                "additionalProperties": false,
+                "description": "Operator hint for SubscriptionLedger window-headroom math. When omitted, cold-start defaults apply (50000/10000) and EstimateBootstrapped fires after first run. Set frozen: true to opt out of rolling updates. RFC §6.3 / §14.6."
+              },
+              "databaseAccess": {
+                "type": "string",
+                "enum": ["none", "read", "write", "migrate"],
+                "default": "none",
+                "description": "Per-stage database-access declaration. Drives DatabaseBranchPool provisioning per RFC §6.3 / §15.7."
               }
             },
             "additionalProperties": false
@@ -151,6 +245,9 @@
         "branching": {
           "$ref": "#/$defs/BranchingConfig"
         },
+        "backlog": {
+          "$ref": "#/$defs/BacklogConfig"
+        },
         "pullRequest": {
           "$ref": "#/$defs/PullRequestConfig"
         },
@@ -162,6 +259,56 @@
         },
         "priorityPolicy": {
           "$ref": "#/$defs/PriorityPolicy"
+        },
+        "embedding": {
+          "$ref": "#/$defs/EmbeddingSpec",
+          "description": "Optional embedding-provider configuration per RFC-0019 §10.1. When absent, the embedding framework is disabled and consumers emit EmbeddingProviderNotConfigured. When present AND AI_SDLC_EMBEDDING_PROVIDER=on, pipeline-load resolves the named adapter from orchestrator/src/embedding/registry.ts and instantiates the named storage backend."
+        },
+        "parallelism": {
+          "$ref": "#/$defs/Parallelism",
+          "description": "Concurrency configuration. When omitted, the pipeline executes serially. See RFC-0010 §6.1 / §9.1."
+        },
+        "defaultModel": {
+          "type": "string",
+          "default": "sonnet",
+          "description": "Resolution target for any Stage with model: inherit (or absent). Defaults to sonnet. RFC-0010 §6.4."
+        },
+        "defaultHarness": {
+          "type": "string",
+          "enum": ["claude-code", "codex", "gemini-cli", "opencode", "aider", "generic-api"],
+          "default": "claude-code",
+          "description": "Resolution target for any Stage with harness: inherit. Defaults to claude-code. RFC-0010 §6.5."
+        },
+        "defaultHarnessFallback": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["claude-code", "codex", "gemini-cli", "opencode", "aider", "generic-api"]
+          },
+          "description": "Pipeline-wide default fallback chain applied to stages that omit harnessFallback. RFC-0010 §6.5."
+        },
+        "tenant": {
+          "type": "string",
+          "description": "Tenant identifier for SubscriptionLedger keying. When set, partitions a shared vendor account into virtual sub-windows per RFC-0010 §6.5 / §14.12."
+        },
+        "tenantQuotaShare": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fraction of the shared account's window quota allocated to this tenant. Required when tenant is set and multiple tenants exist on the same account; sum across tenants MUST equal 1.0."
+        },
+        "accountId": {
+          "type": "string",
+          "description": "Override for HarnessAdapter.getAccountId() auto-derivation (LedgerKeyAmbiguous fallback). RFC-0010 §6.5."
+        },
+        "offPeakMaxWait": {
+          "type": "string",
+          "description": "Maximum time a schedule: off-peak stage may wait before dispatching on-peak. ISO 8601 duration; defaults to PT8H. RFC-0010 §6.5 / §14.3."
+        },
+        "artifactSchemaVersion": {
+          "type": "string",
+          "default": "v1",
+          "description": "Pinned artifact-schema version per RFC-0010 §6.5 / §16.4 schema evolution semantics."
         }
       },
       "additionalProperties": false
@@ -310,6 +457,27 @@
           "type": "string",
           "enum": ["on-merge", "on-close", "manual"],
           "description": "When to delete the feature branch."
+        }
+      },
+      "additionalProperties": false
+    },
+    "BacklogConfig": {
+      "type": "object",
+      "description": "Backlog-workflow specific configuration. Canonical location for settings previously in pipeline-backlog.yaml (AISDLC-245.5). Readers fall back to pipeline-backlog.yaml with a deprecation warning when this section is absent.",
+      "properties": {
+        "branching": {
+          "$ref": "#/$defs/BranchingConfig"
+        },
+        "pullRequest": {
+          "$ref": "#/$defs/PullRequestConfig"
+        },
+        "milestones": {
+          "type": "object",
+          "description": "Milestone-to-backlog-task mapping for cross-cutting release planning.",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
         }
       },
       "additionalProperties": false
@@ -731,6 +899,89 @@
         },
         "adapters": {
           "$ref": "#/$defs/PriorityAdaptersConfig"
+        }
+      },
+      "additionalProperties": false
+    },
+    "EmbeddingSpec": {
+      "type": "object",
+      "description": "Embedding provider configuration per RFC-0019 §10.1. Absent = framework disabled. Present + AI_SDLC_EMBEDDING_PROVIDER=on = framework loads. See docs/operations/embedding-providers.md.",
+      "required": ["provider"],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Canonical adapter alias resolved against orchestrator/src/embedding/registry.ts. Example: 'openai-text-embedding-3-small'. Unknown names fail pipeline-load with UnknownEmbeddingProvider."
+        },
+        "fallback": {
+          "type": "string",
+          "description": "Adapter alias to fall back to when the primary is unavailable. Same value as `provider` means no fallback. Subject to the same registry resolution."
+        },
+        "storageBackend": {
+          "type": "string",
+          "default": "jsonl",
+          "description": "Backend identifier resolved against orchestrator/src/embedding/storage/index.ts. v1 ships 'jsonl'; future backends ('sqlite', 'pgvector', 'qdrant') implement EmbeddingStorageBackend and self-register."
+        },
+        "storageBackendConfig": {
+          "type": "object",
+          "description": "Backend-specific configuration. Opaque to the framework; passed through to the backend constructor.",
+          "additionalProperties": true
+        },
+        "staleVectorPolicy": {
+          "type": "string",
+          "enum": ["lazy-re-embed", "fail-loud", "warn"],
+          "default": "lazy-re-embed",
+          "description": "Per-org default for stale-vector encounters per RFC-0019 OQ-2 re-walkthrough. Consumers MAY pin a stricter policy at the API site (e.g., RFC-0009 Eτ_tessellation_drift pins 'fail-loud' regardless of org default to preserve historical-trajectory fidelity)."
+        },
+        "autoEmbedOnWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, write paths embed-and-store automatically. When false, callers must explicitly invoke embed() + store."
+        },
+        "maxBatchSize": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2048,
+          "description": "Maximum texts per embedBatch() call. Adapter-specific cap; framework chunks larger requests."
+        },
+        "deprecationOverrides": {
+          "type": "object",
+          "description": "Per-org deprecation override per RFC-0019 OQ-4 re-walkthrough. Overrides the adapter-declared defaultGracePeriodDays (which itself overrides the 90d framework default). Catalog dedup milestones (89/60/30/7/1 days before deprecatedAt) are applied uniformly.",
+          "properties": {
+            "gracePeriodDays": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Days before deprecatedAt at which warnings begin. Three-layer precedence: framework default (90d) → adapter defaultGracePeriodDays → this per-org override."
+            },
+            "strictModeAtDeprecatedAt": {
+              "type": "boolean",
+              "default": false,
+              "description": "When true, pipeline-load FAILS at deprecatedAt (operator-strict). When false (default), warnings continue past deprecatedAt and only removedAt fails the load."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "Parallelism": {
+      "type": "object",
+      "description": "Concurrency configuration introduced by RFC-0010. When this object is omitted, the pipeline executes serially (current behavior).",
+      "properties": {
+        "maxConcurrent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Maximum number of issues executing concurrently. When omitted, derived from the declared SubscriptionPlan per RFC-0010 §9.1 resolution table; falls back to 1 when no plan is declared."
+        },
+        "worktreePool": {
+          "type": "string",
+          "description": "Name of the WorktreePool resource backing this pipeline. Defaults to the pipeline's own name."
+        },
+        "mergeStrategy": {
+          "type": "string",
+          "enum": ["serialized-rebase", "parallel-merge"],
+          "default": "serialized-rebase",
+          "description": "Merge ordering strategy. parallel-merge is reserved and forbidden in v1; only serialized-rebase is supported."
         }
       },
       "additionalProperties": false
