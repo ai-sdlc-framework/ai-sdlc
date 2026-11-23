@@ -171,12 +171,12 @@
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/yargs": "^17.0.33",
-    "@vitest/coverage-v8": "^5.1.0",
+    "@vitest/coverage-v8": "^5.1.1",
     "ajv": "^8.20.0",
     "ink-testing-library": "^4.0.0",
     "string-width": "^9.0.0",
     "typescript": "^6.0.3",
     "vite": "^8.3.8",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   }
 }
