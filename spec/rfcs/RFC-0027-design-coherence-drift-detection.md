@@ -5,7 +5,7 @@ status: Draft
 lifecycle: Draft
 author: Morgan Hirtle
 created: 2026-05-04
-updated: 2026-10-22
+updated: 2026-11-23
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0006
@@ -158,15 +158,15 @@ The minimum accessibility conformance any surface in this soul may ship at.
 | Field | Type | Notes |
 |---|---|---|
 | `wcagLevel` | enum `A`, `AA`, `AAA` | Same enum as RFC-0018 §6.1 |
-| `wcagVersion` | enum `2.0`, `2.1`, `2.2`, `3.0` | Same enum as RFC-0018 §6.1. RFC-0018 OQ-7 superseded-version advisory applies |
-| `conformanceTarget` | number 0 to 100 | Optional here; when absent, 100. RFC-0018 requires it at journey level. WCAG 3.0 scoring-model caveat (RFC-0018 OQ-7) applies |
+| `wcagVersion` | enum `2.0`, `2.1`, `2.2` | Same enum as RFC-0018 §6.1. RFC-0018 OQ-7 `wcag-version-not-latest` advisory applies |
+| `conformanceTarget` | number, always 100 | Optional here; when absent, 100. Conformance is pass/fail (RFC-0018 §5.3) |
 | `minTargetSizePx` | number | Optional. When absent, the WCAG requirement for the declared level applies (24 at 2.2 AA, SC 2.5.8). Adopters may set 44 (SC 2.5.5, AAA) |
 | `reducedMotion` | enum `required`, `recommended` | Optional. `required` is a product choice: the related criterion (SC 2.3.3) is AAA, so it goes beyond an AA floor |
 
 **Inheritance.** Platform → Soul → Journey. Variants inherit the soul's floor and cannot override it (RFC-0017 §5.3).
 
-- `wcagLevel`, `conformanceTarget`, `minTargetSizePx` and `reducedMotion` are tighten-only: a child may raise them and may not lower them.
-- `wcagVersion` may move forward within the 2.x line without review. Moving to `3.0` changes the scoring model (RFC-0018 OQ-7), so it requires a Decision (`accessibility-floor-wcag3-adoption`) answered by the Design Authority.
+- `wcagLevel`, `wcagVersion`, `minTargetSizePx` and `reducedMotion` are tighten-only: a child may raise them and may not lower them.
+- `wcagVersion` may move forward within the 2.x line without review. WCAG 3.0 joins the enum only by RFC-0018 amendment (OQ-7); moving a floor to it will change the scoring model, so it will require a Decision (`accessibility-floor-wcag3-adoption`) answered by the Design Authority.
 - A journey's `accessibility` block (RFC-0018 §5.3) is validated against the effective soul floor. A violation emits `AccessibilityFloorInheritanceViolation` and rejects the declaration.
 
 **Relationship to variant `designOverrides`.** RFC-0017 `designOverrides` such as `motionProfile` and `typographyScale` set a variant's default look and feel. The floor governs what users get when they ask for reduced motion or larger text. A variant override never lowers the floor; for example, `motionProfile: full` is valid under `reducedMotion: required`, as long as the surface honours the user's reduced-motion preference.
@@ -368,8 +368,8 @@ Add to `triad.design` in `spec/schemas/design-intent-document.schema.json`. The 
     "additionalProperties": false,
     "properties": {
       "wcagLevel": { "type": "string", "enum": ["A", "AA", "AAA"] },
-      "wcagVersion": { "type": "string", "enum": ["2.0", "2.1", "2.2", "3.0"] },
-      "conformanceTarget": { "type": "number", "minimum": 0, "maximum": 100 },
+      "wcagVersion": { "type": "string", "enum": ["2.0", "2.1", "2.2"] },
+      "conformanceTarget": { "type": "number", "const": 100 },
       "minTargetSizePx": { "type": "number", "minimum": 0 },
       "reducedMotion": { "type": "string", "enum": ["required", "recommended"] },
       "identityClass": { "$ref": "#/$defs/identityClass" }
@@ -684,3 +684,4 @@ Design Authority's sign-off on this RFC will be conditional on this pass, as wit
 | v0.0 | 2026-05-04 | Morgan Hirtle | Number reserved under RFC-0009 Design Authority sign-off condition C3. |
 | v0.1 | 2026-10-22 | Morgan Hirtle | First draft. Part A: five optional structured design vertex fields that reference existing DID and DSB sources. Part B: `DesignCoherenceDriftRule`, four evidence classes, surface attribution, fidelity modes, baseline ratchet, one blocking case, check integrity requirements. |
 | v0.2 | 2026-10-22 | Morgan Hirtle | Revised after review against each authority's scope. Engineering scope: frontmatter moves RFC-0008 and RFC-0018 to `requires`; DSB accessibility standard resolved from the RFC-0006 audit gate; `identityClass` `$ref` corrected; stateless baseline with prune proposals; silent identity seeding on upgrade; evidence file schema; registry dispatcher wired as a required check; severity registration and typed event details. Product scope: Cκ boost replaced with an HC_design repair signal; one scoring home per finding (§6.5) to remove double counting; Eτ_expression term with fixed `k`; Eτ_expression attributed to the Design pillar; framework failures excluded from calibration; blocking toggle requires a Design and Product Decision. Design scope: `principles[]` named as the C3 interaction-principles home with an interaction example; floor relationship to `designOverrides`; judgment findings recorded by the Design Authority or a named delegate; fidelity cannot be lowered on production substrate without a Decision; `judgmentPrinciplesUnreviewed` in the snapshot. OQ-4 and OQ-7 deferred to Engineering Authority; OQ-8 restated with options. Design Authority decisions: C3 recorded item by item (§5.1.6), with voice register re-scoped by the RFC-0017 OQ-5 ruling and left open; component-definition conflicts between the catalog and a ratified design specification go to both Design and Engineering Authority (§5.2); §5.8 tooling items moved to implementation notes and a SHOULD, with OQ-10 deferring them to Engineering Authority. 10 open questions. |
+| v0.2.1 | 2026-11-23 | Morgan Hirtle | Aligned §5.1.1 with RFC-0018 v0.4: `conformanceTarget` fixed at 100 (conformance is pass/fail), `3.0` removed from the `wcagVersion` enum, advisory renamed `wcag-version-not-latest`. |
