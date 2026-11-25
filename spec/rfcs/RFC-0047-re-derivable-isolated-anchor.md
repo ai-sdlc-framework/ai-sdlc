@@ -222,7 +222,7 @@ producible? Until this RFC ships, `requiredTier: isolated` MUST be unsatisfiable
 | --- | --- | --- |
 | Engineering | Dominique Legault | ✅ Signed (CI-only-key anchor preserves offline verify + kills the same-machine-coordinator forgery; sound implementation surface; 2026-09-06) |
 | Operator | Dominique Legault | ✅ Signed (engineered the anchor correctly per the "don't tack it on" directive; 593-597 dispatchable; 2026-09-06) |
-| Product | Alex | ⏸ Pending |
+| Product | Alexander Kline | ⏸ Pending |
 | Design | Morgan | ⏸ Pending |
 
 ## Revision History

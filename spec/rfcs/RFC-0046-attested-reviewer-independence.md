@@ -314,7 +314,7 @@ Captured as the rejected options in each Open Question resolution below.
 | Pillar | Owner | Status |
 |---|---|---|
 | CTO / Engineering Authority + AI-SDLC Operator | Dominique Legault | ✅ Signed (2026-09-06 — mint-not-amend design; independence as re-derivable tier on RFC-0043 substrate; defends determined same-machine coordinator) |
-| Product | Alex | ⏸ Pending |
+| Product | Alexander Kline | ⏸ Pending |
 | Design Authority | Morgan | ⏸ Pending |
 
 ## Revision History

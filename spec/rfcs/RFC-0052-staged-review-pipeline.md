@@ -438,7 +438,7 @@ probe, **and over two leaves** because a probe bundle still blends harnesses.
 | --- | --- | --- |
 | Engineering | Dominique Legault | ✅ Signed (reads once, strongest model only at plan and synthesis, baseline checklist no plan can remove, evidence-cited findings, per-stage leaves; 2026-10-01) |
 | Operator | Dominique Legault | ✅ Signed (full-remit pipeline beside the Opus security reviewer as a head-to-head; nothing retires before 50 compared PRs at 95 percent; 2026-10-01) |
-| Product | Alex | ⏸ Pending |
+| Product | Alexander Kline | ⏸ Pending |
 | Design | Morgan | ⏸ Pending |
 
 ## Revision History

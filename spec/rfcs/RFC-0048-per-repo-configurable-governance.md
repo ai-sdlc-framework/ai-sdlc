@@ -286,7 +286,7 @@ expansion to the granular schema + the OQ-3 fixed set.
 | --- | --- | --- |
 | Engineering | Dominique Legault | ✅ Signed (one per-repo policy source of truth rendered to every surface; defaults strict; sound implementation surface across 601/602/603; 2026-09-07) |
 | Operator | Dominique Legault | ✅ Signed (fixes the real narration/enforcement drift; trust boundary follows the internal-vs-external work-item architecture; 2026-09-07) |
-| Product | Alex | ⏸ Pending |
+| Product | Alexander Kline | ⏸ Pending |
 | Design | Morgan | ⏸ Pending |
 
 ## Revision History

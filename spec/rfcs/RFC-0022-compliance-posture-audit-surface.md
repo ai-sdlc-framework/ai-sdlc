@@ -40,7 +40,7 @@ Status is Implemented to match lifecycle Implemented (AISDLC-856, AISDLC-1223). 
 ## Sign-Off
 
 - [x] Engineering owner — Dominique Legault (2026-05-27 — all OQs resolved per §13 walkthrough 2026-05-16)
-- [x] Product owner — Alexander Kline (2026-05-04)
+- [x] Product owner — Alexander Klineander Kline (2026-05-04)
 - [x] Operator owner — Dominique Legault (2026-05-27 — all OQs resolved per §13 walkthrough 2026-05-16)
 
 ### Product Authority review
@@ -556,7 +556,7 @@ Default constants ship in the `ai-sdlc init` compliance template. The regime →
 ## 15. Sign-Off
 
 - [x] Engineering owner — Dominique Legault (2026-05-27 — all OQs resolved per §13 walkthrough 2026-05-16)
-- [ ] Product owner — Alex (pending — note: top-of-file Sign-Off shows Alex signed v0.x 2026-05-04; this duplicate section is out of sync, consider consolidating)
+- [ ] Product owner — Alexander Kline (pending — note: top-of-file Sign-Off shows Alex signed v0.x 2026-05-04; this duplicate section is out of sync, consider consolidating)
 - [x] Operator owner — Dominique Legault (2026-05-27 — all OQs resolved per §13 walkthrough 2026-05-16)
 
 ## 16. Revision History

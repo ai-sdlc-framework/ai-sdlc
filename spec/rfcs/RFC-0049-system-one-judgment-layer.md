@@ -1081,7 +1081,7 @@ only** because that is today's behaviour.
 | --- | --- | --- |
 | Engineering | Dominique Legault | ✅ Signed (provider-neutral layer behind one runtime contract; abstain always means pre-RFC behaviour; promotion bars enforced in code; attestation untouched; 2026-09-30) |
 | Operator | Dominique Legault | ✅ Signed (gives the unwired judgment seams a backend and measures each one before it acts; review relaxation bounded to trusted work with security review always run; 2026-09-30) |
-| Product | Alex | ⏸ Pending |
+| Product | Alexander Kline | ⏸ Pending |
 | Design | Morgan | ⏸ Pending |
 
 ## Revision History

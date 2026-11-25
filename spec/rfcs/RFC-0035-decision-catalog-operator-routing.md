@@ -57,7 +57,7 @@ Status is Implemented to match lifecycle Implemented (AISDLC-856, AISDLC-1223). 
 ## Sign-Off
 
 - [x] Engineering owner — Dominique Legault (2026-05-27 — all 14 OQs resolved per §15 walkthrough 2026-05-15)
-- [ ] Product owner — Alexander Kline (pending)
+- [ ] Product owner — Alexander Klineander Kline (pending)
 - [x] Operator owner — Dominique Legault (2026-05-27 — all 14 OQs resolved per §15 walkthrough 2026-05-15)
 
 ## Table of Contents

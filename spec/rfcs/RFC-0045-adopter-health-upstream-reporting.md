@@ -124,7 +124,7 @@ Sign-off is per-pillar and operator-driven; do not pre-fill. Owners sign after t
 | Pillar | Owner | Status |
 | --- | --- | --- |
 | Engineering | Dominique Legault | ⏸ Pending |
-| Product | Alex | ✅ Signed 2026-11-24 (approved in direction, one push-back, three conditions) |
+| Product | Alexander Kline | ✅ Signed 2026-11-24 (approved in direction, one push-back, three conditions) |
 | Operator | Dominique Legault | ⏸ Pending |
 
 ### Product review (2026-11-24)

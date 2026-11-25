@@ -478,7 +478,7 @@ where a human should be asked.
 | --- | --- | --- |
 | Engineering | Dominique Legault | ✅ Signed (reuses the board, decisions and governance substrate; authority in policy, not messages; context emptied per task; 2026-09-30) |
 | Operator | Dominique Legault | ✅ Signed (codifies the shape that worked in practice; throughput never waits on a typed confirmation; the human is asked last and deliberately; 2026-09-30) |
-| Product | Alex | ⏸ Pending |
+| Product | Alexander Kline | ⏸ Pending |
 | Design | Morgan | ⏸ Pending |
 
 ## Revision History

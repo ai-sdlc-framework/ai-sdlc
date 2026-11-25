@@ -671,7 +671,7 @@ a continuous bandit** because a table can be read, diffed and cited.
 | --- | --- | --- |
 | Engineering | Dominique Legault | ✅ Signed (measures at the harness, where the calls are made; one deduplicated record per call; routing is a pure lookup with a logged reason; no table file means no behaviour change; 2026-09-30) |
 | Operator | Dominique Legault | ✅ Signed (per-model usage and allotment tracking from real data; cheaper models need evidence and approval, quality regressions revert automatically; 2026-09-30) |
-| Product | Alex | ⏸ Pending |
+| Product | Alexander Kline | ⏸ Pending |
 | Design | Morgan | ⏸ Pending |
 
 ## Revision History
