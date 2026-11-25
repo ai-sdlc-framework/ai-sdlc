@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"operator-answered","ts":"2026-11-25T23:40:03.290Z","decisionId":"DEC-0426","chosenOptionId":"c","rationale":"Operator: queue by default; a filing returns at once and the spacing is applied by the queue, not by blocking the caller."}
