@@ -42,7 +42,21 @@ requiresDocs: []
 |--------|------|--------|------|
 | Morgan Hirtle | Chief of Design / Design Authority | ✍️ Authored v0.2. ✅ Conditional sign-off on v0.2: Part A (design vertex enrichment) and the C3 record in §5.1.6 are ratified; Part A may be ratified and implemented ahead of Part B. Conditions for full sign-off: (1) the §11 practitioner validation pass is completed on the reference implementation; (2) no change to the boundary of the `judgment` class, and no automated aesthetic or imperative scoring, without Design Authority review; (3) no material change to accessibility floor inheritance or the blocking rule before the validation pass without Design Authority review. | 2026-10-22 |
 | Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | [PENDING — Engineering Authority] | |
-| Alexander Kline | Head of Product Strategy / Product Authority | [PENDING — Product Authority] | |
+| Alexander Kline | Head of Product Strategy / Product Authority | ✅ Signed (approved in direction with one push-back and three conditions; see Product review below) | 2026-11-24 |
+
+### Product review (2026-11-24)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved in direction, with one push-back and three conditions.
+
+Product endorses the shape of this RFC. Part A is optional and Part B is opt-in, so adopters who declare nothing see no change (§7). Part A can ratify ahead of Part B, which lets the smaller mechanism prove itself first. The single-home composition table (§6.5) keeps one finding from being scored twice. Part B reuses RFC-0006 and RFC-0008 outputs as evidence and adds checks only where they have none. The one blocking case is a deterministic floor regression, and switching it off needs both Design and Product to answer.
+
+**Push-back (§5.3, §5.9).** Every finding routes toward restoring the declared vertex, and the RFC has no disposition for drift toward real customer need. PPA v1.3 Change 5 separates healthy drift, where the DID is stale, from unhealthy drift, where work is pulling away from core identity. Add a Decision answer on `design-coherence-*` findings that proposes a vertex revision with the evidence attached, so the declared intent can follow the product as well as constrain it.
+
+**Conditions.**
+
+1. Run Phase 2 (`declared` class only) and the Eτ_expression term in shadow for 90 days, with no effect on admission, before Phase 4 promotes it into scoring.
+2. Set `k` (OQ-5) from that shadow data and not at the operator walkthrough alone.
+3. State in §6.5 that this rule is the design-coherence trigger inside PPA `ET_tessellation_drift` and not a parallel scoring path, so the PPA keeps the single definition of drift scoring.
 
 **Review asks by pillar:**
 
@@ -685,3 +699,4 @@ Design Authority's sign-off on this RFC will be conditional on this pass, as wit
 | v0.1 | 2026-10-22 | Morgan Hirtle | First draft. Part A: five optional structured design vertex fields that reference existing DID and DSB sources. Part B: `DesignCoherenceDriftRule`, four evidence classes, surface attribution, fidelity modes, baseline ratchet, one blocking case, check integrity requirements. |
 | v0.2 | 2026-10-22 | Morgan Hirtle | Revised after review against each authority's scope. Engineering scope: frontmatter moves RFC-0008 and RFC-0018 to `requires`; DSB accessibility standard resolved from the RFC-0006 audit gate; `identityClass` `$ref` corrected; stateless baseline with prune proposals; silent identity seeding on upgrade; evidence file schema; registry dispatcher wired as a required check; severity registration and typed event details. Product scope: Cκ boost replaced with an HC_design repair signal; one scoring home per finding (§6.5) to remove double counting; Eτ_expression term with fixed `k`; Eτ_expression attributed to the Design pillar; framework failures excluded from calibration; blocking toggle requires a Design and Product Decision. Design scope: `principles[]` named as the C3 interaction-principles home with an interaction example; floor relationship to `designOverrides`; judgment findings recorded by the Design Authority or a named delegate; fidelity cannot be lowered on production substrate without a Decision; `judgmentPrinciplesUnreviewed` in the snapshot. OQ-4 and OQ-7 deferred to Engineering Authority; OQ-8 restated with options. Design Authority decisions: C3 recorded item by item (§5.1.6), with voice register re-scoped by the RFC-0017 OQ-5 ruling and left open; component-definition conflicts between the catalog and a ratified design specification go to both Design and Engineering Authority (§5.2); §5.8 tooling items moved to implementation notes and a SHOULD, with OQ-10 deferring them to Engineering Authority. 10 open questions. |
 | v0.2.1 | 2026-11-23 | Morgan Hirtle | Aligned §5.1.1 with RFC-0018 v0.4: `conformanceTarget` fixed at 100 (conformance is pass/fail), `3.0` removed from the `wcagVersion` enum, advisory renamed `wcag-version-not-latest`. |
+| v0.2.2 | 2026-11-24 | Alexander Kline | Product Authority sign-off recorded: approved in direction with one push-back (healthy-drift disposition) and three conditions (90-day shadow, `k` from shadow data, PPA `ET_tessellation_drift` framing). No normative text changed. |
