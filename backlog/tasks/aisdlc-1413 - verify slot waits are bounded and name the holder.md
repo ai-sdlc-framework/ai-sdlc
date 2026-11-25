@@ -18,7 +18,9 @@ priority: high
 
 ## Description
 
-**Five-step review (requirements first).** The requirement: a push or a verify run never waits silently and without limit for another process. On 2026-11-25 a `cli-file task --pr` push from the planner session hung for over 10 minutes and was cancelled by the operator. Its pre-push patch-coverage step was waiting for a verify slot.
+**Five-step review (requirements first).** The requirement: a push or a verify run never waits silently and without limit for another process.
+
+Found on 2026-11-25 while investigating a `cli-file task --pr` run that waited over 10 minutes and was cancelled by the operator. That wait was most likely `cli-file`'s own 15-minute filing spacing (AISDLC-1414 makes it visible), not a verify slot: the run started a few minutes after the previous filing PR, and the investigation did not show the push reaching the coverage step. The slot defects below are real independently of that run: any verify run started while they held would have waited without limit.
 
 What the board showed:
 
@@ -26,7 +28,7 @@ What the board showed:
 - `verify-slots/slot-1/pid` held pid 90586. The slot directory dates from 2026-11-21; pid 90586 is now an unrelated Playwright MCP process started 2026-11-23. The pid was reused, so the dead holder looks alive and the slot is never reclaimed.
 - `scripts/pre-push-patch-coverage.mjs` sets `SLOT_WAIT_MS = Infinity` and logs one "waiting for a verify slot" line without naming the holder.
 
-Every push from this checkout that reaches the coverage step was blocked for as long as the AISDLC-1392 executor stayed stuck.
+While those markers held, every verify run on this checkout, including the pre-push coverage step, would have waited for as long as the AISDLC-1392 executor stayed stuck.
 
 - **Delete:** the unbounded wait. No caller waits forever.
 - **Simplify:** a holder is identified by pid plus process start time, so liveness is one check. A reused pid fails it.
