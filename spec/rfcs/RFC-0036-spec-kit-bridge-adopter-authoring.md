@@ -29,7 +29,7 @@ runtimeEvidence: []
 ## Sign-Off
 
 - [x] Engineering owner — Dominique Legault (2026-05-27 — all 12 OQs resolved per §14 walkthrough 2026-05-16; lifecycle bump deferred until AISDLC-336 Phase 11 promotion runbook lands)
-- [x] Product owner — Alexander Klineander Kline *(OQ-9 positioning resolution signed off: "Decision Engine" primary, "spec-driven AI workflows" secondary — 2026-05-18)*
+- [x] Product owner — Alexander Kline *(OQ-9 positioning resolution signed off: "Decision Engine" primary, "spec-driven AI workflows" secondary — 2026-05-18)*
 - [x] Operator owner — Dominique Legault (2026-05-27 — all 12 OQs resolved per §14 walkthrough 2026-05-16; lifecycle bump deferred until AISDLC-336 Phase 11 promotion runbook lands)
 
 ## Table of Contents

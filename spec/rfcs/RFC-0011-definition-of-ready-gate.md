@@ -33,7 +33,7 @@ runtimeEvidence:
 ## Sign-Off
 
 - [x] Engineering owner — Dominique Legault (2026-04-30)
-- [x] Product owner — Alexander Klineander Kline (2026-05-04)
+- [x] Product owner — Alexander Kline (2026-05-04)
 - [x] Operator owner — Dominique Legault (2026-04-30)
 
 ## Revision History
