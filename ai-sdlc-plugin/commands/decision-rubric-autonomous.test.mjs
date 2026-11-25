@@ -25,8 +25,8 @@ describe('decision-rubric autonomous mode', () => {
     assert.match(raw, /--timebox PT10H --autonomous-fallback/);
   });
 
-  it('keeps the five parts and never self-decides class (c)', () => {
-    assert.match(raw, /same five parts/);
+  it('keeps all six steps and never self-decides class (c)', () => {
+    assert.match(raw, /run all six steps/);
     assert.match(raw, /Class \(c\)[^\n]*never self-decided/);
   });
 });

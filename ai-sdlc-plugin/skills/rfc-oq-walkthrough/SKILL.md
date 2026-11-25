@@ -25,10 +25,13 @@ The end-to-end shape is **eight phases**, in order. Skipping any of them ships a
   - RFC-0028 OQ-7.1 asked about `identityClass` — but `'core' | 'evolving'` was already shipped in `layer1-deterministic.ts`. Resolution had to harmonize.
   - RFC-0030 OQ-13.5 asked about flooding detection — but `sourceBaselineDriftMultiplier` was already shipped. Refinement REPLACED the algorithm rather than adding it.
 - Note any shipped/spec mismatch in the resolution body so the implementer knows whether to add net-new code, replace existing code, or harmonize against it.
+- **Name the domain owners.** Read the RFC's Sign-Off table and the project's team-roles record. Any owner of the area (design, accessibility, legal, security, product) who is not the operator makes the affected resolutions provisional until they review them (decision-rubric step 6). RFC-0018 was resolved without its Design Authority and reopened six months later.
 
 ## Phase 3 — Per-OQ walkthrough (decision-rubric)
 
-For each OQ, apply the [[decision-rubric]] skill: problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument → AskUserQuestion. **One OQ per AskUserQuestion call** — never batch.
+For each OQ, apply the [[decision-rubric]] skill's six steps: question the requirement → problem statement → evidence tagged checked or unchecked → 3-4 options plus "what would reject all of these?" → recommendation, counter-argument and trace → domain review. Present each one decision first, with the one thing to check, then the AskUserQuestion. **One OQ per AskUserQuestion call** — never batch.
+
+The trace step matters most in a walkthrough: list every record, data source, emitter, schema field and config key the resolution reads or writes, marked exists (with its path) or undefined. Every undefined item is specified in the resolution or becomes a Phase 6 task that must land first. RFC-0018 v0.4 shipped resolutions that read audit records, a release definition and a declaration date nobody had defined, and needed the v0.4.1 amendment to supply them.
 
 After each operator answer, record the chosen option but do not yet write to the RFC. Hold the resolution text in working memory through the rest of the walkthrough so you can write everything in one batched pass at Phase 4.
 
@@ -46,13 +49,18 @@ The Resolution block per OQ has a load-bearing shape:
 
 ```markdown
 **Resolution (YYYY-MM-DD, full rubric):** **<recommendation summary>.**
-Industry research: <one paragraph of citations>. **Substantive gaps in
-v0.X surfaced by re-walkthrough:** <list>. **Refinement over v0.X:**
-<concrete spec change>. **Counter-argument:** "<steel-manned objection>"
-Rebuttal: <response>. **Selected over <other options> because <reason>.**
+Requirement: <who set it and why it still holds, or why deletion was
+rejected>. Evidence: <key claims, each marked checked (source + date, or
+the grep/query) or unchecked>. **Substantive gaps in v0.X surfaced by
+re-walkthrough:** <list>. **Refinement over v0.X:** <concrete spec
+change>. **Counter-argument:** "<steel-manned objection>" Rebuttal:
+<response>. **Selected over <other options> because <reason>.**
+**Depends on:** <each record/emitter/field: exists at <path> | undefined,
+defined by <task or this section>>. **Check:** <the one thing to check>.
+**Provisional:** <domain owner who must review, if any>.
 ```
 
-If the body only records "answer: A" it has failed the shape — edge cases six months in have nothing to interpret against.
+If the body only records "answer: A" it has failed the shape — edge cases six months in have nothing to interpret against. The `Check:` line lets a later amendment say which fact failed.
 
 ## Phase 5 — Update the RFC registry, footer and upstream cross-references
 
@@ -162,5 +170,6 @@ If there are other open sign-off PRs (run `gh pr list --search "sign-off"` or sc
 - **Generating tasks before operator confirms the OQ resolutions.** Tasks reference the resolutions; resolving the wrong way means filing the wrong tasks. Operator confirmation gates task generation.
 - **Reusing AISDLC IDs claimed by open PRs.** The active-worktree + open-PR scan is non-optional.
 - **Marking task ACs as `[x]` because "the work is in this PR."** If the AC is satisfied by the PR diff, the task should be filed at `status: Done` AND moved to `backlog/completed/` AND committed there — OR filed at `status: To Do` with ACs unchecked for the implementer to verify. The mixed state (Done with unchecked ACs, or To Do with checked ACs) confuses the implementer.
+- **Signing a resolution as final while a domain owner's review is pending.** Keep it marked provisional, name the owner in the PR body, and list the review in the hand-off.
 - **Skipping sign-off because the operator didn't say so.** Don't auto-sign — but DO ask if the operator wants to sign at PR-creation time (one AskUserQuestion: "Sign off on this RFC now?").
 - **Filing the same task with the same ID as an open PR.** This is the worst collision because both PRs look valid until merge — fix by renumbering whichever PR hasn't merged yet.
