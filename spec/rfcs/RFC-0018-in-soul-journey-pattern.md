@@ -55,7 +55,7 @@ Product endorses the journey as a bounded layer inside the Soul. Journeys inheri
 
 1. The Cκ boost magnitude and cap in `docs/operations/journey-metrics.md` are defined by a PPA amendment, and the boost is applied in shadow mode first.
 2. A journey with no declared `successMetrics` scores identically to its parent Soul or Variant, confirmed by a conformance test in Phase 6.
-3. Ninety days after the first InternalAdopter journey ships, Product reviews boost activations against realised journey outcomes, and the boost is kept, changed or removed on that evidence.
+3. Once journeys carry real outcomes, Product reviews boost activations against them, and the boost is kept, changed or removed on that evidence.
 
 ### Re-confirmation of v0.4 normative changes
 

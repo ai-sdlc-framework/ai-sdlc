@@ -54,7 +54,7 @@ Product endorses the shape of this RFC. Part A is optional and Part B is opt-in,
 
 **Conditions.**
 
-1. Run Phase 2 (`declared` class only) and the Eτ_expression term in shadow for 90 days, with no effect on admission, before Phase 4 promotes it into scoring.
+1. Run Phase 2 (`declared` class only) and the Eτ_expression term in shadow, with no effect on admission, until the shadow data supports a value for `k`. Phase 4 then promotes the term into scoring.
 2. Set `k` (OQ-5) from that shadow data and not at the operator walkthrough alone.
 3. State in §6.5 that this rule is the design-coherence trigger inside PPA `ET_tessellation_drift` and not a parallel scoring path, so the PPA keeps the single definition of drift scoring.
 
