@@ -124,5 +124,19 @@ Sign-off is per-pillar and operator-driven; do not pre-fill. Owners sign after t
 | Pillar | Owner | Status |
 | --- | --- | --- |
 | Engineering | Dominique Legault | ⏸ Pending |
-| Product | Alex | ⏸ Pending |
+| Product | Alex | ✅ Signed 2026-11-24 (approved in direction, one push-back, three conditions) |
 | Operator | Dominique Legault | ⏸ Pending |
+
+### Product review (2026-11-24)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved in direction with one push-back and three conditions.
+
+Product endorses the shape of this RFC. Reporting stays off until an adopter turns it on, so adopters who never opt in see no change. The adopter reads the exact payload before anything leaves the machine and submits it personally. The OQ-3 resolution is the chapel: one issue per adopter repo, updated in place, with the endpoint deferred behind a measurable trigger. The payload is booleans and enums only, so the IP firewall holds by construction: no adopter material travels, only framework configuration shape.
+
+**Push-back (OQ-6).** Resolve the default `repoUrl` to empty. Goal 2 and the RFC-0025 baseline already require explicit opt-in. A project-pointing default makes the first run an act the adopter did not choose, and the signal it gathers is worth less than the trust it spends.
+
+**Conditions.**
+
+1. The OQ-5 whitelist and its hermetic test (no path, token, email or branch can appear in any payload) land in the same release as `--report-upstream`, never after.
+2. The preview shows the exact bytes that will be submitted, and the per-repo fingerprint is a one-way hash that cannot be reversed to a repository name. The adopter docs state that the issue is published under the adopter's own GitHub account.
+3. The "≥N adopter requests" endpoint trigger names a number and a 90-day review date before implementation tasks are generated. Without them the deferral has no actor and no effect.
