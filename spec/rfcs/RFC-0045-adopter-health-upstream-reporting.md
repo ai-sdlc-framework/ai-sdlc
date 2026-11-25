@@ -138,5 +138,5 @@ Product endorses the shape of this RFC. Reporting stays off until an adopter tur
 **Conditions.**
 
 1. The OQ-5 whitelist and its hermetic test (no path, token, email or branch can appear in any payload) land in the same release as `--report-upstream`, never after.
-2. The preview shows the exact bytes that will be submitted, and the per-repo fingerprint is a one-way hash that cannot be reversed to a repository name. The adopter docs state that the issue is published under the adopter's own GitHub account.
+2. The preview shows the exact bytes that will be submitted. `configShape` carries no repository identifier; if one is ever added it is a keyed hash, because a plain hash of a public repository name can be reversed by lookup. The adopter docs state that the issue is published under the adopter's own GitHub account.
 3. The "≥N adopter requests" endpoint trigger names a number and a 90-day review date before implementation tasks are generated. Without them the deferral has no actor and no effect.

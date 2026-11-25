@@ -49,7 +49,7 @@ requiresDocs: []
 
 Product endorses the journey as a bounded layer inside the Soul. Journeys inherit from the Soul and Variant, nest nowhere, and add scoring inputs only through metrics an operator declares. The v0.4 pass meets the condition attached to my v0.2 signature: accessibility floors are preserved, and a stale metric cannot trigger a boost. Adopters who declare no journeys see no change.
 
-**Push-back.** §5.4 sets a Cκ boost and an Eρ₅ elevation at journey scope. PPA v1.1 §5 lets journeys affect SA2 and otherwise inherit from the shard. Scoring behaviour for new inputs belongs in the PPA. This RFC should declare the inputs and leave the magnitudes to the PPA.
+**Push-back.** §5.4 sets a Cκ boost at journey scope. Scoring magnitudes for new inputs belong in the PPA, so this RFC should declare the journey's metrics and leave the size of the boost to the PPA. The Eρ₅ elevation stands: a journey that raises its accessibility floor only tightens its parent, which is the inheritance rule PPA v1.1 already sets.
 
 **Conditions.**
 

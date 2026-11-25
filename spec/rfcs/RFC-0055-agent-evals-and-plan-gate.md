@@ -621,11 +621,11 @@ the plan the spec.**
 
 ### Product review (2026-11-24)
 
-**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved with one push-back and two conditions.
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved with two conditions.
 
 Product endorses both parts. Part A applies the principle that the correct response to unreliability is an eval, not a rule: a prompt, hook or rule change gets measured before it is trusted. The layered corpus, the quarantine rule and the recorded bar before `ai-sdlc/evals` gates anything are the progressive enforcement Product asks of every new mechanism. Part B ships report-only first, drift never blocks, and the sentinel records which rung accepted, which gives the gate an auditable record.
 
-**Push-back.** Part A is the instrument that tells us whether Part B earns its place, so it should land first. A plan gate enforced before the golden corpus can measure it asks a capable model to follow a fence nobody has tested. Sequence the Implementation Plan so Part A reaches nightly runs before `planGate` leaves report mode.
+**On sequencing.** The Implementation Plan already lands Part A first: the corpus and nightly runs (Phases 0 and 1) precede the plan gate in report mode (Phase 2) and enforcement (Phase 3). Product holds the plan to that order; Part A is the instrument that tells us whether Part B earns its place.
 
 **Conditions.**
 
