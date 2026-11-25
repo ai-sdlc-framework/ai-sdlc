@@ -20,7 +20,7 @@ priority: high
 
 **Five-step review (requirements first).** The requirement, from the operator on 2026-11-25: we need telemetry on how long commands take, so we notice why a command is slow and can fix it. A command that waits 10 minutes is not acceptable.
 
-On 2026-11-25 a `cli-file task --pr` run hung for over 10 minutes. Nothing recorded where the time went. The cause (a pre-push step waiting on a verify slot, AISDLC-1413) was found only by inspecting processes and slot files by hand. Today no record says how long a pipeline-cli command, a pre-push gate or a slot wait took.
+On 2026-11-25 a `cli-file task --pr` run hung for over 10 minutes. Nothing recorded where the time went. The investigation first blamed a stuck verify slot (AISDLC-1413) after inspecting processes and slot files by hand; the likelier cause, found later, was `cli-file`'s deliberate 15-minute spacing between filing PRs (`AI_SDLC_FILE_SPACING_MINUTES`). It prints one line that a caller showing only the tail of the output never sees. Two later filings that day each waited 898 seconds for the same reason. Today no record says how long a pipeline-cli command, a pre-push gate or a slot wait took.
 
 - **Delete:** no new service or dashboard. One local append-only file and one report command.
 - **Simplify:** one record shape for every timed span: a command, a pre-push gate, a wait.
@@ -33,6 +33,7 @@ On 2026-11-25 a `cli-file task --pr` run hung for over 10 minutes. Nothing recor
 - Wrap every `pipeline-cli/bin/cli-*.mjs` entry point once, at a shared entry, so a new bin is timed without extra code.
 - Time each step of `.husky/pre-push` and record it as a `gate` span, including steps that exit early.
 - Record every verify-slot wait as a `wait` span with the holder named (AISDLC-1413 supplies the holder identity).
+- Record the `cli-file` filing-spacing wait as a `wait` span. Before sleeping, print to stderr how long it will wait, until when, why (the spacing rule and the previous filing it is spaced from) and how to avoid it (`--queue`, `--spacing-minutes`). While sleeping, repeat the remaining time every 60 seconds. The 15-minute default itself is not changed here.
 - While a command runs past a threshold (default 60 seconds), print one line to stderr naming the span it is in and the elapsed time, and repeat every 60 seconds.
 - `cli-hierarchy timings [--since <dur>] [--slow <ms>]`: p50, p95 and max per command and per gate, plus the slowest individual spans.
 - `cli-hierarchy status`: one line for any span over the threshold in the last hour.
@@ -46,4 +47,5 @@ On 2026-11-25 a `cli-file task --pr` run hung for over 10 minutes. Nothing recor
 - [ ] #5 `cli-hierarchy timings` reports p50, p95 and max per command and per gate, and lists the slowest spans.
 - [ ] #6 `cli-hierarchy status` shows spans over the threshold in the last hour.
 - [ ] #7 No span records a token, credential or file contents; a test asserts the redaction.
-- [ ] #8 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [ ] #8 A `cli-file` spacing wait prints its duration, end time, reason and the `--queue` / `--spacing-minutes` alternatives before sleeping, repeats the remaining time every 60 seconds, and is recorded as a `wait` span.
+- [ ] #9 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
