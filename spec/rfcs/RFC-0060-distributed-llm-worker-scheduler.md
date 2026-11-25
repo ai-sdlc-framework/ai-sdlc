@@ -225,7 +225,7 @@ Not eligible: sign-off and Ready for Review only after all ten OQs are resolved.
 
 ### Product review (2026-11-24)
 
-**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved in direction, with one push-back and three conditions. Scope is the open-source tier; the enterprise RFC-0001 is signed separately.
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved in direction, with one push-back and three conditions. Scope is the open-source tier; the enterprise RFC-0001 is signed separately. This signs direction only. The RFC makes itself eligible for sign-off once all ten Open Questions are resolved, and Product confirms the final text then.
 
 Product endorses keeping task state in the tracker, behind the `IssueStateAdapter` contract, and a bounded open-source scope. Cost is an execution property, and treating subscription burn as a first-class budget fits that. The plan also keeps the diagnosis (OQ list) separate from the solution (four phases), which lets each phase be judged on its own evidence.
 
