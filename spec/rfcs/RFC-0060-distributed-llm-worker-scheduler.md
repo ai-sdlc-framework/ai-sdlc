@@ -220,11 +220,26 @@ Not eligible: sign-off and Ready for Review only after all ten OQs are resolved.
 |---|---|---|---|
 | Engineering | Dominique Legault | pending | |
 | Operator | Dominique Legault | pending | |
-| Product | | pending | |
+| Product | Alexander Kline | ✅ Signed (approved in direction, one push-back, three conditions) | 2026-11-24 |
 | Design | | pending | |
+
+### Product review (2026-11-24)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved in direction, with one push-back and three conditions. Scope is the open-source tier; the enterprise RFC-0001 is signed separately.
+
+Product endorses keeping task state in the tracker, behind the `IssueStateAdapter` contract, and a bounded open-source scope. Cost is an execution property, and treating subscription burn as a first-class budget fits that. The plan also keeps the diagnosis (OQ list) separate from the solution (four phases), which lets each phase be judged on its own evidence.
+
+**Push-back.** OQ-4 (affinity, fair-share, backfill) and OQ-10 (cost-pool routing) describe a placement engine that decides who works on what. Workers claiming from the tracker is plumbing. A policy engine on top is routing, and it should not be built until an eval shows claim-based dispatch failing.
+
+**Conditions.**
+
+1. Phase 2 and later are tasked only after Phase 1 has run for 90 days and the result is recorded in this RFC, showing that single-host capacity was the binding constraint.
+2. An adopter who configures nothing sees RFC-0051 and RFC-0059 behaviour unchanged. The adapter contract is optional, and the RFC states this degenerate case in its compatibility answer (OQ-9).
+3. The burn pacer ships in shadow mode first, reporting projected against actual quota use, and every phase reports scheduler overhead per dispatched task before it is promoted.
 
 ## Revision History
 
 | Version | Date | Change |
 |---|---|---|
 | v0.1 | 2026-10-28 | Draft: problem, component diagram, comparison, four-phase outline, ten unresolved OQs. |
+| v0.2 | 2026-11-24 | Product sign-off (Alexander Kline): approved in direction with one push-back and three conditions. Lifecycle unchanged. |
