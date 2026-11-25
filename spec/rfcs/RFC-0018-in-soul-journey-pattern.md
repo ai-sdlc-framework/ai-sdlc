@@ -17,7 +17,7 @@ requiresDocs: []
 # RFC-0018: In-Soul Journey Pattern
 
 **Document type:** Normative
-**Status:** Ready for Review v0.4.1. Design Authority editorial pass on 2026-11-23 (§13 v0.4); Engineering amendment v0.4.1 the same day defines the records and data the OQ-6 and OQ-7 amendments depend on (§13 v0.4.1). Engineering re-confirmed v0.4 and signed v0.4.1 on 2026-11-23; Product re-confirmation and Design Authority review of v0.4.1 are pending (Sign-Off). v0.3 status: operator OQ walkthrough complete 2026-05-28 with full rigor rubric (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument per OQ). All 10 §10 OQs resolved. Cross-cutting framing: operator-impacting journey-lifecycle events (count thresholds, state cardinality, metric staleness, accessibility-cadence overdue, WCAG-superseded use, sub-journey / cross-soul activation requests, state-ID drift) **route through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md)** — pipeline never halts. §10.1 codifies per-Soul / per-org config schema. Implementation broken into 6 phase tasks (AISDLC-465..470).
+**Status:** Ready for Review v0.4.1. Design Authority editorial pass on 2026-11-23 (§13 v0.4); Engineering amendment v0.4.1 the same day defines the records and data the OQ-6 and OQ-7 amendments depend on (§13 v0.4.1). Engineering re-confirmed v0.4 and signed v0.4.1 on 2026-11-23; Product signed v0.4.1 in full on 2026-11-24. Design Authority review of v0.4.1 is pending (Sign-Off). v0.3 status: operator OQ walkthrough complete 2026-05-28 with full rigor rubric (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument per OQ). All 10 §10 OQs resolved. Cross-cutting framing: operator-impacting journey-lifecycle events (count thresholds, state cardinality, metric staleness, accessibility-cadence overdue, WCAG-superseded use, sub-journey / cross-soul activation requests, state-ID drift) **route through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md)** — pipeline never halts. §10.1 codifies per-Soul / per-org config schema. Implementation broken into 6 phase tasks (AISDLC-465..470).
 **Lifecycle:** Ready for Review
 **Created:** 2026-05-04
 **Updated:** 2026-11-23
@@ -41,6 +41,21 @@ requiresDocs: []
 | Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ✅ Signed v0.3 (all 10 §10 OQs resolved per operator walkthrough 2026-05-28 with full rigor rubric; pending Design editorial pass) | 2026-05-28 |
 | Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ✅ Signed v0.4.1 (re-confirms the v0.4 Design Authority pass and authors the v0.4.1 Engineering amendment to OQ-6 and OQ-7) | 2026-11-23 |
 | Alexander Kline | Head of Product Strategy / Product Authority | ✅ Signed v0.2 (PPA-composability scope only; full v1.0+ pending Mo's editorial) | 2026-05-04 |
+| Alexander Kline | Head of Product Strategy / Product Authority | ✅ Signed v0.4.1 in full (approved with one push-back and three conditions; supersedes the v0.2 scoped signature) | 2026-11-24 |
+
+### Product review (2026-11-24)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved with one push-back and three conditions.
+
+Product endorses the journey as a bounded layer inside the Soul. Journeys inherit from the Soul and Variant, nest nowhere, and add scoring inputs only through metrics an operator declares. The v0.4 pass meets the condition attached to my v0.2 signature: accessibility floors are preserved, and a stale metric cannot trigger a boost. Adopters who declare no journeys see no change.
+
+**Push-back.** §5.4 sets a Cκ boost and an Eρ₅ elevation at journey scope. PPA v1.1 §5 lets journeys affect SA2 and otherwise inherit from the shard. Scoring behaviour for new inputs belongs in the PPA. This RFC should declare the inputs and leave the magnitudes to the PPA.
+
+**Conditions.**
+
+1. The Cκ boost magnitude and cap in `docs/operations/journey-metrics.md` are defined by a PPA amendment, and the boost is applied in shadow mode first.
+2. A journey with no declared `successMetrics` scores identically to its parent Soul or Variant, confirmed by a conformance test in Phase 6.
+3. Ninety days after the first InternalAdopter journey ships, Product reviews boost activations against realised journey outcomes, and the boost is kept, changed or removed on that evidence.
 
 ### Re-confirmation of v0.4 normative changes
 
@@ -49,7 +64,7 @@ The v0.4 editorial pass changes the `accessibility` and `successMetrics` schema 
 | Authority | Status |
 |---|---|
 | Engineering Authority | ✅ Re-confirmed v0.4 and signed v0.4.1, Dominique Legault, 2026-11-23 |
-| Product Authority | [PENDING — Product Authority] |
+| Product Authority | ✅ Re-confirmed v0.4 and signed v0.4.1 in full, Alexander Kline, 2026-11-24 |
 | Design Authority | Sign-off follows merge of this pass. Review of the v0.4.1 Engineering amendment (OQ-6 and OQ-7) requested |
 
 ### Product Authority review (PPA-composability scope only)
@@ -717,3 +732,4 @@ Validation criteria (Mo's edits welcome):
 | v0.3.1 | 2026-10-22 | Morgan Hirtle | Editorial: example identifiers replaced with neutral placeholders. No normative change. |
 | v0.4 | 2026-11-23 | Morgan Hirtle | Design Authority editorial pass on §5.4 success metrics, the journey accessibility block and all ten §10 resolutions. Normative: `conformanceTarget` fixed at 100, so conformance is pass/fail (§5.3); `wcagVersion` floor added and `3.0` removed from the enum (§5.3, OQ-7); `additionalCriteria` added for AA plus named AAA criteria, replacing the AAA examples, with each entry required to exist in the declared version and sit above the declared level (§5.1, §5.3, §11); Eρ₅ elevation also counts a later `wcagVersion` and any `additionalCriteria` (§5.4, §6.2); `auditCadence` required, a full audit defined as an evaluation of every screen against all declared criteria, with no automated scan alone counting as an audit, due dates defined per cadence, a new journey counted as audited on its declaration date, `release-gated` and `continuous` audits allowed to cover only the states touched with a full audit due 12 months after the last full one, an audit clearing every earlier due date whose states it covers and a full audit clearing them all, and posture cadences combined by earliest due date with RFC-0022 `auditFrequency` mapped (OQ-6); success metrics gain required `unit` (with `seconds` and `count` 0 or more) and `direction`, `targetSeconds` is removed, the Cκ boost covers any metric past threshold and applies once per journey, and per-state metrics are not part of v1 (§5.4); `wcag-version-superseded` renamed `wcag-version-not-latest`, fired for 2.0 and 2.1 when a journey is declared or its version changes (OQ-7). Editorial: a Design Authority note on each §10 resolution; research figures marked as unverified; §6.2 and §7 aligned with these changes; W3C references added and corrected; §9 follow-ups extended. Engineering and Product re-confirmation pending. |
 | v0.4.1 | 2026-11-23 | Dominique Legault (Engineering Authority; operator rubric) | Engineering amendment to the v0.4 OQ-6 and OQ-7 amendments, defining the records and data they depend on; each item decided with the full rubric. Normative: an `AccessibilityAudit` resource shaped like `MetricSnapshot` (journey, `auditedAt`, `scope`, `statesCovered`, required `auditor` and `reportUrl`); a release for `release-gated` is a git tag matching the Soul's `releaseTagPattern` (default `v*`), and a change for `continuous` is a merged PR whose work item targets the journey; journeys declare a required `declaredAt` that MUST NOT be in the future or change; only regimes in the accessibility regime list (default Section-508, EN-301-549, EAA, ADA-Title-II, ADA-Title-III, AODA; extendable per org) feed the earliest-due-date rule; `wcag-version-not-latest` is emitted by the declaration validator comparing PR base and head; `additionalCriteria` checks run against a table generated from W3C `wcag.json`, and `additionalCriteria` MUST be empty at level AAA. §5.1, §5.2, §5.3, §6.1, §6.3, §9, §10.1 aligned. Engineering re-confirmed v0.4 and signed v0.4.1; Product re-confirmation and Design Authority review pending. |
+| v0.4.1 | 2026-11-24 | Alexander Kline (Product Authority) | Product sign-off in full: one push-back (journey-scope scoring magnitudes belong in the PPA) and three conditions. No normative change to this RFC. |
