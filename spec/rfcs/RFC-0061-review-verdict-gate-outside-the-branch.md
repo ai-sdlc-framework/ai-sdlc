@@ -617,8 +617,14 @@ All eight Open Questions resolved on 2026-11-03.
 |---|---|---|---|
 | Engineering | Dominique Legault | ✅ Signed (all eight OQs walked with the full rubric; error-resistant claim, verdict ref, clean-replay carry-forward) | 2026-11-03 |
 | Operator | Dominique Legault | ✅ Signed (hard v6 cut with names kept; tasks filed after landing, not dispatched) | 2026-11-03 |
-| Product | | pending | |
+| Product | Alexander Kline | ✅ Acknowledged (implemented) | 2026-11-25 |
 | Design | | pending | |
+
+### Product review (2026-11-25)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Acknowledged after implementation.
+
+Product acknowledges RFC-0061. Keeping the verdict outside the reviewed branch, bound to the head commit, removes the chore commits and rebase friction of v6 while preserving the gate's purpose. The shadow phase with a catch ledger preceded the cut, and the upgrade trigger is event-based. One editorial note: the body Lifecycle line still reads Signed Off while the frontmatter reads Implemented.
 
 ## Revision History
 

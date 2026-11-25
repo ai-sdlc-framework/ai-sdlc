@@ -438,8 +438,14 @@ probe, **and over two leaves** because a probe bundle still blends harnesses.
 | --- | --- | --- |
 | Engineering | Dominique Legault | ✅ Signed (reads once, strongest model only at plan and synthesis, baseline checklist no plan can remove, evidence-cited findings, per-stage leaves; 2026-10-01) |
 | Operator | Dominique Legault | ✅ Signed (full-remit pipeline beside the Opus security reviewer as a head-to-head; nothing retires before 50 compared PRs at 95 percent; 2026-10-01) |
-| Product | Alexander Kline | ⏸ Pending |
+| Product | Alexander Kline | ✅ Signed 2026-11-25 (approved) |
 | Design | Morgan | ⏸ Pending |
+
+### Product review (2026-11-25)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved.
+
+Product approves RFC-0052. The staged pipeline reads the diff once, reserves the strongest model for planning and synthesis, and keeps a baseline checklist no plan can remove. It runs head to head with the current reviewers in shadow, and nothing retires before the stated comparison bar is met. The three-reviewer set remains the default. One editorial note: "act-band" is used in the promotion bar but not defined in the RFC.
 
 ## Revision History
 

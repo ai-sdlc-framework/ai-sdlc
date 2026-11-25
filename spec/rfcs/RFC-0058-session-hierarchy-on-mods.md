@@ -530,8 +530,14 @@ by number.**
 |---|---|---|---|
 | Engineering | Dominique Legault | ✅ Signed (six OQs resolved with the full rubric; keystroke layer retired by design, authority stays on the board) | 2026-10-22 |
 | Operator | Dominique Legault | ✅ Signed (tmux kept as a window manager only; Mods gaps go upstream first, workarounds are interim) | 2026-10-22 |
-| Product | | pending | |
+| Product | Alexander Kline | ✅ Signed (approved) | 2026-11-25 |
 | Design | | not applicable | |
+
+### Product review (2026-11-25)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved.
+
+Product approves RFC-0058. The Phase 0 spike measured the saving before the design was marked ready, which is the order Product supports. Moving wakes and relays onto hooks removes a keystroke layer that was inferring state from pane text, and board events consumed by hooks cost no model turn. Adopters below the version floor remain on the tmux path during rollout.
 
 ## Revision History
 

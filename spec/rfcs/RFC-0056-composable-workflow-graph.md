@@ -413,8 +413,14 @@ that forwarded the hard cases unchanged; **over as-is** by the automation ladder
 |---|---|---|---|
 | Engineering | Dominique Legault | ✅ Signed (five OQs resolved with the full rubric; phases 1 to 4 change no behaviour; phase 5 gated on RFC-0057) | 2026-10-20 |
 | Operator | Dominique Legault | ✅ Signed (frozen set names its enforcers; dispatch role retirement gets its own record) | 2026-10-20 |
-| Product | | pending | |
+| Product | Alexander Kline | ✅ Signed (approved) | 2026-11-25 |
 | Design | | not applicable | |
+
+### Product review (2026-11-25)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved.
+
+Product approves RFC-0056. Expressing the execute pipeline as a node and edge document lets adopters reshape it without forking, and the golden replay test holds phases 1 to 4 to no change in behaviour. Validation that refuses any path to `ship` without an anchor is a fence placed at the right point. Staged review enters as a non-gating shadow node, consistent with RFC-0052.
 
 ## Revision History
 

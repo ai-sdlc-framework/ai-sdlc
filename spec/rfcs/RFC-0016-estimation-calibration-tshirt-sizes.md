@@ -52,8 +52,14 @@ Status is Implemented to match lifecycle Implemented (AISDLC-856, AISDLC-1223). 
 ## Sign-Off
 
 - [x] Engineering owner — Dominique Legault (2026-05-03)
-- [ ] Product owner — Alexander Kline (pending review)
+- [x] Product owner — Alexander Kline (2026-11-25, acknowledged after implementation)
 - [x] Operator owner — Dominique Legault (2026-05-03)
+
+### Product review (2026-11-25)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Acknowledged after implementation.
+
+Product acknowledges RFC-0016. The design stays off until an adopter enables it, and promotion is corpus-driven against stated miss rates and Stage A coverage, without a calendar gate. Operator overrides count as calibration samples, which treats reasoned human judgment as signal. The runtime evidence records `estimation.class-assignment` and `estimation.stage-b` as degraded (2026-09-30); Product supports resolving both before the flag moves toward default. The PPA v1.3 working draft plans for calibrated t-shirt sizes to bootstrap ER2 (Build Complexity) in v1.4, so the calibration quality here carries directly into priority scoring.
 
 ## Revision History
 

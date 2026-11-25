@@ -515,8 +515,21 @@ artefact against a heavy dependency in a CLI that adopters install.
 |---|---|---|---|
 | Engineering | Dominique Legault | ✅ Signed (six OQs resolved through the full rubric; Phase 1 wires engines that exist before any new theory, with the three corrected premises built in) | 2026-11-06 |
 | Operator | Dominique Legault | ✅ Signed (every resolution recorded as a Decision record DEC-0385 to DEC-0390; Phase 3 start remains gated on the 200-per-cell count that OQ-3 now gives a clock) | 2026-11-06 |
-| Product | | pending | |
+| Product | Alexander Kline | ✅ Signed (approved, with two conditions on Phase 3 PPA fitting) | 2026-11-25 |
 | Design | | pending | |
+
+### Product review (2026-11-25)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved, with two conditions on the Phase 3 PPA item.
+
+Product approves the sequence: wire the engines that exist, then calibrate, then learn. Phase 1 replaces an mtime-heavy dispatch order with an explicit rank behind a legacy default, and every Phase 2 and 3 item runs in shadow first. The 200-labelled-outcomes-per-cell gate opens Phase 3 on evidence, and Product prefers it to any calendar date.
+
+Log-space PPA with fitted weights touches Product scoring directly, so Product states its position now, ahead of the gate. The PPA composite is a conjunction: every factor holds a veto, and the spec fixes weights so that no single input can be negotiated to zero. The per-factor floor in item 2 preserves that property.
+
+**Conditions.**
+
+1. Fitted weights stay within ranges declared in the spec, each with a floor above zero, and a fitted set goes live only through a decision record that Product signs, after a shadow period comparing fitted and current rankings.
+2. A change to the factor structure itself, as distinct from its weights, returns to Product review.
 
 ## Revision History
 

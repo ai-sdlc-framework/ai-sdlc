@@ -1081,8 +1081,14 @@ only** because that is today's behaviour.
 | --- | --- | --- |
 | Engineering | Dominique Legault | ✅ Signed (provider-neutral layer behind one runtime contract; abstain always means pre-RFC behaviour; promotion bars enforced in code; attestation untouched; 2026-09-30) |
 | Operator | Dominique Legault | ✅ Signed (gives the unwired judgment seams a backend and measures each one before it acts; review relaxation bounded to trusted work with security review always run; 2026-09-30) |
-| Product | Alexander Kline | ⏸ Pending |
+| Product | Alexander Kline | ✅ Signed 2026-11-25 (approved) |
 | Design | Morgan | ⏸ Pending |
+
+### Product review (2026-11-25)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved.
+
+Product approves RFC-0049. Replacing regex and keyword heuristics with typed judgments that may abstain, behind a provider-neutral contract, follows the principle that unreliability calls for an eval. Every capability starts in shadow and reaches enforce only with a promotion record, measured precision and a pinned model, and a model change returns it to shadow. Product affirms the boundary already in the RFC: PPA and soul-alignment scores may run in shadow, and any move to enforce on them requires a Product-signed decision.
 
 ## Revision History
 
