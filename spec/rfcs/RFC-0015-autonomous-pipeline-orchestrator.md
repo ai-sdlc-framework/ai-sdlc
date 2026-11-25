@@ -32,7 +32,7 @@ requiresDocs: []
 ## Sign-Off
 
 - [x] Engineering owner — Dominique Legault (2026-05-02)
-- [x] Product owner — Alexander Klineander Kline (2026-05-04)
+- [x] Product owner — Alexander Kline (2026-05-04)
 - [x] Operator owner — Dominique Legault (2026-05-02)
 
 ### Product Authority review
