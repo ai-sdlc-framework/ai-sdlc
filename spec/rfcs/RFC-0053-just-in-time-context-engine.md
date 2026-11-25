@@ -501,7 +501,7 @@ the question stays open.
 | --- | --- | --- |
 | Engineering | Dominique Legault | ✅ Signed (all 8 OQs resolved via full rubric; 2026-10-09) |
 | Operator | Dominique Legault | ✅ Signed (all 8 OQs resolved via full rubric; 2026-10-09) |
-| Product | Alex | ⏸ Pending |
+| Product | Alexander Kline | ⏸ Pending |
 | Design | Morgan | ⏸ Pending |
 
 ## Revision History

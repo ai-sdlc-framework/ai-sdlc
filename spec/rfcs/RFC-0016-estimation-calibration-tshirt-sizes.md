@@ -52,7 +52,7 @@ Status is Implemented to match lifecycle Implemented (AISDLC-856, AISDLC-1223). 
 ## Sign-Off
 
 - [x] Engineering owner — Dominique Legault (2026-05-03)
-- [ ] Product owner — Alex (pending review)
+- [ ] Product owner — Alexander Kline (pending review)
 - [x] Operator owner — Dominique Legault (2026-05-03)
 
 ## Revision History

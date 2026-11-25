@@ -25,7 +25,7 @@ requiresDocs: []
 ## Sign-Off
 
 - [ ] Engineering owner — Dominique Legault
-- [ ] Product owner — Alexander Kline
+- [ ] Product owner — Alexander Klineander Kline
 
 ## 1. Summary
 
