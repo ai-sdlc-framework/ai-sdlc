@@ -616,8 +616,21 @@ the plan the spec.**
 |---|---|---|---|
 | Engineering | Dominique Legault | pending | |
 | Operator | Dominique Legault | pending | |
-| Product | | pending | |
+| Product | Alexander Kline | ✅ Signed (approved with one push-back and two conditions) | 2026-11-24 |
 | Design | | not applicable | |
+
+### Product review (2026-11-24)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved with one push-back and two conditions.
+
+Product endorses both parts. Part A applies the principle that the correct response to unreliability is an eval, not a rule: a prompt, hook or rule change gets measured before it is trusted. The layered corpus, the quarantine rule and the recorded bar before `ai-sdlc/evals` gates anything are the progressive enforcement Product asks of every new mechanism. Part B ships report-only first, drift never blocks, and the sentinel records which rung accepted, which gives the gate an auditable record.
+
+**Push-back.** Part A is the instrument that tells us whether Part B earns its place, so it should land first. A plan gate enforced before the golden corpus can measure it asks a capable model to follow a fence nobody has tested. Sequence the Implementation Plan so Part A reaches nightly runs before `planGate` leaves report mode.
+
+**Conditions.**
+
+1. The OQ-6 enforce decision records the golden-case delta with the plan required against the plan optional, covering first-pass approval and review iterations. Enforcement requires that delta to favour the plan.
+2. The same decision record states a retirement criterion, for example no measurable gain after the stated number of tasks, so the gate is removed when a more capable model no longer needs it.
 
 ## Revision History
 
@@ -625,6 +638,7 @@ the plan the spec.**
 |---|---|---|
 | v0.1 | 2026-10-16 | Draft from the playbook gap analysis; eight Open Questions, none resolved. |
 | v0.2 | 2026-11-01 | OQ walkthrough with the operator, full rubric per question, after a substrate survey (no evals, plan or gate code shipped; RFC-0049 judgment layer, RFC-0050 ledger and replay, RFC-0052 staged review advisory under DEC-0149 are). Lifecycle Draft to Ready for Review; sign-off in a follow-up PR, phase tasks filed with `cli-file` after it lands. OQ-1 own `cli-evals` runner on the RFC-0050 replay plumbing, `claude plugin eval` deferred. OQ-2 layered golden (about ten, planner-owned) plus mined by proposal, quarantine after two unexplained consecutive failures, halt at `budgetUsd`. OQ-3 rungs deterministic, judgment when configured, Sonnet reviewer; planner only on a second reject via the board; rung recorded in the sentinel. OQ-4 report-only until 30 nightly runs with golden flake under 2%, then one class (b) decision gates agent-shaping PRs on a golden flip outside its band; aggregate drop stays a comment; `agent-shaping` detect group is net-new. OQ-5 `.ai-sdlc/plans/<task-id>.md` committed, three patch-id exclusion lists plus lockstep test, Step 11 PR-body summary. OQ-6 `spec.build.planGate` report then enforce by decision after 50 tasks with rung-1 and would-block rates recorded; scope task worktrees only. OQ-7 proposals in the operator digest (not a dispatch digest, which does not exist) from failed and iteration-exhausted verdicts and red main shas (no `[main-health]` issue since AISDLC-929); `mine --sha`. OQ-8 labelled plan section after the ACs, drift computed at Step 7 and recorded at Step 8, unplanned file a major finding unless justified; staged planner gets Files and Risks as a risk-map input. |
+| v0.2.1 | 2026-11-24 | Product sign-off (Alexander Kline): approved with one push-back and two conditions. Lifecycle unchanged; Engineering and Operator sign-off pending. |
 
 ## References
 
