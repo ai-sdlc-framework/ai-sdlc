@@ -234,7 +234,7 @@ Product endorses keeping task state in the tracker, behind the `IssueStateAdapte
 **Conditions.**
 
 1. Phase 2 and later are tasked only after Phase 1 has run for 90 days and the result is recorded in this RFC, showing that single-host capacity was the binding constraint.
-2. An adopter who configures nothing sees RFC-0051 and RFC-0059 behaviour unchanged. The adapter contract is optional, and the RFC states this degenerate case in its compatibility answer (OQ-9).
+2. An adopter who configures nothing sees RFC-0051 and RFC-0059 behavior unchanged. The adapter contract is optional, and the RFC states this degenerate case in its compatibility answer (OQ-9).
 3. The burn pacer ships in shadow mode first, reporting projected against actual quota use, and every phase reports scheduler overhead per dispatched task before it is promoted.
 
 ## Revision History
