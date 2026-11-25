@@ -40,6 +40,13 @@ requiresDocs: []
 
 - [x] Engineering owner — Dominique Legault (2026-05-20)
 - [x] Operator owner — Dominique Legault (2026-05-20)
+- [x] Product owner — Alexander Kline (2026-11-25, acknowledged after implementation)
+
+### Product review (2026-11-25)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Acknowledged after implementation.
+
+Product acknowledges RFC-0041. Separating the conductor from workers, with the filesystem board as the only channel, addressed a measured failure (six of seven subagents lost to the 600 s watchdog on 2026-05-20) with plumbing and without routing logic. Worker kind remains an operator choice per task. Later RFCs (0051, 0059) build on this board, which supports the decision to keep it simple.
 
 ## Revision History
 

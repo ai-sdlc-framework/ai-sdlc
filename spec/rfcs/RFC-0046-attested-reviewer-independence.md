@@ -314,8 +314,14 @@ Captured as the rejected options in each Open Question resolution below.
 | Pillar | Owner | Status |
 |---|---|---|
 | CTO / Engineering Authority + AI-SDLC Operator | Dominique Legault | ✅ Signed (2026-09-06 — mint-not-amend design; independence as re-derivable tier on RFC-0043 substrate; defends determined same-machine coordinator) |
-| Product | Alexander Kline | ⏸ Pending |
+| Product | Alexander Kline | ✅ Signed 2026-11-25 (approved) |
 | Design Authority | Morgan | ⏸ Pending |
+
+### Product review (2026-11-25)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved.
+
+Product approves RFC-0046. Naming the tiers honestly (`none`, `attested`, `isolated`) and aggregating by the weakest link gives adopters a guarantee that names its mechanism. The tier is informational by default, and enforcement arrives only when an adopter sets `requiredTier`, so adopters who do nothing see no change. Product notes the RFC-0061 amendment that moves the tier carrier.
 
 ## Revision History
 

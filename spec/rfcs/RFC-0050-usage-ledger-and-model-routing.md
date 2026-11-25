@@ -671,8 +671,16 @@ a continuous bandit** because a table can be read, diffed and cited.
 | --- | --- | --- |
 | Engineering | Dominique Legault | ✅ Signed (measures at the harness, where the calls are made; one deduplicated record per call; routing is a pure lookup with a logged reason; no table file means no behaviour change; 2026-09-30) |
 | Operator | Dominique Legault | ✅ Signed (per-model usage and allotment tracking from real data; cheaper models need evidence and approval, quality regressions revert automatically; 2026-09-30) |
-| Product | Alexander Kline | ⏸ Pending |
+| Product | Alexander Kline | ✅ Signed 2026-11-25 (approved with one condition) |
 | Design | Morgan | ⏸ Pending |
+
+### Product review (2026-11-25)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved with one condition.
+
+Product approves RFC-0050. Measuring at the harness, one deduplicated record per call, gives cost a factual basis, and cost sits correctly as an execution property. The routing table passes the fence test: each cell cites its evidence, cheaper models require evidence and approval, and the resolver is a pure lookup. Product notes that the ledger stays on the machine and that downstream consumers such as enterprise RFC-0001 receive counts only.
+
+**Condition.** An entry in the overrides file records its reason alongside the stronger model it selects, so a later table change can confirm the override is still needed when it supersedes it.
 
 ## Revision History
 

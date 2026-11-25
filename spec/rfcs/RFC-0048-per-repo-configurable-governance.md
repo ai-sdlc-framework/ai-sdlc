@@ -286,8 +286,14 @@ expansion to the granular schema + the OQ-3 fixed set.
 | --- | --- | --- |
 | Engineering | Dominique Legault | ✅ Signed (one per-repo policy source of truth rendered to every surface; defaults strict; sound implementation surface across 601/602/603; 2026-09-07) |
 | Operator | Dominique Legault | ✅ Signed (fixes the real narration/enforcement drift; trust boundary follows the internal-vs-external work-item architecture; 2026-09-07) |
-| Product | Alexander Kline | ⏸ Pending |
+| Product | Alexander Kline | ✅ Acknowledged 2026-11-25 (implemented) |
 | Design | Morgan | ⏸ Pending |
+
+### Product review (2026-11-25)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Acknowledged after implementation.
+
+Product acknowledges RFC-0048. One resolved policy now drives both the rule text agents read and the hook that enforces it, which closes the drift between narration and enforcement. Strict defaults, fail-closed parsing and policy read only from the base branch place the trust boundary where it belongs. Policy here acts as a fence: it scopes what an agent may do and leaves how to the agent.
 
 ## Revision History
 

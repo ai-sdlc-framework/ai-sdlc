@@ -213,8 +213,14 @@ its verdict and restarts one only when a claimable task exists. Already in force
 |---|---|---|---|
 | Engineering | Dominique Legault | ✅ Signed | 2026-10-23 |
 | Operator | Dominique Legault | ✅ Signed | 2026-10-23 |
-| Product | | pending | |
+| Product | Alexander Kline | ✅ Acknowledged (implemented) | 2026-11-25 |
 | Design | | pending | |
+
+### Product review (2026-11-25)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Acknowledged after implementation.
+
+Product acknowledges RFC-0059. The weekly token audit showed standing executors consuming 47 percent of the week's tokens while idle, and spawning per task with termination on verdict applies the cost-per-instance principle directly. The concurrency cap reads the budget pacer, which keeps cost an execution property.
 
 ## Revision History
 

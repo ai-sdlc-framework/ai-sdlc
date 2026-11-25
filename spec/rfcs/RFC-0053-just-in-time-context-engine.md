@@ -501,8 +501,16 @@ the question stays open.
 | --- | --- | --- |
 | Engineering | Dominique Legault | ✅ Signed (all 8 OQs resolved via full rubric; 2026-10-09) |
 | Operator | Dominique Legault | ✅ Signed (all 8 OQs resolved via full rubric; 2026-10-09) |
-| Product | Alexander Kline | ⏸ Pending |
+| Product | Alexander Kline | ✅ Signed 2026-11-25 (approved with one condition) |
 | Design | Morgan | ⏸ Pending |
+
+### Product review (2026-11-25)
+
+**From:** Alexander Kline, Head of Product Strategy. **Disposition:** Approved with one condition.
+
+Product approves RFC-0053. Selecting context by relevance at the moment of need, from scored, dated and cited entries, addresses a measurable cost (14k to 25k tokens of standing context per session start). Promotion to canonical stays with a human, and profile changes require a decision record backed by the cache-versus-JIT report. Product notes that external signals reach the PPA as inputs only.
+
+**Condition.** The compatibility section states the adopter degenerate case: what an adopter who configures nothing experiences, and how to keep today's behaviour.
 
 ## Revision History
 
