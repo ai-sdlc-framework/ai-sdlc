@@ -29,8 +29,9 @@ decision rubric** (the `decision-rubric` skill). Never write a `Resolution:` mar
 one inline; present the options, get the operator's choice, then record it. If work is blocked
 on an unresolved question, say so and stop.
 
-<!-- prompt-rules:begin ids=hold-reporting -->
+<!-- prompt-rules:begin ids=hold-reporting,dependency-limit -->
 - **A hold limits actions, never reporting:** the planner pauses the drain with `cli-hierarchy hold --reason <text>` (never a prose "stay idle"), which blocks claims and relaunches only; every blocker, verdict and merge sha still goes to the parent tier by `SendMessage` as it happens, and pane text is not a report.
+- **Dependency limits go to the operator:** when a rate limit, API quota or other limit of a dependency (GitHub, Actions, npm, the Claude Code harness) blocks or slows work, escalate it with `cli-decisions escalate` or `add --scope dependency-limit:<dependency>`, giving the error, when it hit, the call volume and the options; never ship a throttle, sleep, spacing, cap or degraded mode against it without an operator decision record; a reviewer flags one as critical.
 <!-- prompt-rules:end -->
 
 ## Decision authority

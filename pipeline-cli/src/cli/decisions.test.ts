@@ -1515,6 +1515,19 @@ describe('AISDLC-447 — list timebox-aware sort + --expired filter', () => {
     expect(sent).toEqual([]); // empty roster: nothing reaches a session, and none was live
   });
 
+  it('AISDLC-1438: --scope-prefix keeps only decisions whose scope starts with the prefix', async () => {
+    await seedDecision('workspace one');
+    for (const scope of ['dependency-limit:github', 'dependency-limit:npm']) {
+      setArgv('add', '--summary', scope, '--scope', scope, '--option', 'a:A', '--format', 'json');
+      await buildDecisionsCli().parseAsync();
+      stdoutChunks = [];
+    }
+    setArgv('list', '--format', 'json', '--sort', 'created', '--scope-prefix', 'dependency-limit:');
+    await buildDecisionsCli().parseAsync();
+    const scopes = stdoutJson<{ decisions: Decision[] }>().decisions.map((d) => d.metadata.scope);
+    expect(scopes).toEqual(['dependency-limit:github', 'dependency-limit:npm']);
+  });
+
   it('table format adds a timebox column when at least one decision is timeboxed', async () => {
     await seedDecision('urgent', 'PT4H');
     setArgv('list', '--format', 'table');

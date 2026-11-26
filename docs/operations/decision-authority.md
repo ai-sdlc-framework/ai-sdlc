@@ -30,6 +30,8 @@ Ask three questions, in this order, and take the strictest answer:
 
 Class (c) is never derived from the other questions; it is recognised by its subject. Class (c) is short: legal and licensing, money, accounts and credentials, and actions only the operator's identity can perform (merging the release PR, closing or disarming a PR).
 
+**Dependency limits are operator-routed (DEC-0433).** A workaround for a limit of a dependency (a rate limit, API quota or platform limit of GitHub, Actions, npm or the Claude Code harness) is routed like class (c): the planner may not decide it under class (a) or (b), whatever its reversibility. Record the hit with `cli-decisions escalate` (task sessions) or `cli-decisions add` (planner) with `--scope dependency-limit:<dependency>`, giving the error, when it was hit, the call volume behind it and the options; `cli-decisions list --scope-prefix dependency-limit:` shows every escalation, the evidence base for larger moves such as replacing a dependency. No throttle, sleep, spacing, cap or degraded mode ships against the limit without the operator's decision record (the filing spacing deleted by DEC-0432 is the case that set this rule).
+
 **What counts as a weakening.** Only a change that loosens a control beyond what a recorded decision already allows is a weakening. Tightening a control, or applying what a decision on `main` already permits, is class (a).
 
 **Away rule.** No session opens a blocking question prompt to the operator while the operator is away. Questions go to the planner, which decides (a) and (b) and collects (c).
@@ -47,6 +49,7 @@ Class (c) is never derived from the other questions; it is recognised by its sub
 | Choosing the option that needs no exception to any hook or rule (AISDLC-721 waits for the hook fix, then uses the Edit tool) | (a)                                   | No control is bypassed or loosened                                                                  |
 | Subscribing to a paid service                                                                                                | (c)                                   | Money and an account                                                                                |
 | Accepting a licence for a dependency                                                                                         | (c)                                   | Legal                                                                                               |
+| A throttle, sleep or spacing against a GitHub rate limit                                                                     | (c)-routed                            | A dependency limit (DEC-0433); escalate with `--scope dependency-limit:github`                      |
 
 ## Where decision events live (AISDLC-825)
 

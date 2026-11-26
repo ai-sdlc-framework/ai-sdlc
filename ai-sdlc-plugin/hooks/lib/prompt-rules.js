@@ -99,6 +99,11 @@ const PROMPT_RULES = [
     text: '**Hook-spawned processes (AISDLC-1129):** a change that spawns a process from a git hook (husky, pre-push, lint-staged) must state how it handles `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and `GIT_PREFIX` (unset, scrub with `gitSafeEnv()`, or justify keeping one); an undeclared inheritance is a critical finding (the 2026-10-30 parent-checkout deletion).',
     detect: /Hook-spawned processes/g,
   },
+  {
+    id: 'dependency-limit',
+    text: '**Dependency limits go to the operator:** when a rate limit, API quota or other limit of a dependency (GitHub, Actions, npm, the Claude Code harness) blocks or slows work, escalate it with `cli-decisions escalate` or `add --scope dependency-limit:<dependency>`, giving the error, when it hit, the call volume and the options; never ship a throttle, sleep, spacing, cap or degraded mode against it without an operator decision record; a reviewer flags one as critical.',
+    detect: /Dependency limits go to the operator/g,
+  },
 ];
 
 const BEGIN_RE = /<!-- prompt-rules:begin ids=([a-z0-9,-]+) -->/;

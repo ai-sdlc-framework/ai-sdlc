@@ -16,7 +16,10 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 // Ceiling for the statically measurable executor start context (AISDLC-1067). Raise only
 // with a reason. This is only a proxy for the 30k-token target on the full second model call,
 // which also includes skill/agent listings and MCP schemas that depend on the operator machine.
-const STATIC_CEILING_TOKENS = 7500;
+// 7500 -> 7650 (AISDLC-1438, DEC-0433): the SessionStart governance block renders every
+// prompt rule, and the operator-ruled dependency-limit rule adds about 115 tokens to it; the
+// executor command body does not repeat the rule.
+const STATIC_CEILING_TOKENS = 7650;
 
 describe('measureTranscript (AISDLC-1067)', () => {
   const write = (lines) => {

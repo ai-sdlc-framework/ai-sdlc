@@ -114,6 +114,34 @@ describe('hold-and-reporting rule (AISDLC-899)', () => {
   }
 });
 
+describe('dependency-limit rule (AISDLC-1438)', () => {
+  // The executor session already gets every rule from the SessionStart governance block
+  // (fixed-prefix.js renders PROMPT_RULES), so its command body does not repeat it and its
+  // start-context budget (measure-start-context.test.mjs) is spent once.
+  const carriers = allPrompts().filter(
+    (rel) => rel !== 'commands/executor.md' && findPromptRulesBlock(read(rel)),
+  );
+
+  it('is rendered in every prompt that carries a rules block, reviewers included', () => {
+    assert.ok(carriers.includes('agents/developer.md'));
+    assert.ok(carriers.includes('agents/code-reviewer.md'));
+    for (const rel of carriers) {
+      const found = findPromptRulesBlock(read(rel));
+      assert.ok(found?.ids.includes('dependency-limit'), `${rel} must carry dependency-limit`);
+      assert.equal(countRuleRestatements(read(rel))['dependency-limit'], 1);
+    }
+  });
+
+  it('routes through the decision catalog with a dependency-limit scope and names no internal id', () => {
+    const block = renderPromptRulesBlock(['dependency-limit']);
+    assert.equal(block.split('\n').length, 3, 'one rendered line between the markers');
+    assert.match(block, /cli-decisions escalate/);
+    assert.match(block, /--scope dependency-limit:<dependency>/);
+    assert.match(block, /critical/);
+    assert.doesNotMatch(block, /\b[A-Z]{3,}-\d+\b/);
+  });
+});
+
 describe('prompts carrying a rules block', () => {
   for (const rel of GUARDED) {
     it(`${rel} carries a block`, () => {

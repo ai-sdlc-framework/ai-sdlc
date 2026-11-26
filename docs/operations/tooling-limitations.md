@@ -1,5 +1,7 @@
 # Tooling limitations register
 
+**Every row must cite the decision record that chose its workaround, and a new row comes only from a `dependency-limit:<dependency>` escalation** (`cli-decisions escalate` or `cli-decisions add --scope dependency-limit:<dependency>`; list them all with `cli-decisions list --scope-prefix dependency-limit:`). A limit of a dependency is the operator's to solve: no session ships a throttle, sleep, spacing, cap or degraded mode against it without an operator decision record (DEC-0433, AISDLC-1438). A row written before this rule that cites no record is a candidate for that escalation, not authority for its workaround.
+
 Every external ceiling (GitHub API, `gh`, git, Actions) the framework works around, with the symptom when it is hit, where its headroom is read, the workaround that holds it off, and how it scales. Neither limit is ours: the workarounds hold the ceiling off, they do not remove it. Adopters running many concurrent agents on one codebase, in particular enterprise organisations, meet these ceilings earlier than we do.
 
 The `Headroom read at` column is either a backticked repository path of the surface that reports the metric, or the word `unmeasured` (no instrumentation yet; the cell then gives the manual command). `scripts/check-tooling-limitations.test.mjs` enforces this and that every required ceiling has a row. Add a row whenever a new ceiling is worked around.
