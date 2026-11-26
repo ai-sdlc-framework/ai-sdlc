@@ -107,6 +107,10 @@ function reviewsLine(verdict: FinalizeTaskOptions['verdict']): string {
  * `acceptanceCriteriaCheck` index list (defaults to all ACs unless the
  * developer reported an explicit subset).
  *
+ * Every heading is followed by a blank line, and the reviews line is set apart
+ * from the verification list, so the completed task file stays prettier-clean
+ * (AISDLC-1430).
+ *
  * Pure — exported for unit tests.
  */
 export function buildFinalSummary(opts: FinalizeTaskOptions): {
@@ -130,13 +134,13 @@ export function buildFinalSummary(opts: FinalizeTaskOptions): {
   const reviewLine = reviewsLine(opts.verdict);
 
   const finalSummary =
-    `## Summary\n${opts.prOpenedByPipeline ? `${SUMMARY_BEFORE_PUSH_MARKER}\n\n` : ''}${opts.developerReturn.summary}\n\n` +
-    `## Changes\n${filesBlock}\n\n` +
-    `## Design decisions\n${notesText(opts.developerReturn.notes)}\n\n` +
-    `## Verification\n` +
-    `${verificationLines(opts.workDir, opts.developerReturn, summaryOf)}\n` +
+    `## Summary\n\n${opts.prOpenedByPipeline ? `${SUMMARY_BEFORE_PUSH_MARKER}\n\n` : ''}${opts.developerReturn.summary}\n\n` +
+    `## Changes\n\n${filesBlock}\n\n` +
+    `## Design decisions\n\n${notesText(opts.developerReturn.notes)}\n\n` +
+    `## Verification\n\n` +
+    `${verificationLines(opts.workDir, opts.developerReturn, summaryOf)}\n\n` +
     `${reviewLine}\n\n` +
-    `## Follow-up\n${followupsText(opts.developerReturn.followups)}\n`;
+    `## Follow-up\n\n${followupsText(opts.developerReturn.followups)}\n`;
 
   return { finalSummary, acceptanceCriteriaCheck };
 }

@@ -2,6 +2,7 @@ import { checkFollowups } from '../backlog/followup-rule.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { format } from 'prettier';
 import { buildFinalSummary, finalizeTask, moveTaskToCompleted } from './10-finalize.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-helpers/make-task.js';
 import { FakeRunner, ok } from '../__test-helpers/fake-runner.js';
@@ -34,6 +35,28 @@ const dev: DeveloperReturn = {
   acceptanceCriteriaMet: [1, 2, 3],
   notes: 'no follow-up needed',
 };
+
+/** A task file `prettier --check` (default config) accepts as is. */
+const PRETTIER_CLEAN_TASK = [
+  '---',
+  'id: AISDLC-7',
+  'title: seven',
+  'status: In Progress',
+  '---',
+  '',
+  '## Description',
+  '',
+  'Demo.',
+  '',
+  '## Acceptance Criteria',
+  '',
+  '<!-- AC:BEGIN -->',
+  '',
+  '- [ ] #1 a',
+  '',
+  '<!-- AC:END -->',
+  '',
+].join('\n');
 
 function approved(): AggregatedVerdict {
   return {
@@ -177,7 +200,7 @@ describe('Step 10 — follow-up section (AISDLC-997)', () => {
       ...base,
       developerReturn: { ...dev, notes: 'para one\n\nSome prose follow-up here' },
     });
-    expect(r.finalSummary.split('## Follow-up')[1]).toBe('\n(none)\n');
+    expect(r.finalSummary.split('## Follow-up')[1]).toBe('\n\n(none)\n');
     expect(checkFollowups(r.finalSummary).ok).toBe(true);
   });
 
@@ -186,7 +209,9 @@ describe('Step 10 — follow-up section (AISDLC-997)', () => {
       ...base,
       developerReturn: { ...dev, followups: ['AISDLC-5', 'declined: not worth doing now'] },
     });
-    expect(r.finalSummary).toContain('## Follow-up\n- AISDLC-5\n- declined: not worth doing now\n');
+    expect(r.finalSummary).toContain(
+      '## Follow-up\n\n- AISDLC-5\n- declined: not worth doing now\n',
+    );
   });
 
   it('finalizeTask fails closed on a bad followups entry', async () => {
@@ -278,6 +303,47 @@ describe('Step 10 — finalizeTask', () => {
       }),
     ).rejects.toThrow(/cannot locate task file/);
   });
+
+  // ── AISDLC-1430: the completed file stays prettier-clean ──────
+
+  it('AISDLC-1430: buildFinalSummary sets a blank line after each heading and before the reviews line', () => {
+    const { finalSummary } = buildFinalSummary({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      task,
+      developerReturn: dev,
+      verdict: approved(),
+      iterations: 1,
+    });
+    for (const h of ['Summary', 'Changes', 'Design decisions', 'Verification', 'Follow-up']) {
+      expect(finalSummary).toContain(`## ${h}\n\n`);
+    }
+    expect(finalSummary).toMatch(/— passed\n\n- 0 reviews approved\n/);
+  });
+
+  for (const useAtomicCompletion of [false, true]) {
+    it(`AISDLC-1430: the completed task file passes prettier --check (useAtomicCompletion=${useAtomicCompletion})`, async () => {
+      const src = join(tmp, 'backlog', 'tasks', 'aisdlc-7 - seven.md');
+      writeFileSync(src, PRETTIER_CLEAN_TASK, 'utf8');
+      expect(await format(PRETTIER_CLEAN_TASK, { parser: 'markdown' })).toBe(PRETTIER_CLEAN_TASK);
+      await finalizeTask({
+        taskId: 'AISDLC-7',
+        workDir: tmp,
+        worktreePath: tmp,
+        task,
+        developerReturn: dev,
+        verdict: approved(),
+        iterations: 1,
+        runner: new FakeRunner().toRunner(),
+        skipCommit: true,
+        useAtomicCompletion,
+      });
+      const out = readFileSync(join(tmp, 'backlog', 'completed', 'aisdlc-7 - seven.md'), 'utf8');
+      expect(out).toContain('status: Done');
+      expect(await format(out, { parser: 'markdown' })).toBe(out);
+    });
+  }
 
   // ── AISDLC-202.3 AC #3 + #4: Codex path uses atomic completion ──────
 

@@ -334,6 +334,9 @@ importers:
       ink-testing-library:
         specifier: ^4.0.0
         version: 4.0.0(@types/react@19.3.0)
+      prettier:
+        specifier: ^3.10.1
+        version: 3.10.1
       string-width:
         specifier: ^9.0.0
         version: 9.0.0
