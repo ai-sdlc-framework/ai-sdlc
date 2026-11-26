@@ -299,6 +299,9 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
     const cfg = join(tmpDir, '.ai-sdlc');
     expect(existsSync(join(cfg, 'review-policy.md'))).toBe(true);
     expect(existsSync(join(cfg, 'workflow.yaml'))).toBe(true);
+    // AISDLC-1408: the knowledge store config and root are visible on a fresh install.
+    expect(existsSync(join(cfg, 'context.yaml'))).toBe(true);
+    expect(existsSync(join(cfg, 'knowledge', 'README.md'))).toBe(true);
     const { missingConfigEntries } = await import('@ai-sdlc/pipeline-cli/config-manifest');
     expect(missingConfigEntries(tmpDir)).toEqual([]);
   });

@@ -15,6 +15,13 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { buildExecuteGraph, renderYaml } from '../workflow/graph.js';
+import {
+  CONTEXT_CONFIG_PATH,
+  DEFAULT_PROTECTED_ROOT,
+  DEFAULT_RETRIEVAL_ADAPTER,
+  DEFAULT_RETRIEVAL_INDEX_PATH,
+  DEFAULT_TRACKED_ROOT,
+} from '../knowledge/config.js';
 
 /** The command an operator runs to scaffold missing configuration. */
 export const INIT_COMMAND = '/ai-sdlc init';
@@ -69,6 +76,40 @@ below before analyzing a PR. Edit freely: this file is yours.
 4. **Severity honesty**: no failure scenario means not critical or major.
 5. **Signal over noise**: one good finding beats ten weak ones.
 6. **Scope discipline**: do not flag deferred work or unchanged code.
+`;
+
+/**
+ * Knowledge store configuration (RFC-0053, AISDLC-1408). Every value is the
+ * built-in default, so loading this file yields the same config as no file: it
+ * exists to show an adopter that the store exists and where its keys go.
+ */
+const CONTEXT_YAML_DEFAULT = `# AI-SDLC knowledge store configuration (RFC-0053).
+# Every value below is the built-in default; deleting this file changes nothing.
+# See docs/operations/knowledge-store.md.
+knowledge:
+  trackedRoot: ${DEFAULT_TRACKED_ROOT} # reviewed, versioned entries
+  protectedRoot: ${DEFAULT_PROTECTED_ROOT} # gitignored client material
+  # dataRoomRoot: client-data-room/ # optional raw data room, indexed read-only
+  classification:
+    dataRoomRoots: [] # source paths that mark protected material
+    clientIdentifiers: [] # names that mark protected material
+  promotion:
+    commands: {} # proof command id -> argv list
+retrieval:
+  adapter: ${DEFAULT_RETRIEVAL_ADAPTER}
+  indexPath: ${DEFAULT_RETRIEVAL_INDEX_PATH} # gitignored
+`;
+
+const KNOWLEDGE_README_DEFAULT = `# Knowledge store
+
+Scored, dated facts that agents and people retrieve just in time (RFC-0053).
+Entries live at \`<trunk>/<topic>.md\` under this folder, one fact per file with
+YAML frontmatter. Client and data-room material (\`scope: protected\`) goes in the
+gitignored \`${DEFAULT_PROTECTED_ROOT}/\` instead, never here.
+
+Roots and retrieval settings are in \`${CONTEXT_CONFIG_PATH}\`. Check entries with
+\`cli-context validate\`. The entry schema, ontology and checks are described in
+the AI-SDLC docs: docs/operations/knowledge-store.md.
 `;
 
 /**
@@ -299,6 +340,26 @@ export const REQUIRED_CONFIG_MANIFEST: readonly ConfigEntry[] = [
     optional: true,
     prompts: [],
     render: () => renderYaml(buildExecuteGraph()),
+  },
+  {
+    id: 'context',
+    path: CONTEXT_CONFIG_PATH,
+    since: '0.45.0',
+    description: 'knowledge store and retrieval settings (RFC-0053); defaults apply when absent',
+    operatorInput: false,
+    optional: true,
+    prompts: [],
+    render: () => CONTEXT_YAML_DEFAULT,
+  },
+  {
+    id: 'knowledge-readme',
+    path: `${DEFAULT_TRACKED_ROOT}/README.md`,
+    since: '0.45.0',
+    description: 'tracked knowledge store root (RFC-0053); entries are added under it',
+    operatorInput: false,
+    optional: true,
+    prompts: [],
+    render: () => KNOWLEDGE_README_DEFAULT,
   },
 ];
 

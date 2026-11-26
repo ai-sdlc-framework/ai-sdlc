@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { gatherDefaults, runInitCli } from './init.js';
 import {
@@ -41,7 +41,7 @@ describe('cli-init', () => {
     expect(await runInitCli(['--check', '--project-dir', dir])).toBe(1);
     expect(out).toContain('missing required config .ai-sdlc/review-policy.md');
     for (const e of REQUIRED_CONFIG_MANIFEST) {
-      mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+      mkdirSync(dirname(join(dir, e.path)), { recursive: true });
       writeFileSync(join(dir, e.path), 'x');
     }
     out = '';

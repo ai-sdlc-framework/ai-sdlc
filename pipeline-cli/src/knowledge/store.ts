@@ -65,6 +65,8 @@ export function validateKnowledge(
   const seenIds = new Map<string, string>();
   for (const [dir, kind] of roots) {
     for (const file of listMarkdown(dir)) {
+      // The README init scaffolds at the root (AISDLC-1408) describes the store; it is not an entry.
+      if (relative(dir, file) === 'README.md') continue;
       const rel = relative(projectRoot, file);
       report.entries++;
       const parsed = parseEntryFile(readFileSync(file, 'utf-8'));

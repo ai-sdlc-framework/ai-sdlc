@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -22,6 +22,8 @@ import { CODE_TEST_MERGED_REVIEWER_SET, classifyReviewerSet } from '../steps/rev
 import { checkReviewerKindCoverage } from '../../attestation-core/review-scope-core.mjs';
 import { parseOperationalPolicy } from '../hierarchy/operational.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
+import { loadKnowledgeConfig, loadRetrievalConfig } from '../knowledge/config.js';
+import { validateKnowledge } from '../knowledge/store.js';
 
 const answers = { org: 'acme', repo: 'widgets' };
 
@@ -104,6 +106,8 @@ describe('scaffold (AC2)', () => {
       '.ai-sdlc/review-policy.md',
       '.ai-sdlc/agent-role.yaml',
       '.ai-sdlc/workflow.yaml',
+      '.ai-sdlc/context.yaml',
+      '.ai-sdlc/knowledge/README.md',
     ]);
   });
 
@@ -210,5 +214,41 @@ describe('scaffolded agent role states the merge settings (AISDLC-1351)', () => 
     });
     expect(text).toContain('      - octo');
     expect(text).toContain('      - land-eligible-prs');
+  });
+});
+
+describe('knowledge store scaffold (AISDLC-1408)', () => {
+  it('init on an empty project writes context.yaml and the knowledge README; a re-run keeps an edited context.yaml', async () => {
+    const res = await scaffoldConfig({ projectDir: dir, defaults: answers });
+    expect(res.created).toContain('.ai-sdlc/context.yaml');
+    expect(res.created).toContain('.ai-sdlc/knowledge/README.md');
+    const ctx = join(dir, '.ai-sdlc/context.yaml');
+    expect(existsSync(join(dir, '.ai-sdlc/knowledge/README.md'))).toBe(true);
+    writeFileSync(ctx, 'knowledge:\n  trackedRoot: docs/knowledge\n');
+    const again = await scaffoldConfig({ projectDir: dir, defaults: answers });
+    expect(again.skipped).toContain('.ai-sdlc/context.yaml');
+    expect(readFileSync(ctx, 'utf8')).toBe('knowledge:\n  trackedRoot: docs/knowledge\n');
+  });
+
+  it('the scaffolded context.yaml loads to the same config as no file', async () => {
+    const bare = { knowledge: loadKnowledgeConfig(dir), retrieval: loadRetrievalConfig(dir) };
+    await scaffoldConfig({ projectDir: dir, defaults: answers });
+    expect(existsSync(join(dir, '.ai-sdlc/context.yaml'))).toBe(true);
+    expect({ knowledge: loadKnowledgeConfig(dir), retrieval: loadRetrievalConfig(dir) }).toEqual(
+      bare,
+    );
+  });
+
+  it('the knowledge README is not validated as an entry', async () => {
+    await scaffoldConfig({ projectDir: dir, defaults: answers });
+    const report = validateKnowledge(dir);
+    expect(report.errors).toEqual([]);
+    expect(report.entries).toBe(0);
+  });
+
+  it('neither entry is required', () => {
+    const ids = missingConfigEntries(dir).map((m) => m.id);
+    expect(ids).not.toContain('context');
+    expect(ids).not.toContain('knowledge-readme');
   });
 });

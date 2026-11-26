@@ -8,7 +8,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { REQUIRED_CONFIG_MANIFEST } from '../config-manifest/manifest.js';
 export interface MakeTaskOptions {
   id: string;
@@ -69,7 +69,10 @@ export function makeTmpProject(): string {
   mkdirSync(join(dir, 'backlog', 'completed'), { recursive: true });
   mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
   // AISDLC-910: the execute Step 1 preflight needs every required config entry present.
-  for (const e of REQUIRED_CONFIG_MANIFEST) writeFileSync(join(dir, e.path), 'x');
+  for (const e of REQUIRED_CONFIG_MANIFEST) {
+    mkdirSync(dirname(join(dir, e.path)), { recursive: true });
+    writeFileSync(join(dir, e.path), 'x');
+  }
   return dir;
 }
 

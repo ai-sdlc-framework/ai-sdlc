@@ -57,6 +57,22 @@ knowledge:
     clientIdentifiers: [Acme]                # names that mark protected material
 ```
 
+## Scaffold
+
+`/ai-sdlc init` (and `ai-sdlc init`, `cli-init`, `doctor --fix`) writes two optional files
+from the config manifest (`pipeline-cli/src/config-manifest/manifest.ts`, AISDLC-1408) so
+a fresh install shows that the store exists and where its keys go:
+
+- `.ai-sdlc/context.yaml` with every `knowledge.*` and `retrieval.*` key at its built-in
+  default. Loading it yields the same config as having no file, so deleting it changes
+  nothing.
+- `.ai-sdlc/knowledge/README.md`, a short note on the tracked root. Validation skips a
+  `README.md` at the top of a root; it is not an entry.
+
+Both are optional: a missing one does not refuse a run or fail `cli-init --check`, and a
+re-run never overwrites an existing file. Nothing else changes: reads of a missing root
+return no entries, and writes create the folders they need.
+
 ## Checks
 
 - `node pipeline-cli/bin/cli-context.mjs validate [--strict]` checks every entry in both
