@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1424
 title: Correcting a protected entry writes its old value into the committed knowledge log
-status: In Progress
+status: Done
 priority: high
 labels:
   - pipeline-cli
