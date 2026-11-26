@@ -1320,8 +1320,10 @@ describe('protected knowledge guard (AISDLC-1409)', () => {
   });
 
   it('a project with no knowledge store runs no check', async () => {
+    // makeTmpProject scaffolds the store (AISDLC-1408); a bare directory has none.
+    const bare = mkdtempSync(join(tmpdir(), 'no-store-'));
     const f = fake();
-    const r = await pushAndPr({ ...opts(tmp), knowledgeCliPath: null, runner: f.toRunner() });
+    const r = await pushAndPr({ ...opts(bare), knowledgeCliPath: null, runner: f.toRunner() });
     expect(r.prUrl).toBe('https://github.com/x/y/pull/1');
     expect(f.calls.some((c) => c.command === process.execPath)).toBe(false);
   });
