@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1419
 title: Route every knowledge entry read through the KnowledgeStore
-status: To Do
+status: Done
 priority: high
 labels:
   - pipeline-cli
