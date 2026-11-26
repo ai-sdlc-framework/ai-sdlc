@@ -34,6 +34,12 @@ const REQUIRED = [
 ];
 
 describe('tooling-limitations register', () => {
+  it('opens with the decision-record and dependency-limit escalation rule (AISDLC-1438)', () => {
+    const head = doc.slice(0, doc.indexOf('\n|'));
+    assert.match(head, /must cite the decision record that chose its workaround/);
+    assert.match(head, /dependency-limit:<dependency>/);
+  });
+
   it('has the required ceilings', () => {
     for (const re of REQUIRED) {
       assert.ok(

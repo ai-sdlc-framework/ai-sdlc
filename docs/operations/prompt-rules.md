@@ -26,7 +26,7 @@ AISDLC-651.2. "Never do X" rules used to be pasted (and sometimes escalated in l
 
 ## Rule ids
 
-`merge`, `force-push`, `close`, `branch-delete`, `destructive-git`, `stash`, `ci-skip`, `governance-config`, `oq-resolution`, `pre-work`, `worktree-cwd`, `executor-no-question`, and `hold-reporting`.
+`merge`, `force-push`, `close`, `branch-delete`, `destructive-git`, `stash`, `ci-skip`, `governance-config`, `oq-resolution`, `pre-work`, `worktree-cwd`, `executor-no-question`, `hold-reporting`, `hook-git-env`, and `dependency-limit` (AISDLC-1438, DEC-0433: rendered in every prompt that carries a block, reviewers included, so a reviewer flags a throttle shipped against a dependency limit).
 
 ## Session hooks
 

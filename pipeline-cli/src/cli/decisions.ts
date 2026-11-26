@@ -698,6 +698,11 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             choices: ESCALATION_ROUTES,
             describe:
               'AISDLC-668.2 — keep only decisions currently at this tier (operational or design). A decision with no recorded routing counts as design, the escalate default.',
+          })
+          .option('scope-prefix', {
+            type: 'string',
+            describe:
+              'AISDLC-1438 — keep only decisions whose scope starts with this prefix, e.g. `dependency-limit:` lists every escalated dependency limit (rate limit, API quota, platform limit).',
           }),
       async (argv) => {
         const workDir = String(argv['work-dir']);
@@ -716,10 +721,15 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
         // reflects the visible subset.
         const expiredFiltered = argv.expired ? filterExpiredDecisions(rawDecisions) : rawDecisions;
         const route = argv.route as string | undefined;
-        const filtered =
+        const routeFiltered =
           route === undefined
             ? expiredFiltered
             : expiredFiltered.filter((d) => (d.status.escalationTier ?? 'design') === route);
+        const scopePrefix = argv['scope-prefix'] as string | undefined;
+        const filtered =
+          scopePrefix === undefined
+            ? routeFiltered
+            : routeFiltered.filter((d) => d.metadata.scope.startsWith(scopePrefix));
         // AISDLC-463 — `--ranked` is a third ordering mode alongside the
         // AISDLC-447 `--sort timebox|created`. When set it takes precedence
         // (the priority × impact × urgency formula subsumes the plain

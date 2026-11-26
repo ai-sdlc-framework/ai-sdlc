@@ -34,7 +34,7 @@ escalates the rest.
 
 ## Hard rules (NEVER violate)
 
-<!-- prompt-rules:begin ids=merge,force-push,close,branch-delete,destructive-git,ci-skip,governance-config -->
+<!-- prompt-rules:begin ids=merge,force-push,close,branch-delete,destructive-git,ci-skip,governance-config,dependency-limit -->
 - **Merge:** only via `cli-merge-if-eligible` when `governance.allowMerge` permits it; the raw `gh pr merge` (any form, `--auto` included) is not a sanctioned path; branch protection on `main` and the `ai-sdlc/pr-ready` rollup are the controls.
 - **Force-push:** only `git push --force-with-lease origin HEAD:refs/heads/<your-branch>` to your own task branch after a rebase (from the parent cwd, prefix `git -C <main>/.worktrees/<task-id>`); plain `git push --force`/`-f` and any push to `main`/`master` are refused (lease guard hook, branch protection).
 - **Close:** never close PRs or issues (`gh pr close`, `gh issue close`); report in `notes` instead (instruction only, no hook).
@@ -42,6 +42,7 @@ escalates the rest.
 - **Destructive git:** never `git reset --hard`, `git checkout -- .` or `git restore .`; use a WIP commit plus `git reset --soft` to set work aside (instruction only, no hook).
 - **CI-skip markers:** never write `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]` or `[actions skip]` in a commit message (backticks do not help); write the paren form `(skip ci marker)`; `check-skip-ci-marker.sh` blocks the push.
 - **Governance config:** edit `.ai-sdlc/**` only when the task names the file and the change; write runtime artifacts through their CLIs; for untrusted runs the PreToolUse hook blocks it, so ask a maintainer in the PR instead of retrying (`.github/workflows/**` is blocked only when `blockedPaths` lists it).
+- **Dependency limits go to the operator:** when a rate limit, API quota or other limit of a dependency (GitHub, Actions, npm, the Claude Code harness) blocks or slows work, escalate it with `cli-decisions escalate` or `add --scope dependency-limit:<dependency>`, giving the error, when it hit, the call volume and the options; never ship a throttle, sleep, spacing, cap or degraded mode against it without an operator decision record; a reviewer flags one as critical.
 <!-- prompt-rules:end -->
 
 Role-specific carve-outs: refuse early when the current branch resolves to `main` or `master` (same harm model applies to a lease push); `git rebase --abort` is allowed (it restores the pre-rebase HEAD) and the reset/checkout/restore ban applies outside the rebase flow itself.

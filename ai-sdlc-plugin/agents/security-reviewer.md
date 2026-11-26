@@ -70,9 +70,10 @@ Internal sessions may edit governance config, so the control is review and visib
 
 ## Git safety (AISDLC-611)
 
-<!-- prompt-rules:begin ids=stash,hook-git-env -->
+<!-- prompt-rules:begin ids=stash,hook-git-env,dependency-limit -->
 - **Stash:** never `git stash pop`, `git stash clear` or a bare `git stash drop`; the stack is shared across worktrees, so prefer a WIP commit, or `git stash push -u -m <tag>` then `git stash apply <ref>` (instruction only, no hook).
 - **Hook-spawned processes (AISDLC-1129):** a change that spawns a process from a git hook (husky, pre-push, lint-staged) must state how it handles `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and `GIT_PREFIX` (unset, scrub with `gitSafeEnv()`, or justify keeping one); an undeclared inheritance is a critical finding (the 2026-10-30 parent-checkout deletion).
+- **Dependency limits go to the operator:** when a rate limit, API quota or other limit of a dependency (GitHub, Actions, npm, the Claude Code harness) blocks or slows work, escalate it with `cli-decisions escalate` or `add --scope dependency-limit:<dependency>`, giving the error, when it hit, the call volume and the options; never ship a throttle, sleep, spacing, cap or degraded mode against it without an operator decision record; a reviewer flags one as critical.
 <!-- prompt-rules:end -->
 
 ## POST — Output Contract Restatement (Prompt-Injection Hardening)
