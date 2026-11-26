@@ -160,10 +160,10 @@ describe('ephemeral executors in the tick', () => {
     expect(r.verdicts[0]?.clear.status).toBe('cleared');
   });
 
-  it('sweeps an executor still alive 5 minutes after its verdict', async () => {
+  it('retries a failed down on the next tick, with no grace delay (AISDLC-1417)', async () => {
     writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71')] });
-    verdictAt('AISDLC-71', clock - 6 * MIN);
-    // The verdict was handled by an earlier tick.
+    verdictAt('AISDLC-71', clock - MIN);
+    // The verdict was handled by an earlier tick whose down failed.
     await runDispatchTick(
       deps({
         ephemeral: { ...deps().ephemeral!, down: async () => ({ ok: false, reason: 'busy' }) },
@@ -172,19 +172,7 @@ describe('ephemeral executors in the tick', () => {
     downs = [];
     const r = await runDispatchTick(deps());
     expect(downs).toEqual(['ai-sdlc-executor-aisdlc-71']);
-    expect(r.ephemeral?.downed[0]?.why).toBe('sweep');
-  });
-
-  it('does not sweep before 5 minutes, nor on a verdict older than the executor', async () => {
-    writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71'), entry('AISDLC-72')] });
-    verdictAt('AISDLC-71', clock - 4 * MIN);
-    verdictAt('AISDLC-72', clock - 90 * MIN);
-    await runDispatchTick(
-      deps({ ephemeral: { ...deps().ephemeral!, down: async () => ({ ok: false }) } }),
-    );
-    downs = [];
-    await runDispatchTick(deps());
-    expect(downs).toEqual([]);
+    expect(r.ephemeral?.downed[0]?.why).toBe('verdict');
   });
 
   it('downs an executor idle with its claim and re-queues the task (AISDLC-1218)', async () => {
@@ -296,15 +284,117 @@ describe('ephemeral executors in the tick', () => {
     expect(r.ephemeral?.orphansReaped).toEqual(['ai-sdlc-executor-aisdlc-9']);
   });
 
-  it('does nothing while held', async () => {
-    writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71')] });
-    verdictAt('AISDLC-71', clock - 10 * MIN);
-    queue('AISDLC-80');
-    const { writeHold } = await import('./hold.js');
-    writeHold(board, { reason: 'test', by: 'planner', at: new Date(clock).toISOString() } as never);
-    const r = await runDispatchTick(deps());
-    expect(downs).toEqual([]);
-    expect(spawns).toEqual([]);
-    expect(r.ephemeral).toBeUndefined();
+  describe('teardown is not gated by any hold (AISDLC-1417)', () => {
+    const hold = async (by = 'planner', reason = 'test'): Promise<void> => {
+      const { writeHold } = await import('./hold.js');
+      writeHold(board, { reason, by, since: new Date(clock).toISOString() });
+    };
+    const lowQuota: Partial<LoopDeps> = { quota: () => ({ core: 1 }), quotaFloor: 500 };
+    type Case = readonly [string, () => Promise<void>, Partial<LoopDeps>];
+
+    it('downs a finished executor and consumes its success verdict while held', async () => {
+      writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71')] });
+      verdictAt('AISDLC-71', clock - 10 * MIN);
+      queue('AISDLC-80');
+      await hold();
+      const r = await runDispatchTick(deps());
+      expect(downs).toEqual(['ai-sdlc-executor-aisdlc-71']);
+      expect(readRosterChecked(board).roster.sessions).toHaveLength(0);
+      expect(r.ephemeral?.downed[0]).toMatchObject({
+        taskId: 'AISDLC-71',
+        why: 'verdict',
+        ok: true,
+      });
+      expect(r.verdicts[0]?.clear.reason).toBe('ephemeral executor: downed');
+      expect(readLoopState(board).handled).toContain(
+        `done:AISDLC-71:${new Date(clock - 10 * MIN).toISOString()}`,
+      );
+      // The hold still gates the spawn.
+      expect(spawns).toEqual([]);
+      expect(r.ephemeral?.spawned).toEqual([]);
+    });
+
+    it.each([
+      ['a budget-pacer hold', () => hold('pacer', 'budget: 7d at 91%'), {}],
+      ['a quota skip', async () => undefined, lowQuota],
+    ] as Case[])('downs a finished executor under %s and spawns nothing', async (_n, set, over) => {
+      writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71')] });
+      verdictAt('AISDLC-71', clock - MIN);
+      queue('AISDLC-80');
+      await set();
+      const r = await runDispatchTick(deps(over));
+      expect(downs).toEqual(['ai-sdlc-executor-aisdlc-71']);
+      expect(readRosterChecked(board).roster.sessions).toHaveLength(0);
+      expect(spawns).toEqual([]);
+      expect(r.ephemeral?.spawned).toEqual([]);
+    });
+
+    it.each([
+      ['no hold', async () => undefined, {}],
+      ['a planner hold', () => hold(), {}],
+      ['a budget-pacer hold', () => hold('pacer', 'budget: x'), {}],
+      ['a quota skip', async () => undefined, lowQuota],
+    ] as Case[])(
+      'keeps an executor with an inflight claim or a stale verdict under %s',
+      async (_n, set, over) => {
+        writeRoster(board, {
+          schemaVersion: 'v1',
+          sessions: [entry('AISDLC-71'), entry('AISDLC-72')],
+        });
+        // AISDLC-71: an iterate-needed verdict keeps the claim inflight.
+        claim('AISDLC-71', 'ai-sdlc-executor-aisdlc-71', MIN);
+        writeVerdict(board, {
+          schemaVersion: 'v1',
+          taskId: 'AISDLC-71',
+          outcome: 'iterate-needed',
+          completedAt: new Date(clock - MIN).toISOString(),
+          workerId: 'ai-sdlc-executor-aisdlc-71',
+        });
+        // AISDLC-72: the verdict predates the executor's start (an earlier attempt).
+        verdictAt('AISDLC-72', clock - 90 * MIN);
+        await set();
+        await runDispatchTick(deps(over));
+        expect(downs).toEqual([]);
+        expect(readRosterChecked(board).roster.sessions).toHaveLength(2);
+      },
+    );
+
+    it('reaps orphans and downs idle surplus while held', async () => {
+      writeRoster(board, {
+        schemaVersion: 'v1',
+        sessions: [entry('AISDLC-71'), entry('AISDLC-72')],
+      });
+      await hold();
+      const d = deps({ idleExecutors: () => ['ai-sdlc-executor-aisdlc-72'] });
+      d.ephemeral!.cap = () => 1;
+      d.ephemeral!.reapOrphans = () => ['ai-sdlc-executor-aisdlc-9'];
+      const first = await runDispatchTick(d);
+      expect(first.ephemeral?.orphansReaped).toEqual(['ai-sdlc-executor-aisdlc-9']);
+      expect(downs).toEqual([]);
+      const second = await runDispatchTick(d);
+      expect(downs).toEqual(['ai-sdlc-executor-aisdlc-72']);
+      expect(second.ephemeral?.downed[0]).toMatchObject({ why: 'surplus', ok: true });
+    });
+
+    it('stops a failed executor while held, with no playbook and one planner notice', async () => {
+      writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71')] });
+      verdictAt('AISDLC-71', clock - MIN, 'failed');
+      await hold();
+      let playbooks = 0;
+      const d = deps({
+        playbook: (v) => {
+          playbooks += 1;
+          return { taskId: v.taskId, action: 'requeue', result: 'done', reason: 'ok' };
+        },
+      });
+      const r = await runDispatchTick(d);
+      expect(downs).toEqual(['ai-sdlc-executor-aisdlc-71']);
+      expect(playbooks).toBe(0);
+      expect(r.escalations.filter((e) => e.taskId === 'AISDLC-71')).toHaveLength(1);
+      expect(r.verdicts[0]?.clear.reason).toBe('the board is held: test');
+      const again = await runDispatchTick(d);
+      expect(again.escalations.filter((e) => e.taskId === 'AISDLC-71')).toHaveLength(0);
+      expect(playbooks).toBe(0);
+    });
   });
 });

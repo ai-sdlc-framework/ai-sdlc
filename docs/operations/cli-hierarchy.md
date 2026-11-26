@@ -860,13 +860,27 @@ roster entry (role `executor`, `taskId`, `startedAt` as the spawn time) and laun
 with `AI_SDLC_EXECUTOR_TASK=<id>`. A live session of that name is reported and nothing is created; a task already
 inflight is refused. The hooks module executor branch reads the variable at `session.start` and runs the executor
 command at once, with no `enqueue` wake to wait for. `status` lists each dynamic executor as
-`dynamic executor: <name> task <id> age <age> (<state>)`, one line per roster entry that carries a `taskId`.
+`dynamic executor: <name> task <id> age <age> (<state>)`, one line per roster entry that carries a `taskId`
+(`<state>` is `finished, not stopped` for a missed teardown; see the termination rule below).
 A tmux session of that name that the roster does not know, with no inflight task, is an orphan (AISDLC-1117): `spawn` kills it and
 creates the session, and the dispatch tick reaps every such session on its own (listed in the tick result as `orphansReaped`).
 Every session is tagged at creation with `AI_SDLC_BOARD_DIR=<absolute board dir>` (a tmux session environment entry, set right after `new-session`; a failed tag fails the spawn). Sweep and `spawn` act only on sessions whose tag equals their own board dir: an untagged session, a differently tagged one, or one whose `show-environment` fails is foreign and is left alone (logged as `skipped foreign executor session '<name>'`; `spawn` returns `created: false` naming the tag it found). Two hierarchies may therefore share one tmux server without reaping each other.
 A rostered live session is never touched. The last tick's spawn failures print in `status` as `spawn error: task <id>: <error>`,
 and the drain-stall check counts spawn errors with no live executor as a stall. `down` also kills the session of an ephemeral executor.
-The session ends with its task (one task per executor). With the variable set, `executor-start` claims only that task, exits `1` naming the reason
+The session ends with its task (one task per executor).
+
+**Termination rule (AISDLC-1417).** Teardown has one owner: every dispatch tick downs each rostered
+dynamic executor whose task has a verdict (in `done/` or `failed/`) written at or after its `startedAt`
+and that holds no inflight claim (an `iterate-needed` verdict keeps the claim, so its executor stays).
+The rule is level-triggered from those durable facts, so a down that fails is retried on the next
+tick, and it has no grace delay. No hold gates it: a planner hold, a budget-pacer hold and a quota
+skip all leave teardown, orphan reaping and the idle-surplus down running; they gate spawns and
+claims only. A success verdict of a dynamic executor is consumed (marked handled) on the tick that
+downs it, held or not. A failed one under a hold keeps the held behaviour (no playbook, one planner
+notice) and the executor is still downed: its worktree, branch and failure record stay on disk for
+inspection, the idle session itself holds nothing more. `status` shows a rostered dynamic executor
+whose verdict is over 10 minutes old as `finished, not stopped` instead of its live state, so a
+missed teardown is visible. With the variable set, `executor-start` claims only that task, exits `1` naming the reason
 when it is not claimable (or the board is held), and refuses `--wait`.
 
 ### `executor-start`
@@ -1204,8 +1218,11 @@ cli-hierarchy resume [--budget]
 ```
 
 While held, `tick` still ingests briefs, watches verdicts, classifies PRs and returns `reports`
-and `escalations`, plus `held` (`reason`, `since`, `by`); it does not clear executors, run the
-playbook, re-queue failures or reap stalled claims (a failure becomes an escalation instead).
+and `escalations`, plus `held` (`reason`, `since`, `by`); it does not spawn executors, clear
+executors, run the playbook, re-queue failures or reap stalled claims (a failure becomes an
+escalation instead). A hold never gates teardown (AISDLC-1417): a finished dynamic executor is
+downed, orphaned sessions are reaped and idle surplus is downed as on any tick (see the termination
+rule under [`spawn`](#spawn)).
 `executor-start` claims nothing, prints `BOARD HELD: <reason>` and returns `taskId: null` with
 `held`. A held board with open work wakes on the `active` cadence. The tick JSON also carries
 `blockers`: the hold, failures awaiting the planner, queued tasks waiting on an unfinished
@@ -1219,10 +1236,10 @@ after a hold was lifted). The hooks module wakes idle executors on every tick th
 when a brief was ingested; an executor woken on one tick is skipped on the next (one-tick back-off), and
 `holdLifted` clears the back-off.
 
-| State   | Claims | Relaunches / re-queues | Reports and escalations |
-| ------- | ------ | ---------------------- | ----------------------- |
-| running | yes    | yes                    | yes                     |
-| held    | no     | no                     | yes                     |
+| State   | Claims | Spawns | Relaunches / re-queues | Teardown of finished executors | Reports and escalations |
+| ------- | ------ | ------ | ---------------------- | ------------------------------ | ----------------------- |
+| running | yes    | yes    | yes                    | yes                            | yes                     |
+| held    | no     | no     | no                     | yes                            | yes                     |
 
 A hold limits actions, never reporting; the rule is rendered once from `prompt-rules.js` into the
 planner, dispatch and executor commands.

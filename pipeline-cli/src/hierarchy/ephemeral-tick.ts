@@ -1,20 +1,23 @@
 /**
  * The dispatch tick's ephemeral-executor steps (RFC-0059, AISDLC-1074).
  *
- * Order within a tick: record verdicts, down the executors that produced them, sweep
- * any executor still alive after its verdict, reap crashed ones through the stall path,
- * then spawn one executor per eligible claim up to the cap, so the cap frees before it
- * is consumed. A static roster entry (no `taskId`) is never touched here.
+ * Order within a tick: down every finished executor, reap orphaned sessions and crashed
+ * claims, then spawn one executor per eligible claim up to the cap, so the cap frees before
+ * it is consumed. A static roster entry (no `taskId`) is never touched here.
+ *
+ * AISDLC-1417: teardown has one owner, {@link downFinishedExecutors}. It is level-triggered
+ * from durable facts (the roster, the verdict files, the inflight manifests) and runs on
+ * every tick whatever the hold, budget-pacer hold or quota skip; those gate spawns and
+ * claims only.
  */
 
 import { collectVerdicts, peekQueueOrder } from '../dispatch/board.js';
+import type { DispatchVerdict } from '../dispatch/types.js';
+import { listInflight } from './inflight.js';
 import { openPrHoldReason, type OpenPrState } from './open-pr-limit.js';
 import { readRosterChecked } from './roster.js';
 import type { RosterEntry } from './types.js';
 import { isSpawnedExecutorNameOf } from './validate.js';
-
-/** An executor still alive this long after its verdict is downed by the sweep. */
-export const EPHEMERAL_SWEEP_MS = 5 * 60 * 1000;
 
 /** Operations the tick needs; the CLI wires them to `hierarchyDown` and `hierarchySpawn`. */
 export interface EphemeralDeps {
@@ -28,8 +31,6 @@ export interface EphemeralDeps {
   cap: (live?: number) => number;
   /** Open task PRs and their limit (AISDLC-1189); absent means no limit. */
   openPrs?: () => OpenPrState;
-  /** Sweep delay; default {@link EPHEMERAL_SWEEP_MS}. */
-  sweepMs?: number;
 }
 
 /** What the ephemeral steps did this tick. */
@@ -37,7 +38,7 @@ export interface EphemeralReport {
   downed: {
     name: string;
     taskId: string;
-    why: 'verdict' | 'sweep' | 'surplus';
+    why: 'verdict' | 'surplus';
     ok: boolean;
     reason?: string;
   }[];
@@ -73,7 +74,7 @@ export function isEphemeralWorker(boardDir: string, worker: string): boolean {
 async function downOne(
   deps: EphemeralDeps,
   entry: RosterEntry,
-  why: 'verdict' | 'sweep' | 'surplus',
+  why: 'verdict' | 'surplus',
   out: EphemeralReport,
 ): Promise<void> {
   let r: { ok: boolean; reason?: string };
@@ -91,48 +92,44 @@ async function downOne(
   });
 }
 
-/** Down the executor of each verdict recorded this tick (matched by task and roster name). */
-export async function downRecordedExecutors(
-  boardDir: string,
-  deps: EphemeralDeps,
-  recorded: readonly { workerId: string; taskId: string }[],
-  out: EphemeralReport,
-): Promise<void> {
-  const live = dynamicExecutors(boardDir);
-  for (const v of recorded) {
-    const entry = live.find((e) => e.name === v.workerId && e.taskId === v.taskId.toUpperCase());
-    if (entry) await downOne(deps, entry, 'verdict', out);
+/**
+ * The completion time of the newest verdict of `entry`'s task written at or after the
+ * executor started, or undefined when it has none. A verdict older than the start belongs
+ * to an earlier attempt and is ignored.
+ */
+export function finishedAt(
+  entry: RosterEntry,
+  verdicts: readonly DispatchVerdict[],
+): number | undefined {
+  const startedAt = Date.parse(entry.startedAt);
+  let newest: number | undefined;
+  for (const v of verdicts) {
+    const at = Date.parse(v.completedAt);
+    if (v.taskId.toUpperCase() !== entry.taskId || !Number.isFinite(at)) continue;
+    if (!Number.isNaN(startedAt) && at < startedAt) continue;
+    if (newest === undefined || at > newest) newest = at;
   }
+  return newest;
 }
 
 /**
- * Down any executor still alive `sweepMs` after its task's verdict. A verdict older than
- * the executor's start belongs to an earlier attempt and is ignored.
+ * AISDLC-1417: the one teardown owner. Down every rostered dynamic executor whose task has a
+ * verdict newer than its start and that holds no inflight claim (an `iterate-needed` verdict
+ * keeps its claim, so its executor stays). Level-triggered: a down that fails this tick is
+ * retried on the next. No grace delay: the verdict is the executor's last act.
  */
-export async function sweepFinishedExecutors(
+export async function downFinishedExecutors(
   boardDir: string,
   deps: EphemeralDeps,
-  nowMs: number,
   out: EphemeralReport,
 ): Promise<void> {
-  const live = dynamicExecutors(boardDir).filter(
-    (e) => !out.downed.some((d) => d.name === e.name && d.ok),
-  );
+  const live = dynamicExecutors(boardDir);
   if (live.length === 0) return;
   const verdicts = collectVerdicts(boardDir);
-  const sweepMs = deps.sweepMs ?? EPHEMERAL_SWEEP_MS;
+  const inflight = listInflight(boardDir);
   for (const entry of live) {
-    const startedAt = Date.parse(entry.startedAt);
-    const finished = verdicts.some((v) => {
-      const at = Date.parse(v.completedAt);
-      return (
-        v.taskId.toUpperCase() === entry.taskId &&
-        Number.isFinite(at) &&
-        (Number.isNaN(startedAt) || at >= startedAt) &&
-        nowMs - at >= sweepMs
-      );
-    });
-    if (finished) await downOne(deps, entry, 'sweep', out);
+    if (inflight.some((i) => i.workerId === entry.name || i.taskId === entry.taskId)) continue;
+    if (finishedAt(entry, verdicts) !== undefined) await downOne(deps, entry, 'verdict', out);
   }
 }
 

@@ -407,6 +407,57 @@ describe('up records the cli bin directory (AISDLC-1358)', () => {
   });
 });
 
+describe('status flags a finished executor that was not stopped (AISDLC-1417)', () => {
+  it('shows `finished, not stopped` once the verdict is over 10 minutes old', async () => {
+    const { writeVerdict } = await import('../dispatch/board.js');
+    const { spawnedExecutorName } = await import('./validate.js');
+    const dyn = (taskId: string): RosterEntry =>
+      ({
+        role: 'executor',
+        name: spawnedExecutorName(taskId),
+        taskId,
+        tmuxSession: spawnedExecutorName(taskId),
+        tmuxWindow: spawnedExecutorName(taskId),
+        paneId: '%1',
+        pid: 0,
+        model: 'sonnet',
+        permissionMode: 'bypassPermissions',
+        startedAt: new Date(NOW.getTime() - 60 * 60_000).toISOString(),
+        status: 'running',
+      }) as RosterEntry;
+    writeRoster(boardDir, {
+      schemaVersion: 'v1',
+      sessions: [dyn('AISDLC-71'), dyn('AISDLC-72'), dyn('AISDLC-73')],
+    });
+    const verdict = (taskId: string, agoMin: number) =>
+      writeVerdict(boardDir, {
+        schemaVersion: 'v1',
+        taskId,
+        outcome: 'success',
+        completedAt: new Date(NOW.getTime() - agoMin * 60_000).toISOString(),
+        workerId: spawnedExecutorName(taskId),
+      });
+    verdict('AISDLC-71', 11);
+    verdict('AISDLC-72', 9);
+    // AISDLC-73: the verdict predates the executor (an earlier attempt).
+    verdict('AISDLC-73', 90);
+    const result = hierarchyStatus(deps);
+    const byTask = Object.fromEntries(result.rows.map((r) => [r.entry.taskId, r]));
+    expect(byTask['AISDLC-71']?.finishedNotStopped).toBe(true);
+    expect(byTask['AISDLC-72']?.finishedNotStopped).toBeUndefined();
+    expect(byTask['AISDLC-73']?.finishedNotStopped).toBeUndefined();
+    const lines = formatStatus(result, NOW.getTime());
+    expect(lines).toContain(
+      'dynamic executor: ai-sdlc-executor-aisdlc-71 task AISDLC-71 age 1h0m (finished, not stopped)',
+    );
+    expect(
+      lines.some((l) => l.includes('ai-sdlc-executor-aisdlc-72') && l.includes('finished')),
+    ).toBe(false);
+    const tableRow = lines.find((l) => l.startsWith('executor') && l.includes('aisdlc-71'));
+    expect(tableRow).toContain('finished, not stopped');
+  });
+});
+
 describe('formatStatus dynamic executors (AISDLC-1075)', () => {
   it('lists each dynamic executor with its task id and age', () => {
     const row = (taskId: string | undefined, startedAt: string) =>
