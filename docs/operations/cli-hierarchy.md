@@ -350,14 +350,20 @@ the board is held.
 
 ### A reaped claim is never restarted from zero (AISDLC-1219, DEC-0392)
 
-No claim is reaped by heartbeat age (AISDLC-1218, DEC-0392): a step longer than 30 minutes used to be failed while the
-executor was working (AISDLC-1209). The reap reads the pipeline-written heartbeat (AISDLC-1226) and fires only with no verdict in
-`done/` or `failed/`, and no live `next-step` under the holder, when either (a) the claim's `phase` is `done` or `aborted`,
-or (b) its `lastHeartbeat` is older than `stallMs` (default 20 minutes). It writes the
-`failed/<id>.diagnostic.json` record (cause `idle-with-claim`), clears the holder and sends the task back through
-`requeueFailed` (still limited by `DEFAULT_REQUEUE_RETRY_LIMIT`; a refusal leaves the failure record and the progress line says
-`not re-queued`). A claim in `awaiting-developer` or `awaiting-reviewers` with a heartbeat inside the window is never reaped; the enqueue wake skips any executor holding a non-terminal claim, whatever its heartbeat age.
-A step that can hang owns its own budget: see the developer round budget in the execute command.
+No claim is reaped by heartbeat age (AISDLC-1218, AISDLC-1416, DEC-0392): a step longer than 30 minutes used to be failed while the
+executor was working (AISDLC-1209), and a developer subagent writing for 20 minutes was reaped mid-write (AISDLC-1407).
+Liveness comes only from the three signals DEC-0392 names:
+
+1. Pane death requeues the claim at once through the `pane-exited` hook (AISDLC-1217).
+2. A terminal phase (`done` or `aborted`) with no verdict in `done/` or `failed/`, and no live `next-step` under the holder,
+   is reaped by the tick; a `done` claim only after `terminalGraceMs` (AISDLC-1226, AISDLC-1230).
+3. A wedged developer round ends on its step-owned budget in `next-step` (AISDLC-1219), which reports `iterate-needed` and
+   keeps the worktree.
+
+The terminal reap writes the `failed/<id>.diagnostic.json` record (cause `idle-with-claim`), clears the holder and sends the
+task back through `requeueFailed` (still limited by `DEFAULT_REQUEUE_RETRY_LIMIT`; a refusal leaves the failure record and the
+progress line says `not re-queued`). A claim in `awaiting-developer` or `awaiting-reviewers` is never reaped, whatever its
+heartbeat age; the enqueue wake skips any executor holding a non-terminal claim.
 
 ### Every failed verdict reaches a terminal state (AISDLC-1156, DEC-0291)
 
@@ -1326,7 +1332,8 @@ pending check turns green later. The tick result carries `landed` (`landed`, `re
 **Stall check (AISDLC-826).** Every tick also checks each inflight claim once. The
 claim's pipeline record (`phase`, `currentStep`, `lastHeartbeat`, written by `next-step`, AISDLC-1226) is the only
 input. A claim is stalled when it has no verdict in `done/` or `failed/`, no live `next-step` runs under its holder, and
-either its `phase` is `done` or `aborted`, or its `lastHeartbeat` is older than `stallMs` (default 20 minutes). It moves to `failed/` with
+its `phase` is `done` or `aborted` (DEC-0392: heartbeat age never reaps; pane death and the developer round budget are the
+other two liveness signals, see [A reaped claim is never restarted from zero](#a-reaped-claim-is-never-restarted-from-zero-aisdlc-1219-dec-0392)). It moves to `failed/` with
 `cause: idle-with-claim`, `lastStep` and `heartbeatAgeMs` (informational); the holder is cleared (which restarts its
 executor loop with `/ai-sdlc:executor`) and the task goes back to `queue/` through `requeueFailed`. An idle executor
 with a live `next-step` process (a backgrounded verification) is spared. The executor writes the verdict (Step 3 `complete`), a `done` claim is spared for `terminalGraceMs` (default 5 minutes) after the phase flip, and `complete` over an existing verdict with the same outcome is a no-op while a different outcome is refused naming both (AISDLC-1230); the diagnostic names the flip time, the reap time and the expected worker.
