@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1428
 title: A filing commit or PR is treated as the task shipping or landing
-status: To Do
+status: In Progress
 priority: high
 labels:
   - dispatch

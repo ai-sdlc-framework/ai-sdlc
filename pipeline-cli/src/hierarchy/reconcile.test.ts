@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -17,6 +17,7 @@ import {
   gatherFacts,
   gatherDocsBump,
   gatherMainHealth,
+  landingPath,
   readDocsSitePin,
   LIVE_CLAIM_NOTE,
   prBelongsToTask,
@@ -1812,5 +1813,88 @@ describe('heldPlannerRouteCount (AISDLC-1391)', () => {
     } finally {
       removeFixtureDir(dir);
     }
+  });
+});
+
+describe('a filing PR that merges between ticks (AISDLC-1428)', () => {
+  const runner: CommandRunner = (_f, args) => {
+    if (args[0] === 'api') return { status: 0, stdout: 'me', stderr: '' };
+    if (args[1] === 'list') return { status: 0, stdout: '[]', stderr: '' };
+    if (args[1] === 'view' && args[2] === '13')
+      return {
+        status: 0,
+        stdout: JSON.stringify({ state: 'MERGED', mergeCommit: { oid: 'f1c33325' } }),
+        stderr: '',
+      };
+    return { status: 1, stdout: '', stderr: 'err' };
+  };
+  const seed = (record: Partial<LandingRecord>): void => {
+    const file = landingPath(board, 13);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(
+      file,
+      JSON.stringify({
+        pr: 13,
+        taskId: 'ENT-12',
+        owner: 'machine',
+        state: 'no-match',
+        action: 'arm',
+        headSha: '032689b9',
+        lastActionAt: '2026-11-25T16:56:40.669Z',
+        history: [{ ts: '2026-11-25T16:56:40.669Z', state: 'no-match', action: 'arm' }],
+        ...record,
+      }),
+    );
+    for (const d of ['failed', 'blocked']) mkdirSync(path.join(board, d), { recursive: true });
+    writeFileSync(
+      path.join(board, 'failed', 'ENT-12.verdict.json'),
+      JSON.stringify({ schemaVersion: 'v1', taskId: 'ENT-12', outcome: 'failed' }),
+    );
+    writeFileSync(path.join(board, 'blocked', 'ENT-12.manifest.json'), '{"taskId":"ENT-12"}');
+  };
+  const tick = () =>
+    reconcile(gatherFacts(runner, '/', board)!, {
+      boardDir: board,
+      execute: () => ({ ran: true }),
+      now: fixedNow,
+    });
+  const untouched = () => {
+    const ls = (d: string) => readdirSync(path.join(board, d));
+    expect(ls('failed')).toContain('ENT-12.verdict.json');
+    expect(ls('blocked')).toContain('ENT-12.manifest.json');
+  };
+
+  it('keeps kind docs and the head branch, and moves no verdict or manifest', () => {
+    seed({ kind: 'docs', headBranch: 'ai-sdlc/file-ent-12' });
+    tick();
+    const r = readLanding(board, 13)!;
+    expect(r).toMatchObject({
+      kind: 'docs',
+      headBranch: 'ai-sdlc/file-ent-12',
+      state: 'merged',
+      landedSha: 'f1c33325',
+    });
+    untouched();
+  });
+
+  it('keeps the earlier kind when the record has no head branch', () => {
+    seed({ kind: 'docs' });
+    tick();
+    expect(readLanding(board, 13)).toMatchObject({ kind: 'docs', state: 'merged' });
+    expect(readLanding(board, 13)!.headBranch).toBeUndefined();
+    untouched();
+  });
+
+  it('a task record still retires only when the task is completed on main', () => {
+    seed({ kind: 'task' });
+    const run = (completed: ReadonlyMap<string, string> | undefined) =>
+      reconcile(gatherFacts(runner, '/', board)!, {
+        boardDir: board,
+        execute: () => ({ ran: true }),
+        now: fixedNow,
+        completedOnMain: () => completed,
+      });
+    run(new Map());
+    untouched();
   });
 });

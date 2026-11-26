@@ -25,6 +25,7 @@ import {
   findTaskFile,
   findTaskFileRelative,
 } from './dispatch-readiness.js';
+import { filingCommitSubject, isFilingSubject } from '../hierarchy/filing-branches.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let tmp: string;
@@ -110,6 +111,22 @@ describe('dispatch-readiness — verdict matrix', () => {
     });
     expect(v.readiness).toBe('stale-shipped');
     expect(v.evidence.staleShippedCommits).toEqual(['abc1234']);
+  });
+
+  it('a cli-file file or update commit does not make the task stale-shipped (AISDLC-1428)', () => {
+    writeOpenTask('ENT-12');
+    const verdict = (subject: string) =>
+      checkDispatchReadiness('ENT-12', {
+        workDir: tmp,
+        gitLogCmd: () => `f1c3332 ${subject}\n`,
+        ghPrListCmd: () => '[]',
+      }).readiness;
+    expect(verdict(filingCommitSubject('file', 'ENT-12'))).toBe('ready');
+    expect(verdict(`${filingCommitSubject('update', 'ENT-12')} (#13)`)).toBe('ready');
+    expect(verdict('chore(docs): file backlog task ENT-12 (ENT-12)')).toBe('ready');
+    expect(verdict('feat(x): thing (ENT-12)')).toBe('stale-shipped');
+    expect(isFilingSubject(filingCommitSubject('close', 'ENT-12'))).toBe(false);
+    expect(isFilingSubject('chore(docs): file backlog task ENT-12 (ENT-13)')).toBe(false);
   });
 
   it('does NOT return stale-shipped when the task is already in completed/', () => {

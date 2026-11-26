@@ -1066,6 +1066,11 @@ export interface ReconcileOpts {
   docsBump?: DocsBump;
   /** AISDLC-1242: enqueues a landed filing's task from its brief; returns the planner line, or undefined when it left the task alone. */
   enqueueFiled?: (pr: number, headBranch: string | undefined) => string | undefined;
+  /**
+   * AISDLC-1428: task ids under `backlog/completed/` on `origin/main`, undefined when unreadable.
+   * Read at most once a pass, only when a landed task PR would retire a verdict or manifest.
+   */
+  completedOnMain?: () => ReadonlyMap<string, string> | undefined;
 }
 
 /** Reconcile a set of PR facts: update the records and run the actions. Idempotent. */
@@ -1090,6 +1095,11 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     const first = firstRoute(opts.boardDir, pr, headSha, reason, opts.notifyPlanner);
     if (!first) report.suppressed++;
     return first;
+  };
+  let completedRead: { map: ReadonlyMap<string, string> | undefined } | undefined;
+  const completedOnMain = (): ReadonlyMap<string, string> | undefined => {
+    completedRead ??= { map: opts.completedOnMain?.() };
+    return completedRead.map;
   };
   for (const f of facts) {
     const existing = readLanding(opts.boardDir, f.prNumber);
@@ -1366,10 +1376,14 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         : undefined);
     const landedAt = existing?.landed ?? (d.state === 'merged' ? ts : undefined);
     const landedSha = existing?.landedSha ?? (d.state === 'merged' ? f.mergeSha : undefined);
+    // AISDLC-1428: a fact with no head branch (a PR that merged between ticks) keeps the kind
+    // and branch the record already had, so a filing PR never turns into a task landing.
+    const headBranch = f.headBranch || existing?.headBranch;
+    const kind = !f.headBranch && existing?.kind ? existing.kind : d.kind;
     const record: LandingRecord = {
       pr: f.prNumber,
-      kind: d.kind,
-      ...(f.headBranch ? { headBranch: f.headBranch } : {}),
+      kind,
+      ...(headBranch ? { headBranch } : {}),
       ...(f.taskId ? { taskId: f.taskId } : {}),
       owner,
       state: d.state,
@@ -1425,13 +1439,15 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     if (d.state === 'merged' && f.taskId && landedAt !== undefined) {
       const sha = landedSha ?? f.headSha;
       try {
+        const completed = kind === 'task' ? completedOnMain() : undefined;
         const retireInput = {
           taskId: f.taskId,
           landedAt,
           ...(sha === undefined ? {} : { landedSha: sha }),
           prNumber: f.prNumber,
-          kind: d.kind,
-          ...(f.headBranch === undefined ? {} : { headBranch: f.headBranch }),
+          kind,
+          ...(headBranch ? { headBranch } : {}),
+          ...(completed === undefined ? {} : { completedOnMain: completed }),
         };
         retireFailedVerdict(opts.boardDir, retireInput);
         // AISDLC-1204: a landed task parked in blocked/ is done, not requeueable.
@@ -1830,6 +1846,8 @@ export function gatherFacts(
         prNumber: r.pr,
         taskId: r.taskId ?? '',
         merged: true,
+        // AISDLC-1428: the record's branch keeps a filing PR in the docs lane once it merged.
+        ...(r.headBranch ? { headBranch: r.headBranch } : {}),
         ...(r.headSha ? { headSha: r.headSha } : {}),
         ...(viewed?.mergeCommit?.oid ? { mergeSha: viewed.mergeCommit.oid } : {}),
       });
