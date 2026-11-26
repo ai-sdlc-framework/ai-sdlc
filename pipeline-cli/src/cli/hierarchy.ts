@@ -43,6 +43,8 @@
  *   - `send --to <name> --text <message>` — message a roster session; refused with the reason when
  *     `to` is not listed in this project's roster (AISDLC-1036).
  *   - `playbook --task <id> --action <step>` — run one named playbook step (AISDLC-918).
+ *   - `gh-usage report [--since 7d] [--ledger <file-or-dir,...>] [--json]` — per-token GitHub
+ *     usage from the gh call ledger and CI quota snapshots (AISDLC-1439).
  *   - `route-decision --decision-id <id> --route operational|design --to <name>`
  *     — record that a decision was routed to a tier.
  *
@@ -61,7 +63,13 @@ import { fetchClosedUnmergedPrs } from '../kpi/closed-unmerged.js';
 import { executorCap, resolveExecutorsMax } from '../hierarchy/executor-cap.js';
 import { openPrState } from '../hierarchy/open-pr-limit.js';
 import { clearScaleCeiling, writeScaleCeiling } from '../hierarchy/scale.js';
-import { parseQuota, parseQuotaFloor } from '../hierarchy/gh-calls.js';
+import { ghCallsPath, parseQuota, parseQuotaFloor } from '../hierarchy/gh-calls.js';
+import {
+  formatGhUsageReport,
+  ghUsageReport,
+  parseSince,
+  readLedgers,
+} from '../hierarchy/gh-usage.js';
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { launchUsageIngestDetached } from '../usage/launch.js';
@@ -252,6 +260,7 @@ Commands:
   resume     Lift the hold set by hold (resume --budget: override the budget pacer for the window)
   canary     Drive a synthetic task through claim, verdict, clear and re-claim: canary run --no-pr
   usage      Sample the account usage windows into usage.json (never prints the token)
+  gh-usage   Per-token GitHub calls/h, lowest quota and rate-limit errors (gh-usage report [--since 7d] [--ledger <paths>] [--json])
   tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
   escalation-file  Write a board file for the planner: failure record, log tail, PR check summary
   route-decision  Record that a decision was routed to a tier
@@ -1251,6 +1260,27 @@ export async function runHierarchyCli(
               : { available: false, reason: file.reason },
           ),
         );
+        return 0;
+      }
+      case 'gh-usage': {
+        const sinceMs = parseSince(flags.since === 'true' ? undefined : flags.since);
+        if (firstPositional(argv) !== 'report' || sinceMs === undefined) {
+          process.stderr.write(
+            'cli-hierarchy gh-usage: usage: gh-usage report [--since <n>d|<n>h|<n>m] [--ledger <file-or-dir,...>] [--json]\n',
+          );
+          return 2;
+        }
+        const extra =
+          flags.ledger && flags.ledger !== 'true'
+            ? flags.ledger.split(',').map((p) => path.resolve(deps.cwd, p.trim()))
+            : [];
+        const report = ghUsageReport(
+          readLedgers([ghCallsPath(deps.boardDir), ...extra]),
+          deps.now(),
+          sinceMs,
+        );
+        if (flags.json === 'true') deps.log(JSON.stringify(report));
+        else process.stdout.write(formatGhUsageReport(report));
         return 0;
       }
       case 'escalation-file': {

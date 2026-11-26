@@ -1,0 +1,2 @@
+{"at":"2026-11-24T12:00:00.000Z","session":"ci","token":"actions","argv":["api","rate_limit"],"exit":0,"runId":"9001","quota":{"core":{"remaining":120,"limit":5000,"reset":1795100000},"graphql":{"remaining":4800,"limit":5000,"reset":1795100000}},"rateLimitedJobs":["ai-sdlc/issue-link"]}
+{"at":"2026-11-24T13:00:00.000Z","session":"ci","token":"actions","argv":["api","rate_limit"],"exit":0,"runId":"9002","quota":{"core":{"remaining":2500,"limit":5000,"reset":1795103600},"graphql":{"remaining":4900,"limit":5000,"reset":1795103600}},"rateLimitedJobs":[]}

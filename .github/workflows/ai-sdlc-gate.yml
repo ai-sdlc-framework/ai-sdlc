@@ -1476,6 +1476,8 @@ jobs:
       needs.detect.outputs.draft != 'true'
     runs-on: ubuntu-latest
     permissions:
+      # AISDLC-1439: read failed job logs for the rate-limit tag.
+      actions: read
       checks: write
       pull-requests: read
     steps:
@@ -1523,10 +1525,55 @@ jobs:
 
       # AISDLC-927: surface the shared installation quota so an exhausted budget
       # is visible in the run summary. /rate_limit itself is not metered.
-      - name: Report API quota remaining (end of run)
+      # AISDLC-1439: core and graphql remaining/limit/reset plus the run id go to
+      # the summary and a `gh-quota-*` artifact (a gh-calls ledger line, token
+      # `actions`) that `cli-hierarchy gh-usage report --ledger` reads. Failed jobs
+      # whose log says `API rate limit exceeded` are named in `rateLimitedJobs`;
+      # their logs are fetched only when an upstream job failed.
+      - name: Record API quota snapshot (end of run)
+        id: quota
         if: always()
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          ANY_FAILED: ${{ contains(needs.*.result, 'failure') }}
         run: |
-          gh api rate_limit --jq '.resources.core | "Actions quota remaining at end: \(.remaining)/\(.limit), resets at \(.reset | todate)"' | tee -a "$GITHUB_STEP_SUMMARY"
+          mkdir -p /tmp/gh-quota
+          gh api rate_limit > /tmp/gh-quota/rate_limit.json
+          limited='[]'
+          if [ "$ANY_FAILED" = true ]; then
+            names=""
+            gh api "repos/$REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT/jobs?per_page=100" \
+              --jq '.jobs[] | select(.conclusion == "failure") | "\(.id)\t\(.name)"' > /tmp/gh-quota/failed.tsv || true
+            while IFS="$(printf '\t')" read -r id name; do
+              [ -n "$id" ] || continue
+              if gh api "repos/$REPO/actions/jobs/$id/logs" 2>/dev/null | grep -q 'API rate limit exceeded'; then
+                names="$names$name"$'\n'
+              fi
+            done < /tmp/gh-quota/failed.tsv
+            limited=$(printf '%s' "$names" | jq -R -s -c 'split("\n") | map(select(. != ""))')
+          fi
+          jq -c --arg at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" --arg run "$RUN_ID" --argjson limited "$limited" '
+            { at: $at, session: "ci", token: "actions", argv: ["api", "rate_limit"], exit: 0, runId: $run,
+              quota: (.resources | { core: (.core | {remaining, limit, reset}), graphql: (.graphql | {remaining, limit, reset}) }),
+              rateLimitedJobs: $limited }' /tmp/gh-quota/rate_limit.json > /tmp/gh-quota/gh-quota.jsonl
+          jq -r '
+            "### Actions API quota (end of run \(.runId))",
+            "",
+            "| bucket | remaining | limit | resets at |",
+            "| --- | --- | --- | --- |",
+            (.quota | to_entries[] | "| \(.key) | \(.value.remaining) | \(.value.limit) | \(.value.reset | todate) |"),
+            "",
+            (if (.rateLimitedJobs | length) > 0 then "Rate-limited jobs: \(.rateLimitedJobs | join(", "))" else "Rate-limited jobs: none" end)
+          ' /tmp/gh-quota/gh-quota.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload API quota snapshot
+        if: always() && steps.quota.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gh-quota-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/gh-quota/gh-quota.jsonl
+          retention-days: 14

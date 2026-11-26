@@ -4,10 +4,17 @@
  */
 
 import { execFile } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { now as clockNow } from '../clock.js';
 import {
   appendGhCall,
+  claimQuotaSnapshot,
+  failureFields,
+  isRateLimitRead,
+  parseQuotaSnapshot,
+  parseResource,
+  quotaStampPath,
   redactArgv,
   GH_CALL_LOGGED_ENV,
   GH_CALL_LOG_ENV,
@@ -62,24 +69,61 @@ function augmentedPath(): string {
  * receive an injected runner default to this.
  */
 export const defaultRunner: Runner = async (command, args, opts = {}) => {
+  const logPath = process.env[GH_CALL_LOG_ENV];
+  const session = process.env.AI_SDLC_HIERARCHY_SESSION ?? '-';
   const log = (r: ExecResult | undefined): void => {
-    const logPath = process.env[GH_CALL_LOG_ENV];
     if (!logPath || command !== 'gh') return;
-    const remaining = r ? parseRemaining(r.stdout) : undefined;
+    const stdout = r?.stdout ?? '';
+    const remaining = parseRemaining(stdout);
+    const resource = remaining !== undefined ? parseResource(stdout) : undefined;
+    const exit = r?.code ?? 1;
+    const at = clockNow().toISOString();
+    // AISDLC-1439: a successful rate_limit read is itself this hour's quota snapshot.
+    const quota = exit === 0 && isRateLimitRead(args) ? parseQuotaSnapshot(stdout) : undefined;
+    if (quota) {
+      try {
+        writeFileSync(quotaStampPath(logPath, session), at);
+      } catch {
+        /* best effort */
+      }
+    }
+    appendGhCall(logPath, {
+      at,
+      session,
+      argv: redactArgv(args),
+      exit,
+      ...(remaining !== undefined ? { remaining } : {}),
+      ...(resource !== undefined ? { resource } : {}),
+      ...failureFields(exit, r?.stderr ?? ''),
+      ...(quota ? { quota } : {}),
+    });
+  };
+  /** AISDLC-1439: at most one extra `gh api rate_limit` per hour per session. */
+  const snapshot = async (): Promise<void> => {
+    if (!logPath || command !== 'gh' || isRateLimitRead(args)) return;
+    if (!claimQuotaSnapshot(logPath, session, clockNow())) return;
+    const r = await runCommand('gh', ['api', 'rate_limit'], {
+      cwd: opts.cwd,
+      timeout: 30_000,
+      allowFailure: true,
+    }).catch(() => undefined);
+    const quota = r?.code === 0 ? parseQuotaSnapshot(r.stdout) : undefined;
     appendGhCall(logPath, {
       at: clockNow().toISOString(),
-      session: process.env.AI_SDLC_HIERARCHY_SESSION ?? '-',
-      argv: redactArgv(args),
+      session,
+      argv: ['api', 'rate_limit'],
       exit: r?.code ?? 1,
-      ...(remaining !== undefined ? { remaining } : {}),
+      ...(quota ? { quota } : {}),
     });
   };
   try {
     const result = await runCommand(command, args, opts);
     log(result);
+    await snapshot();
     return result;
   } catch (err) {
     log((err as { result?: ExecResult }).result);
+    await snapshot();
     throw err;
   }
 };
