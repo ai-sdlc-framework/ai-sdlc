@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1439
 title: "Record GitHub quota and rate-limit errors for both the local token and the CI token, with a weekly report"
-status: To Do
+status: Done
 priority: high
 labels:
   - observability
