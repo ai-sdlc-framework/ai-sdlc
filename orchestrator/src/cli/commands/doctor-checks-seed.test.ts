@@ -23,6 +23,7 @@ import {
   checkFeatureFlags,
   checkFeatureWorkflows,
   checkAttestationGovernanceCheck,
+  checkKnowledgeScopeWired,
   DOCTOR_CHECKS,
   type DoctorCheckAdapters,
   type DoctorRunContext,
@@ -334,5 +335,46 @@ describe('Backlog Drift required context (check 7 extension)', () => {
     expect(checkAttestationGovernanceCheck(governanceCtx(['ai-sdlc/pr-ready'])).severity).toBe(
       'pass',
     );
+  });
+});
+
+describe('knowledge-scope-wired (AISDLC-1409)', () => {
+  it('passes when there is no protected knowledge root', () => {
+    expect(checkKnowledgeScopeWired(ctxOf()).severity).toBe('pass');
+  });
+
+  it('warns when the protected root exists and no pre-push hook runs the check', () => {
+    put('.ai-sdlc/knowledge-protected/acme.md', '---\nid: acme\n---\n');
+    const r = checkKnowledgeScopeWired(ctxOf());
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain('.ai-sdlc/knowledge-protected');
+    expect(r.remediation).toMatch(/cli-context check-scope/);
+    put('.husky/pre-push', '#!/bin/sh\npnpm lint\n');
+    expect(checkKnowledgeScopeWired(ctxOf()).severity).toBe('warn');
+  });
+
+  it('passes when the pre-push hook runs the check', () => {
+    put('.ai-sdlc/knowledge-protected/acme.md', 'x');
+    put(
+      '.husky/pre-push',
+      '#!/bin/sh\nnpx --no-install cli-context check-scope --project-dir "$PWD"\n',
+    );
+    expect(checkKnowledgeScopeWired(ctxOf()).severity).toBe('pass');
+    put('.husky/pre-push', './scripts/check-knowledge-scope.sh --push-stdin\n');
+    expect(checkKnowledgeScopeWired(ctxOf()).severity).toBe('pass');
+  });
+
+  it('honours a configured protectedRoot and falls back on unparseable config', () => {
+    put('.ai-sdlc/context.yaml', 'knowledge:\n  protectedRoot: private/kb\n');
+    expect(checkKnowledgeScopeWired(ctxOf()).severity).toBe('pass');
+    put('private/kb/a.md', 'x');
+    expect(checkKnowledgeScopeWired(ctxOf()).title).toContain('private/kb');
+    put('.ai-sdlc/context.yaml', 'knowledge: [unclosed\n');
+    put('.ai-sdlc/knowledge-protected/a.md', 'x');
+    expect(checkKnowledgeScopeWired(ctxOf()).title).toContain('.ai-sdlc/knowledge-protected');
+  });
+
+  it('is registered', () => {
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('knowledge-scope-wired');
   });
 });
