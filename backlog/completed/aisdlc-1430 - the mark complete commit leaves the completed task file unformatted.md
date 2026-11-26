@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1430
 title: "The `mark <id> complete` commit leaves `backlog/completed/<id>.md` unformatted and fails format checks on adopter PRs"
-status: To Do
+status: Done
 priority: medium
 labels:
   - pipeline-cli

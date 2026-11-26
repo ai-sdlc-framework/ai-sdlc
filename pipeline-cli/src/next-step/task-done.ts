@@ -64,7 +64,9 @@ function trimTrailingBlankLines(lines: string[]): string[] {
 /** Append (or replace) the `## Final Summary` section. */
 export function setFinalSummary(bodyLines: string[], summary: string): string[] {
   const headingIdx = bodyLines.findIndex((line) => /^##\s+Final Summary\s*$/i.test(line));
-  const summaryLines = summary.split(/\r?\n/);
+  // AISDLC-1430: a summary ending in a newline must not leave a second blank
+  // line at the end of the file (prettier would strip it).
+  const summaryLines = trimTrailingBlankLines(summary.split(/\r?\n/));
   if (headingIdx === -1) {
     const out = [...trimTrailingBlankLines(bodyLines)];
     if (out.length > 0) out.push('');
