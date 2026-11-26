@@ -5,7 +5,8 @@
  *   cli-init --check [--format json]   report missing entries (doctor, SessionStart)
  *   cli-init --fix                     scaffold entries that need no operator input
  *
- * Everything comes from `REQUIRED_CONFIG_MANIFEST`.
+ * Everything comes from `REQUIRED_CONFIG_MANIFEST`; the scaffold run also adds the
+ * missing runtime entries to .gitignore (`RUNTIME_GITIGNORE_PATHS`).
  */
 
 import { execFileSync } from 'node:child_process';
@@ -22,6 +23,7 @@ import {
   scaffoldConfig,
   type PromptFn,
 } from '../config-manifest/manifest.js';
+import { writeRuntimeGitignore } from '../config-manifest/runtime-gitignore.js';
 
 function git(projectDir: string, args: string[]): string {
   try {
@@ -113,6 +115,8 @@ export async function runInitCli(argv: string[] = hideBin(process.argv)): Promis
     for (const f of res.failed) {
       process.stderr.write(`failed  ${f.path}: ${f.reason}\n`);
     }
+    // AISDLC-1407: the runtime paths every repository must ignore, on every run.
+    for (const p of writeRuntimeGitignore(projectDir)) process.stdout.write(`ignored ${p}\n`);
     return res.failed.length === 0 ? 0 : 1;
   } finally {
     rl?.close();

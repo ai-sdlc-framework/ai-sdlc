@@ -29,18 +29,13 @@
  */
 
 import { Command } from 'commander';
-import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { detectAgentsDetailed, installMcpServer } from './mcp-setup.js';
 import { detectWorkspace, generateWorkspaceYaml, type WorkspaceRepo } from './workspace-detect.js';
 import { detectGitRemote, type RemoteInfo } from './git-remote.js';
 import { resolveVersions, formatVersionBlock } from '../versions.js';
-import {
-  RUNTIME_GITIGNORE_SENTINEL,
-  hasSentinelLine,
-  insertIntoSentinelBlock,
-  missingRuntimeGitignorePaths,
-} from '../../runtime-gitignore.js';
+import { writeRuntimeGitignore } from '../../runtime-gitignore.js';
 import {
   applyFeatureSelection,
   buildProductionAdapters,
@@ -226,31 +221,15 @@ export function scaffoldSoulDsbs(
   }
 }
 
-/** Ensure .gitignore includes AI-SDLC runtime artifact entries. */
-function ensureGitignore(projectDir: string, dryRun: boolean, prefix: string = ''): void {
-  const gitignorePath = join(projectDir, '.gitignore');
-  const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf-8') : '';
-
-  const missing = missingRuntimeGitignorePaths(existing);
+/**
+ * Ensure .gitignore includes AI-SDLC runtime artifact entries. Runs on first init and
+ * on every `init --add`, so a repository initialised by an older version gains the
+ * entries added since (AISDLC-1407).
+ */
+export function ensureGitignore(projectDir: string, dryRun: boolean, prefix: string = ''): void {
+  const missing = writeRuntimeGitignore(projectDir, { dryRun });
   if (missing.length === 0) return;
-
-  if (dryRun) {
-    console.log(`${prefix}  Would update .gitignore`);
-    return;
-  }
-
-  if (hasSentinelLine(existing)) {
-    // An earlier init wrote the block: add the new entries under it, not a second block.
-    writeFileSync(gitignorePath, insertIntoSentinelBlock(existing, missing), 'utf-8');
-  } else {
-    const block =
-      (existing.length > 0 ? '\n' : '') +
-      `${RUNTIME_GITIGNORE_SENTINEL}\n` +
-      missing.join('\n') +
-      '\n';
-    appendFileSync(gitignorePath, block, 'utf-8');
-  }
-  console.log(`${prefix}  updated .gitignore`);
+  console.log(`${prefix}  ${dryRun ? 'Would update' : 'updated'} .gitignore`);
 }
 
 /**
@@ -592,6 +571,7 @@ export const initCommand = new Command('init')
       const selection: FeatureSelection = await resolveFeatureSelection(flags, adapters);
       console.log(`Extending AI-SDLC config with --add ${flags.add}:`);
       console.log('');
+      ensureGitignore(projectDir, dryRun);
       const result = await applyFeatureSelection(projectDir, selection, flags, adapters);
       renderNextSteps(selection, result, adapters, projectDir);
       // Reviewer feedback (round 2, suggestion #5): when the operator

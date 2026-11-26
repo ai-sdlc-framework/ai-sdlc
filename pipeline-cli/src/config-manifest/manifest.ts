@@ -458,3 +458,4 @@ export async function scaffoldConfig(opts: ScaffoldOptions): Promise<ScaffoldRes
   }
   return result;
 }
+export * from './runtime-gitignore.js';

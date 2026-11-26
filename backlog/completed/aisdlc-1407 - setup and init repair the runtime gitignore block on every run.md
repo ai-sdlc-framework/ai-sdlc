@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1407
 title: 'Setup and init repair the runtime gitignore block on every run'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24'
 labels:
