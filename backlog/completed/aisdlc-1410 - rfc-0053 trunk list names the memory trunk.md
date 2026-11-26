@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1410
 title: 'RFC-0053 trunk list names the memory trunk'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24'
 labels:
