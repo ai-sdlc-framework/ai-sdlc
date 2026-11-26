@@ -116,9 +116,21 @@ describe('writeEscalationFile idempotence (AISDLC-1200)', () => {
     expect(count()).toBe(3);
   });
 
+  it('writes a new file when the identical one is older than the window (AISDLC-1382)', () => {
+    const old = go(new Date(now.getTime() - 30 * 24 * 3600_000));
+    const fresh = go(now);
+    expect(fresh.file).not.toBe(old.file);
+    expect(JSON.parse(readFileSync(fresh.file, 'utf-8')).createdAt).toBe(now.toISOString());
+    expect(go(new Date(now.getTime() + 60_000)).file).toBe(fresh.file);
+    expect(count()).toBe(2);
+  });
+
   it('ignores unreadable and unrelated files', () => {
     mkdirSync(path.join(board, 'escalations'), { recursive: true });
-    writeFileSync(path.join(board, 'escalations', 'AISDLC-12-1.json'), '{broken');
+    writeFileSync(
+      path.join(board, 'escalations', `AISDLC-12-${now.getTime() - 1}.json`),
+      '{broken',
+    );
     writeFileSync(path.join(board, 'escalations', '.notified.json'), '{}');
     go(now);
     expect(count()).toBe(3);

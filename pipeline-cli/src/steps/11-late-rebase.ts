@@ -153,6 +153,39 @@ export interface LateRebaseResult {
    * re-sign before pushing.
    */
   resolvedFiles: string[];
+  /**
+   * AISDLC-1382: set when the rebase could not complete because the branch's pull request has
+   * already merged (main holds its squash commit); `ok` is true and nothing is left to push.
+   */
+  alreadyMerged?: { mergeSha: string; prUrl?: string };
+}
+
+/**
+ * AISDLC-1382: the merge commit of the worktree branch's pull request when GitHub reports it
+ * merged, else undefined. Any lookup failure reads as not merged.
+ */
+async function mergedPr(
+  runner: Runner,
+  cwd: string,
+): Promise<{ mergeSha: string; prUrl?: string } | undefined> {
+  const r = await runner('gh', ['pr', 'view', '--json', 'state,mergeCommit,url'], {
+    cwd,
+    allowFailure: true,
+    timeout: 30_000,
+  });
+  if (r.code !== 0) return undefined;
+  try {
+    const v = JSON.parse(r.stdout) as {
+      state?: string;
+      mergeCommit?: { oid?: string } | null;
+      url?: string;
+    };
+    const sha = v.mergeCommit?.oid;
+    if (v.state !== 'MERGED' || !sha) return undefined;
+    return { mergeSha: sha, ...(v.url ? { prUrl: v.url } : {}) };
+  } catch {
+    return undefined;
+  }
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -431,6 +464,17 @@ export async function lateRebase(opts: LateRebaseOptions): Promise<LateRebaseRes
     if (hardConflicts.length > 0) {
       // Has unresolvable conflicts — abort and return
       await runner('git', ['rebase', '--abort'], { cwd, allowFailure: true });
+      // AISDLC-1382: main already holds this branch's squash commit; the conflict is with itself.
+      const merged = await mergedPr(runner, cwd);
+      if (merged) {
+        return {
+          ok: true,
+          conflictingFiles: [],
+          rebaseAttempts: attempts,
+          resolvedFiles: [],
+          alreadyMerged: merged,
+        };
+      }
       return {
         ok: false,
         conflictingFiles: hardConflicts,

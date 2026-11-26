@@ -264,6 +264,36 @@ describe('cancelled duplicate with passing sibling (AISDLC-724)', () => {
   });
 });
 
+describe('cancelled duplicate run with a newer run in progress (AISDLC-1382)', () => {
+  it('a cancelled run plus a newer in-progress run for the same head is pending, not real-failure', () => {
+    // PR #2919: run A was cancelled by concurrency (its jobs cancelled, its rollup red) while
+    // run B for the same head was still in progress.
+    const c = classifyPr({
+      ...base,
+      mergeStateStatus: 'BLOCKED',
+      checks: [
+        { name: 'Build & Test', conclusion: 'cancelled' },
+        { name: 'ai-sdlc/pr-ready', conclusion: 'failure', summary: 'Build & Test: cancelled' },
+        { name: 'Build & Test', conclusion: 'pending' },
+        { name: 'ai-sdlc/pr-ready', conclusion: 'pending' },
+      ],
+    });
+    expect(c.state).toBe('pending');
+    expect(c.action).toBe('none');
+  });
+
+  it('keeps a failure with no running sibling of the same name', () => {
+    const c = classifyPr({
+      ...base,
+      checks: [
+        { name: 'ai-sdlc/pr-ready', conclusion: 'failure', summary: 'boom' },
+        { name: 'Build & Test', conclusion: 'pending' },
+      ],
+    });
+    expect(c.state).toBe('real-failure');
+  });
+});
+
 describe('stale-base Backlog Drift (AISDLC-1140)', () => {
   const drift = (changedFiles: string[]) =>
     classifyPr({

@@ -260,6 +260,49 @@ describe('dispatch host (AISDLC-1035)', () => {
     expect(s.runs.some((a) => a[1] === 'escalation-file' && a.includes('AISDLC-3'))).toBe(true);
   });
 
+  it('names the exit code or signal and the duration of a failed tick (AISDLC-1382)', async () => {
+    const s = setup();
+    await s.start();
+    s.setTick(undefined);
+    await s.timer();
+    const msg = (argv: string[]) => argv[argv.indexOf('--message') + 1];
+    const empty = s.runs.find((a) => a[1] === 'escalation-file' && a.includes('TICK'))!;
+    expect(msg(empty)).toMatch(
+      /^cli-hierarchy tick did not return a result: no output \(exit code 0, after \d+\.\ds\)$/,
+    );
+    s.runs.length = 0;
+    const run = s.$.process.run;
+    s.$.process.run = vi.fn(async (a: string[]) =>
+      a[2] === 'tick' ? { exitCode: null, signal: 'SIGKILL', stdout: '', stderr: '' } : run(a),
+    );
+    await s.timer();
+    const killed = s.runs.find((a) => a[1] === 'escalation-file' && a.includes('TICK'));
+    expect(killed).toBeUndefined(); // same failure text as the last one: not escalated again
+    s.$.process.run = vi.fn(async (a: string[]) =>
+      a[2] === 'tick' ? { exitCode: null, signal: 'SIGKILL', stdout: '', stderr: 'oom' } : run(a),
+    );
+    await s.timer();
+    const oom = s.runs.find((a) => a[1] === 'escalation-file' && a.includes('TICK'))!;
+    expect(msg(oom)).toMatch(/: oom \(signal SIGKILL, after \d+\.\ds\)$/);
+  });
+
+  it('classifies an executor status line with a doubled sender prefix (AISDLC-1382)', async () => {
+    const s = setup();
+    await s.start();
+    s.runs.length = 0;
+    const from = 'ai-sdlc-executor-aisdlc-1374';
+    expect(await s.receive(from, `${from}: AISDLC-1374 success, PR 2919, decisions none`)).toEqual({
+      consumed: 'hierarchy:verdict',
+    });
+    expect(s.runs.some((a) => a[1] === 'escalation-file')).toBe(false);
+    expect(s.runs.some((a) => a[1] === 'collect-verdicts')).toBe(true);
+    expect(classify('AISDLC-1374 failed, PR 2919')).toMatchObject({
+      kind: 'verdict',
+      taskId: 'AISDLC-1374',
+    });
+    expect(classify('AISDLC-1374 is odd')).toMatchObject({ kind: 'unknown' });
+  });
+
   it('escalates a persistent tick failure once and runs reconcile and sweep after a good tick', async () => {
     const s = setup();
     await s.start();

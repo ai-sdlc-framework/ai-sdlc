@@ -738,6 +738,8 @@ export interface PushAndPrResult {
    * is left in its pre-rebase state (clean, rebased to the last clean commit).
    * Orchestrator tick maps this to `outcome: 'rebase-conflict'` and continues.
    */
+  /** AISDLC-1382: the PR had already merged at the late rebase; nothing was pushed. */
+  alreadyMerged?: { mergeSha: string };
   rebaseConflict?: {
     /** Files that had unresolvable conflicts. */
     files: string[];

@@ -166,10 +166,18 @@ function failed(c: PrCheck): boolean {
 /**
  * AISDLC-724: a cancelled run is a superseded duplicate when a sibling check of
  * the same name succeeded; drop it so it is not read as a failing check.
+ * AISDLC-1382: a finished non-success check whose name also has a pending sibling
+ * belongs to a run the newer, still-running one replaces (a concurrency-cancelled
+ * duplicate and its red rollup); drop it so the head reads as pending.
  */
 export function dropSupersededCancelled(checks: readonly PrCheck[]): PrCheck[] {
   const passing = new Set(checks.filter((c) => c.conclusion === 'success').map((c) => c.name));
-  return checks.filter((c) => !(c.conclusion === 'cancelled' && passing.has(c.name)));
+  const running = new Set(checks.filter((c) => c.conclusion === 'pending').map((c) => c.name));
+  return checks.filter(
+    (c) =>
+      !(c.conclusion === 'cancelled' && passing.has(c.name)) &&
+      !(c.conclusion !== 'success' && c.conclusion !== 'pending' && running.has(c.name)),
+  );
 }
 
 /** Classify one PR into exactly one state. Pure and deterministic. */

@@ -41,6 +41,8 @@ export interface LandPrepResult {
   /** Mechanically resolved files. */
   resolvedFiles: string[];
   reason?: string;
+  /** AISDLC-1382: the PR had already merged; nothing was rebased or pushed. */
+  alreadyMerged?: { mergeSha: string; prUrl?: string };
 }
 
 const SKIP_VAR = /^AI_SDLC_(SKIP_.*|BYPASS_ALL_GATES)$/;
@@ -85,6 +87,16 @@ export async function landPrep(opts: LandPrepOptions): Promise<LandPrepResult> {
   });
   if (!rebase.ok) {
     return fail(rebase.reason ?? 'rebase failed', { conflictingFiles: rebase.conflictingFiles });
+  }
+  if (rebase.alreadyMerged) {
+    return {
+      ok: true,
+      pushed: false,
+      rebased: false,
+      conflictingFiles: [],
+      resolvedFiles: [],
+      alreadyMerged: rebase.alreadyMerged,
+    };
   }
   const afterRebase = (await runner('git', ['rev-parse', 'HEAD'], { cwd })).stdout.trim();
   const rebased = afterRebase !== before;

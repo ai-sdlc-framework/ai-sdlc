@@ -263,7 +263,12 @@ export function decide(
   if (!delivered && !takeover) return { ...base, action: 'none' };
   // AISDLC-1202: a red check on a PR whose task is inflight with a live claim is a round in progress
   // (the reviewers have not signed the new head); it is not counted as a failure and nothing runs.
-  if (c.state === 'real-failure' && f.manifestState === 'inflight' && !takeover) {
+  // AISDLC-1382: the same holds for a head no row matches (no verdict yet for it): not routed.
+  if (
+    (c.state === 'real-failure' || c.state === 'no-match') &&
+    f.manifestState === 'inflight' &&
+    !takeover
+  ) {
     return { ...base, action: 'none', note: LIVE_CLAIM_NOTE };
   }
   // AISDLC-1232: one rerun per head; a second stale classification means the rerun did not turn green.

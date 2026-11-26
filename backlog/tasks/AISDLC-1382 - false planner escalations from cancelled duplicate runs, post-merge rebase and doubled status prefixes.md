@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1382
 title: 'False planner escalations from cancelled duplicate runs, post-merge rebase and doubled status prefixes'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-22'
 labels:

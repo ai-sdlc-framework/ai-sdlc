@@ -51,15 +51,21 @@ function readJson(file: string): Record<string, unknown> | null {
   }
 }
 
+/** The same task and message is announced to the planner at most once in this window. */
+export const ESCALATION_NOTIFY_WINDOW_MS = 60 * 60 * 1000;
+
 /**
  * AISDLC-1200: an existing file for the same task, message and head (the failure record the
  * escalation was written against), or undefined. Unreadable files never match.
+ * AISDLC-1382: only a file created inside {@link ESCALATION_NOTIFY_WINDOW_MS} matches, so a live
+ * failure identical to a month-old one gets its own file with a current `createdAt`.
  */
 function findExistingEscalation(
   dir: string,
   taskId: string,
   message: string,
   failureRecord: Record<string, unknown> | null,
+  now: Date,
 ): string | undefined {
   let names: string[];
   try {
@@ -71,6 +77,8 @@ function findExistingEscalation(
   const head = JSON.stringify(failureRecord);
   for (const name of names) {
     if (!name.startsWith(prefix) || !/^\d+\.json$/.test(name.slice(prefix.length))) continue;
+    const at = Number(name.slice(prefix.length, -'.json'.length));
+    if (now.getTime() - at >= ESCALATION_NOTIFY_WINDOW_MS) continue;
     const file = path.join(dir, name);
     const prior = readJson(file);
     if (prior && prior.taskId === taskId && prior.message === message) {
@@ -89,7 +97,7 @@ export function writeEscalationFile(inputs: EscalationInputs): { file: string } 
     readJson(path.join(boardDir, 'failed', `${taskId}.verdict.json`)) ??
     readJson(path.join(boardDir, 'done', `${taskId}.verdict.json`));
   const dir = path.join(boardDir, 'escalations');
-  const existing = findExistingEscalation(dir, taskId, message, failureRecord);
+  const existing = findExistingEscalation(dir, taskId, message, failureRecord, now);
   if (existing) return { file: existing };
   const notes = typeof failureRecord?.notes === 'string' ? failureRecord.notes : '';
   const logTail = notes.split('\n').filter(Boolean).slice(-LOG_TAIL_LINES);
@@ -113,9 +121,6 @@ export function writeEscalationFile(inputs: EscalationInputs): { file: string } 
   writeFileSync(file, JSON.stringify(body, null, 2) + '\n', 'utf-8');
   return { file };
 }
-
-/** The same task and message is announced to the planner at most once in this window. */
-export const ESCALATION_NOTIFY_WINDOW_MS = 60 * 60 * 1000;
 
 /**
  * AISDLC-1190: tell the planner about a new escalation file, one line. A repeat of the same
