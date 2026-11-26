@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1420
 title: Record the acting principal on every knowledge-log event
-status: In Progress
+status: Done
 priority: high
 labels:
   - pipeline-cli
