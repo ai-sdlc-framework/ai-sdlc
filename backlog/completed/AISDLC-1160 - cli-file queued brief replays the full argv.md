@@ -1,6 +1,8 @@
 ---
 id: AISDLC-1160
-title: 'cli-file --pr --queue writes the queued brief from the real argv, so a queued `decision --answer` (and every other flag) replays intact'
+title: >-
+  cli-file --pr --queue writes the queued brief from the real argv, so a queued
+  `decision --answer` (and every other flag) replays intact
 status: Done
 assignee: []
 created_date: '2026-11-02'
@@ -10,11 +12,19 @@ labels:
 dependencies: []
 references:
   - pipeline-cli/src/cli/file.ts
-  - pipeline-cli/src/cli/file-pacing.ts
-  - pipeline-cli/src/cli/file-pacing.test.ts
   - pipeline-cli/src/cli/file.test.ts
 priority: medium
 dispatchable: true
+drift_log:
+  - date: '2026-11-26'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/cli/file-pacing.ts'
+    resolution: flagged
+  - date: '2026-11-26'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/cli/file-pacing.test.ts'
+    resolution: flagged
+drift_checked: '2026-11-26'
 ---
 
 ## Description

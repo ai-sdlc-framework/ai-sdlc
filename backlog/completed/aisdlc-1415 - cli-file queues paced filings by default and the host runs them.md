@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1415
-title: 'cli-file queues paced filings by default and the host runs them when due'
-status: To Do
+title: cli-file queues paced filings by default and the host runs them when due
+status: Done
 assignee: []
 created_date: '2026-11-25'
 labels:
@@ -10,10 +10,15 @@ labels:
   - dispatch
 dependencies: []
 references:
-  - pipeline-cli/src/cli/file-pacing.ts
   - pipeline-cli/src/cli/file.ts
   - docs/operations/tooling-limitations.md
 priority: high
+drift_log:
+  - date: '2026-11-26'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/src/cli/file-pacing.ts'
+    resolution: flagged
+drift_checked: '2026-11-26'
 ---
 
 ## Description
@@ -45,3 +50,9 @@ On 2026-11-25 three filings each blocked for about 15 minutes (898 s, 899 s and 
 - [ ] #5 `cli-hierarchy status` prints the queued-filing count and the next due id. A brief already satisfied on `origin/main` is removed with a log line.
 - [ ] #6 `cli-decisions add|answer --file --pr` follows the same queue-by-default path. Tested.
 - [ ] #7 `docs/operations/tooling-limitations.md` and the planner command text describe the new default, citing DEC-0426.
+
+## Closed
+
+- Reason: superseded by DEC-0426 d, recorded as DEC-0432 b (operator, 2026-11-26), which overrules DEC-0426 c; the filing spacing is deleted outright, so there is nothing to queue. Not built.
+- Superseded by: AISDLC-1437
+- Date: 2026-11-26

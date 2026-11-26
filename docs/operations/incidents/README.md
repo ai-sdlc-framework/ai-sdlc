@@ -42,7 +42,7 @@ Append a row, or bump the count and last-seen date, when a mistake recurs. File 
 
 | Mistake | Count | Last seen | Addressed by |
 |---------|-------|-----------|--------------|
-| Every PR push fans out to many workflows and exhausts the shared GitHub token bucket; gate jobs then fail with `API rate limit exceeded for installation` | 2 | 2026-10-16 | DEC-0250 (fan-out cut); [`tooling-limitations.md`](../tooling-limitations.md); `cli-file --pr` pacing (AISDLC-986) |
+| Every PR push fans out to many workflows and exhausts the shared GitHub token bucket; gate jobs then fail with `API rate limit exceeded for installation` | 2 | 2026-10-16 | DEC-0250 (fan-out cut); [`tooling-limitations.md`](../tooling-limitations.md) |
 | Rerunning failed jobs while the bucket is empty spends more of it | 2 | 2026-10-16 | [`tooling-limitations.md`](../tooling-limitations.md) rerun-once-per-head rule |
 | A background helper (forwarder, receiver) dies silently and nothing notices | 1 | 2026-10-15 | DEC-0235 (forwarder owned by `cli-hierarchy up/down`, poller backstop); no doctor check yet |
 | Decision ids allocated twice for different records (concurrent sessions) | 2 | 2026-10-15 | none yet |

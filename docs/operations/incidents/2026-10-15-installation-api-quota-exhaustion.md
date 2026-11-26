@@ -13,7 +13,7 @@ PRs could not land while the bucket was empty. Reruns spent more of the bucket, 
 - 2026-10-15: roughly 32 pushes in 90 minutes, each firing 7-8 workflows, drained the 1,000 requests per hour Actions token bucket.
 - 2026-10-15 22:45: planner opened DEC-0249, then a duplicate DEC-0250, proposing to cut per-PR fan-out.
 - 2026-10-15 22:46: operator chose `full` on DEC-0250.
-- 2026-10-16: follow-on exhaustion of the shared installation bucket handled by pacing.
+- 2026-10-16: follow-on exhaustion of the shared installation bucket handled by `cli-file --pr` pacing (AISDLC-986), since removed (DEC-0432 b).
 
 ## Ruling and who made it
 
@@ -25,4 +25,4 @@ Per-PR workflow fan-out multiplied by push rate exceeded the per-repository toke
 
 ## Follow-up
 
-Ceiling documented in [`../tooling-limitations.md`](../tooling-limitations.md). `cli-file --pr` spaces filings (AISDLC-986).
+Ceiling documented in [`../tooling-limitations.md`](../tooling-limitations.md). The `cli-file --pr` filing spacing added by AISDLC-986 was removed by DEC-0432 b, the operator ruling of 2026-11-26 that overrules DEC-0426 c (AISDLC-1437): the root cause was workflow fan-out, addressed by DEC-0250 and the AISDLC-867 records-only fast lane.
