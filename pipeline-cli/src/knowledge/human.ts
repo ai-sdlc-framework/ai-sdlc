@@ -7,7 +7,8 @@ import { createHash } from 'node:crypto';
 import { now } from '../clock.js';
 import { AGENT_CONFIDENCE_CAP, type KnowledgeEntry } from './entry.js';
 import { appendKnowledgeEvent } from './log.js';
-import { findEntryFile, REOBSERVE_WEIGHT, rewrite, type Role } from './promote.js';
+import { openKnowledgeStore } from './knowledge-store.js';
+import { REOBSERVE_WEIGHT, type Role } from './promote.js';
 
 /** Confirm: confidence moves 30 percent toward the supplied value; authority never changes. */
 export function confirmEntry(
@@ -17,16 +18,15 @@ export function confirmEntry(
   by: Role,
   observed?: string,
 ): number | null {
-  const file = findEntryFile(trackedRootAbs, id);
-  if (!file) return null;
   let next = 0;
-  const before = rewrite(file, (f) => {
+  const before = openKnowledgeStore({ trackedRoot: trackedRootAbs }).update(id, (f) => {
     const old = Number(f.confidence);
     next = Math.round((old + REOBSERVE_WEIGHT * (confidence - old)) * 1e6) / 1e6;
     if (f.writtenBy === 'agent') next = Math.min(next, AGENT_CONFIDENCE_CAP);
     f.confidence = next;
     if (observed) f.observed = observed;
   });
+  if (!before) return null;
   appendKnowledgeEvent(trackedRootAbs, {
     event: 'confirmed',
     id,
@@ -44,13 +44,12 @@ export function correctEntry(
   by: Role,
   observed?: string,
 ): boolean {
-  const file = findEntryFile(trackedRootAbs, id);
-  if (!file) return false;
-  const before = rewrite(file, (f) => {
+  const before = openKnowledgeStore({ trackedRoot: trackedRootAbs }).update(id, (f) => {
     f.value = value;
     f.contentHash = createHash('sha256').update(value).digest('hex');
     if (observed) f.observed = observed;
   });
+  if (!before) return false;
   appendKnowledgeEvent(trackedRootAbs, {
     event: 'corrected',
     id,
@@ -67,12 +66,13 @@ export function supersedeEntry(
   newId: string,
   by: Role,
 ): { ok: boolean; reason: string } {
-  const oldFile = findEntryFile(trackedRootAbs, oldId);
-  const newFile = findEntryFile(trackedRootAbs, newId);
-  if (!oldFile) return { ok: false, reason: `entry '${oldId}' not found` };
-  if (!newFile) return { ok: false, reason: `entry '${newId}' not found` };
+  const store = openKnowledgeStore({ trackedRoot: trackedRootAbs });
+  const oldEntry = store.get(oldId, { scope: 'tracked' });
+  const newEntry = store.get(newId, { scope: 'tracked' });
+  if (!oldEntry) return { ok: false, reason: `entry '${oldId}' not found` };
+  if (!newEntry) return { ok: false, reason: `entry '${newId}' not found` };
   if (oldId === newId) return { ok: false, reason: 'an entry cannot supersede itself' };
-  rewrite(newFile, (f) => {
+  store.update(newId, (f) => {
     f.supersedes = oldId;
     const rels = Array.isArray(f.relations)
       ? (f.relations as { type: string; target: string }[])

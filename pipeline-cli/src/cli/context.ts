@@ -25,13 +25,14 @@
  *                     configured protected root is tracked / not git-ignored. With `--rev`, also
  *                     scans every commit in the pushed range, not only HEAD/the index.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import process from 'node:process';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { now } from '../clock.js';
 import { loadKnowledgeConfig } from '../knowledge/config.js';
+import { openKnowledgeStore } from '../knowledge/knowledge-store.js';
 import { captureFact, exportableEntries } from '../knowledge/data-room.js';
 import { checkKnowledgeScope, checkKnowledgeScopeRange } from '../knowledge/scope-check.js';
 import { INGEST_SOURCES, ingestSource, type IngestSource } from '../knowledge/ingest-sources.js';
@@ -361,10 +362,9 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           observed: String(args.observed),
           headings: args.heading as string[] | undefined,
         });
+        const store = openKnowledgeStore({ trackedRoot: trackedAbs });
         for (const e of entries) {
-          const out = join(trackedAbs, e.path);
-          mkdirSync(dirname(out), { recursive: true });
-          writeFileSync(out, e.text);
+          store.put({ fields: e.fields, body: e.body }, { scope: 'tracked', path: e.path });
         }
         process.stdout.write(`${entries.length} entries written\n`);
       },

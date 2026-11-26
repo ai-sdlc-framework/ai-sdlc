@@ -5,10 +5,10 @@
  * from a document are captured as protected entries in the protected root with a citation.
  * Export and sharing paths drop the protected partition by scope alone.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, join, relative } from 'node:path';
-import { dump } from '../util/yaml.js';
 import { hashValue, type KnowledgeEntry } from './entry.js';
+import { openKnowledgeStore } from './knowledge-store.js';
 
 export type DocumentKind = 'signed' | 'plan' | 'deck' | 'document';
 
@@ -110,10 +110,11 @@ export function captureFact(protectedRootAbs: string, input: CaptureInput): stri
     writtenBy: 'agent',
     reverify: `Re-check against ${input.sourceDoc} in the data room`,
   };
-  mkdirSync(protectedRootAbs, { recursive: true });
-  const file = join(protectedRootAbs, `${input.id}.md`);
-  writeFileSync(file, `---\n${dump(fields)}---\nSource: ${input.sourceDoc}\n`);
-  return file;
+  const { path } = openKnowledgeStore({ protectedRoot: protectedRootAbs }).put(
+    { fields, body: `Source: ${input.sourceDoc}\n` },
+    { scope: 'protected', path: `${input.id}.md` },
+  );
+  return join(protectedRootAbs, path);
 }
 
 /** Export and sharing paths: the protected partition is excluded by scope alone. */

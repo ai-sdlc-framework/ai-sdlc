@@ -22,6 +22,9 @@ export interface IngestedEntry {
   /** Path under the tracked knowledge root: `<trunk>/<slug>.md`. */
   path: string;
   text: string;
+  /** Frontmatter fields and the body after the closing `---`, as written through the store. */
+  fields: Record<string, unknown>;
+  body: string;
 }
 
 export function slugify(heading: string): string {
@@ -80,10 +83,11 @@ export function sectionsToEntries(
     };
     const errors = validateEntryFields(fields, ontology);
     if (errors.length > 0) throw new Error(`section '${s.heading}': ${errors.join('; ')}`);
-    const text = `---\n${dump(fields)}---\n\n${s.body}\n`;
+    const body = `\n${s.body}\n`;
+    const text = `---\n${dump(fields)}---\n${body}`;
     // Round-trip guard: what we write must parse back as an entry.
     if (!('fields' in parseEntryFile(text))) throw new Error(`section '${s.heading}': unparseable`);
-    entries.push({ path: `${trunk}/${slug}.md`, text });
+    entries.push({ path: `${trunk}/${slug}.md`, text, fields, body });
   }
   return entries;
 }
