@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1440
 title: "Cut the dispatch and planner GitHub API call volume toward the measured floor (cache across processes, webhook-driven snapshots, no quota polling)"
-status: In Progress
+status: Done
 priority: high
 labels:
   - pipeline-cli
