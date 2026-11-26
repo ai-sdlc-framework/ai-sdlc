@@ -132,7 +132,7 @@ Three layers.
 
 The entry schema above, stored as files under `.ai-sdlc/knowledge/<trunk>/<topic>.md`
 (location resolved by OQ-1). Trunks are engineering domains: systems, products, customers,
-decisions, people, process. Every entry has a trunk, a type and relations. An ontology
+decisions, people, process, plus `memory` for indexed auto-memory (OQ-6). Every entry has a trunk, a type and relations. An ontology
 file declares the entry types and the relations allowed between them.
 
 Two roots, one index (OQ-1). Entries with scope `internal` or `universal` live in the
