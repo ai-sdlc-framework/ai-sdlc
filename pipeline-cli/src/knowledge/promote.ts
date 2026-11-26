@@ -160,6 +160,12 @@ const AUTHORITY_RANK: Record<string, number> = { inferred: 0, specialist: 1, can
 
 export type Role = 'agent' | 'human';
 
+/** Who acts on an entry: the role authority rules read, and the audit principal. */
+export interface Actor {
+  by: Role;
+  principal: string;
+}
+
 export interface PromoteResult extends Verdict {
   authority?: string;
 }
@@ -167,7 +173,7 @@ export interface PromoteResult extends Verdict {
 export function promoteEntry(
   trackedRootAbs: string,
   id: string,
-  opts: { to: 'specialist' | 'canonical'; proof?: string; by: Role },
+  opts: { to: 'specialist' | 'canonical'; proof?: string; by: Role; principal: string },
   c: VerifyContext,
 ): PromoteResult {
   const store = openKnowledgeStore({ trackedRoot: trackedRootAbs });
@@ -214,6 +220,7 @@ export function promoteEntry(
     to: opts.to,
     proof: opts.proof,
     by: opts.by,
+    principal: opts.principal,
   });
   return { ok: true, reason: `promoted to ${opts.to}`, authority: opts.to };
 }
@@ -223,6 +230,7 @@ export function reobserveEntry(
   trackedRootAbs: string,
   id: string,
   observedConfidence: number,
+  actor: Actor,
   observedDate?: string,
 ): number | null {
   let next = 0;
@@ -237,13 +245,20 @@ export function reobserveEntry(
   appendKnowledgeEvent(trackedRootAbs, {
     event: 'reobserved',
     id,
+    by: actor.by,
+    principal: actor.principal,
     detail: `confidence ${String(before.confidence)} -> ${next}`,
   });
   return next;
 }
 
 /** Refutation drops the entry back to `inferred` and logs why. */
-export function refuteEntry(trackedRootAbs: string, id: string, reason: string, by: Role): boolean {
+export function refuteEntry(
+  trackedRootAbs: string,
+  id: string,
+  reason: string,
+  actor: Actor,
+): boolean {
   const before = openKnowledgeStore({ trackedRoot: trackedRootAbs }).update(id, (f) => {
     f.authority = 'inferred';
   });
@@ -253,7 +268,8 @@ export function refuteEntry(trackedRootAbs: string, id: string, reason: string, 
     id,
     from: String(before.authority),
     to: 'inferred',
-    by,
+    by: actor.by,
+    principal: actor.principal,
     detail: reason,
   });
   return true;

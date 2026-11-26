@@ -17,6 +17,9 @@ import {
 } from './promote.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
+const HUMAN = { by: 'human', principal: 'human:op@example.com' } as const;
+const AGENT = { by: 'agent', principal: 'agent:task:T-1' } as const;
+
 let root: string;
 afterEach(() => {
   removeFixtureDir(root);
@@ -82,7 +85,7 @@ describe('promotion verifier', () => {
     const r = promoteEntry(
       tracked(),
       'k-1',
-      { to: 'specialist', proof: 'shell:rm -rf /', by: 'agent' },
+      { to: 'specialist', proof: 'shell:rm -rf /', by: 'agent', principal: 'agent:task:T-1' },
       ctx(),
     );
     expect(r.ok).toBe(false);
@@ -142,19 +145,40 @@ describe('promotion verifier', () => {
 
   it('refuses canonical for an agent and allows a human', () => {
     repo();
-    expect(promoteEntry(tracked(), 'k-1', { to: 'canonical', by: 'agent' }, ctx()).ok).toBe(false);
+    expect(
+      promoteEntry(
+        tracked(),
+        'k-1',
+        { to: 'canonical', by: 'agent', principal: 'agent:task:T-1' },
+        ctx(),
+      ).ok,
+    ).toBe(false);
     expect(authority()).toBe('inferred');
-    expect(promoteEntry(tracked(), 'k-1', { to: 'canonical', by: 'human' }, ctx()).ok).toBe(true);
+    expect(
+      promoteEntry(
+        tracked(),
+        'k-1',
+        { to: 'canonical', by: 'human', principal: 'human:op@example.com' },
+        ctx(),
+      ).ok,
+    ).toBe(true);
     expect(authority()).toBe('canonical');
   });
 
   it('does not demote a canonical entry via specialist promotion', () => {
     repo();
-    expect(promoteEntry(tracked(), 'k-1', { to: 'canonical', by: 'human' }, ctx()).ok).toBe(true);
+    expect(
+      promoteEntry(
+        tracked(),
+        'k-1',
+        { to: 'canonical', by: 'human', principal: 'human:op@example.com' },
+        ctx(),
+      ).ok,
+    ).toBe(true);
     const r = promoteEntry(
       tracked(),
       'k-1',
-      { to: 'specialist', proof: 'decision-id:DEC-0091', by: 'agent' },
+      { to: 'specialist', proof: 'decision-id:DEC-0091', by: 'agent', principal: 'agent:task:T-1' },
       ctx(),
     );
     expect(r.ok).toBe(false);
@@ -163,8 +187,22 @@ describe('promotion verifier', () => {
 
   it('requires a proof for specialist and reports a missing entry', () => {
     repo();
-    expect(promoteEntry(tracked(), 'k-1', { to: 'specialist', by: 'agent' }, ctx()).ok).toBe(false);
-    expect(promoteEntry(tracked(), 'zzz', { to: 'specialist', by: 'agent' }, ctx()).ok).toBe(false);
+    expect(
+      promoteEntry(
+        tracked(),
+        'k-1',
+        { to: 'specialist', by: 'agent', principal: 'agent:task:T-1' },
+        ctx(),
+      ).ok,
+    ).toBe(false);
+    expect(
+      promoteEntry(
+        tracked(),
+        'zzz',
+        { to: 'specialist', by: 'agent', principal: 'agent:task:T-1' },
+        ctx(),
+      ).ok,
+    ).toBe(false);
   });
 
   it('logs promotion, supersession-style refutation, and audit lists the proof', () => {
@@ -172,13 +210,13 @@ describe('promotion verifier', () => {
     const r = promoteEntry(
       tracked(),
       'k-1',
-      { to: 'specialist', proof: 'decision-id:DEC-0091', by: 'agent' },
+      { to: 'specialist', proof: 'decision-id:DEC-0091', by: 'agent', principal: 'agent:task:T-1' },
       ctx(),
     );
     expect(r.ok).toBe(true);
     expect(authority()).toBe('specialist');
-    expect(refuteEntry(tracked(), 'k-1', 'wrong', 'human')).toBe(true);
-    expect(refuteEntry(tracked(), 'nope', 'wrong', 'human')).toBe(false);
+    expect(refuteEntry(tracked(), 'k-1', 'wrong', HUMAN)).toBe(true);
+    expect(refuteEntry(tracked(), 'nope', 'wrong', HUMAN)).toBe(false);
     const events = readKnowledgeLog(tracked());
     expect(events.map((e) => e.event)).toEqual(['promoted', 'refuted']);
     const lines = auditLines(events);
@@ -189,15 +227,15 @@ describe('promotion verifier', () => {
 
   it('re-observation moves confidence 30 percent toward the value, authority unchanged', () => {
     repo({}, { authority: 'specialist' });
-    expect(reobserveEntry(tracked(), 'k-1', 1, '2026-10-28')).toBeCloseTo(0.65);
+    expect(reobserveEntry(tracked(), 'k-1', 1, AGENT, '2026-10-28')).toBeCloseTo(0.65);
     expect(authority()).toBe('specialist');
-    expect(reobserveEntry(tracked(), 'nope', 1)).toBeNull();
+    expect(reobserveEntry(tracked(), 'nope', 1, AGENT)).toBeNull();
     expect(readKnowledgeLog(tracked()).map((e) => e.event)).toEqual(['reobserved']);
   });
 
   it('caps re-observed confidence for agent-written entries', () => {
     repo({}, { writtenBy: 'agent', reverify: 'x', confidence: 0.85 });
-    expect(reobserveEntry(tracked(), 'k-1', 1)).toBe(0.85);
+    expect(reobserveEntry(tracked(), 'k-1', 1, AGENT)).toBe(0.85);
   });
 });
 
