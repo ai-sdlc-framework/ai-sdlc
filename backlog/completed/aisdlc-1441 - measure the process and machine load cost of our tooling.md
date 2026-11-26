@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1441
 title: "Measure the process-spawn and machine-load cost of our tooling (evidence for or against a rewrite of our CLI)"
-status: In Progress
+status: Done
 priority: medium
 labels:
   - observability
