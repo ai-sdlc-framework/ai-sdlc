@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1427
 title: pipeline-cli declares the Node version that loading an ES-module knowledge backend needs
-status: In Progress
+status: Done
 priority: medium
 labels:
   - pipeline-cli
