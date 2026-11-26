@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -489,6 +489,17 @@ describe('verify narrowing (AISDLC-1188, DEC-0372)', () => {
 });
 
 describe('first round runs only affected tests (AISDLC-1377, DEC-0423)', () => {
+  // A full-verify push (AI_SDLC_VERIFY_FULL=1 git push) runs this suite with the variable
+  // set; these cases need it unset (AISDLC-1407).
+  let savedFull: string | undefined;
+  beforeEach(() => {
+    savedFull = process.env['AI_SDLC_VERIFY_FULL'];
+    delete process.env['AI_SDLC_VERIFY_FULL'];
+  });
+  afterEach(() => {
+    if (savedFull === undefined) delete process.env['AI_SDLC_VERIFY_FULL'];
+    else process.env['AI_SDLC_VERIFY_FULL'] = savedFull;
+  });
   const defaults = ['pnpm build', 'pnpm test', 'pnpm lint', 'pnpm format:check'];
   const mk = (changed: string[], opts: { mergeBase?: string; lsFail?: boolean } = {}) => {
     const dir = mkdtempSync(join(tmpdir(), 'first-round-'));
