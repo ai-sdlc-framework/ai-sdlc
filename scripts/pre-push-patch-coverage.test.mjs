@@ -617,8 +617,11 @@ describe('pre-push narrows to related files (AISDLC-1377, DEC-0423)', () => {
       log: () => {},
     });
     assert.equal(code, 0);
-    assert.deepEqual(calls[0].slice(-2), [
+    assert.deepEqual(calls[0].slice(-5), [
+      '--coverage.thresholds.lines=0',
       '--coverage.thresholds.functions=0',
+      '--coverage.thresholds.branches=0',
+      '--coverage.thresholds.statements=0',
       'src/steps/verify-commands.ts',
     ]);
     assert.match(calls.at(-1)[1], /check-pr-patch-coverage\.mjs$/);

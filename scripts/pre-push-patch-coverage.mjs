@@ -261,8 +261,12 @@ export function coverageArgs(pkg, related) {
     '--run',
     '--passWithNoTests',
     '--coverage',
+    // A related-only run covers a slice of the package, so every global floor is
+    // zeroed here; the patch gate below and CI's full run enforce coverage.
     '--coverage.thresholds.lines=0',
     '--coverage.thresholds.functions=0',
+    '--coverage.thresholds.branches=0',
+    '--coverage.thresholds.statements=0',
     ...related,
   ];
 }
