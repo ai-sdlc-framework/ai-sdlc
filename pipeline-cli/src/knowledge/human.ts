@@ -18,9 +18,11 @@ export function confirmEntry(
   confidence: number,
   actor: Actor,
   observed?: string,
+  projectRoot?: string,
 ): number | null {
   let next = 0;
-  const before = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }).update(id, (f) => {
+  const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
+  const before = store.update(id, (f) => {
     const old = Number(f.confidence);
     next = Math.round((old + REOBSERVE_WEIGHT * (confidence - old)) * 1e6) / 1e6;
     if (f.writtenBy === 'agent') next = Math.min(next, AGENT_CONFIDENCE_CAP);
@@ -38,7 +40,17 @@ export function confirmEntry(
   return next;
 }
 
-/** Correct: replace the value and its hash in place; authority and confidence are untouched. */
+/** True when an entry's scope is `protected`, normalised as `exportableEntries` does. */
+function isProtectedScope(scope: unknown): boolean {
+  const s = typeof scope === 'string' ? scope : '';
+  return s.trim().toLowerCase() === 'protected';
+}
+
+/**
+ * Correct: replace the value and its hash in place; authority and confidence are untouched.
+ * The log sits next to the tracked root and is committed, so a protected entry's event
+ * carries no value and no hash of one (RFC-0053 OQ-1, OQ-7; AISDLC-1424).
+ */
 export function correctEntry(
   sel: KnowledgeBackendSelection,
   trackedRootAbs: string,
@@ -46,8 +58,10 @@ export function correctEntry(
   value: string,
   actor: Actor,
   observed?: string,
+  projectRoot?: string,
 ): boolean {
-  const before = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }).update(id, (f) => {
+  const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
+  const before = store.update(id, (f) => {
     f.value = value;
     f.contentHash = createHash('sha256').update(value).digest('hex');
     if (observed) f.observed = observed;
@@ -58,7 +72,9 @@ export function correctEntry(
     id,
     by: actor.by,
     principal: actor.principal,
-    detail: `value changed from '${String(before.value)}'`,
+    detail: isProtectedScope(before.scope)
+      ? 'value corrected (protected; value not logged)'
+      : `value changed from '${String(before.value)}'`,
   });
   return true;
 }
@@ -70,8 +86,9 @@ export function supersedeEntry(
   oldId: string,
   newId: string,
   actor: Actor,
+  projectRoot?: string,
 ): { ok: boolean; reason: string } {
-  const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs });
+  const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
   const oldEntry = store.get(oldId, { scope: 'tracked' });
   const newEntry = store.get(newId, { scope: 'tracked' });
   if (!oldEntry) return { ok: false, reason: `entry '${oldId}' not found` };

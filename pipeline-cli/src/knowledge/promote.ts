@@ -177,7 +177,7 @@ export function promoteEntry(
   opts: { to: 'specialist' | 'canonical'; proof?: string; by: Role; principal: string },
   c: VerifyContext,
 ): PromoteResult {
-  const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs });
+  const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, c.projectDir);
   const entry = store.get(id, { scope: 'tracked' });
   if (!entry) return { ok: false, reason: `entry '${id}' not found` };
   const current = String(entry.fields.authority);

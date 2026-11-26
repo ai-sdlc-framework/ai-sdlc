@@ -15,6 +15,7 @@ import {
   supersedeEntry,
 } from './human.js';
 import { readKnowledgeLog } from './log.js';
+import { loadKnowledgeConfig } from './config.js';
 import { DEFAULT_ONTOLOGY } from './ontology.js';
 import { openKnowledgeStore, toEntries } from './knowledge-store.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
@@ -80,6 +81,88 @@ describe('human surface', () => {
     expect(e.value).toBe('new text');
     expect(e.contentHash).toBe(hashValue('new text'));
     expect(correctEntry({ backend: 'files' }, t, 'zz', 'x', HUMAN)).toBe(false);
+  });
+
+  it('correct of a tracked entry logs the old value with id, by and principal', () => {
+    const t = repo();
+    correctEntry({ backend: 'files' }, t, 'a', 'new text', HUMAN);
+    const [ev] = readKnowledgeLog(t);
+    expect(ev).toMatchObject({
+      event: 'corrected',
+      id: 'a',
+      by: 'human',
+      principal: HUMAN.principal,
+      detail: "value changed from 'value of a'",
+    });
+  });
+
+  /** A protected entry under `<root>/<protectedRel>/systems/<id>.md`. */
+  function protectedEntry(protectedRel: string, id: string, value: string, scope: string): void {
+    const p = join(root, protectedRel, 'systems', `${id}.md`);
+    mkdirSync(dirname(p), { recursive: true });
+    const f = fields(id, { value, scope, contentHash: hashValue(value) });
+    writeFileSync(p, `---\n${JSON.stringify(f)}\n---\nbody\n`);
+  }
+
+  it.each(['protected', ' Protected ', 'PROTECTED'])(
+    'correct of a %j-scoped entry keeps both values and their hashes out of the raw log',
+    (scope) => {
+      const t = repo();
+      const protectedAbs = join(root, '.ai-sdlc/knowledge-protected');
+      writeFileSync(
+        join(root, '.ai-sdlc/context.yaml'),
+        `knowledge:\n  protectedRoot: ${JSON.stringify(protectedAbs)}\n`,
+      );
+      const OLD = 'ACME-CLIENT-SECRET-old-7731';
+      const NEW = 'ACME-CLIENT-SECRET-new-9184';
+      protectedEntry('.ai-sdlc/knowledge-protected', 'p1', OLD, scope);
+      // opened as cli/context.ts opens it: the full loaded config is the backend selection
+      const config = loadKnowledgeConfig(root);
+      expect(correctEntry(config, t, 'p1', NEW, HUMAN, undefined, root)).toBe(true);
+      const raw = readFileSync(join(root, '.ai-sdlc/knowledge-log.jsonl'), 'utf-8');
+      for (const needle of [OLD, NEW, hashValue(OLD), hashValue(NEW)]) {
+        expect(raw).not.toContain(needle);
+      }
+      expect(readKnowledgeLog(t)).toEqual([
+        expect.objectContaining({
+          event: 'corrected',
+          id: 'p1',
+          by: 'human',
+          principal: HUMAN.principal,
+          detail: 'value corrected (protected; value not logged)',
+        }),
+      ]);
+    },
+  );
+
+  it('human edits resolve a relative protectedRoot against the project directory', async () => {
+    const t = repo();
+    // the test process cwd is the package directory, never the fixture root
+    expect(process.cwd()).not.toBe(root);
+    writeFileSync(join(root, '.ai-sdlc/context.yaml'), 'knowledge:\n  protectedRoot: secret-kb\n');
+    protectedEntry('secret-kb', 'p2', 'CLIENT-VALUE-4410', 'protected');
+    const config = loadKnowledgeConfig(root);
+    expect(correctEntry(config, t, 'p2', 'CLIENT-VALUE-5521', HUMAN, undefined, root)).toBe(true);
+    expect(confirmEntry(config, t, 'p2', 1, HUMAN, undefined, root)).toBe(0.65);
+    expect(readFileSync(join(root, 'secret-kb/systems/p2.md'), 'utf-8')).toContain(
+      'CLIENT-VALUE-5521',
+    );
+    // the CLI passes --project-dir through
+    await buildContextCli([
+      'correct',
+      'p2',
+      '--value',
+      'CLIENT-VALUE-6632',
+      '--project-dir',
+      root,
+    ]).parseAsync();
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(readFileSync(join(root, 'secret-kb/systems/p2.md'), 'utf-8')).toContain(
+      'CLIENT-VALUE-6632',
+    );
+    expect(readFileSync(join(root, '.ai-sdlc/knowledge-log.jsonl'), 'utf-8')).not.toContain(
+      'CLIENT-VALUE',
+    );
   });
 
   it('supersede links, keeps the old entry and moves the chain head', () => {
