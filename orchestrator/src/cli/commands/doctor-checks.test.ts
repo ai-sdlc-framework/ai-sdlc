@@ -1350,7 +1350,7 @@ describe('checkRuntimeGitignore', () => {
     expect(r.title).toContain('.ai-sdlc/dispatch/');
     expect(r.title).toContain('.ai-sdlc/transcripts/');
     expect(r.title).not.toContain('.ai-sdlc/state.db,');
-    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: true, missingCount: 15 });
+    expect(r.anonymizableEvidence).toEqual({ gitignorePresent: true, missingCount: 16 });
   });
 
   it('fails without the artifacts/_dor and artifacts/_capabilities entries, passes once fix adds them (AISDLC-1366)', () => {
@@ -1366,6 +1366,17 @@ describe('checkRuntimeGitignore', () => {
     expect(r.title).toContain('artifacts/_capabilities/');
     expect(fixRuntimeGitignore(ctx).applied).toBe(true);
     expect(checkRuntimeGitignore(ctx).severity).toBe('pass');
+  });
+
+  it('fails without .ai-sdlc/knowledge-protected/ (AISDLC-1407)', () => {
+    expect(RUNTIME_GITIGNORE_PATHS).toContain('.ai-sdlc/knowledge-protected/');
+    writeFileSync(
+      join(tmpDir, '.gitignore'),
+      `# ai-sdlc:runtime-gitignore\n${ALL.replace('.ai-sdlc/knowledge-protected/\n', '')}`,
+    );
+    const r = checkRuntimeGitignore(makeCtx(noGit()));
+    expect(r.severity).toBe('fail');
+    expect(r.title).toContain('.ai-sdlc/knowledge-protected/');
   });
 
   it('fails when there is no .gitignore at all', () => {

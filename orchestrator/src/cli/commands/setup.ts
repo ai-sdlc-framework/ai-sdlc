@@ -17,11 +17,20 @@ import { basename, join } from 'node:path';
 import { Command } from 'commander';
 import { detectAgentsDetailed, installMcpServer } from './mcp-setup.js';
 import { fetchBranchProtectionStatus } from './branch-protection-shared.js';
+import { writeRuntimeGitignore } from '../../runtime-gitignore.js';
 
 export type SetupStatus = 'done' | 'skipped' | 'not-possible';
 
 export interface SetupStep {
-  id: 'signing-key' | 'init' | 'workflows' | 'branch-protection' | 'backlog' | 'mcp' | 'doctor';
+  id:
+    | 'signing-key'
+    | 'init'
+    | 'workflows'
+    | 'branch-protection'
+    | 'gitignore'
+    | 'backlog'
+    | 'mcp'
+    | 'doctor';
   status: SetupStatus;
   reason: string;
   /** Exact next action when the step did not complete. */
@@ -144,6 +153,39 @@ function repairSteps(projectDir: string, adapters: SetupAdapters): SetupStep[] {
     });
   }
   return out;
+}
+
+/**
+ * Add any runtime entry the .gitignore lacks, on every run (AISDLC-1407): a repository
+ * set up by an older version gains the entries added since, which the init skip on a
+ * re-run would otherwise never write.
+ */
+function gitignoreStep(projectDir: string): SetupStep {
+  try {
+    const added = writeRuntimeGitignore(projectDir);
+    return added.length > 0
+      ? {
+          id: 'gitignore',
+          status: 'done',
+          reason: `added ${added.length} runtime entr${added.length === 1 ? 'y' : 'ies'} to .gitignore`,
+          details: added,
+          changed: true,
+        }
+      : {
+          id: 'gitignore',
+          status: 'skipped',
+          reason: '.gitignore already ignores every runtime path',
+          changed: false,
+        };
+  } catch (err) {
+    return {
+      id: 'gitignore',
+      status: 'not-possible',
+      reason: `could not update .gitignore: ${(err as Error).message}`,
+      nextAction: 'fix the error above, then run `ai-sdlc doctor --fix`',
+      changed: false,
+    };
+  }
 }
 
 /** Create the folders tasks live in; run `backlog init` only when its config is absent and the CLI exists. */
@@ -331,6 +373,7 @@ export function runSetup(projectDir: string, adapters: SetupAdapters): SetupResu
     );
   }
 
+  steps.push(gitignoreStep(projectDir));
   steps.push(backlogStep(projectDir, adapters));
 
   try {

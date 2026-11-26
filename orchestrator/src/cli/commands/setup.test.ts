@@ -1,9 +1,10 @@
 /** First-run smoke test for `ai-sdlc setup` on a fresh repository (AISDLC-1178). */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runSetup, renderSetupReport, type SetupAdapters } from './setup.js';
+import { RUNTIME_GITIGNORE_PATHS, RUNTIME_GITIGNORE_SENTINEL } from '../../runtime-gitignore.js';
 
 let dir: string;
 beforeEach(() => {
@@ -58,6 +59,40 @@ describe('ai-sdlc setup', () => {
     expect(renderSetupReport(r).join('\n')).toContain(
       'first pull request that adds .ai-sdlc/ is merged by a person',
     );
+  });
+
+  it('adds the runtime .gitignore block when pipeline.yaml exists, then changes nothing (AISDLC-1407)', () => {
+    mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(join(dir, '.ai-sdlc', 'pipeline.yaml'), 'x');
+    mkdirSync(join(dir, '.github', 'workflows'), { recursive: true });
+    writeFileSync(join(dir, '.github', 'workflows', 'ai-sdlc-gate.yml'), 'x');
+    writeFileSync(join(dir, '.gitignore'), 'node_modules/\n');
+    const noInit = adapters({
+      runInit: () => {
+        throw new Error('init must not rerun');
+      },
+    });
+    const first = runSetup(dir, noInit);
+    const step = first.steps.find((s) => s.id === 'gitignore');
+    expect(step?.status).toBe('done');
+    expect(step?.details).toEqual([...RUNTIME_GITIGNORE_PATHS]);
+    const text = readFileSync(join(dir, '.gitignore'), 'utf-8');
+    expect(text.startsWith('node_modules/\n')).toBe(true);
+    expect(text).toContain(RUNTIME_GITIGNORE_SENTINEL);
+    for (const p of RUNTIME_GITIGNORE_PATHS) expect(text.split('\n')).toContain(p);
+
+    const second = runSetup(dir, noInit);
+    expect(second.steps.find((s) => s.id === 'gitignore')?.status).toBe('skipped');
+    expect(second.unchanged).toBe(true);
+    expect(readFileSync(join(dir, '.gitignore'), 'utf-8')).toBe(text);
+  });
+
+  it('reports a .gitignore it cannot write as not-possible', () => {
+    mkdirSync(join(dir, '.gitignore'));
+    const r = runSetup(dir, adapters());
+    const step = r.steps.find((s) => s.id === 'gitignore');
+    expect(step?.status).toBe('not-possible');
+    expect(step?.nextAction).toContain('doctor --fix');
   });
 
   it('reports not-possible steps with a next action', () => {

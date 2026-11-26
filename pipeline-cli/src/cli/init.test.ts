@@ -1,9 +1,13 @@
-import { mkdirSync, mkdtempSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { gatherDefaults, runInitCli } from './init.js';
-import { REQUIRED_CONFIG_MANIFEST } from '../config-manifest/manifest.js';
+import {
+  REQUIRED_CONFIG_MANIFEST,
+  RUNTIME_GITIGNORE_PATHS,
+  RUNTIME_GITIGNORE_SENTINEL,
+} from '../config-manifest/manifest.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
@@ -53,6 +57,23 @@ describe('cli-init', () => {
     expect(await runInitCli(['--fix', '--project-dir', dir])).toBe(0);
     expect(existsSync(join(dir, '.ai-sdlc/review-policy.md'))).toBe(true);
     expect(existsSync(join(dir, '.ai-sdlc/trusted-reviewers.yaml'))).toBe(false);
+  });
+
+  it('adds the missing runtime .gitignore entries and keeps existing lines (AISDLC-1407)', async () => {
+    const before = 'node_modules/\n# mine\n.ai-sdlc/state.db\n';
+    writeFileSync(join(dir, '.gitignore'), before);
+    expect(await runInitCli(['--fix', '--project-dir', dir])).toBe(0);
+    const after = readFileSync(join(dir, '.gitignore'), 'utf-8');
+    expect(after.startsWith(before)).toBe(true);
+    expect(after).toContain(RUNTIME_GITIGNORE_SENTINEL);
+    for (const p of RUNTIME_GITIGNORE_PATHS) expect(after.split('\n')).toContain(p);
+    expect(out).toContain('ignored .ai-sdlc/knowledge-protected/');
+    expect(out).not.toContain('ignored .ai-sdlc/state.db\n');
+    // A second run writes nothing.
+    out = '';
+    expect(await runInitCli(['--fix', '--project-dir', dir])).toBe(0);
+    expect(readFileSync(join(dir, '.gitignore'), 'utf-8')).toBe(after);
+    expect(out).not.toContain('ignored ');
   });
 
   it('--non-interactive fails naming the entries it cannot fill', async () => {

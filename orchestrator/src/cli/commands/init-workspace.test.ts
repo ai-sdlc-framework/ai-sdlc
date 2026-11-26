@@ -537,6 +537,25 @@ describe('init — AISDLC-143 wizard scaffolding', () => {
     expect(afterAdd).toBe(beforeAdd);
   });
 
+  it('--add adds the missing runtime .gitignore entries and keeps existing lines (AISDLC-1407)', async () => {
+    initBareRepo(tmpDir);
+    mkdirSync(join(tmpDir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(join(tmpDir, '.ai-sdlc', 'pipeline.yaml'), 'x');
+    const before = 'node_modules/\n# mine\n.ai-sdlc/dispatch/\n';
+    writeFileSync(join(tmpDir, '.gitignore'), before);
+
+    await runInit(['--skip-mcp', '--add', 'classifier']);
+
+    const gi = readFileSync(join(tmpDir, '.gitignore'), 'utf-8');
+    expect(gi).toBe(
+      `${before}\n# ai-sdlc:runtime-gitignore\n${RUNTIME_GITIGNORE_PATHS.filter(
+        (p) => p !== '.ai-sdlc/dispatch/',
+      ).join('\n')}\n`,
+    );
+    await runInit(['--skip-mcp', '--add', 'classifier']);
+    expect(readFileSync(join(tmpDir, '.gitignore'), 'utf-8')).toBe(gi);
+  });
+
   it('--add with an unknown feature exits 1 with a helpful error', async () => {
     initBareRepo(tmpDir);
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
