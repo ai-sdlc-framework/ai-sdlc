@@ -510,6 +510,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           Number(args.confidence),
           resolveActor(String(args['project-dir'])),
           String(args.observed),
+          ctx.verify.projectDir,
         );
         if (next === null) {
           process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
@@ -534,6 +535,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           String(args.value),
           resolveActor(String(args['project-dir'])),
           String(args.observed),
+          ctx.verify.projectDir,
         );
         if (!ok) {
           process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
@@ -556,6 +558,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           String(args.old),
           String(args.new),
           resolveActor(String(args['project-dir'])),
+          ctx.verify.projectDir,
         );
         process.stdout.write(`${r.ok ? 'superseded' : 'refused'}: ${r.reason}\n`);
         if (!r.ok) process.exitCode = 1;
