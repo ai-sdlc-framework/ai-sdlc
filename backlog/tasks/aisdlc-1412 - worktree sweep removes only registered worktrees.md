@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1412
 title: 'Worktree sweep removes only registered worktrees'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-25'
 labels:

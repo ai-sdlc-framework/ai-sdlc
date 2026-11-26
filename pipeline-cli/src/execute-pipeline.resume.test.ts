@@ -117,7 +117,9 @@ describe('executePipeline on a resumed task', () => {
     });
     expect(result.outcome).toBe('aborted');
     expect(result.notes).toMatch(/not a dispatch session in the roster/);
-    expect(runner.calls.some((c) => c.args[0] === 'push' || c.args[0] === 'worktree')).toBe(false);
+    // The Step 0 sweep's read-only `git worktree list` is allowed (AISDLC-1412).
+    const wtWrite = (a: string[]) => a[0] === 'worktree' && a[1] !== 'list';
+    expect(runner.calls.some((c) => c.args[0] === 'push' || wtWrite(c.args))).toBe(false);
   });
 
   it('refuses when another session claimed the resumed manifest', async () => {
@@ -219,7 +221,8 @@ describe('executePipeline on a resumed task', () => {
     });
 
     // AC5: existing worktree and branch, never created from origin/main.
-    expect(runner.calls.some((c) => c.args[0] === 'worktree')).toBe(false);
+    // The Step 0 sweep's read-only `git worktree list` is allowed (AISDLC-1412).
+    expect(runner.calls.some((c) => c.args[0] === 'worktree' && c.args[1] !== 'list')).toBe(false);
     expect(
       runner.calls.some((c) => c.args.includes('origin/main') && c.args[0] === 'worktree'),
     ).toBe(false);

@@ -7,7 +7,17 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import {
   sweepMergedWorktrees,
@@ -19,6 +29,8 @@ import {
 import { WORKTREE_SWEEP_DEFAULTS } from './00-worktree-disposition.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, ok, fail as fakeRunnerFail } from '../__test-helpers/fake-runner.js';
+import { makeGitEnv } from '../__test-helpers/git-env.js';
+import { defaultRunner, type ExecResult, type Runner } from '../runtime/exec.js';
 
 let tmp: string;
 
@@ -34,11 +46,19 @@ const pr = (number: number, state: string, headRefName: string, mergedAt: string
   ({ number, state, headRefName, mergedAt }) as Pr;
 const list = (...prs: Pr[]) => ok(JSON.stringify(prs));
 
+/** `git worktree list --porcelain` naming every directory now under `<tmp>/.worktrees`. */
+const listAll = () => {
+  const dir = join(tmp, '.worktrees');
+  const names = existsSync(dir) ? readdirSync(dir) : [];
+  return ok(names.map((n) => `worktree ${join(dir, n)}\nHEAD x\n`).join('\n'));
+};
+
 /** Runner where worktree dir `<name>` has branch `ai-sdlc/<name>` and sha `sha-<name>`. */
 function wtRunner(prs: Pr[], ghCalls?: string[][], pre?: (f: FakeRunner) => void) {
   const fake = new FakeRunner();
   pre?.(fake);
   return fake
+    .on(/^git worktree list --porcelain/, listAll)
     .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, (args) =>
       ok(`ai-sdlc/${(args[1] ?? '').split('/').pop()}\n`),
     )
@@ -210,6 +230,7 @@ describe('Step 0 — sweepMergedWorktrees', () => {
     mk('flaky');
     age('flaky', 100);
     const fake = new FakeRunner()
+      .on(/^git worktree list --porcelain/, listAll)
       .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/flaky\n'))
       .on(/^gh pr list/, fakeRunnerFail('rate limited', 1));
     const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
@@ -218,7 +239,9 @@ describe('Step 0 — sweepMergedWorktrees', () => {
 
   it('skips detached HEAD worktrees', async () => {
     mk('detached');
-    const fake = new FakeRunner().on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('HEAD\n'));
+    const fake = new FakeRunner()
+      .on(/^git worktree list --porcelain/, listAll)
+      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('HEAD\n'));
     const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
     expect(result.swept).toEqual([]);
     expect(fake.calls.some((c) => c.command === 'gh')).toBe(false);
@@ -235,11 +258,13 @@ describe('Step 0 — sweepMergedWorktrees', () => {
 
   it('handles non-zero git exit by skipping the entry silently', async () => {
     mk('broken');
-    const fake = new FakeRunner().on(/^git -C .+ rev-parse --abbrev-ref HEAD/, {
-      stdout: '',
-      stderr: 'fatal: not a git repository',
-      code: 128,
-    });
+    const fake = new FakeRunner()
+      .on(/^git worktree list --porcelain/, listAll)
+      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, {
+        stdout: '',
+        stderr: 'fatal: not a git repository',
+        code: 128,
+      });
     const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
     expect(result.swept).toEqual([]);
   });
@@ -247,6 +272,7 @@ describe('Step 0 — sweepMergedWorktrees', () => {
   it('gh failure: nothing swept, nothing cached', async () => {
     mk('a');
     const failing = new FakeRunner()
+      .on(/^git worktree list --porcelain/, listAll)
       .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/a\n'))
       .on(/^gh pr list/, fakeRunnerFail('boom', 1));
     const result = await sweepMergedWorktrees({ workDir: tmp, runner: failing.toRunner() });
@@ -421,5 +447,125 @@ describe('Step 0 — per-branch lookup and landed cache (AISDLC-958, AISDLC-1108
       runner: wtRunner([pr(1, 'CLOSED', 'ai-sdlc/c')], ghCalls).toRunner(),
     });
     expect(ghCalls).toHaveLength(1);
+  });
+});
+
+describe('Step 0 — only registered worktrees are swept (AISDLC-1412)', () => {
+  const env = makeGitEnv();
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync('git', args, { cwd, env, stdio: 'pipe' }).toString();
+  const initRepo = (dir: string, branch = 'main') => {
+    mkdirSync(dir, { recursive: true });
+    git(dir, 'init', '-q', '-b', branch);
+    writeFileSync(join(dir, 'README.md'), '# r\n');
+    git(dir, 'add', 'README.md');
+    git(dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init');
+  };
+  /** Real git with the fixture env; every PR lookup reports MERGED. */
+  const realRunner = (
+    ghCalls: string[][],
+    gitOverride?: (args: string[]) => ExecResult | undefined,
+  ): Runner => {
+    return async (command, args, opts = {}) => {
+      if (command === 'gh') {
+        ghCalls.push(args);
+        if (args[0] === 'pr') {
+          const head = args[args.indexOf('--head') + 1];
+          return ok(JSON.stringify([pr(1, 'MERGED', head ?? '', '2026-11-01T00:00:00Z')]));
+        }
+        return ok('[]');
+      }
+      const r = gitOverride?.(args);
+      return r ?? defaultRunner(command, args, { ...opts, env: { ...env, ...opts.env } });
+    };
+  };
+  const quiet = { info: () => undefined, warn: () => undefined };
+  const oldDir = (p: string) => {
+    const t = new Date(Date.now() - 100 * 3_600_000);
+    utimesSync(p, t, t);
+  };
+
+  it('leaves a symlink, a plain folder and an unregistered clone; removes a merged worktree', async () => {
+    initRepo(tmp);
+    const wts = join(tmp, '.worktrees');
+    mkdirSync(wts);
+    // Registered worktree with a merged PR.
+    git(tmp, 'worktree', 'add', '-q', '-b', 'ai-sdlc/merged', join(wts, 'merged'));
+    // Symlink to a sibling checkout.
+    const sibling = join(tmp, '..', `${tmp.split('/').pop()}-sibling`);
+    initRepo(sibling, 'feature-x');
+    symlinkSync(sibling, join(wts, 'linked'));
+    // Plain folder, not a repository.
+    mkdirSync(join(wts, 'plain'));
+    writeFileSync(join(wts, 'plain', 'notes.txt'), 'keep me');
+    oldDir(join(wts, 'plain'));
+    // Separate clone with uncommitted work.
+    initRepo(join(wts, 'clone'), 'other');
+    writeFileSync(join(wts, 'clone', 'wip.txt'), 'uncommitted');
+    oldDir(join(wts, 'clone'));
+
+    const ghCalls: string[][] = [];
+    try {
+      const result = await sweepMergedWorktrees({
+        workDir: tmp,
+        runner: realRunner(ghCalls),
+        logger: quiet,
+      });
+      expect(result.swept.map((s) => s.taskId)).toEqual(['merged']);
+      expect(existsSync(join(wts, 'merged'))).toBe(false);
+      expect(lstatSync(join(wts, 'linked')).isSymbolicLink()).toBe(true);
+      expect(readFileSync(join(sibling, 'README.md'), 'utf8')).toBe('# r\n');
+      expect(readFileSync(join(wts, 'plain', 'notes.txt'), 'utf8')).toBe('keep me');
+      expect(readFileSync(join(wts, 'clone', 'wip.txt'), 'utf8')).toBe('uncommitted');
+      // Only the registered worktree's branch was looked up.
+      const heads = ghCalls.filter((a) => a[0] === 'pr').map((a) => a[a.indexOf('--head') + 1]);
+      expect(heads).toEqual(['ai-sdlc/merged']);
+      const rec = JSON.parse(readFileSync(join(tmp, SWEEP_STATUS_FILE), 'utf8'));
+      expect(rec.count).toBe(0);
+    } finally {
+      cleanupTmpProject(sibling);
+    }
+  });
+
+  it('the rm -rf fallback still clears a registered worktree git refuses to remove', async () => {
+    initRepo(tmp);
+    const wt = join(tmp, '.worktrees', 'stuck');
+    git(tmp, 'worktree', 'add', '-q', '-b', 'ai-sdlc/stuck', wt);
+    const refuse = (args: string[]) =>
+      args[0] === 'worktree' && args[1] === 'remove'
+        ? fakeRunnerFail('fatal: refused', 128)
+        : undefined;
+    const warns: string[] = [];
+    const result = await sweepMergedWorktrees({
+      workDir: tmp,
+      runner: realRunner([], refuse),
+      logger: { info: () => undefined, warn: (m) => warns.push(m) },
+    });
+    expect(result.swept.map((s) => s.taskId)).toEqual(['stuck']);
+    expect(existsSync(wt)).toBe(false);
+    expect(warns.join('\n')).toContain('fell back to rm -rf');
+    expect(git(tmp, 'worktree', 'list', '--porcelain')).not.toContain('stuck');
+  });
+
+  it('removes nothing and warns when git worktree list fails', async () => {
+    // tmp is not a git repository, so the list fails.
+    mkdirSync(join(tmp, '.worktrees', 'plain'), { recursive: true });
+    writeFileSync(join(tmp, '.worktrees', 'plain', 'f.txt'), 'x');
+    oldDir(join(tmp, '.worktrees', 'plain'));
+    const ghCalls: string[][] = [];
+    const warns: string[] = [];
+    const result = await sweepMergedWorktrees({
+      workDir: tmp,
+      runner: realRunner(ghCalls, (args) =>
+        args[0] === 'worktree' && args[1] === 'list'
+          ? fakeRunnerFail('fatal: not a git repository', 128)
+          : undefined,
+      ),
+      logger: { info: () => undefined, warn: (m) => warns.push(m) },
+    });
+    expect(result.swept).toEqual([]);
+    expect(ghCalls).toEqual([]);
+    expect(existsSync(join(tmp, '.worktrees', 'plain', 'f.txt'))).toBe(true);
+    expect(warns.join('\n')).toContain('git worktree list --porcelain failed');
   });
 });
