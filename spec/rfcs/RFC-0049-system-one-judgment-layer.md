@@ -2,10 +2,10 @@
 id: RFC-0049
 title: System One Judgment Layer (Typed-Question Provider Adapter, Jev First)
 status: Approved
-lifecycle: Signed Off
+lifecycle: Ready for Review
 author: 'Dominique Legault'
 created: 2026-09-30
-updated: 2026-10-01
+updated: 2026-11-26
 targetSpecVersion: v1alpha1
 requires: []
 assumes: [RFC-0004, RFC-0010, RFC-0011, RFC-0016, RFC-0019, RFC-0024, RFC-0035, RFC-0042, RFC-0043, RFC-0046, RFC-0048]
@@ -15,7 +15,11 @@ requiresDocs:
 
 # RFC-0049: System One Judgment Layer (Typed-Question Provider Adapter, Jev First)
 
-**Status:** Signed Off (2026-09-30, Engineering + Operator) — **all 7 Open Questions
+**Status:** Ready for Review (2026-11-26). The operator-question auto-answer
+amendment (section 5 Group D, section 8, OQ-8 to OQ-10) returns the RFC for Product and
+Design review; its resolutions are provisional until Product signs, and the judgment it
+adds stays `shadow`-only until then. The original design below was Signed Off
+(2026-09-30, Engineering + Operator) — **all 7 Open Questions
 resolved via operator rubric walkthrough.** Resolutions: **(OQ-1)** judgments may relax review on
 trusted-`sourceKind` work only, limited in v1 to selecting the merged two-reviewer set
 (AISDLC-617) per PR, with `security-reviewer` always run and the path regex as a veto;
@@ -398,7 +402,9 @@ Each definition also declares a `riskClass`, which selects its promotion bar:
 `seam` (the only alternative is a `pending` sentinel and every action is reversible),
 `tighten` (a wrong answer costs extra scrutiny) or `relax` (a wrong answer reduces
 review of code that merges). Two `relax` judgments exist in v1: `review.reviewer-set`
-(OQ-1) and `dor.stage-b-pass` (amendment of 2026-10-01, below).
+(OQ-1) and `dor.stage-b-pass` (amendment of 2026-10-01, below). The amendment of
+2026-11-26 adds a third, `operator-question.auto-answer` (section 5, Group D), whose wrong
+answer stands in for an operator decision rather than reducing review.
 
 The reason is the provider's own disclosure that adversarial content in the state can
 move an answer. Tighten-only bounds what a steered answer can do to "more review than
@@ -503,6 +509,56 @@ the merged set. The selection and its inputs are recorded in the judgment log; t
 attestation pipeline is unchanged because the merged set is already a supported
 reviewer set.
 
+**Group D: operator questions (amendment of 2026-11-26).**
+
+RFC-0049 leaves stakes-bearing decisions with the operator. Many questions a session puts
+to the operator through `AskUserQuestion` are ones the operator answers the same way the
+session recommended, and each one blocks the session until it is answered (30 days of
+planner questions: median wait 2.1 minutes, p90 22.7 minutes, 16.8 hours blocked in
+total). Group D lets a promoted judgment answer such a question in place. It is a new
+group because "always ask the operator" is not a heuristic with a working incumbent
+(Group C).
+
+| Judgment id | Incumbent | Shape | Direction |
+| --- | --- | --- | --- |
+| `operator-question.auto-answer` | ask the operator, block until answered | Choice over the question's own options plus `none-of-these` (ask the operator) | `bidirectional`, `riskClass: relax`, trusted work only |
+
+- **Input:** the question, its 2 to 4 options with descriptions, the session's recent
+  context window (bounded by `buildState`), and the decision records the question gate
+  (AISDLC-1443) shortlisted. Egress class `agent-output`, so it runs only where that class
+  is listed in `egress.allow` (OQ-2).
+- **Output:** one of the question's options, or `none-of-these`, which is the abstain
+  outcome: the question is asked as today. An answered option is the permissive outcome,
+  so on untrusted work (`permissiveAllowed` false, section 4) the judgment always asks.
+- **Never answered:** class-(c) questions (legal, money, credentials, actions only the
+  operator's identity can perform), detected by deterministic markers before the judgment
+  runs, and RFC Open Questions (AISDLC-298; the operator resolves those through the
+  decision rubric). Neither reaches the provider.
+- **Scope (OQ-10):** only sessions whose `AI_SDLC_HIERARCHY_ROLE` is `planner`, and only in
+  a repository whose own `.ai-sdlc/judgment-config.yaml` carries a promotion record for it.
+  Every other session asks as today. Corpora are per repository; pooling across
+  repositories is not specified.
+- **Effect (OQ-9):** an enforced answer takes effect at once. It is written as a Decision
+  Catalog record (class (a), `--by judgment:<provider>@<model>`, the probability in the
+  rationale), so the existing reverse path (`cli-decisions answer DEC-NNNN <other option>`)
+  is the veto.
+- **Visibility (OQ-9):** the existing `cli-decisions operator-digest` is the report. A
+  scheduled producer delivers it at the end of each 5-hour budget window once at least N
+  auto-answers have built up since the last delivery (N defaults to 10 and is
+  configurable), otherwise daily. It is delivered as an interactive artifact report, one
+  entry per auto-answer with a one-press reverse, linked through a configurable channel
+  (default: the tmux pane or the built-in notification). Planner orientation prints
+  `N delivered, none reviewed` when delivered digests go unopened, because an unread digest
+  makes the veto rate read zero.
+- **Freshness precondition (OQ-9):** if no digest has been delivered in the last 26 hours,
+  the runtime downgrades the judgment to `shadow` (reason `digest-not-delivered`), enforced
+  in code like the promotion-record check. Visibility is a precondition of acting, not a
+  convention.
+- **Provider:** only a calibrated provider can act (DEC-0435: no Claude-model fallback;
+  the existing `uncalibrated-provider` downgrade applies).
+- **Corpus:** in `shadow` every question reaching the operator is evaluated and the
+  prediction is joined to the operator's actual answer by question id (AISDLC-1445).
+
 ### 6. Configuration
 
 `.ai-sdlc/judgment-config.yaml`, schema `spec/schemas/judgment-config.v1.schema.json`,
@@ -599,6 +655,28 @@ first-pass finding on that PR. The promotion record is written into the config n
 the thresholds, and the runtime refuses `enforce` without one (section 4). A change to
 the pinned model version returns every `enforce` judgment to `shadow` until it is
 re-evaluated against the new version.
+
+**`operator-question.auto-answer` (OQ-8).** The label here is the operator's own answer,
+and the operator picks the session's Recommended option most of the time (108 of 117
+answered planner questions in 30 days). A judgment that echoes the recommendation could
+clear the 95% bar while being wrong on exactly the questions where the operator's answer
+carries information. Promotion therefore needs all of:
+
+1. The `relax` corpus bar above (n ≥ 50 labelled questions, act-band precision ≥ 95%, no
+   override path).
+2. A deviation test: at least 80% correct on at least 20 labelled questions where the
+   operator did not pick the recommended option. The recommended option is recorded with
+   each question and decision (AISDLC-1447); the eval report prints the deviation-set
+   size, so an empty set is visible rather than silently passing.
+3. Label aging: a label counts only once it is 28 days old, so an answer the operator
+   later reversed is not scored as correct (observed reversals: 2.6% of answered
+   decisions, the operator's own at 0.7 to 26 days).
+4. A free-text ("Other") operator answer counts as a deviation with the label unknown,
+   never as agreement.
+
+Once enforced, the judgment returns to `shadow` when more than 2 of its last 20 enforced
+answers were vetoed (reversed through the digest or `cli-decisions answer`). This is the
+first demotion rule in the layer; it is implemented in AISDLC-1445.
 
 ### 9. Capability liveness
 
@@ -859,6 +937,24 @@ immediately.
   `Signed Off → Implemented` rule, the linter warning, and the retroactive blocks on
   RFC-0011, RFC-0016, RFC-0024 and RFC-0035 (OQ-6). Depends on 642.
 
+Operator-question auto-answer (section 5 Group D), added by the 2026-11-26 amendment
+(AISDLC-1444). Until Product signs the amendment, these tasks ship `shadow`-only.
+
+- **AISDLC-1442 — provider key and outage alarm.** Judgment calls get the provider key in
+  every session; a silent outage fails doctor (DEC-0435).
+- **AISDLC-1443 — question gate.** A `PreToolUse` gate on `AskUserQuestion` answers from a
+  decision record on `main` when one already covers the question, and exports the
+  class-(c) and RFC-OQ detectors.
+- **AISDLC-1445 — the judgment in shadow.** Catalog definition, labels from the operator's
+  answer (free text recorded as a deviation with the label unknown), corpus export with
+  the deviation test and 28-day aging, the veto-rate demotion and the 26-hour
+  digest-freshness downgrade (OQ-8, OQ-9). Depends on 1442, 1443, 1444.
+- **AISDLC-1446 — digest delivery.** Scheduled producer on the dispatch tick, the
+  interactive artifact report with a one-press reverse, the configurable channel, and the
+  orientation `delivered, none reviewed` line (OQ-9). Depends on 1443, 1444.
+- **AISDLC-1447 — recommended option recorded.** `cli-decisions add --recommended` and a
+  recommended-option field in the question-gate log (OQ-8).
+
 ## Open Questions
 
 **OQ-1 — May a judgment ever reduce scrutiny?** The draft made every judgment whose
@@ -1045,6 +1141,80 @@ step** because with DoR in the path that halts admission on every provider outag
 **over a hard block** for the same reason at larger scale, **and over a warning
 only** because that is today's behaviour.
 
+The three questions below were added by the amendment of 2026-11-26 (AISDLC-1444, where
+they were drafted as OQ-A to OQ-C). Each resolution is **provisional until Product signs
+the amendment**; OQ-9 also needs Design. The provider question is not open: DEC-0435
+(no Claude-model fallback) settled it.
+
+**OQ-8 — Promotion bar for `operator-question.auto-answer`.** The runtime already requires
+a `relax` judgment to reach act-band precision ≥ 0.95 on n ≥ 50 with no override. Is that
+enough for answering on the operator's behalf, or does it need a higher bar, a larger
+corpus, or a per-question-kind bar?
+
+**Resolution (2026-11-26, full rubric, DEC-0436, provisional): the existing `relax` bar
+plus a deviation test, label aging, a recorded recommended option, and veto-rate
+demotion** (section 8). Evidence (checked): the bar is n ≥ 50, ≥ 95%, no override
+(`reference/src/judgment/evaluate.ts`); nothing demotes a judgment on a precision drop;
+`cli-decisions` records no recommended option; the operator picked "(Recommended)" in 108
+of 117 answered planner questions. Evidence (unchecked, carried from an earlier session's
+study): 2.6% of answered decisions reversed (11 of 427), the operator's own 2.8% (3 of
+106), after 0.7, 17 and 26 days; a lower bound, since only reversals citing the decision id
+are found. Options: bar plus deviation plus demotion (recommended); existing bar only;
+per-question-kind bar; never enforce. **Counter-argument:** the deviation test and
+demotion only fix a labelling problem the 95% bar already handles, and 28-day aging delays
+every label to guard against about 3% of answers. Rebuttal: the bar measures the average,
+so a judgment can pass it while getting the deviations wrong, and those are the only
+questions where the label adds information; aging costs only time in shadow, whereas
+scoring a reversed answer as correct is permanent; the window can be shortened later.
+**Undefined dependencies:** the recommended-option field (AISDLC-1447); the demotion and
+free-text labelling are specified here and built in AISDLC-1445. **Check:** the eval
+report prints the deviation-set size; if sessions stop marking "(Recommended)", the set
+stays empty and promotion cannot pass.
+
+**OQ-9 — When an auto-answer takes effect, and how the operator sees it.** Does it act at
+once with a veto afterwards, or wait a short window for a veto? Is a loaded veto surface
+enough, or must the operator be shown to be watching?
+
+**Resolution (2026-11-26, full rubric, DEC-0437, provisional; Design review needed): act at
+once as a reversible decision record; visibility is a scheduled, delivered
+`operator-digest` report** (section 5 Group D). Delivered at the end of each 5-hour budget
+window once ≥ N auto-answers have built up (N default 10, configurable), otherwise daily;
+as an interactive artifact report linked through a configurable channel (default the tmux
+pane or the built-in notification); the judgment drops to `shadow` if nothing has been
+delivered in 26 hours; orientation warns when delivered digests go unreviewed. The
+operator rejected a first proposal (act, attached pane, cap of 3 unreviewed): "a cap on 3
+just postpones the problem it doesn't solve it … a delay of waiting for an answer could be
+more costly than a wrong answer". Cost analysis: over 94 answered planner questions, median
+wait 2.1 minutes, p90 22.7, longest 4.8 hours, 16.8 hours blocked in total, mostly while the
+operator was away; at the bar about 4 extra wrong answers a month, rework cost unmeasured.
+Evidence (checked): `operator-digest` exists and has no scheduled caller; the 5-hour window
+is tracked by the budget pacer; no RFC defines a veto grace window. Options: window/daily
+delivered (recommended); fixed daily; window/daily plus a ping on low-confidence answers;
+pull at orientation only. **Counter-argument:** pull-only is cheaper and honest, since the
+operator reviews only on return anyway. Rebuttal: a delivered digest allows a veto away
+from the desk; pull-only leaves an answer standing for days and keeps demotion blind.
+**Undefined dependencies:** the scheduled producer and the channel (AISDLC-1446); the
+freshness check (AISDLC-1445). The loaded-versus-watching question is superseded: the
+veto is a delivered report, not a live surface. **Check:** a digest delivered but never
+opened makes the veto rate read zero; orientation prints the unreviewed count.
+
+**OQ-10 — Scope.** Planner sessions only, or also interactive non-hierarchy sessions?
+
+**Resolution (2026-11-26, full rubric, DEC-0438, provisional): planner-role sessions only,
+enabled per repository by a promotion PR to that repository's own
+`.ai-sdlc/judgment-config.yaml`; corpora per repository.** Evidence (checked): 30 days of
+`AskUserQuestion` calls, 322 from planner sessions and 40 from others across repositories
+(this repository 187 planner, 1 other, 0 executor); the role comes from
+`AI_SDLC_HIERARCHY_ROLE`; judgment config is already per repository. Options: planner role
+per repo (recommended); planner plus interactive sessions here; every session that asks;
+this repository first, adopters later. **Counter-argument:** "this repository first" would
+spare each adopter building its own corpus. Rebuttal: promotion is already per repository
+and operator-only by PR; a cross-repository gate would be new machinery nothing
+implements. **Assumption:** corpora are not pooled across repositories, so reaching 20
+deviations relies on this repository's volume alone. **Check:** a planner run without the
+role variable never auto-answers, and the digest shows zero auto-answers for that
+repository.
+
 ## References
 
 - Provider documentation, read 2026-09-30: <https://docs.typesafe.ai/introduction>,
@@ -1083,6 +1253,10 @@ only** because that is today's behaviour.
 | Operator | Dominique Legault | ✅ Signed (gives the unwired judgment seams a backend and measures each one before it acts; review relaxation bounded to trusted work with security review always run; 2026-09-30) |
 | Product | Alexander Kline | ✅ Signed 2026-11-25 (approved) |
 | Design | Morgan | ⏸ Pending |
+| Engineering (amendment 2026-11-26) | Dominique Legault | ✅ Signed (operator-question auto-answer: relax-class, planner-only, acts as a reversible decision record, shadow unless a digest was delivered in 26 hours; OQ-8 to OQ-10 via operator rubric; 2026-11-26) |
+| Operator (amendment 2026-11-26) | Dominique Legault | ✅ Signed (OQ-8 to OQ-10 rulings; lifecycle returned to Ready for Review pending Product; 2026-11-26) |
+| Product (amendment 2026-11-26) | Alexander Kline | ⏸ Pending (required: the amendment takes the operator out of a decision; until signed, the resolutions are provisional and AISDLC-1445/1446 ship shadow-only) |
+| Design (amendment 2026-11-26) | Morgan | ⏸ Pending (OQ-9 digest report and delivery channel) |
 
 ### Product review (2026-11-25)
 
@@ -1099,3 +1273,4 @@ Product approves RFC-0049. Replacing regex and keyword heuristics with typed jud
 | 2026-09-30 | **Ready for Review → Signed Off** (Engineering + Operator). Added runtime evidence that the classifier substrate, DoR Stage B and Decision Catalog Stage C have never produced a model-backed answer in this repository, with the documented cause (AISDLC-321/275 dependency constraint; AISDLC-289 follow-up never filed); `dor.stage-b` specified for the no-spawner path. Phase tasks AISDLC-629 to AISDLC-641 dispatchable (641 operator-only). |
 | 2026-09-30 | **Amendment (lifecycle unchanged, sign-off confirmed by operator for the extension).** Added section 9, capability liveness: registry and `live` / `shadow` / `degraded` outcome reporting, doctor check and Decisions for required capabilities, `runtimeEvidence` and the `Signed Off → Implemented` evidence rule, the follow-up gate, and the stub-in-production rule. OQ-6 (annotate the four `Implemented` RFCs per capability) and OQ-7 (doctor fail plus Decision, nothing blocked) resolved via operator rubric. Phase tasks AISDLC-642 to AISDLC-647 added; RFC-0049 had merged as #1094 before this amendment. |
 | 2026-10-01 | **Amendment (lifecycle unchanged, operator-approved).** Corrected the `dor.stage-b` risk classification: a judged pass can override a medium- or low-confidence Stage A fail and skip the `refinement-reviewer` (found during AISDLC-636), so the pass side is split into `dor.stage-b-pass`, a second `relax`-class judgment, shadow-only until it clears the corpus bar; `dor.stage-b` itself is now strictly tighten-only. Section 4 and 5 text and the OQ-1 resolution note updated. |
+| 2026-11-26 | **Amendment; Signed Off → Ready for Review** (operator choice: the amendment is provisional until Product signs). Added section 5 Group D, `operator-question.auto-answer`: a third `relax` judgment that may answer an operator `AskUserQuestion` in place, never for class-(c) questions or RFC Open Questions, on trusted work in planner-role sessions only. OQ-8 (promotion bar plus deviation test, 28-day label aging, recorded recommended option, veto-rate demotion; DEC-0436), OQ-9 (act at once as a reversible decision record, delivered `operator-digest` report, shadow if none delivered in 26 hours; DEC-0437) and OQ-10 (planner role, per repository; DEC-0438) resolved via operator rubric, provisional. Section 4, section 8 and the Implementation Plan (AISDLC-1442, 1443, 1445, 1446, 1447) updated. Trigger: AISDLC-1444. |
