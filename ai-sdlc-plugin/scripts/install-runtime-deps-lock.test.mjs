@@ -41,7 +41,18 @@ function writeTree(pluginDir, tree) {
   }
 }
 
-function setup({ sleep = 0, brokenInstall = false } = {}) {
+/**
+ * AISDLC-1423: uutils coreutils 0.8.0 (Ubuntu 26.04, the `ubuntu-latest` runner) `mkdir`
+ * exits 0 when the kernel returns EEXIST for an existing directory (uutils#13970), so
+ * two racing `mkdir` calls both "win". This stub reproduces that lie deterministically.
+ */
+const LYING_MKDIR = `#!/usr/bin/env bash
+for last in "$@"; do :; done
+/bin/mkdir "$@" 2>/dev/null
+[ -d "$last" ]
+`;
+
+function setup({ sleep = 0, brokenInstall = false, lyingMkdir = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'aisdlc-1084-'));
   const pluginDir = join(root, 'plugin');
   mkdirSync(pluginDir, { recursive: true });
@@ -78,6 +89,10 @@ for(const [rel,body] of Object.entries(tree)){const f=p.join(process.argv[2],"no
 `,
   );
   chmodSync(join(binDir, 'npm'), 0o755);
+  if (lyingMkdir) {
+    writeFileSync(join(binDir, 'mkdir'), LYING_MKDIR);
+    chmodSync(join(binDir, 'mkdir'), 0o755);
+  }
   const env = { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME };
   return { root, pluginDir, log, env };
 }
@@ -110,6 +125,42 @@ describe('AISDLC-1084 runtime-deps health + installer', () => {
       assert.equal(err.match(/waited for lock/g)?.length, 1);
       assert.ok(checkRuntimeDepsHealth(c.pluginDir).healthy);
       assert.ok(!existsSync(join(c.pluginDir, '.ai-sdlc-install.lock')));
+    } finally {
+      rmSync(c.root, { recursive: true, force: true });
+    }
+  });
+
+  it('AISDLC-1423: a mkdir that exits 0 on EEXIST still admits one installer', async () => {
+    const c = setup({ sleep: 1, lyingMkdir: true });
+    try {
+      const [a, b] = await Promise.all([runAsync(c), runAsync(c)]);
+      assert.equal(a.code, 0, a.err);
+      assert.equal(b.code, 0, b.err);
+      assert.equal(npmRuns(c), 1);
+      assert.equal((a.err + b.err).match(/installed successfully/g)?.length, 1);
+      assert.ok(!existsSync(join(c.pluginDir, '.ai-sdlc-install.lock')));
+    } finally {
+      rmSync(c.root, { recursive: true, force: true });
+    }
+  });
+
+  it('AISDLC-1423: a waiter that takes the lock after a healthy install runs no npm', async () => {
+    const c = setup();
+    const lock = join(c.pluginDir, '.ai-sdlc-install.lock');
+    try {
+      writeTree(c.pluginDir, FULL_TREE);
+      writeFileSync(lock, `${process.pid}\n`); // held by a live process (this test)
+      const p = spawn('bash', [SCRIPT, c.pluginDir], { env: c.env });
+      let err = '';
+      p.stderr.on('data', (d) => {
+        err += d;
+        if (/waited for lock/.test(err) && existsSync(lock)) rmSync(lock); // holder releases
+      });
+      const code = await new Promise((r) => p.on('close', r));
+      assert.equal(code, 0, err);
+      assert.equal(npmRuns(c), 0);
+      assert.match(err, /already installed/);
+      assert.ok(!existsSync(lock));
     } finally {
       rmSync(c.root, { recursive: true, force: true });
     }

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1423
 title: Concurrent runtime-deps installers run npm twice under CI load
-status: To Do
+status: In Progress
 priority: medium
 labels:
   - ai-sdlc-plugin
