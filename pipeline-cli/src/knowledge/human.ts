@@ -8,14 +8,14 @@ import { now } from '../clock.js';
 import { AGENT_CONFIDENCE_CAP, type KnowledgeEntry } from './entry.js';
 import { appendKnowledgeEvent } from './log.js';
 import { openKnowledgeStore } from './knowledge-store.js';
-import { REOBSERVE_WEIGHT, type Role } from './promote.js';
+import { type Actor, REOBSERVE_WEIGHT } from './promote.js';
 
 /** Confirm: confidence moves 30 percent toward the supplied value; authority never changes. */
 export function confirmEntry(
   trackedRootAbs: string,
   id: string,
   confidence: number,
-  by: Role,
+  actor: Actor,
   observed?: string,
 ): number | null {
   let next = 0;
@@ -30,7 +30,8 @@ export function confirmEntry(
   appendKnowledgeEvent(trackedRootAbs, {
     event: 'confirmed',
     id,
-    by,
+    by: actor.by,
+    principal: actor.principal,
     detail: `confidence ${String(before.confidence)} -> ${next}`,
   });
   return next;
@@ -41,7 +42,7 @@ export function correctEntry(
   trackedRootAbs: string,
   id: string,
   value: string,
-  by: Role,
+  actor: Actor,
   observed?: string,
 ): boolean {
   const before = openKnowledgeStore({ trackedRoot: trackedRootAbs }).update(id, (f) => {
@@ -53,7 +54,8 @@ export function correctEntry(
   appendKnowledgeEvent(trackedRootAbs, {
     event: 'corrected',
     id,
-    by,
+    by: actor.by,
+    principal: actor.principal,
     detail: `value changed from '${String(before.value)}'`,
   });
   return true;
@@ -64,7 +66,7 @@ export function supersedeEntry(
   trackedRootAbs: string,
   oldId: string,
   newId: string,
-  by: Role,
+  actor: Actor,
 ): { ok: boolean; reason: string } {
   const store = openKnowledgeStore({ trackedRoot: trackedRootAbs });
   const oldEntry = store.get(oldId, { scope: 'tracked' });
@@ -86,7 +88,8 @@ export function supersedeEntry(
     event: 'superseded',
     id: oldId,
     to: newId,
-    by,
+    by: actor.by,
+    principal: actor.principal,
     detail: `${newId} supersedes ${oldId}`,
   });
   return { ok: true, reason: `${newId} supersedes ${oldId}` };

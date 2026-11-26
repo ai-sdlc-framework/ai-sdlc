@@ -17,6 +17,8 @@ import { DEFAULT_ONTOLOGY } from './ontology.js';
 import { promoteEntry } from './promote.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
+const HUMAN = { by: 'human', principal: 'human:op@example.com' } as const;
+
 let root: string;
 afterEach(() => removeFixtureDir(root));
 
@@ -51,7 +53,7 @@ describe('entry bytes on disk (golden)', () => {
     const read = (p: string): string => readFileSync(p, 'utf-8');
 
     const ctx = { projectDir: root, ontology: DEFAULT_ONTOLOGY, config: loadKnowledgeConfig(root) };
-    expect(promoteEntry(tracked, 'a', { to: 'canonical', by: 'human' }, ctx).ok).toBe(true);
+    expect(promoteEntry(tracked, 'a', { to: 'canonical', ...HUMAN }, ctx).ok).toBe(true);
     expect(read(join(tracked, 'systems/a.md'))).toMatchInlineSnapshot(`
       "---
       id: a
@@ -71,7 +73,7 @@ describe('entry bytes on disk (golden)', () => {
       "
     `);
 
-    expect(supersedeEntry(tracked, 'a', 'b', 'human').ok).toBe(true);
+    expect(supersedeEntry(tracked, 'a', 'b', HUMAN).ok).toBe(true);
     expect(read(join(tracked, 'systems/b.md'))).toMatchInlineSnapshot(`
       "---
       id: b
@@ -102,6 +104,7 @@ describe('entry bytes on disk (golden)', () => {
       trackedRootAbs: tracked,
       ontology: DEFAULT_ONTOLOGY,
       observed: '2026-10-09',
+      actor: HUMAN,
     };
     expect(ingestSource('tasks', opts)).toEqual({ created: 1, updated: 0, unchanged: 0 });
     expect(read(join(tracked, 'process/task-t-1.md'))).toMatchInlineSnapshot(`
@@ -162,6 +165,7 @@ describe('entry bytes on disk (golden)', () => {
       protectedRootAbs: prot,
       ontology: DEFAULT_ONTOLOGY,
       observed: '2026-10-09',
+      actor: HUMAN,
     };
     expect(ingestMemoryTrunk(memOpts).created).toBe(2);
     expect(read(join(prot, 'memory/memory-user-role.md'))).toMatchInlineSnapshot(`

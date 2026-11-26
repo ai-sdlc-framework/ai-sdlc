@@ -82,6 +82,7 @@ import {
   renderLinterWarnings,
 } from '../capture/incode-linter.js';
 import { renderRubricTable, getRubricEntry } from '../capture/triage-rubric.js';
+import { resolveOperatorIdentity as sharedOperatorIdentity } from '../util/operator-identity.js';
 
 // ── Feature flag ──────────────────────────────────────────────────────────────
 
@@ -365,14 +366,7 @@ async function detectCurrentPrNumber(): Promise<number | null> {
 // ── Resolve operator identity ─────────────────────────────────────────────────
 
 async function resolveOperatorIdentityReal(override?: string): Promise<string> {
-  if (override) return override;
-  try {
-    const { spawnSync } = await import('node:child_process');
-    const r = spawnSync('git', ['config', 'user.email'], { encoding: 'utf8', stdio: 'pipe' });
-    return r.stdout?.trim() || process.env.USER || 'unknown';
-  } catch {
-    return process.env.USER || 'unknown';
-  }
+  return sharedOperatorIdentity(override);
 }
 
 /**

@@ -23,13 +23,20 @@ export interface KnowledgeEvent {
   from?: string;
   to?: string;
   proof?: string;
+  /** Role: 'agent' or 'human'. Authority rules read this. */
   by?: string;
+  /**
+   * Who acted (AISDLC-1420): `human:<email>`, `agent:<session>`, `agent:task:<id>`
+   * or `agent:unknown`. Audit only. Absent on lines written before AISDLC-1420.
+   */
+  principal?: string;
   detail?: string;
 }
 
+/** Every event the framework writes names a role and a principal. */
 export function appendKnowledgeEvent(
   trackedRootAbs: string,
-  e: Omit<KnowledgeEvent, 'ts'>,
+  e: Omit<KnowledgeEvent, 'ts' | 'by' | 'principal'> & { by: string; principal: string },
 ): KnowledgeEvent {
   const full: KnowledgeEvent = { ts: now().toISOString(), ...e };
   const file = knowledgeLogPath(trackedRootAbs);
@@ -59,6 +66,6 @@ export function auditLines(events: KnowledgeEvent[]): string[] {
     .filter((e) => e.event === 'promoted')
     .map(
       (e) =>
-        `${e.ts} ${e.id} ${e.from ?? '?'} -> ${e.to ?? '?'} proof=${e.proof ?? '(none)'} by=${e.by ?? '?'}`,
+        `${e.ts} ${e.id} ${e.from ?? '?'} -> ${e.to ?? '?'} proof=${e.proof ?? '(none)'} by=${e.by ?? '?'} principal=${e.principal ?? '?'}`,
     );
 }

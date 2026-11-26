@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 import { reviewsLedgerPath, reviewsLedgerRelativePath } from '../attestation/reviews-ledger.js';
 import { projectAll } from '../decisions/projection.js';
 import { appendKnowledgeEvent } from './log.js';
+import type { Actor } from './promote.js';
 import { hashValue, parseEntryFile, validateEntryFields } from './entry.js';
 import { openKnowledgeStore } from './knowledge-store.js';
 import type { Ontology } from './ontology.js';
@@ -43,6 +44,8 @@ export interface IngestOptions {
   ontology: Ontology;
   observed: string;
   eventsFile?: string;
+  /** Recorded on the `superseded` events this ingest writes. */
+  actor: Actor;
 }
 
 const oneLine = (s: string): string => s.replace(/\s+/g, ' ').trim();
@@ -255,6 +258,8 @@ export function ingestSource(kind: IngestSource, o: IngestOptions): IngestResult
       appendKnowledgeEvent(o.trackedRootAbs, {
         event: 'superseded',
         id: c.id,
+        by: o.actor.by,
+        principal: o.actor.principal,
         detail: String(fields.supersedes),
       });
     }

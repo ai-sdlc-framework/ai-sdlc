@@ -63,7 +63,14 @@ import {
   renderDashboard,
   supersedeEntry,
 } from '../knowledge/human.js';
-import { promoteEntry, reobserveEntry, refuteEntry, type Role } from '../knowledge/promote.js';
+import {
+  type Actor,
+  promoteEntry,
+  reobserveEntry,
+  refuteEntry,
+  type Role,
+} from '../knowledge/promote.js';
+import { resolveKnowledgePrincipal, systemPrincipalDeps } from '../knowledge/principal.js';
 import {
   compactSession,
   queryIndex,
@@ -94,6 +101,15 @@ export function resolveRole(
   tty: boolean = process.stdin.isTTY === true && process.stdout.isTTY === true,
 ): Role {
   return tty && !env.AI_SDLC_ACTIVE_TASK_ID ? 'human' : 'agent';
+}
+
+/** The role and audit principal for knowledge-log events written by this process. */
+export function resolveActor(projectDir: string, env: NodeJS.ProcessEnv = process.env): Actor {
+  const by = resolveRole(env);
+  return {
+    by,
+    principal: resolveKnowledgePrincipal(env, systemPrincipalDeps(by, projectDir, env)),
+  };
 }
 
 export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
@@ -384,6 +400,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           ontology: loadOntology(trackedRootAbs).ontology,
           observed: String(args.observed),
           eventsFile: args['events-file'] as string | undefined,
+          actor: resolveActor(projectDir),
         });
         process.stdout.write(
           `${r.created} created, ${r.updated} updated, ${r.unchanged} unchanged\n`,
@@ -459,7 +476,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           {
             to: args.to as 'specialist' | 'canonical',
             proof: args.proof as string | undefined,
-            by: resolveRole(),
+            ...resolveActor(String(args['project-dir'])),
           },
           ctx.verify,
         );
@@ -481,7 +498,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           ctx.trackedAbs,
           String(args.id),
           Number(args.confidence),
-          resolveRole(),
+          resolveActor(String(args['project-dir'])),
           String(args.observed),
         );
         if (next === null) {
@@ -504,7 +521,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           ctx.trackedAbs,
           String(args.id),
           String(args.value),
-          resolveRole(),
+          resolveActor(String(args['project-dir'])),
           String(args.observed),
         );
         if (!ok) {
@@ -522,7 +539,12 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           .positional('new', { type: 'string', demandOption: true }),
       (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
-        const r = supersedeEntry(ctx.trackedAbs, String(args.old), String(args.new), resolveRole());
+        const r = supersedeEntry(
+          ctx.trackedAbs,
+          String(args.old),
+          String(args.new),
+          resolveActor(String(args['project-dir'])),
+        );
         process.stdout.write(`${r.ok ? 'superseded' : 'refused'}: ${r.reason}\n`);
         if (!r.ok) process.exitCode = 1;
       },
@@ -559,7 +581,12 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           .option('reason', { type: 'string', demandOption: true }),
       (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
-        const ok = refuteEntry(ctx.trackedAbs, String(args.id), String(args.reason), resolveRole());
+        const ok = refuteEntry(
+          ctx.trackedAbs,
+          String(args.id),
+          String(args.reason),
+          resolveActor(String(args['project-dir'])),
+        );
         if (!ok) {
           process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
           process.exitCode = 1;
@@ -580,6 +607,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           ctx.trackedAbs,
           String(args.id),
           Number(args.confidence),
+          resolveActor(String(args['project-dir'])),
           String(args.observed),
         );
         if (next === null) {
