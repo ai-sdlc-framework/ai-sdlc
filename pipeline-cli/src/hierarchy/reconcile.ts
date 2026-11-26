@@ -814,7 +814,7 @@ export function gatherMainHealth(run: CommandRunner, cwd: string): MainHealth {
     run,
     `main-sha|${cwd}`,
     ['api', 'repos/{owner}/{repo}/commits/main', '--jq', '.sha'],
-    { cwd },
+    { cwd, events: true },
     GH_READ_TTL_MS,
   );
   const sha = head.status === 0 ? head.stdout.trim() : '';
@@ -837,7 +837,7 @@ export function gatherMainHealth(run: CommandRunner, cwd: string): MainHealth {
       '--json',
       'conclusion,url',
     ],
-    { cwd },
+    { cwd, events: true },
     GH_READ_TTL_MS,
   );
   const runs =
@@ -913,7 +913,7 @@ export function gatherDocsBump(run: CommandRunner, cwd: string): DocsBump {
       '--json',
       'databaseId,conclusion,url',
     ],
-    { cwd },
+    { cwd, events: true },
     GH_READ_TTL_MS,
   );
   if (listed.status !== 0) return { state: 'unknown' };
@@ -1645,15 +1645,20 @@ function verdictRefNewerThanCheck(
   const job = checks.find((c) => c.name === VERDICT_CHECK_NAME && c.conclusion === 'failure');
   const done = Date.parse(job?.completedAt ?? '');
   if (!job || !Number.isFinite(done)) return false;
-  const ref = run(
-    'gh',
+  // AISDLC-1440: a missing ref (404) is cached briefly, so one sha is not asked about every tick.
+  const ref = cachedGh(
+    run,
+    `verdict-ref|${cwd}|${headSha}`,
     ['api', `repos/{owner}/{repo}/git/ref/ai-sdlc/verdicts/${headSha}`, '--jq', '.object.sha'],
     { cwd },
+    GH_READ_TTL_MS,
   );
   const sha = ref.status === 0 ? ref.stdout.trim() : '';
   if (!sha) return false;
-  const when = run(
-    'gh',
+  // A commit's date never changes.
+  const when = cachedGh(
+    run,
+    `commit-date|${cwd}|${sha}`,
     ['api', `repos/{owner}/{repo}/git/commits/${sha}`, '--jq', '.committer.date'],
     { cwd },
   );

@@ -21,7 +21,7 @@ import { loadOperationalPolicy, mergeOffLines } from './operational.js';
 import {
   callsPerSession,
   ghCallsPath,
-  parseQuota,
+  ledgerQuota,
   pruneGhCalls,
   readGhCalls,
   type Quota,
@@ -215,7 +215,7 @@ export function formatWorktrees(w: StatusResult['worktrees']): string[] {
 /** Join the roster with the registry, tmux and the board. */
 export function hierarchyStatus(
   deps: HierarchyDeps,
-  opts: { rosterOnly?: boolean } = {},
+  _opts: { rosterOnly?: boolean } = {},
 ): StatusResult {
   const checked = readRosterChecked(deps.boardDir);
   const { rejected } = checked;
@@ -393,22 +393,16 @@ export function hierarchyStatus(
     /* an unreadable board must not break status */
   }
   let ghCallsPerHour: Record<string, number> = {};
+  let quota: Quota | undefined;
   try {
     const log = ghCallsPath(deps.boardDir);
     pruneGhCalls(log, deps.now());
-    ghCallsPerHour = callsPerSession(readGhCalls(log), deps.now());
+    const calls = readGhCalls(log);
+    ghCallsPerHour = callsPerSession(calls, deps.now());
+    // AISDLC-1440: the quota is the ledger's latest reading; status never polls `gh api rate_limit`.
+    quota = ledgerQuota(calls, deps.now());
   } catch {
     /* an unreadable call log must not break status */
-  }
-  let quota: Quota | undefined;
-  try {
-    // AISDLC-1380: roster-only callers never print the quota; skip the gh call.
-    const r = opts.rosterOnly
-      ? undefined
-      : deps.run('gh', ['api', 'rate_limit'], { cwd: deps.cwd });
-    if (r?.status === 0) quota = parseQuota(r.stdout);
-  } catch {
-    /* gh missing or offline */
   }
   const drainStall = readOpenDrainStall(deps.boardDir);
   let webhookHealthReading: WebhookHealth | undefined;

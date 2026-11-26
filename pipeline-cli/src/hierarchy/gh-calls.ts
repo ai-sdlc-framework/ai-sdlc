@@ -15,9 +15,13 @@
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   renameSync,
   writeFileSync,
 } from 'node:fs';
@@ -220,6 +224,29 @@ export function readGhCalls(logPath: string): GhCall[] {
   } catch {
     return [];
   }
+  return parseGhCallLines(text);
+}
+
+/** Calls in the last `bytes` of the log; the first, possibly torn, line is skipped (AISDLC-1440). */
+export function readGhCallsTail(logPath: string, bytes = 2 * 1024 * 1024): GhCall[] {
+  let fd: number | undefined;
+  try {
+    fd = openSync(logPath, 'r');
+    const size = fstatSync(fd).size;
+    const start = Math.max(0, size - bytes);
+    const buf = Buffer.alloc(size - start);
+    readSync(fd, buf, 0, buf.length, start);
+    let text = buf.toString('utf-8');
+    if (start > 0) text = text.slice(text.indexOf('\n') + 1);
+    return parseGhCallLines(text);
+  } catch {
+    return [];
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+function parseGhCallLines(text: string): GhCall[] {
   const calls: GhCall[] = [];
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
@@ -273,6 +300,44 @@ export function parseQuota(stdout: string): Quota | undefined {
     return undefined;
   }
 }
+
+/**
+ * AISDLC-1440: the local token's quota as the ledger last saw it, so nothing polls
+ * `gh api rate_limit` for it: the newest hourly snapshot per bucket, replaced by any newer
+ * `x-ratelimit-remaining` a `gh api -i` call printed. A bucket whose reset has passed, or with no
+ * reset and older than an hour, is unknown (the window refilled it). CI lines are ignored.
+ */
+export function ledgerQuota(calls: readonly GhCall[], now: Date): Quota | undefined {
+  const seen: Partial<Record<keyof Quota, { remaining: number; at: number; reset?: number }>> = {};
+  const set = (name: string, remaining: number, at: number, reset?: number): void => {
+    if (name !== 'core' && name !== 'graphql') return;
+    const prev = seen[name];
+    if (prev && prev.at > at) return;
+    // A newer reading without a reset stays in the earlier reading's window until it ends.
+    const keep =
+      reset ?? (prev?.reset !== undefined && prev.reset * 1000 > at ? prev.reset : undefined);
+    seen[name] = { remaining, at, ...(keep !== undefined ? { reset: keep } : {}) };
+  };
+  for (const c of calls) {
+    if (c.token !== undefined && c.token !== USER_TOKEN_NAME) continue;
+    const at = Date.parse(c.at);
+    if (!Number.isFinite(at)) continue;
+    for (const [name, b] of Object.entries(c.quota ?? {})) set(name, b.remaining, at, b.reset);
+    if (typeof c.remaining === 'number' && c.resource) set(c.resource, c.remaining, at);
+  }
+  const t = now.getTime();
+  const out: Quota = {};
+  for (const name of ['core', 'graphql'] as const) {
+    const b = seen[name];
+    if (!b || b.at > t) continue;
+    const live = b.reset !== undefined ? b.reset * 1000 > t : t - b.at < HOUR_MS;
+    if (live) out[name] = b.remaining;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** `token` value of the local user token, when a line names it at all. */
+const USER_TOKEN_NAME = 'user';
 
 /** The lower of the known buckets, or undefined when unknown. */
 export function lowestRemaining(q: Quota | undefined): number | undefined {

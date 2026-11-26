@@ -13,6 +13,7 @@ import path from 'node:path';
 import { validateHierarchyRoster } from '@ai-sdlc/reference';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { appendGhCall, ghCallsPath } from './gh-calls.js';
 import { landingPath } from './reconcile.js';
 import { resolvePlannerModel } from './model-fallback.js';
 import { writeModelMarker } from '../routing/model-unavailable.js';
@@ -742,14 +743,21 @@ describe('hierarchy up', () => {
     expect(ok.status).toEqual([]);
   });
 
-  it('a roster-only status makes no rate_limit call (AISDLC-1380)', async () => {
+  it('status makes no rate_limit call; the quota comes from the ledger (AISDLC-1440)', async () => {
     await hierarchyUp(baseOpts, deps);
     const rateLimit = () => fake.calls.filter((c) => c.args.includes('rate_limit')).length;
     const before = rateLimit();
     hierarchyStatus(deps, { rosterOnly: true });
+    const at = new Date(deps.now().getTime() - 60_000).toISOString();
+    appendGhCall(ghCallsPath(deps.boardDir), {
+      at,
+      session: 's',
+      argv: ['api', 'rate_limit'],
+      exit: 0,
+      quota: { core: { remaining: 4321 }, graphql: { remaining: 4999 } },
+    });
+    expect(hierarchyStatus(deps).quota).toEqual({ core: 4321, graphql: 4999 });
     expect(rateLimit()).toBe(before);
-    hierarchyStatus(deps);
-    expect(rateLimit()).toBe(before + 1);
   });
 
   it('never emits a global option from up, status, attach or down', async () => {

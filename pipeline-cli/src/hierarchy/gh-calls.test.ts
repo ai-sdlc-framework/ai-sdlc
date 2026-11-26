@@ -22,6 +22,9 @@ import {
   redactArgv,
   pruneGhCalls,
   readGhCalls,
+  readGhCallsTail,
+  ledgerQuota,
+  type GhCall,
 } from './gh-calls.js';
 
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'gh-calls-'));
@@ -278,5 +281,59 @@ describe('gh call log (AISDLC-963)', () => {
     expect(
       redactArgv(['api', 'x', '-H', 'Authorization: tok', '-f', 'a=b', '--body=hi', '--jq', '.a']),
     ).toEqual(['api', 'x', '-H', '***', '-f', '***', '--body=***', '--jq', '.a']);
+  });
+});
+
+describe('ledgerQuota (AISDLC-1440)', () => {
+  const now = new Date('2026-11-26T12:00:00Z');
+  const at = (minAgo: number) => new Date(now.getTime() - minAgo * 60_000).toISOString();
+  const line = (c: Partial<GhCall>): GhCall => ({
+    at: at(10),
+    session: 's',
+    argv: ['pr', 'list'],
+    exit: 0,
+    ...c,
+  });
+  const reset = now.getTime() / 1000 + 600;
+
+  it('takes the newest snapshot, then newer -i readings in the same window', () => {
+    const calls = [
+      line({
+        at: at(50),
+        quota: { core: { remaining: 4000, reset }, graphql: { remaining: 4900 } },
+      }),
+      line({ at: at(30), remaining: 3500, resource: 'core' }),
+      line({ at: at(20), token: 'actions', quota: { core: { remaining: 10 } } }),
+      line({ at: at(25), remaining: 9, resource: 'search' }),
+    ];
+    expect(ledgerQuota(calls, now)).toEqual({ core: 3500, graphql: 4900 });
+  });
+
+  it('forgets a bucket whose window has ended and ignores out-of-order or future lines', () => {
+    const calls = [
+      line({ at: at(5), remaining: 100, resource: 'core' }),
+      line({ at: at(90), quota: { core: { remaining: 1 }, graphql: { remaining: 2, reset: 1 } } }),
+      line({ at: 'bad', remaining: 1, resource: 'core' }),
+      line({
+        at: new Date(now.getTime() + 60_000).toISOString(),
+        quota: { graphql: { remaining: 7 } },
+      }),
+    ];
+    expect(ledgerQuota(calls, now)).toEqual({ core: 100 });
+    expect(ledgerQuota([], now)).toBeUndefined();
+    expect(
+      ledgerQuota([line({ at: at(90), remaining: 5, resource: 'core' })], now),
+    ).toBeUndefined();
+  });
+
+  it('reads only the tail of a long log', () => {
+    const log = path.join(tmp(), 'gh-calls.jsonl');
+    expect(readGhCallsTail(log)).toEqual([]);
+    for (let i = 0; i < 50; i++) appendGhCall(log, line({ argv: ['n', String(i)] }));
+    const tail = readGhCallsTail(log, 300);
+    expect(tail.length).toBeGreaterThan(0);
+    expect(tail.length).toBeLessThan(50);
+    expect(tail.at(-1)?.argv).toEqual(['n', '49']);
+    expect(readGhCallsTail(log)).toHaveLength(50);
   });
 });
