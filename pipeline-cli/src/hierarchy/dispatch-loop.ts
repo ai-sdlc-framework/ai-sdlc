@@ -53,13 +53,12 @@ import { parseBrief, type ParsedBrief } from './brief-format.js';
 import { pruneEvents } from './pr-snapshot.js';
 import { processCanaryEvents, type CanaryReport } from './canary.js';
 import {
-  downRecordedExecutors,
+  downFinishedExecutors,
   dynamicExecutors,
   isEphemeralWorker,
   downIdleSurplus,
   reapOrphanSessions,
   spawnForEligibleClaims,
-  sweepFinishedExecutors,
   type EphemeralDeps,
   type EphemeralReport,
 } from './ephemeral-tick.js';
@@ -609,21 +608,35 @@ async function watchVerdicts(
   deps: LoopDeps,
   state: LoopState,
   held: Hold | null,
-): Promise<Pick<TickResult, 'verdicts' | 'escalations'>> {
-  const out: Pick<TickResult, 'verdicts' | 'escalations'> = { verdicts: [], escalations: [] };
+): Promise<Pick<TickResult, 'verdicts' | 'escalations'> & { seen: DispatchVerdict[] }> {
+  const out: Pick<TickResult, 'verdicts' | 'escalations'> & { seen: DispatchVerdict[] } = {
+    verdicts: [],
+    escalations: [],
+    seen: [],
+  };
   const executors = new Set(
     readRosterChecked(deps.boardDir)
       .roster.sessions.filter((e) => e.role === 'executor' && e.status === 'running')
       .map((e) => e.name),
   );
   for (const raw of collectVerdicts(deps.boardDir)) {
+    // Read before the playbook runs: a requeue deletes the failed verdict from disk, and
+    // teardown must still see it this tick (AISDLC-1417).
+    out.seen.push(raw);
     const verdictState = stateOf(raw);
     const key = `${verdictState}:${raw.taskId}:${raw.completedAt}`;
     if (state.handled.includes(key)) continue;
     const heldKey = `${key}:${raw.outcome}:${raw.commitSha ?? ''}`;
-    // Held, the clear and the playbook do not run, so the verdict stays unhandled
-    // and is processed on the first tick after `resume`.
-    if (!held) {
+    // AISDLC-1417: a finished ephemeral executor is downed whatever the hold, so its
+    // success verdict is consumed now; nothing is cleared and no playbook runs for it.
+    const consumeHeld =
+      held !== null &&
+      verdictState === 'done' &&
+      deps.ephemeral !== undefined &&
+      isEphemeralWorker(deps.boardDir, raw.workerId);
+    // Otherwise, held, the clear and the playbook do not run, so the verdict stays
+    // unhandled and is processed on the first tick after `resume`.
+    if (!held || consumeHeld) {
       state.handled.push(key);
       saveLoopState(deps.boardDir, state);
     }
@@ -641,7 +654,13 @@ async function watchVerdicts(
       ...(verdict.decisionIds ? { decisionIds: verdict.decisionIds } : {}),
       ...(dropped.length > 0 ? { rejectedFields: dropped } : {}),
     };
-    if (held) {
+    if (consumeHeld) {
+      report.clear = {
+        status: 'skipped',
+        executor: verdict.workerId,
+        reason: 'ephemeral executor: downed',
+      };
+    } else if (held) {
       report.clear = { status: 'skipped', reason: `the board is held: ${held.reason}` };
       // AISDLC-1382: the verdict is seen again on every held tick; the planner hears of it once.
       if (verdictState === 'failed' && !(state.heldEscalated ?? []).includes(heldKey)) {
@@ -820,28 +839,30 @@ async function checkStalls(
 }
 
 /**
- * RFC-0059 order: verdicts are recorded (by the caller), then finished executors are
- * downed, the sweep catches any still alive 5 minutes after its verdict, crashed ones are
- * reaped by the stall path (which downs rather than clears them), then a spawn per
- * eligible claim up to the cap. Held, nothing is downed or spawned.
+ * RFC-0059 order: verdicts are recorded (by the caller), then every finished executor is
+ * downed, orphaned sessions are reaped, crashed claims are reaped by the stall path (which
+ * downs rather than clears them), then a spawn per eligible claim up to the cap.
+ *
+ * AISDLC-1417: teardown (finished, orphaned, idle surplus) runs whatever the hold, budget-pacer
+ * hold or quota skip; a hold or a quota skip gates the spawn step only, and a hold the
+ * claim path (AISDLC-899).
  */
 async function runEphemeralSteps(
   deps: LoopDeps,
-  verdicts: readonly VerdictReport[],
   held: Hold | null,
   quotaSkip: TickResult['quotaSkip'],
   reap: () => Promise<StalledReport[]>,
   state: LoopState,
+  seen: readonly DispatchVerdict[],
   beforeSpawn?: () => Promise<void>,
 ): Promise<{ stalled: StalledReport[]; report?: EphemeralReport }> {
   const eph = deps.ephemeral;
-  if (!eph || held) return { stalled: await reap() };
+  if (!eph) return { stalled: await reap() };
   const report: EphemeralReport = { downed: [], spawned: [], spawnErrors: [] };
-  await downRecordedExecutors(deps.boardDir, eph, verdicts, report);
   try {
-    await sweepFinishedExecutors(deps.boardDir, eph, deps.now().getTime(), report);
+    await downFinishedExecutors(deps.boardDir, eph, report, seen);
   } catch {
-    /* an unreadable verdict must not stop the dispatch loop */
+    /* an unreadable verdict or roster must not stop the dispatch loop */
   }
   try {
     reapOrphanSessions(eph, report);
@@ -849,7 +870,7 @@ async function runEphemeralSteps(
     /* an unreadable tmux server must not stop the dispatch loop */
   }
   const stalled = await reap();
-  if (!quotaSkip) {
+  if (!quotaSkip && !held) {
     try {
       await beforeSpawn?.();
     } catch {
@@ -1151,7 +1172,8 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const githubFresh = githubReadFresh(deps, state);
   const readGithub = !quotaSkip && !githubFresh;
   log.start('verdicts');
-  const watch = await watchVerdicts(deps, state, held);
+  // `seen` holds the raw verdict files: they feed teardown only and never reach the tick result.
+  const { seen, ...watch } = await watchVerdicts(deps, state, held);
   // AISDLC-1189: landing, then the in-tick reconcile, run before any spawn.
   let landed: LandReport | undefined;
   let landDone = false;
@@ -1180,7 +1202,6 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   };
   const ephemeral = await runEphemeralSteps(
     deps,
-    watch.verdicts,
     held,
     quotaSkip,
     async () => {
@@ -1188,6 +1209,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
       return stalled;
     },
     state,
+    seen,
     landAndRepair,
   );
   await landAndRepair();

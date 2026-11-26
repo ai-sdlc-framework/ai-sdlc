@@ -3,7 +3,7 @@
  * and the board's inflight view.
  */
 
-import { listBoard, peekQueue } from '../dispatch/board.js';
+import { collectVerdicts, listBoard, peekQueue } from '../dispatch/board.js';
 import { readHold, type Hold } from './hold.js';
 import { listHeld } from './held-triage.js';
 import { listUnbriefed } from './auto-brief.js';
@@ -62,12 +62,15 @@ import {
 } from './drain-stall.js';
 import { plannerFallbackLine } from './model-fallback.js';
 import { budgetStatus, formatBudget, type BudgetStatus } from './budget.js';
-import { dynamicExecutors } from './ephemeral-tick.js';
+import { dynamicExecutors, finishedAt } from './ephemeral-tick.js';
 import { executorCap, formatExecutorCap, type ExecutorCap } from './executor-cap.js';
 import { formatOpenPrs, openPrState, type OpenPrState } from './open-pr-limit.js';
 import { readRotateRequests } from './rotate-request.js';
 import { resolveThresholds } from './thresholds.js';
 import type { HierarchyDeps, HierarchyRole, RosterEntry } from './types.js';
+
+/** A rostered dynamic executor whose verdict is older than this is flagged `finished, not stopped` (AISDLC-1417). */
+export const FINISHED_NOT_STOPPED_MS = 10 * 60 * 1000;
 
 /** Live state of one roster entry. */
 export type LiveState = 'busy' | 'idle' | 'starting' | 'gone' | 'unknown';
@@ -80,6 +83,11 @@ export interface StatusRow {
   attached: boolean;
   /** Task the session holds in `inflight/`, when its heartbeat names it. */
   inflightTask?: string;
+  /**
+   * AISDLC-1417: a dynamic executor still rostered more than {@link FINISHED_NOT_STOPPED_MS}
+   * after its task's verdict: the teardown missed it. Shown instead of the live state.
+   */
+  finishedNotStopped?: true;
   /** Pipeline phase of that task (AISDLC-1226). */
   phase?: string;
   /** The PR this executor is landing and its state, e.g. `#12 ci-pending` (AISDLC-816). */
@@ -277,6 +285,13 @@ export function hierarchyStatus(
     live: dynamicExecutors(deps.boardDir).length,
   });
   const rotateRequests = readRotateRequests(deps.boardDir);
+  const dynamicNames = new Set(dynamicExecutors(deps.boardDir).map((e) => e.name));
+  let verdicts: ReturnType<typeof collectVerdicts> = [];
+  try {
+    verdicts = dynamicNames.size > 0 ? collectVerdicts(deps.boardDir) : [];
+  } catch {
+    /* an unreadable verdict must not break status */
+  }
   const rows = roster.sessions.map((entry): StatusRow => {
     const live =
       registry.find((r) => r.name === entry.name) ??
@@ -288,6 +303,9 @@ export function hierarchyStatus(
       state = live.status === 'busy' ? 'busy' : live.status === 'idle' ? 'idle' : 'unknown';
     } else state = 'starting';
     const held = inflight.find((i) => i.workerId === entry.name);
+    const verdictAt = dynamicNames.has(entry.name) ? finishedAt(entry, verdicts) : undefined;
+    const finishedNotStopped =
+      verdictAt !== undefined && deps.now().getTime() - verdictAt > FINISHED_NOT_STOPPED_MS;
     const owned = landings.find((l) => l.owner === `executor:${entry.name}`);
     const startCommand = alive
       ? paneStartCommand(deps.run, entry.tmuxSession, entry.tmuxWindow)
@@ -314,6 +332,7 @@ export function hierarchyStatus(
     return {
       entry,
       state,
+      ...(finishedNotStopped ? { finishedNotStopped: true as const } : {}),
       ...(rotatePending ? { rotatePending } : {}),
       ...(contextTokens !== undefined
         ? { contextTokens, overThreshold: contextTokens > thresholdsByRole[entry.role] }
@@ -483,12 +502,17 @@ export function formatAge(startedAt: string, nowMs: number): string {
   return min < 60 ? `${min}m` : `${Math.floor(min / 60)}h${min % 60}m`;
 }
 
+/** The STATE cell: `finished, not stopped` for a missed teardown (AISDLC-1417), else the live state. */
+function stateLabel(r: StatusRow): string {
+  return r.finishedNotStopped ? 'finished, not stopped' : r.state;
+}
+
 export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): string[] {
   const dynamicLines = result.rows
     .filter((r) => r.entry.taskId !== undefined)
     .map(
       (r) =>
-        `dynamic executor: ${r.entry.name} task ${r.entry.taskId} age ${formatAge(r.entry.startedAt, nowMs)} (${r.state})`,
+        `dynamic executor: ${r.entry.name} task ${r.entry.taskId} age ${formatAge(r.entry.startedAt, nowMs)} (${stateLabel(r)})`,
     );
   dynamicLines.push(
     ...(result.spawnErrors ?? []).map((e) => `spawn error: task ${e.taskId}: ${e.error}`),
@@ -591,7 +615,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
   const body = result.rows.map((r) => [
     r.entry.role,
     r.entry.name,
-    r.state,
+    stateLabel(r),
     r.attached ? 'yes' : 'no',
     r.entry.model,
     r.entry.permissionMode,
