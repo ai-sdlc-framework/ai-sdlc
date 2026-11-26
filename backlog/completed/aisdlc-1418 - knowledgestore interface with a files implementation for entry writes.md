@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1418
 title: KnowledgeStore interface with a files implementation, routing every entry write through it
-status: To Do
+status: Done
 priority: high
 labels:
   - pipeline-cli

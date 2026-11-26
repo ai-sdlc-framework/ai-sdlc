@@ -5,13 +5,13 @@
  * source id; no adapter ever writes `canonical`. Re-ingest is idempotent by
  * contentHash, and a changed source rewrites the entry with a `supersedes` record.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { reviewsLedgerPath, reviewsLedgerRelativePath } from '../attestation/reviews-ledger.js';
 import { projectAll } from '../decisions/projection.js';
-import { dump } from '../util/yaml.js';
 import { appendKnowledgeEvent } from './log.js';
 import { hashValue, parseEntryFile, validateEntryFields } from './entry.js';
+import { openKnowledgeStore } from './knowledge-store.js';
 import type { Ontology } from './ontology.js';
 import { slugify } from './ingest-sections.js';
 
@@ -239,31 +239,28 @@ export function candidateFields(c: Candidate, observed: string): Record<string, 
 
 export function ingestSource(kind: IngestSource, o: IngestOptions): IngestResult {
   const result: IngestResult = { created: 0, updated: 0, unchanged: 0 };
+  const store = openKnowledgeStore({ trackedRoot: o.trackedRootAbs });
   for (const c of collectCandidates(kind, o)) {
     const fields = candidateFields(c, o.observed);
     const errors = validateEntryFields(fields, o.ontology);
     if (errors.length > 0) throw new Error(`${c.id}: ${errors.join('; ')}`);
-    const path = join(o.trackedRootAbs, c.trunk, `${c.id}.md`);
-    if (existsSync(path)) {
-      const prior = parseEntryFile(readFileSync(path, 'utf-8'));
-      if ('fields' in prior && prior.fields.contentHash === fields.contentHash) {
-        result.unchanged++;
-        continue;
-      }
-      if ('fields' in prior) {
-        fields.supersedes = `${c.id}@${String(prior.fields.contentHash)}`;
-        appendKnowledgeEvent(o.trackedRootAbs, {
-          event: 'superseded',
-          id: c.id,
-          detail: String(fields.supersedes),
-        });
-      }
-      result.updated++;
-    } else {
-      result.created++;
+    const path = join(c.trunk, `${c.id}.md`);
+    const prior = store.get(c.id, { scope: 'tracked', path });
+    if (prior && prior.fields.contentHash === fields.contentHash) {
+      result.unchanged++;
+      continue;
     }
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `---\n${dump(fields)}---\n\n${c.body}${c.body ? '\n' : ''}`);
+    if (prior) {
+      fields.supersedes = `${c.id}@${String(prior.fields.contentHash)}`;
+      appendKnowledgeEvent(o.trackedRootAbs, {
+        event: 'superseded',
+        id: c.id,
+        detail: String(fields.supersedes),
+      });
+    }
+    const body = `\n${c.body}${c.body ? '\n' : ''}`;
+    if (store.put({ fields, body }, { scope: 'tracked', path }).created) result.created++;
+    else result.updated++;
   }
   return result;
 }

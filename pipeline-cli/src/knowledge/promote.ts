@@ -5,12 +5,10 @@
  * allowlisted-command (value `<commandId>::<expected output substring>`).
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { dump } from '../util/yaml.js';
 import type { KnowledgeConfig } from './config.js';
 import { appendKnowledgeEvent } from './log.js';
-import { AGENT_CONFIDENCE_CAP, parseEntryFile } from './entry.js';
+import { AGENT_CONFIDENCE_CAP } from './entry.js';
+import { openKnowledgeStore } from './knowledge-store.js';
 import type { Ontology } from './ontology.js';
 
 export const REOBSERVE_WEIGHT = 0.3;
@@ -158,33 +156,6 @@ export function verifyProof(proof: string, c: VerifyContext): Verdict {
   return VERIFIERS[kind](value, c);
 }
 
-export function findEntryFile(dir: string, id: string): string | null {
-  if (!existsSync(dir)) return null;
-  for (const d of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, d.name);
-    if (d.isDirectory()) {
-      const r = findEntryFile(full, id);
-      if (r) return r;
-    } else if (d.name.endsWith('.md')) {
-      const parsed = parseEntryFile(readFileSync(full, 'utf-8'));
-      if ('fields' in parsed && parsed.fields.id === id) return full;
-    }
-  }
-  return null;
-}
-
-export function rewrite(
-  file: string,
-  edit: (f: Record<string, unknown>) => void,
-): Record<string, unknown> {
-  const parsed = parseEntryFile(readFileSync(file, 'utf-8'));
-  if (!('fields' in parsed)) throw new Error(`${file}: ${parsed.error}`);
-  const before = { ...parsed.fields };
-  edit(parsed.fields);
-  writeFileSync(file, `---\n${dump(parsed.fields)}---\n${parsed.body}`);
-  return before;
-}
-
 const AUTHORITY_RANK: Record<string, number> = { inferred: 0, specialist: 1, canonical: 2 };
 
 export type Role = 'agent' | 'human';
@@ -199,12 +170,10 @@ export function promoteEntry(
   opts: { to: 'specialist' | 'canonical'; proof?: string; by: Role },
   c: VerifyContext,
 ): PromoteResult {
-  const file = findEntryFile(trackedRootAbs, id);
-  if (!file) return { ok: false, reason: `entry '${id}' not found` };
-  const current = String(
-    (parseEntryFile(readFileSync(file, 'utf-8')) as { fields: Record<string, unknown> }).fields
-      .authority,
-  );
+  const store = openKnowledgeStore({ trackedRoot: trackedRootAbs });
+  const entry = store.get(id, { scope: 'tracked' });
+  if (!entry) return { ok: false, reason: `entry '${id}' not found` };
+  const current = String(entry.fields.authority);
   if (opts.to === 'canonical') {
     if (opts.by !== 'human') {
       return {
@@ -229,11 +198,15 @@ export function promoteEntry(
     const v = verifyProof(opts.proof, c);
     if (!v.ok) return { ...v, authority: current };
   }
-  rewrite(file, (f) => {
-    f.authority = opts.to;
-    if (opts.proof) f.proof = opts.proof;
-    if (f.writtenBy === 'agent') f.writtenBy = 'framework-verifier';
-  });
+  store.update(
+    id,
+    (f) => {
+      f.authority = opts.to;
+      if (opts.proof) f.proof = opts.proof;
+      if (f.writtenBy === 'agent') f.writtenBy = 'framework-verifier';
+    },
+    { scope: 'tracked' },
+  );
   appendKnowledgeEvent(trackedRootAbs, {
     event: 'promoted',
     id,
@@ -252,16 +225,15 @@ export function reobserveEntry(
   observedConfidence: number,
   observedDate?: string,
 ): number | null {
-  const file = findEntryFile(trackedRootAbs, id);
-  if (!file) return null;
   let next = 0;
-  const before = rewrite(file, (f) => {
+  const before = openKnowledgeStore({ trackedRoot: trackedRootAbs }).update(id, (f) => {
     const old = Number(f.confidence);
     next = Math.round((old + REOBSERVE_WEIGHT * (observedConfidence - old)) * 1e6) / 1e6;
     if (f.writtenBy === 'agent') next = Math.min(next, AGENT_CONFIDENCE_CAP);
     f.confidence = next;
     if (observedDate) f.observed = observedDate;
   });
+  if (!before) return null;
   appendKnowledgeEvent(trackedRootAbs, {
     event: 'reobserved',
     id,
@@ -272,11 +244,10 @@ export function reobserveEntry(
 
 /** Refutation drops the entry back to `inferred` and logs why. */
 export function refuteEntry(trackedRootAbs: string, id: string, reason: string, by: Role): boolean {
-  const file = findEntryFile(trackedRootAbs, id);
-  if (!file) return false;
-  const before = rewrite(file, (f) => {
+  const before = openKnowledgeStore({ trackedRoot: trackedRootAbs }).update(id, (f) => {
     f.authority = 'inferred';
   });
+  if (!before) return false;
   appendKnowledgeEvent(trackedRootAbs, {
     event: 'refuted',
     id,

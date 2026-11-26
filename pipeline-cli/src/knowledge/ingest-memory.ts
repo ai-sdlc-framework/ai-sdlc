@@ -8,14 +8,14 @@
  * `inferred`. The note file is the citation. A note that disappears from the folder (for example
  * after a dream swap) has its entry marked superseded, never deleted.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative } from 'node:path';
+import { existsSync } from 'node:fs';
+import { basename, isAbsolute, join, relative } from 'node:path';
 import { readMemoryFolder, stemOf, type Note } from '../memory-dream/notes.js';
-import { dump } from '../util/yaml.js';
 import { now } from '../clock.js';
 import { loadKnowledgeConfig } from './config.js';
 import { loadOntology } from './ontology.js';
-import { hashValue, parseEntryFile, validateEntryFields } from './entry.js';
+import { hashValue, validateEntryFields } from './entry.js';
+import { openKnowledgeStore, type KnowledgeStore } from './knowledge-store.js';
 import { slugify } from './ingest-sections.js';
 import type { Ontology } from './ontology.js';
 import { estimateTokens, type QueryHit } from './retrieval/types.js';
@@ -90,9 +90,14 @@ function noteFields(n: Note, o: MemoryIngestOptions): Record<string, unknown> {
   return fields;
 }
 
-function writeEntry(path: string, fields: Record<string, unknown>, body: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `---\n${dump(fields)}---\n\n${body}${body ? '\n' : ''}`);
+function writeEntry(
+  store: KnowledgeStore,
+  path: string,
+  fields: Record<string, unknown>,
+  body: string,
+): boolean {
+  return store.put({ fields, body: `\n${body}${body ? '\n' : ''}` }, { scope: 'protected', path })
+    .created;
 }
 
 /** Ingest (or re-ingest) the memory folder into the `memory` trunk of the protected root. */
@@ -104,7 +109,7 @@ export function ingestMemoryTrunk(o: MemoryIngestOptions): MemoryIngestResult {
     superseded: 0,
     skipped: 0,
   };
-  const dir = join(o.protectedRootAbs, MEMORY_TRUNK);
+  const store = openKnowledgeStore({ protectedRoot: o.protectedRootAbs });
   const live = new Set<string>();
   for (const n of readMemoryFolder(o.memoryDir).notes) {
     if (n.problems.length > 0) {
@@ -115,34 +120,26 @@ export function ingestMemoryTrunk(o: MemoryIngestOptions): MemoryIngestResult {
     const errors = validateEntryFields(fields, o.ontology);
     if (errors.length > 0) throw new Error(`${String(fields.id)}: ${errors.join('; ')}`);
     live.add(`${String(fields.id)}.md`);
-    const path = join(dir, `${String(fields.id)}.md`);
-    if (existsSync(path)) {
-      const prior = parseEntryFile(readFileSync(path, 'utf-8'));
-      if (
-        'fields' in prior &&
-        prior.fields.contentHash === fields.contentHash &&
-        prior.fields.status !== 'superseded'
-      ) {
-        result.unchanged++;
-        continue;
-      }
-      if ('fields' in prior) {
-        fields.supersedes = `${String(fields.id)}@${String(prior.fields.contentHash)}`;
-      }
-      result.updated++;
-    } else {
-      result.created++;
+    const path = join(MEMORY_TRUNK, `${String(fields.id)}.md`);
+    const prior = store.get(String(fields.id), { scope: 'protected', path });
+    if (
+      prior &&
+      prior.fields.contentHash === fields.contentHash &&
+      prior.fields.status !== 'superseded'
+    ) {
+      result.unchanged++;
+      continue;
     }
-    writeEntry(path, fields, n.body.trim());
+    if (prior) {
+      fields.supersedes = `${String(fields.id)}@${String(prior.fields.contentHash)}`;
+    }
+    if (writeEntry(store, path, fields, n.body.trim())) result.created++;
+    else result.updated++;
   }
-  if (existsSync(dir)) {
-    for (const f of readdirSync(dir).filter((x) => x.endsWith('.md') && !live.has(x))) {
-      const path = join(dir, f);
-      const prior = parseEntryFile(readFileSync(path, 'utf-8'));
-      if (!('fields' in prior) || prior.fields.status === 'superseded') continue;
-      writeEntry(path, { ...prior.fields, status: 'superseded' }, prior.body.trim());
-      result.superseded++;
-    }
+  for (const prior of store.list({ scope: 'protected', trunk: MEMORY_TRUNK })) {
+    if (live.has(basename(prior.path)) || prior.fields.status === 'superseded') continue;
+    writeEntry(store, prior.path, { ...prior.fields, status: 'superseded' }, prior.body.trim());
+    result.superseded++;
   }
   return result;
 }
