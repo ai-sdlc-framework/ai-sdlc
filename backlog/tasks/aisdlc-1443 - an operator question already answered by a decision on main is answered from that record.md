@@ -9,6 +9,7 @@ labels:
   - rfc-0049
   - hooks
 dependencies: []
+assumes: [RFC-0049]
 references:
   - ai-sdlc-plugin/.claude-plugin/plugin.json
   - pipeline-cli/src/decisions/judged.ts
