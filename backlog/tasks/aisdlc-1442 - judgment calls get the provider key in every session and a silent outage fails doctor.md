@@ -8,6 +8,7 @@ labels:
   - rfc-0049
   - capability-liveness
 dependencies: []
+assumes: [RFC-0049]
 references:
   - spec/rfcs/RFC-0049-system-one-judgment-layer.md
   - reference/src/judgment/jev-provider.ts
