@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1444
 title: "RFC-0049 amendment: a relax-class judgment may answer an operator question in place, only under a visible veto surface"
-status: To Do
+status: Done
 priority: high
 labels:
   - rfc-0049
@@ -39,7 +39,7 @@ The amendment adds to section 5 a new judgment `operator-question.auto-answer` (
 - **Provider (not open):** DEC-0435 option a (no Claude-model fallback; answer record PR #3067) means only a calibrated provider can act; the amendment cites DEC-0435 and the existing `uncalibrated-provider` downgrade (`evaluate.ts:153`) rather than reopening it. If #3067 has not merged when this task starts, stop and say so.
 
 ## Acceptance Criteria
-- [ ] #1 RFC-0049 gains a dated Revision History row and section 5/8 text for `operator-question.auto-answer` covering every bullet above; lifecycle stays Signed Off only if the operator confirms the extension (as for the 2026-09-30 amendment), otherwise it returns to Ready for Review.
-- [ ] #2 OQ-A to OQ-C are listed in the RFC's Open Questions and resolved only through the operator rubric walkthrough; each resolution recorded with a DEC id.
-- [ ] #3 Implementation tasks for the amendment (AISDLC-1445, AISDLC-1446) are named in the Implementation Plan.
-- [ ] #4 Engineering and Product sign-off rows added for the amendment. Product review is required (RFC-0049 already carries a "Product review (2026-11-25)" section); until Product signs, the amendment is recorded as provisional and 1445/1446 stay shadow-only.
+- [x] #1 RFC-0049 gains a dated Revision History row and section 5/8 text for `operator-question.auto-answer` covering every bullet above; lifecycle stays Signed Off only if the operator confirms the extension (as for the 2026-09-30 amendment), otherwise it returns to Ready for Review.
+- [x] #2 OQ-A to OQ-C are listed in the RFC's Open Questions and resolved only through the operator rubric walkthrough; each resolution recorded with a DEC id.
+- [x] #3 Implementation tasks for the amendment (AISDLC-1445, AISDLC-1446) are named in the Implementation Plan.
+- [x] #4 Engineering and Product sign-off rows added for the amendment. Product review is required (RFC-0049 already carries a "Product review (2026-11-25)" section); until Product signs, the amendment is recorded as provisional and 1445/1446 stay shadow-only.
