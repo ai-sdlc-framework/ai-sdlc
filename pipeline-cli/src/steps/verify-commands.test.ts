@@ -538,7 +538,7 @@ describe('first round runs only affected tests (AISDLC-1377, DEC-0423)', () => {
     expect(cmds).toContain("pnpm -r --no-bail --filter './orchestrator' test");
     expect(cmds.join('\n')).not.toContain('other');
     expect(cmds).toContain(
-      "pnpm --filter ./pipeline-cli exec vitest related --run --passWithNoTests --coverage --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 'src/a.ts'",
+      "pnpm --filter ./pipeline-cli exec vitest related --run --passWithNoTests --coverage --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 --coverage.thresholds.branches=0 --coverage.thresholds.statements=0 'src/a.ts'",
     );
     expect(cmds.some((c) => c === 'pnpm --filter ./pipeline-cli test:coverage')).toBe(false);
     expect(cmds.some((c) => c.includes(gateCommand('mb1')))).toBe(true);
