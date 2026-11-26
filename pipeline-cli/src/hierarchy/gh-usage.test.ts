@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,6 +71,26 @@ describe('gh-usage report (AISDLC-1439)', () => {
     );
     expect(formatGhUsageReport(one)).toContain('lowest remaining: none recorded');
     expect(one.tokens[0]!.callsPerHour).toEqual({ mean: 1, p95: 1, max: 1 });
+  });
+
+  it('groups a week-sized ledger in linear time and reads a large ledger file', () => {
+    const n = 200_000;
+    const start = NOW.getTime() - WEEK + 1;
+    const calls = Array.from({ length: n }, (_, i) => ({
+      at: new Date(start + Math.floor((i * (WEEK - 2)) / n)).toISOString(),
+      session: 's',
+      argv: ['pr', 'list'],
+      exit: 0,
+      ...(i % 2 ? { token: 'actions' } : {}),
+    }));
+    const began = Date.now();
+    const r = ghUsageReport(calls, NOW, WEEK);
+    expect(Date.now() - began).toBeLessThan(5_000);
+    expect(r.tokens.map((t) => t.calls)).toEqual([n / 2, n / 2]);
+    const dir = mkdtempSync(path.join(tmpdir(), 'gh-usage-big-'));
+    const big = path.join(dir, 'gh-calls.jsonl');
+    writeFileSync(big, calls.map((c) => JSON.stringify(c)).join('\n') + '\n');
+    expect(readLedgers([big])).toHaveLength(n);
   });
 
   it('parses --since and call shapes', () => {

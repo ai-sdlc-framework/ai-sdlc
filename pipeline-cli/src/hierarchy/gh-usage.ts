@@ -121,7 +121,9 @@ export function ghUsageReport(calls: GhCall[], now: Date, sinceMs: number): GhUs
     const t = Date.parse(c.at);
     if (!(t >= fromMs && t <= untilMs)) continue;
     const token = c.token ?? USER_TOKEN;
-    byToken.set(token, [...(byToken.get(token) ?? []), c]);
+    let bucket = byToken.get(token);
+    if (!bucket) byToken.set(token, (bucket = []));
+    bucket.push(c);
   }
   return {
     since: new Date(fromMs).toISOString(),
@@ -148,7 +150,7 @@ export function readLedgers(paths: readonly string[]): GhCall[] {
         if (name.endsWith('.jsonl') || statSync(child).isDirectory()) visit(child);
       }
     } else {
-      out.push(...readGhCalls(p));
+      for (const c of readGhCalls(p)) out.push(c);
     }
   };
   for (const p of paths) visit(p);
