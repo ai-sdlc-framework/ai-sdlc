@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1408
 title: 'Init scaffolds the knowledge store configuration'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-24'
 labels:
