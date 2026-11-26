@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1417
 title: "A finished dynamic executor is stopped on its verdict, whatever the hold: teardown has one owner and no hold gates it"
-status: To Do
+status: Done
 priority: high
 labels:
   - pipeline-cli
