@@ -15,7 +15,12 @@ import { now } from '../clock.js';
 import { loadKnowledgeConfig } from './config.js';
 import { loadOntology } from './ontology.js';
 import { hashValue, validateEntryFields } from './entry.js';
-import { openKnowledgeStore, type KnowledgeStore } from './knowledge-store.js';
+import {
+  backendSelection,
+  openKnowledgeStore,
+  type KnowledgeBackendSelection,
+  type KnowledgeStore,
+} from './knowledge-store.js';
 import { slugify } from './ingest-sections.js';
 import type { Ontology } from './ontology.js';
 import { estimateTokens, type QueryHit } from './retrieval/types.js';
@@ -23,7 +28,7 @@ import { estimateTokens, type QueryHit } from './retrieval/types.js';
 export const MEMORY_TRUNK = 'memory';
 export const OPERATOR_SOURCE = 'operator';
 
-export interface MemoryIngestOptions {
+export interface MemoryIngestOptions extends KnowledgeBackendSelection {
   projectDir: string;
   memoryDir: string;
   protectedRootAbs: string;
@@ -109,7 +114,11 @@ export function ingestMemoryTrunk(o: MemoryIngestOptions): MemoryIngestResult {
     superseded: 0,
     skipped: 0,
   };
-  const store = openKnowledgeStore({ protectedRoot: o.protectedRootAbs });
+  const store = openKnowledgeStore({
+    backend: o.backend,
+    backendModule: o.backendModule,
+    protectedRoot: o.protectedRootAbs,
+  });
   const live = new Set<string>();
   for (const n of readMemoryFolder(o.memoryDir).notes) {
     if (n.problems.length > 0) {
@@ -161,6 +170,7 @@ export function ingestMemoryForProject(
   const config = loadKnowledgeConfig(projectDir);
   const abs = (p: string): string => (isAbsolute(p) ? p : join(projectDir, p));
   return ingestMemoryTrunk({
+    ...backendSelection(config),
     projectDir,
     memoryDir,
     protectedRootAbs: abs(config.protectedRoot),

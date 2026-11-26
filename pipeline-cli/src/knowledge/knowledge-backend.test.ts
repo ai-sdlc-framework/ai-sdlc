@@ -13,6 +13,7 @@ import {
   openKnowledgeStore,
   registerKnowledgeBackend,
   type KnowledgeStore,
+  type KnowledgeStoreRoots,
 } from './knowledge-store.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -51,9 +52,14 @@ const open = (backend: string, backendModule: string | null): KnowledgeStore =>
   openKnowledgeStore({ trackedRoot: 'kb', backend, backendModule }, project);
 
 describe('openKnowledgeStore backend selection (DEC-0427)', () => {
-  it('returns the files store for backend files and for an unset backend', () => {
+  it('returns the files store for backend files', () => {
     expect(open('files', null)).toBeInstanceOf(FilesKnowledgeStore);
-    expect(openKnowledgeStore({ trackedRoot: 'kb' }, project)).toBeInstanceOf(FilesKnowledgeStore);
+  });
+
+  it('refuses a missing backend rather than assuming files', () => {
+    const unset = { trackedRoot: 'kb' } as unknown as KnowledgeStoreRoots;
+    expect(() => openKnowledgeStore(unset, project)).toThrow(KnowledgeBackendError);
+    expect(() => open('', null)).toThrow(/no knowledge backend selected/);
   });
 
   it('returns the backend a fixture package registers', () => {

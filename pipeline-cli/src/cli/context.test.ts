@@ -51,6 +51,49 @@ describe('cli-context knowledge.backend (DEC-0427)', () => {
     ).rejects.toThrow(/knowledge backend 'remote' is not registered/);
     expect(existsSync(join(dir, '.ai-sdlc/knowledge'))).toBe(false);
   });
+
+  it('routes every write and read through the registered backend, never the files store', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cli-context-'));
+    mkdirSync(join(dir, '.ai-sdlc'));
+    writeFileSync(join(dir, 'package.json'), '{"name":"adopter","private":true}');
+    const pkgDir = join(dir, 'node_modules', 'ai-sdlc-fixture-recording');
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(
+      join(pkgDir, 'package.json'),
+      '{"name":"ai-sdlc-fixture-recording","main":"index.js"}',
+    );
+    writeFileSync(
+      join(pkgDir, 'index.js'),
+      `const calls = (globalThis.__recordingCalls = []);
+exports.registerKnowledgeBackends = (r) =>
+  r.registerKnowledgeBackend('recording', () => ({
+    kind: 'recording',
+    get: () => null,
+    put: (e, o) => (calls.push('put:' + o.scope), { path: o.path ?? 'x.md', created: true }),
+    update: () => null,
+    list: () => (calls.push('list'), []),
+    listRaw: () => [],
+  }));
+`,
+    );
+    writeFileSync(
+      join(dir, '.ai-sdlc/context.yaml'),
+      'knowledge:\n  backend: recording\n  backendModule: ai-sdlc-fixture-recording\n',
+    );
+    writeFileSync(join(dir, 'NOTES.md'), '# T\n\n## Why\n\nBecause.\n');
+    const run = (args: string[]) =>
+      buildContextCli([...args, '--project-dir', dir])
+        .exitProcess(false)
+        .fail(false)
+        .parseAsync();
+    await run(['ingest-sections', 'NOTES.md']);
+    await run(['capture', 'fact-1', '--value', 'v', '--source-doc', 'doc.pdf']);
+    await run(['export']);
+    const calls = (globalThis as { __recordingCalls?: string[] }).__recordingCalls;
+    expect(calls).toEqual(['put:tracked', 'put:protected', 'list']);
+    expect(existsSync(join(dir, '.ai-sdlc/knowledge'))).toBe(false);
+    expect(existsSync(join(dir, '.ai-sdlc/knowledge-protected'))).toBe(false);
+  });
 });
 
 describe('resolveRole', () => {

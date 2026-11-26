@@ -144,13 +144,15 @@ describe('every knowledge-log emit site records by and principal', () => {
       projectDir: root,
       config: { trackedRoot: '.ai-sdlc/knowledge', protectedRoot: '.ai-sdlc/private' },
       ontology: DEFAULT_ONTOLOGY,
-    } as unknown as Parameters<typeof promoteEntry>[3];
-    expect(promoteEntry(tracked, 'a', { to: 'canonical', ...human }, verify).ok).toBe(true);
-    expect(reobserveEntry(tracked, 'a', 1, agent)).not.toBeNull();
-    expect(refuteEntry(tracked, 'a', 'wrong', human)).toBe(true);
-    expect(confirmEntry(tracked, 'a', 1, human)).not.toBeNull();
-    expect(correctEntry(tracked, 'a', 'new', human)).toBe(true);
-    expect(supersedeEntry(tracked, 'a', 'b', human).ok).toBe(true);
+    } as unknown as Parameters<typeof promoteEntry>[4];
+    expect(
+      promoteEntry({ backend: 'files' }, tracked, 'a', { to: 'canonical', ...human }, verify).ok,
+    ).toBe(true);
+    expect(reobserveEntry({ backend: 'files' }, tracked, 'a', 1, agent)).not.toBeNull();
+    expect(refuteEntry({ backend: 'files' }, tracked, 'a', 'wrong', human)).toBe(true);
+    expect(confirmEntry({ backend: 'files' }, tracked, 'a', 1, human)).not.toBeNull();
+    expect(correctEntry({ backend: 'files' }, tracked, 'a', 'new', human)).toBe(true);
+    expect(supersedeEntry({ backend: 'files' }, tracked, 'a', 'b', human).ok).toBe(true);
 
     const task = (title: string): void =>
       put(
@@ -159,6 +161,7 @@ describe('every knowledge-log emit site records by and principal', () => {
       );
     const ingest = (): void => {
       ingestSource('tasks', {
+        backend: 'files',
         projectDir: root as string,
         trackedRootAbs: tracked,
         ontology: DEFAULT_ONTOLOGY,

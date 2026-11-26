@@ -32,7 +32,7 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { now } from '../clock.js';
 import { DEFAULT_KNOWLEDGE_BACKEND, loadKnowledgeConfig } from '../knowledge/config.js';
-import { openKnowledgeStore, toEntries } from '../knowledge/knowledge-store.js';
+import { backendSelection, openKnowledgeStore, toEntries } from '../knowledge/knowledge-store.js';
 import { captureFact, exportableEntries } from '../knowledge/data-room.js';
 import { checkKnowledgeScope, checkKnowledgeScopeRange } from '../knowledge/scope-check.js';
 import { INGEST_SOURCES, ingestSource, type IngestSource } from '../knowledge/ingest-sources.js';
@@ -380,7 +380,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           observed: String(args.observed),
           headings: args.heading as string[] | undefined,
         });
-        const store = openKnowledgeStore({ trackedRoot: trackedAbs });
+        const store = openKnowledgeStore({ ...backendSelection(config), trackedRoot: trackedAbs });
         for (const e of entries) {
           store.put({ fields: e.fields, body: e.body }, { scope: 'tracked', path: e.path });
         }
@@ -402,6 +402,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           ? config.trackedRoot
           : join(projectDir, config.trackedRoot);
         const r = ingestSource(args.source as IngestSource, {
+          ...backendSelection(config),
           projectDir,
           trackedRootAbs,
           ontology: loadOntology(trackedRootAbs).ontology,
@@ -478,6 +479,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
       (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
         const r = promoteEntry(
+          ctx.verify.config,
           ctx.trackedAbs,
           String(args.id),
           {
@@ -502,6 +504,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
       (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
         const next = confirmEntry(
+          ctx.verify.config,
           ctx.trackedAbs,
           String(args.id),
           Number(args.confidence),
@@ -525,6 +528,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
       (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
         const ok = correctEntry(
+          ctx.verify.config,
           ctx.trackedAbs,
           String(args.id),
           String(args.value),
@@ -547,6 +551,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
       (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
         const r = supersedeEntry(
+          ctx.verify.config,
           ctx.trackedAbs,
           String(args.old),
           String(args.new),
@@ -563,7 +568,12 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
       (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
         const d = buildDashboard(
-          toEntries(openKnowledgeStore({ trackedRoot: ctx.trackedAbs }).list('tracked')),
+          toEntries(
+            openKnowledgeStore({
+              ...backendSelection(ctx.verify.config),
+              trackedRoot: ctx.trackedAbs,
+            }).list('tracked'),
+          ),
           ctx.verify.ontology.trunks,
         );
         process.stdout.write(`${renderDashboard(d).join('\n')}\n`);
@@ -589,6 +599,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
       (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
         const ok = refuteEntry(
+          ctx.verify.config,
           ctx.trackedAbs,
           String(args.id),
           String(args.reason),
@@ -611,6 +622,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
       (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
         const next = reobserveEntry(
+          ctx.verify.config,
           ctx.trackedAbs,
           String(args.id),
           Number(args.confidence),
@@ -638,7 +650,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
         const protectedAbs = isAbsolute(config.protectedRoot)
           ? config.protectedRoot
           : join(projectDir, config.protectedRoot);
-        const file = captureFact(protectedAbs, {
+        const file = captureFact(config, protectedAbs, {
           id: String(args.id),
           value: String(args.value),
           sourceDoc: String(args['source-doc']),
@@ -654,7 +666,10 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
       (args) => {
         const projectDir = String(args['project-dir']);
         const config = loadKnowledgeConfig(projectDir);
-        const store = openKnowledgeStore({ trackedRoot: config.trackedRoot }, projectDir);
+        const store = openKnowledgeStore(
+          { ...backendSelection(config), trackedRoot: config.trackedRoot },
+          projectDir,
+        );
         const shared = exportableEntries(toEntries(store.list('tracked')));
         process.stdout.write(`${JSON.stringify(shared, null, 2)}\n`);
       },

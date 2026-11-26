@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import type { KnowledgeConfig } from './config.js';
 import { appendKnowledgeEvent } from './log.js';
 import { AGENT_CONFIDENCE_CAP } from './entry.js';
-import { openKnowledgeStore } from './knowledge-store.js';
+import { openKnowledgeStore, type KnowledgeBackendSelection } from './knowledge-store.js';
 import type { Ontology } from './ontology.js';
 
 export const REOBSERVE_WEIGHT = 0.3;
@@ -171,12 +171,13 @@ export interface PromoteResult extends Verdict {
 }
 
 export function promoteEntry(
+  sel: KnowledgeBackendSelection,
   trackedRootAbs: string,
   id: string,
   opts: { to: 'specialist' | 'canonical'; proof?: string; by: Role; principal: string },
   c: VerifyContext,
 ): PromoteResult {
-  const store = openKnowledgeStore({ trackedRoot: trackedRootAbs });
+  const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs });
   const entry = store.get(id, { scope: 'tracked' });
   if (!entry) return { ok: false, reason: `entry '${id}' not found` };
   const current = String(entry.fields.authority);
@@ -227,6 +228,7 @@ export function promoteEntry(
 
 /** Move confidence 30 percent toward the observed value; authority never changes. */
 export function reobserveEntry(
+  sel: KnowledgeBackendSelection,
   trackedRootAbs: string,
   id: string,
   observedConfidence: number,
@@ -234,7 +236,7 @@ export function reobserveEntry(
   observedDate?: string,
 ): number | null {
   let next = 0;
-  const before = openKnowledgeStore({ trackedRoot: trackedRootAbs }).update(id, (f) => {
+  const before = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }).update(id, (f) => {
     const old = Number(f.confidence);
     next = Math.round((old + REOBSERVE_WEIGHT * (observedConfidence - old)) * 1e6) / 1e6;
     if (f.writtenBy === 'agent') next = Math.min(next, AGENT_CONFIDENCE_CAP);
@@ -254,12 +256,13 @@ export function reobserveEntry(
 
 /** Refutation drops the entry back to `inferred` and logs why. */
 export function refuteEntry(
+  sel: KnowledgeBackendSelection,
   trackedRootAbs: string,
   id: string,
   reason: string,
   actor: Actor,
 ): boolean {
-  const before = openKnowledgeStore({ trackedRoot: trackedRootAbs }).update(id, (f) => {
+  const before = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }).update(id, (f) => {
     f.authority = 'inferred';
   });
   if (!before) return false;

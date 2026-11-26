@@ -83,6 +83,7 @@ describe('promotion verifier', () => {
   it('refuses a proof kind outside the vocabulary and keeps the entry inferred', () => {
     repo();
     const r = promoteEntry(
+      { backend: 'files' },
       tracked(),
       'k-1',
       { to: 'specialist', proof: 'shell:rm -rf /', by: 'agent', principal: 'agent:task:T-1' },
@@ -147,6 +148,7 @@ describe('promotion verifier', () => {
     repo();
     expect(
       promoteEntry(
+        { backend: 'files' },
         tracked(),
         'k-1',
         { to: 'canonical', by: 'agent', principal: 'agent:task:T-1' },
@@ -156,6 +158,7 @@ describe('promotion verifier', () => {
     expect(authority()).toBe('inferred');
     expect(
       promoteEntry(
+        { backend: 'files' },
         tracked(),
         'k-1',
         { to: 'canonical', by: 'human', principal: 'human:op@example.com' },
@@ -169,6 +172,7 @@ describe('promotion verifier', () => {
     repo();
     expect(
       promoteEntry(
+        { backend: 'files' },
         tracked(),
         'k-1',
         { to: 'canonical', by: 'human', principal: 'human:op@example.com' },
@@ -176,6 +180,7 @@ describe('promotion verifier', () => {
       ).ok,
     ).toBe(true);
     const r = promoteEntry(
+      { backend: 'files' },
       tracked(),
       'k-1',
       { to: 'specialist', proof: 'decision-id:DEC-0091', by: 'agent', principal: 'agent:task:T-1' },
@@ -189,6 +194,7 @@ describe('promotion verifier', () => {
     repo();
     expect(
       promoteEntry(
+        { backend: 'files' },
         tracked(),
         'k-1',
         { to: 'specialist', by: 'agent', principal: 'agent:task:T-1' },
@@ -197,6 +203,7 @@ describe('promotion verifier', () => {
     ).toBe(false);
     expect(
       promoteEntry(
+        { backend: 'files' },
         tracked(),
         'zzz',
         { to: 'specialist', by: 'agent', principal: 'agent:task:T-1' },
@@ -208,6 +215,7 @@ describe('promotion verifier', () => {
   it('logs promotion, supersession-style refutation, and audit lists the proof', () => {
     repo({}, { writtenBy: 'agent', reverify: 'check' });
     const r = promoteEntry(
+      { backend: 'files' },
       tracked(),
       'k-1',
       { to: 'specialist', proof: 'decision-id:DEC-0091', by: 'agent', principal: 'agent:task:T-1' },
@@ -215,8 +223,8 @@ describe('promotion verifier', () => {
     );
     expect(r.ok).toBe(true);
     expect(authority()).toBe('specialist');
-    expect(refuteEntry(tracked(), 'k-1', 'wrong', HUMAN)).toBe(true);
-    expect(refuteEntry(tracked(), 'nope', 'wrong', HUMAN)).toBe(false);
+    expect(refuteEntry({ backend: 'files' }, tracked(), 'k-1', 'wrong', HUMAN)).toBe(true);
+    expect(refuteEntry({ backend: 'files' }, tracked(), 'nope', 'wrong', HUMAN)).toBe(false);
     const events = readKnowledgeLog(tracked());
     expect(events.map((e) => e.event)).toEqual(['promoted', 'refuted']);
     const lines = auditLines(events);
@@ -227,15 +235,17 @@ describe('promotion verifier', () => {
 
   it('re-observation moves confidence 30 percent toward the value, authority unchanged', () => {
     repo({}, { authority: 'specialist' });
-    expect(reobserveEntry(tracked(), 'k-1', 1, AGENT, '2026-10-28')).toBeCloseTo(0.65);
+    expect(
+      reobserveEntry({ backend: 'files' }, tracked(), 'k-1', 1, AGENT, '2026-10-28'),
+    ).toBeCloseTo(0.65);
     expect(authority()).toBe('specialist');
-    expect(reobserveEntry(tracked(), 'nope', 1, AGENT)).toBeNull();
+    expect(reobserveEntry({ backend: 'files' }, tracked(), 'nope', 1, AGENT)).toBeNull();
     expect(readKnowledgeLog(tracked()).map((e) => e.event)).toEqual(['reobserved']);
   });
 
   it('caps re-observed confidence for agent-written entries', () => {
     repo({}, { writtenBy: 'agent', reverify: 'x', confidence: 0.85 });
-    expect(reobserveEntry(tracked(), 'k-1', 1, AGENT)).toBe(0.85);
+    expect(reobserveEntry({ backend: 'files' }, tracked(), 'k-1', 1, AGENT)).toBe(0.85);
   });
 });
 

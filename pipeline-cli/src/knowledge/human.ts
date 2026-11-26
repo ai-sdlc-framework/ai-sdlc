@@ -7,11 +7,12 @@ import { createHash } from 'node:crypto';
 import { now } from '../clock.js';
 import { AGENT_CONFIDENCE_CAP, type KnowledgeEntry } from './entry.js';
 import { appendKnowledgeEvent } from './log.js';
-import { openKnowledgeStore } from './knowledge-store.js';
+import { openKnowledgeStore, type KnowledgeBackendSelection } from './knowledge-store.js';
 import { type Actor, REOBSERVE_WEIGHT } from './promote.js';
 
 /** Confirm: confidence moves 30 percent toward the supplied value; authority never changes. */
 export function confirmEntry(
+  sel: KnowledgeBackendSelection,
   trackedRootAbs: string,
   id: string,
   confidence: number,
@@ -19,7 +20,7 @@ export function confirmEntry(
   observed?: string,
 ): number | null {
   let next = 0;
-  const before = openKnowledgeStore({ trackedRoot: trackedRootAbs }).update(id, (f) => {
+  const before = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }).update(id, (f) => {
     const old = Number(f.confidence);
     next = Math.round((old + REOBSERVE_WEIGHT * (confidence - old)) * 1e6) / 1e6;
     if (f.writtenBy === 'agent') next = Math.min(next, AGENT_CONFIDENCE_CAP);
@@ -39,13 +40,14 @@ export function confirmEntry(
 
 /** Correct: replace the value and its hash in place; authority and confidence are untouched. */
 export function correctEntry(
+  sel: KnowledgeBackendSelection,
   trackedRootAbs: string,
   id: string,
   value: string,
   actor: Actor,
   observed?: string,
 ): boolean {
-  const before = openKnowledgeStore({ trackedRoot: trackedRootAbs }).update(id, (f) => {
+  const before = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }).update(id, (f) => {
     f.value = value;
     f.contentHash = createHash('sha256').update(value).digest('hex');
     if (observed) f.observed = observed;
@@ -63,12 +65,13 @@ export function correctEntry(
 
 /** Supersede: the new entry links the old one; the old entry stays on disk. */
 export function supersedeEntry(
+  sel: KnowledgeBackendSelection,
   trackedRootAbs: string,
   oldId: string,
   newId: string,
   actor: Actor,
 ): { ok: boolean; reason: string } {
-  const store = openKnowledgeStore({ trackedRoot: trackedRootAbs });
+  const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs });
   const oldEntry = store.get(oldId, { scope: 'tracked' });
   const newEntry = store.get(newId, { scope: 'tracked' });
   if (!oldEntry) return { ok: false, reason: `entry '${oldId}' not found` };
