@@ -33,7 +33,7 @@ import { hideBin } from 'yargs/helpers';
 import { now } from '../clock.js';
 import { DEFAULT_KNOWLEDGE_BACKEND, loadKnowledgeConfig } from '../knowledge/config.js';
 import { backendSelection, openKnowledgeStore, toEntries } from '../knowledge/knowledge-store.js';
-import { captureFact, exportableEntries } from '../knowledge/data-room.js';
+import { captureFactForProject, exportableEntries } from '../knowledge/data-room.js';
 import { checkKnowledgeScope, checkKnowledgeScopeRange } from '../knowledge/scope-check.js';
 import { INGEST_SOURCES, ingestSource, type IngestSource } from '../knowledge/ingest-sources.js';
 import { ingestMemoryForProject } from '../knowledge/ingest-memory.js';
@@ -648,12 +648,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           .option('source-doc', { type: 'string', demandOption: true })
           .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
       (args) => {
-        const projectDir = String(args['project-dir']);
-        const config = loadKnowledgeConfig(projectDir);
-        const protectedAbs = isAbsolute(config.protectedRoot)
-          ? config.protectedRoot
-          : join(projectDir, config.protectedRoot);
-        const file = captureFact(config, protectedAbs, {
+        const file = captureFactForProject(String(args['project-dir']), {
           id: String(args.id),
           value: String(args.value),
           sourceDoc: String(args['source-doc']),

@@ -13,6 +13,7 @@ import { basename, isAbsolute, join, relative } from 'node:path';
 import { readMemoryFolder, stemOf, type Note } from '../memory-dream/notes.js';
 import { now } from '../clock.js';
 import { loadKnowledgeConfig } from './config.js';
+import { DATA_ROOM_SOURCE_PREFIX } from './data-room.js';
 import { loadOntology } from './ontology.js';
 import { hashValue, validateEntryFields } from './entry.js';
 import {
@@ -147,6 +148,8 @@ export function ingestMemoryTrunk(o: MemoryIngestOptions): MemoryIngestResult {
   }
   for (const prior of store.list({ scope: 'protected', trunk: MEMORY_TRUNK })) {
     if (live.has(basename(prior.path)) || prior.fields.status === 'superseded') continue;
+    // Data-room captures share the memory trunk but are not notes (AISDLC-1425).
+    if (String(prior.fields.source ?? '').startsWith(DATA_ROOM_SOURCE_PREFIX)) continue;
     writeEntry(store, prior.path, { ...prior.fields, status: 'superseded' }, prior.body.trim());
     result.superseded++;
   }
