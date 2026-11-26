@@ -155,6 +155,11 @@ export interface LoopState {
   overCapTicks?: number;
   /** Ticks since dispatch asked an over-context session to rotate (AISDLC-1150); dropped once it is under threshold. */
   rotateAsked?: Record<string, number>;
+  /**
+   * Failed verdicts already escalated while the board was held (AISDLC-1382), as
+   * `<handled key>:<outcome>:<head sha>`; dropped on the first tick that is not held.
+   */
+  heldEscalated?: string[];
 }
 
 /** A roster session as the restart rules see it (AISDLC-1110). */
@@ -229,6 +234,9 @@ export function readLoopState(boardDir: string): LoopState {
       ...(parsed.restartStreak ? { restartStreak: parsed.restartStreak } : {}),
       ...(typeof parsed.overCapTicks === 'number' ? { overCapTicks: parsed.overCapTicks } : {}),
       ...(parsed.rotateAsked ? { rotateAsked: parsed.rotateAsked } : {}),
+      ...(Array.isArray(parsed.heldEscalated) && parsed.heldEscalated.length > 0
+        ? { heldEscalated: parsed.heldEscalated }
+        : {}),
     };
   } catch {
     return emptyState();
@@ -612,6 +620,7 @@ async function watchVerdicts(
     const verdictState = stateOf(raw);
     const key = `${verdictState}:${raw.taskId}:${raw.completedAt}`;
     if (state.handled.includes(key)) continue;
+    const heldKey = `${key}:${raw.outcome}:${raw.commitSha ?? ''}`;
     // Held, the clear and the playbook do not run, so the verdict stays unhandled
     // and is processed on the first tick after `resume`.
     if (!held) {
@@ -634,7 +643,10 @@ async function watchVerdicts(
     };
     if (held) {
       report.clear = { status: 'skipped', reason: `the board is held: ${held.reason}` };
-      if (verdictState === 'failed') {
+      // AISDLC-1382: the verdict is seen again on every held tick; the planner hears of it once.
+      if (verdictState === 'failed' && !(state.heldEscalated ?? []).includes(heldKey)) {
+        state.heldEscalated = [...(state.heldEscalated ?? []), heldKey];
+        saveLoopState(deps.boardDir, state);
         // The playbook re-queues and relaunches; held, the planner decides instead.
         out.escalations.push({
           taskId: verdict.taskId,
@@ -661,6 +673,11 @@ async function watchVerdicts(
       }
     }
     out.verdicts.push(report);
+  }
+  // Not held, every verdict on the board was handled above: the held-escalation record is spent.
+  if (!held && state.heldEscalated) {
+    delete state.heldEscalated;
+    saveLoopState(deps.boardDir, state);
   }
   return out;
 }

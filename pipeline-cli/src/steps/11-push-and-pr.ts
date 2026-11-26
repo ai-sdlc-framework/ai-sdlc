@@ -622,6 +622,14 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
       },
     };
   }
+  // AISDLC-1382: the PR merged while this run was finishing; report it delivered, push nothing.
+  if ('alreadyMerged' in rebase && rebase.alreadyMerged) {
+    return {
+      pushed: true,
+      prUrl: rebase.alreadyMerged.prUrl ?? null,
+      alreadyMerged: { mergeSha: rebase.alreadyMerged.mergeSha },
+    };
+  }
 
   // 0a. AISDLC-1111 - build the workspace from the rebased sources before anything signs or
   //     pushes; skipped when the rebase left HEAD alone and the dist entry points exist.

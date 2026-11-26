@@ -1586,6 +1586,22 @@ describe('failing check on a live claim (AISDLC-1202)', () => {
     expect(readLanding(board, 10)?.history.filter((h) => h.action === 'reenter')).toHaveLength(0);
   });
 
+  it('does not route a no-match head to the planner while the executor is mid-round (AISDLC-1382)', () => {
+    // PR #2915: the executor is live (inflight, fresh heartbeat), review has no verdict for the new head yet.
+    const noVerdict = [
+      {
+        name: 'ai-sdlc/attestation',
+        conclusion: 'failure' as const,
+        summary: 'no verdict ref for this head',
+      },
+      { name: 'ai-sdlc/pr-ready', conclusion: 'success' as const },
+    ];
+    const pr = taskPr({ checks: noVerdict, manifestState: 'inflight' });
+    expect(decide(taskPr({ checks: noVerdict })).action).toBe('route-to-planner');
+    expect(decide(pr)).toMatchObject({ state: 'no-match', action: 'none', note: LIVE_CLAIM_NOTE });
+    expect(decide({ ...pr, executorDead: true }).action).toBe('route-to-planner');
+  });
+
   it('counts the same failure once the claim is released', () => {
     const execute = vi.fn(() => ({ ran: true }));
     const report = reconcile([taskPr({ checks: red })], {

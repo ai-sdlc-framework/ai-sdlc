@@ -298,6 +298,53 @@ describe('lateRebase', () => {
     expect(abortCalls.length).toBeGreaterThan(0);
   });
 
+  it('returns success with the merge sha when the PR already merged (AISDLC-1382)', async () => {
+    // AISDLC-1374: main already held the PR's own squash commit; the rebase conflicted on its task file.
+    const taskFile = 'backlog/tasks/aisdlc-1374 - x.md';
+    mkdirSync(join(tmp, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(
+      join(tmp, taskFile),
+      `<<<<<<< HEAD\nstatus: Done\n=======\nstatus: x\n>>>>>>> m\n`,
+    );
+    const fake = new FakeRunner()
+      .on(/^git fetch -- origin main/, ok())
+      .on(/^git merge-base --is-ancestor/, fail('', 1))
+      .on(/^git rebase origin\/main$/, fail('CONFLICT', 1))
+      .on(/^git status --porcelain/, ok(`UU ${taskFile}\n`))
+      .on(/^git rebase --abort/, ok())
+      .on(
+        /^gh pr view --json state,mergeCommit,url/,
+        ok(
+          JSON.stringify({
+            state: 'MERGED',
+            mergeCommit: { oid: 'cd53eb237' },
+            url: 'https://github.com/o/r/pull/2919',
+          }),
+        ),
+      );
+    const result = await lateRebase({ worktreePath: tmp, runner: fake.toRunner() });
+    expect(result).toMatchObject({
+      ok: true,
+      conflictingFiles: [],
+      alreadyMerged: { mergeSha: 'cd53eb237', prUrl: 'https://github.com/o/r/pull/2919' },
+    });
+  });
+
+  it('keeps the conflict when the PR is open or GitHub cannot be read (AISDLC-1382)', async () => {
+    writeFileSync(join(tmp, 'svc.ts'), `<<<<<<< HEAD\na\n=======\nb\n>>>>>>> m\n`);
+    for (const gh of [ok('{"state":"OPEN","mergeCommit":null}'), ok('not json'), fail('no', 1)]) {
+      const fake = new FakeRunner()
+        .on(/^git fetch -- origin main/, ok())
+        .on(/^git merge-base --is-ancestor/, fail('', 1))
+        .on(/^git rebase origin\/main$/, fail('CONFLICT', 1))
+        .on(/^git status --porcelain/, ok('UU svc.ts\n'))
+        .on(/^gh pr view/, gh);
+      const result = await lateRebase({ worktreePath: tmp, runner: fake.toRunner() });
+      expect(result.ok).toBe(false);
+      expect(result.alreadyMerged).toBeUndefined();
+    }
+  });
+
   it('returns ok=false when git fetch fails', async () => {
     const fake = new FakeRunner().on(
       /^git fetch -- origin main/,

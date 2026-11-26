@@ -1061,6 +1061,29 @@ describe('Step 11 lease-push preflight (AISDLC-798)', () => {
     expect(warn).toHaveBeenCalledWith('lease-push preflight: heartbeat unmet');
   });
 
+  it('reports an already-merged PR at the late rebase and pushes nothing (AISDLC-1382)', async () => {
+    writeFileSync(join(tmp, 'z.ts'), `<<<<<<< HEAD\na\n=======\nb\n>>>>>>> m\n`);
+    const fake = new FakeRunner()
+      .on(/^git merge-base --is-ancestor/, fail('', 1))
+      .on(/^git rebase origin\/main$/, fail('CONFLICT', 1))
+      .on(/^git status --porcelain/, ok('UU z.ts\n'))
+      .on(
+        /^gh pr view --json state,mergeCommit,url/,
+        ok('{"state":"MERGED","mergeCommit":{"oid":"cd53"},"url":"https://github.com/x/y/pull/9"}'),
+      );
+    const r = await pushAndPr({
+      ...base(),
+      runner: fake.toRunner(),
+      leasePreflight: () => ({ status: 'ok' }) as never,
+    });
+    expect(r).toMatchObject({
+      pushed: true,
+      prUrl: 'https://github.com/x/y/pull/9',
+      alreadyMerged: { mergeSha: 'cd53' },
+    });
+    expect(fake.calls.some((c) => c.command === 'git' && c.args[0] === 'push')).toBe(false);
+  });
+
   it('runs the real preflight by default and skips it when the plugin is not on disk', async () => {
     const fake = new FakeRunner()
       .on(/^git push -u origin/, ok())

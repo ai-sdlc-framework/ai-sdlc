@@ -194,6 +194,34 @@ describe('landPrep (real git)', () => {
     expect(git(wt, 'rev-parse', 'HEAD')).toBe(before);
     expect(git(wt, 'status', '--porcelain')).toBe('');
   });
+
+  it('reports a PR that already merged as done, without pushing (AISDLC-1382)', async () => {
+    const { root, wt, other } = setup();
+    dirs.push(root);
+    writeFileSync(join(wt, 'a.txt'), 'mine\n');
+    git(wt, 'commit', '-q', '-am', 'mine');
+    git(wt, 'push', '-q', '-u', 'origin', 'feat/x');
+    writeFileSync(join(other, 'a.txt'), 'squashed then edited\n');
+    git(other, 'commit', '-q', '-am', 'squash of feat/x');
+    git(other, 'push', '-q', 'origin', 'HEAD:main');
+    const before = git(wt, 'rev-parse', 'HEAD');
+    const merged = JSON.stringify({ state: 'MERGED', mergeCommit: { oid: 'abc' }, url: 'u' });
+    const res = await landPrep({
+      worktreePath: wt,
+      branch: 'feat/x',
+      env: {},
+      runner: async (cmd, args, o) =>
+        cmd === 'gh'
+          ? { stdout: merged, stderr: '', code: 0 }
+          : (await import('../runtime/exec.js')).defaultRunner(cmd, args, o),
+    });
+    expect(res).toMatchObject({
+      ok: true,
+      pushed: false,
+      alreadyMerged: { mergeSha: 'abc', prUrl: 'u' },
+    });
+    expect(git(wt, 'rev-parse', 'HEAD')).toBe(before);
+  });
 });
 
 describe('runLandPrep CLI guards', () => {

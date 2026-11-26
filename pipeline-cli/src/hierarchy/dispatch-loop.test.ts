@@ -27,6 +27,7 @@ import { clearHold, readHold, writeHold } from './hold.js';
 import { enqueueTasks, type EnqueueEntry } from '../dispatch/enqueue.js';
 import type { DispatchVerdict } from '../dispatch/types.js';
 import { listUnbriefed, writeAutoBrief } from './auto-brief.js';
+import { writeEscalationFile } from './escalation-file.js';
 import { renderBriefBlock, type BriefEntry } from './brief-format.js';
 import type { ClearResult } from './clear.js';
 import {
@@ -1288,6 +1289,59 @@ describe('hold (AISDLC-899)', () => {
     expect(after.verdicts).toHaveLength(2);
     expect(cleared.length).toBeGreaterThan(0);
     expect(playbooked).toHaveLength(1);
+  });
+
+  it('escalates one failed verdict once across many ticks, held or not (AISDLC-1382)', async () => {
+    // ENT-5: with the board held every tick re-read the same failed verdict and wrote a new file.
+    const files = new Set<string>();
+    const tickAndFile = async () => {
+      const r = await runDispatchTick(deps());
+      for (const e of r.escalations) {
+        const at = new Date(clock);
+        clock += 1000;
+        files.add(
+          writeEscalationFile({
+            ...e,
+            boardDir: board,
+            now: at,
+            run: () => ({ status: 0, stdout: '', stderr: '' }),
+          }).file,
+        );
+      }
+    };
+    const failed = (over: Partial<DispatchVerdict> = {}) =>
+      verdict('AISDLC-3', {
+        outcome: 'failed',
+        workerId: 'executor-beta',
+        commitSha: 'aaa',
+        completedAt: new Date(clock + 1).toISOString(),
+        ...over,
+      });
+    hold();
+    const first = failed();
+    for (let i = 0; i < 10; i++) await tickAndFile();
+    expect(files.size).toBe(1);
+    // A later verdict with another head sha, then another outcome: one more file each.
+    failed({ commitSha: 'bbb', completedAt: first.completedAt });
+    for (let i = 0; i < 5; i++) await tickAndFile();
+    expect(files.size).toBe(2);
+    failed({ outcome: 'blocked', commitSha: 'bbb', completedAt: first.completedAt });
+    for (let i = 0; i < 5; i++) await tickAndFile();
+    expect(files.size).toBe(3);
+
+    // Not held: the playbook escalates the verdict once, on the tick that handles it.
+    clearHold(board, 'planner', 'x');
+    playbookImpl = (v) => ({
+      taskId: v.taskId,
+      action: 'escalate',
+      result: 'escalated',
+      reason: 'r',
+      escalation: { taskId: v.taskId, message: 'retries exhausted' },
+    });
+    for (let i = 0; i < 10; i++) await tickAndFile();
+    expect(files.size).toBe(4);
+    expect(playbooked).toHaveLength(1);
+    expect(readLoopState(board).heldEscalated).toBeUndefined();
   });
 
   it('does not reap stalled claims while held', async () => {

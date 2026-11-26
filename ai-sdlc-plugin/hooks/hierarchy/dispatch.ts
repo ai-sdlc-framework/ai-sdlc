@@ -225,12 +225,18 @@ export async function runCli(
   p: DispatchPorts,
   bin: string,
   args: string[],
-): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+): Promise<{ ok: boolean; stdout: string; stderr: string; code: unknown; signal?: string }> {
   const file = p.binDir ? `${p.binDir.replace(/[\\/]+$/, '')}/${bin.split('/').pop()}` : bin;
   const r = await safe(() => p.runProcess({ command: NODE, args: [file, ...args] }));
   const v = (r.value ?? {}) as Any;
   const code = v.exitCode ?? v.status ?? v.code ?? (r.ok ? 0 : 1);
-  return { ok: r.ok && code === 0, stdout: String(v.stdout ?? ''), stderr: String(v.stderr ?? '') };
+  return {
+    ok: r.ok && code === 0,
+    stdout: String(v.stdout ?? ''),
+    stderr: String(v.stderr ?? ''),
+    code,
+    ...(typeof v.signal === 'string' && v.signal ? { signal: v.signal } : {}),
+  };
 }
 
 function parseJson(text: string): Any {
@@ -419,19 +425,21 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
   state.ticking = true;
   try {
     p.binDir = await readBinDir(p.runProcess, state.boardDir, state.projectDir);
+    const startedMs = Date.now();
     const r = await runCli(p, HIERARCHY_BIN, ['tick', ...boardArgs(state)]);
     const result = parseJson(r.stdout) as Any;
     if (!r.ok || !result || typeof result !== 'object') {
       const firstLine = (r.stderr || r.stdout).split('\n')[0] || 'no output';
       note(state, `tick failed: ${firstLine}`);
       await recordHealth(p, state, { state: 'failing', reason: firstLine.slice(0, 200) });
-      const failure = `cli-hierarchy tick did not return a result: ${r.stderr || r.stdout}`.slice(
-        0,
-        500,
-      );
+      // AISDLC-1382: name how it ended and how long it ran, so an empty-output failure under load says something.
+      const ended = r.signal ? `signal ${r.signal}` : `exit code ${String(r.code)}`;
+      const output = (r.stderr || r.stdout).trim() || 'no output';
+      const failure = `cli-hierarchy tick did not return a result: ${output}`.slice(0, 450);
       if (failure !== state.lastTickFailure) {
         state.lastTickFailure = failure;
-        await escalate(p, state, 'TICK', failure);
+        const took = ((Date.now() - startedMs) / 1000).toFixed(1);
+        await escalate(p, state, 'TICK', `${failure} (${ended}, after ${took}s)`);
       }
       await refreshPane(p, state);
       return;
@@ -530,6 +538,10 @@ export type Classified =
   | { kind: 'planner'; text: string }
   | { kind: 'unknown'; text: string };
 
+/** AISDLC-1382: an executor's status line, `<TASK-ID> <outcome>, PR <n>, decisions <ids>`. */
+const EXECUTOR_STATUS =
+  /^([A-Z][A-Z0-9]*-\d+(?:\.\d+)*)\s+(?:success|failed|failure|parked|blocked|aborted|timeout|iterate-needed)\b/;
+
 /** Classify a message by its text; the sender is recorded for the pane but never trusted for authority. */
 export function classify(text: string): Classified {
   const planner = PLANNER_ADDRESSED.exec(text);
@@ -543,7 +555,19 @@ export function classify(text: string): Classified {
     if (pr) return { kind: 'landed', pr, text };
   }
   if (/^(status|ack|ping|idle)\b/i.test(text)) return { kind: 'status', text };
+  const line = EXECUTOR_STATUS.exec(text);
+  if (line) return { kind: 'verdict', taskId: line[1]!, text };
   return { kind: 'unknown', text };
+}
+
+/**
+ * AISDLC-1382: some senders repeat their own name in the text (`<name>: <text>`) after the
+ * envelope already carries it; strip that copy so the text is classified, not escalated.
+ */
+export function stripSenderPrefix(text: string, sender: string): string {
+  let out = text;
+  while (sender && out.startsWith(`${sender}:`)) out = out.slice(sender.length + 1).trimStart();
+  return out;
 }
 
 /** Consume one message. Returns the label the hook reports as consumed; never prompts the model. */
@@ -553,7 +577,7 @@ export async function handleMessage(
   raw: string,
 ): Promise<string> {
   const sender = senderOf(raw) || 'unknown';
-  const text = innerText(raw);
+  const text = stripSenderPrefix(innerText(raw), sender);
   const c = classify(text);
   switch (c.kind) {
     case 'planner':
