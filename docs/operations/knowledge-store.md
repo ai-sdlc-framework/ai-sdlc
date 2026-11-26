@@ -33,7 +33,9 @@ verifier or a human, never by the writer.
 `<trackedRoot>/ontology.yaml` declares `trunks`, `entryTypes`, `relations` and
 `proofKinds`, the closed vocabulary of proofs a verifier may re-run to promote an entry.
 An entry that uses an undeclared trunk, type or relation fails validation. When the file
-is absent the built-in default applies.
+is absent the built-in default applies. The default trunks are `systems`, `products`,
+`customers`, `decisions`, `people`, `process` and `memory` (indexed auto-memory, held at
+`scope: protected`).
 
 ## Two roots and the scope rule
 
