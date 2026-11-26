@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1421
 title: knowledge.backend key and backend registration seam, with the RFC-0053 amendment (DEC-0427)
-status: In Progress
+status: Done
 priority: high
 labels:
   - pipeline-cli
