@@ -12,7 +12,7 @@ import { projectAll } from '../decisions/projection.js';
 import { appendKnowledgeEvent } from './log.js';
 import type { Actor } from './promote.js';
 import { hashValue, parseEntryFile, validateEntryFields } from './entry.js';
-import { openKnowledgeStore } from './knowledge-store.js';
+import { openKnowledgeStore, type KnowledgeBackendSelection } from './knowledge-store.js';
 import type { Ontology } from './ontology.js';
 import { slugify } from './ingest-sections.js';
 
@@ -38,7 +38,7 @@ export interface IngestResult {
   unchanged: number;
 }
 
-export interface IngestOptions {
+export interface IngestOptions extends KnowledgeBackendSelection {
   projectDir: string;
   trackedRootAbs: string;
   ontology: Ontology;
@@ -242,7 +242,11 @@ export function candidateFields(c: Candidate, observed: string): Record<string, 
 
 export function ingestSource(kind: IngestSource, o: IngestOptions): IngestResult {
   const result: IngestResult = { created: 0, updated: 0, unchanged: 0 };
-  const store = openKnowledgeStore({ trackedRoot: o.trackedRootAbs });
+  const store = openKnowledgeStore({
+    backend: o.backend,
+    backendModule: o.backendModule,
+    trackedRoot: o.trackedRootAbs,
+  });
   for (const c of collectCandidates(kind, o)) {
     const fields = candidateFields(c, o.observed);
     const errors = validateEntryFields(fields, o.ontology);

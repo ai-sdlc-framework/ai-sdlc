@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { isAbsolute, join, relative } from 'node:path';
 import { DEFAULT_PROTECTED_ROOT, loadKnowledgeConfig, type KnowledgeConfig } from './config.js';
 import { parseEntryFile } from './entry.js';
-import { openKnowledgeStore, type RawStoredEntry } from './knowledge-store.js';
+import { backendSelection, openKnowledgeStore, type RawStoredEntry } from './knowledge-store.js';
 
 function git(projectRoot: string, args: string[]): { ok: boolean; out: string } {
   try {
@@ -51,7 +51,10 @@ export function checkKnowledgeScope(
   const trackedAbs = isAbsolute(config.trackedRoot)
     ? config.trackedRoot
     : join(projectRoot, config.trackedRoot);
-  const store = openKnowledgeStore({ trackedRoot: trackedAbs });
+  const store = openKnowledgeStore(
+    { ...backendSelection(config), trackedRoot: trackedAbs },
+    projectRoot,
+  );
   for (const { path, parsed } of store.listRaw('tracked')) {
     const v = entryScopeViolation(relative(projectRoot, join(trackedAbs, path)), parsed);
     if (v) violations.push(v);

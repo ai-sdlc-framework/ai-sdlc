@@ -87,6 +87,7 @@ const CONTEXT_YAML_DEFAULT = `# AI-SDLC knowledge store configuration (RFC-0053)
 # Every value below is the built-in default; deleting this file changes nothing.
 # See docs/operations/knowledge-store.md.
 knowledge:
+  # backend: files # store backend; another name needs a registering backendModule package
   trackedRoot: ${DEFAULT_TRACKED_ROOT} # reviewed, versioned entries
   protectedRoot: ${DEFAULT_PROTECTED_ROOT} # gitignored client material
   # dataRoomRoot: client-data-room/ # optional raw data room, indexed read-only

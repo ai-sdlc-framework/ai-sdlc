@@ -77,7 +77,7 @@ describe('capture and export', () => {
   it('writes a protected entry with a citation in the protected root', () => {
     mk();
     const prot = join(root, 'prot');
-    const file = captureFact(prot, {
+    const file = captureFact({ backend: 'files' }, prot, {
       id: 'fact-1',
       value: 'Payment is net 30',
       sourceDoc: 'msa-signed.md',
@@ -89,7 +89,9 @@ describe('capture and export', () => {
     const e = toEntry(parsed.fields, parsed.body);
     expect(e.scope).toBe('protected');
     expect(e.source).toBe('data-room:msa-signed.md');
-    expect(openKnowledgeStore({ protectedRoot: prot }).list('protected')).toHaveLength(1);
+    expect(
+      openKnowledgeStore({ backend: 'files', protectedRoot: prot }).list('protected'),
+    ).toHaveLength(1);
   });
 
   it('export excludes the protected partition by scope', () => {

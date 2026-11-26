@@ -53,7 +53,9 @@ describe('entry bytes on disk (golden)', () => {
     const read = (p: string): string => readFileSync(p, 'utf-8');
 
     const ctx = { projectDir: root, ontology: DEFAULT_ONTOLOGY, config: loadKnowledgeConfig(root) };
-    expect(promoteEntry(tracked, 'a', { to: 'canonical', ...HUMAN }, ctx).ok).toBe(true);
+    expect(
+      promoteEntry({ backend: 'files' }, tracked, 'a', { to: 'canonical', ...HUMAN }, ctx).ok,
+    ).toBe(true);
     expect(read(join(tracked, 'systems/a.md'))).toMatchInlineSnapshot(`
       "---
       id: a
@@ -73,7 +75,7 @@ describe('entry bytes on disk (golden)', () => {
       "
     `);
 
-    expect(supersedeEntry(tracked, 'a', 'b', HUMAN).ok).toBe(true);
+    expect(supersedeEntry({ backend: 'files' }, tracked, 'a', 'b', HUMAN).ok).toBe(true);
     expect(read(join(tracked, 'systems/b.md'))).toMatchInlineSnapshot(`
       "---
       id: b
@@ -100,6 +102,7 @@ describe('entry bytes on disk (golden)', () => {
     mkdirSync(dirname(task), { recursive: true });
     writeFileSync(task, '---\nid: T-1\ntitle: Do thing\nstatus: To Do\n---\n\nbody\n');
     const opts = {
+      backend: 'files',
       projectDir: root,
       trackedRootAbs: tracked,
       ontology: DEFAULT_ONTOLOGY,
@@ -160,6 +163,7 @@ describe('entry bytes on disk (golden)', () => {
     note('user_role.md', 'user');
     note('project_x.md', 'project');
     const memOpts = {
+      backend: 'files',
       projectDir: root,
       memoryDir: mem,
       protectedRootAbs: prot,
@@ -211,7 +215,7 @@ describe('entry bytes on disk (golden)', () => {
       "
     `);
 
-    const captured = captureFact(prot, {
+    const captured = captureFact({ backend: 'files' }, prot, {
       id: 'fact-1',
       value: 'Revenue grew',
       sourceDoc: 'plan.md',

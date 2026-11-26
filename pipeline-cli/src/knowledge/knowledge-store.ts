@@ -2,16 +2,19 @@
  * The knowledge-store seam (AISDLC-1418, AISDLC-1419): every entry read and write goes through
  * `KnowledgeStore`.
  *
- * RFC-0053 OQ-2 stands: the entries on disk remain the source of truth. `FilesKnowledgeStore`
- * is therefore the only implementation, and `openKnowledgeStore` returns it unconditionally;
- * there is no backend key and no adapter registry. The interface is synchronous because every
- * caller is; whether it becomes asynchronous is part of a separate RFC-0053 amendment decision.
+ * RFC-0053 OQ-2 stands as the open-source default: the entries on disk are the source of truth
+ * and `FilesKnowledgeStore` is the only implementation open source ships. The RFC-0053
+ * amendment of 2026-11-26 (DEC-0427) adds a registration seam: `knowledge.backend` names a
+ * backend that an installed package (`knowledge.backendModule`) registers. Selection fails
+ * closed, like `retrieval/registry.ts`: an unregistered backend throws `KnowledgeBackendError`
+ * and never falls back to files. The interface is synchronous because every caller is.
  * Modelled on the `RetrievalIndex` contract (`retrieval/types.ts`).
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { dump } from '../util/yaml.js';
-import type { KnowledgeConfig } from './config.js';
+import { DEFAULT_KNOWLEDGE_BACKEND, type KnowledgeConfig } from './config.js';
 import { parseEntryFile, toEntry, type KnowledgeEntry } from './entry.js';
 
 /** The two RFC-0053 roots: the git-tracked root and the git-ignored protected root. */
@@ -78,14 +81,29 @@ export interface KnowledgeStore {
   listRaw(scope: ListScope): RawStoredEntry[];
 }
 
-export type KnowledgeStoreRoots = Partial<Pick<KnowledgeConfig, 'trackedRoot' | 'protectedRoot'>>;
+/**
+ * The backend a caller opens. `backend` is required so that no call site can omit it and
+ * end up on the files store while another backend is configured (DEC-0427, fail closed).
+ */
+export type KnowledgeBackendSelection = Pick<KnowledgeConfig, 'backend'> &
+  Partial<Pick<KnowledgeConfig, 'backendModule'>>;
+
+/** The files roots a store is opened on. */
+export type KnowledgeRoots = Partial<Pick<KnowledgeConfig, 'trackedRoot' | 'protectedRoot'>>;
+
+export type KnowledgeStoreRoots = KnowledgeRoots & KnowledgeBackendSelection;
+
+/** The backend fields of a loaded config, for callers that open a store on their own roots. */
+export function backendSelection(config: KnowledgeBackendSelection): KnowledgeBackendSelection {
+  return { backend: config.backend, backendModule: config.backendModule ?? null };
+}
 
 /** Entries as markdown files with YAML frontmatter under the tracked and protected roots. */
 export class FilesKnowledgeStore implements KnowledgeStore {
   readonly kind = 'files';
   private readonly roots: Partial<Record<StoreScope, string>> = {};
 
-  constructor(roots: KnowledgeStoreRoots, projectRoot?: string) {
+  constructor(roots: KnowledgeRoots, projectRoot?: string) {
     const abs = (p: string): string => (projectRoot ? resolve(projectRoot, p) : resolve(p));
     if (roots.trackedRoot) this.roots.tracked = abs(roots.trackedRoot);
     if (roots.protectedRoot) this.roots.protected = abs(roots.protectedRoot);
@@ -211,11 +229,117 @@ export function toEntries(stored: StoredEntry[]): KnowledgeEntry[] {
   return stored.map((e) => toEntry(e.fields, e.body));
 }
 
+/** Raised whenever a non-files backend cannot be selected; never a silent fall-back to files. */
+export class KnowledgeBackendError extends Error {
+  override name = 'KnowledgeBackendError';
+}
+
+export type KnowledgeBackendFactory = (
+  cfg: KnowledgeStoreRoots,
+  projectRoot: string | undefined,
+) => KnowledgeStore;
+
+/** What a `knowledge.backendModule` package receives in `registerKnowledgeBackends(registry)`. */
+export interface KnowledgeBackendRegistry {
+  registerKnowledgeBackend(name: string, factory: KnowledgeBackendFactory): void;
+}
+
+const backends = new Map<string, KnowledgeBackendFactory>();
 /**
- * Open the knowledge store for a `KnowledgeConfig` (or just the roots a caller writes to).
- * Files are the only implementation (RFC-0053 OQ-2); relative roots resolve against
- * `projectRoot`, else the working directory.
+ * `backendModule` specifiers whose `registerKnowledgeBackends` already ran in this process.
+ * Keyed by specifier, so a library call that resolves from the working directory reuses the
+ * module the CLI loaded from the project root.
+ */
+const loadedModules = new Set<string>();
+
+/** Register a store backend by name. `files` is built in; a name registered twice is an error. */
+export function registerKnowledgeBackend(name: string, factory: KnowledgeBackendFactory): void {
+  if (name === DEFAULT_KNOWLEDGE_BACKEND) {
+    throw new KnowledgeBackendError(
+      `knowledge backend '${DEFAULT_KNOWLEDGE_BACKEND}' is built in and cannot be overridden`,
+    );
+  }
+  if (backends.has(name)) {
+    throw new KnowledgeBackendError(`knowledge backend '${name}' is already registered`);
+  }
+  backends.set(name, factory);
+}
+
+/**
+ * Refuse anything but a bare npm package specifier: no relative or absolute path, no
+ * `file:`/`data:` or other URL scheme (a colon also rules out `node:` and drive letters).
+ */
+/** An npm package name (optionally scoped) with an optional subpath; `.`/`..` segments refused. */
+const BARE_SPECIFIER = /^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(\/[\w.-]+)*$/i;
+
+function assertBareSpecifier(spec: string, backend: string): void {
+  const dotSegment = spec.split('/').some((seg) => seg === '.' || seg === '..');
+  if (!BARE_SPECIFIER.test(spec) || dotSegment) {
+    throw new KnowledgeBackendError(
+      `knowledge.backendModule '${spec}' (backend '${backend}') must be a bare npm package specifier; ` +
+        'relative paths, absolute paths and URL specifiers are refused',
+    );
+  }
+}
+
+function loadBackendModule(spec: string, backend: string, projectRoot: string): void {
+  assertBareSpecifier(spec, backend);
+  if (loadedModules.has(spec)) return;
+  let mod: { registerKnowledgeBackends?: unknown };
+  try {
+    const req = createRequire(join(projectRoot, 'package.json'));
+    mod = req(req.resolve(spec)) as { registerKnowledgeBackends?: unknown };
+  } catch (err) {
+    throw new KnowledgeBackendError(
+      `knowledge backend '${backend}': knowledge.backendModule '${spec}' failed to load: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  if (typeof mod.registerKnowledgeBackends !== 'function') {
+    throw new KnowledgeBackendError(
+      `knowledge backend '${backend}': knowledge.backendModule '${spec}' does not export registerKnowledgeBackends(registry)`,
+    );
+  }
+  const registry: KnowledgeBackendRegistry = { registerKnowledgeBackend };
+  try {
+    (mod.registerKnowledgeBackends as (r: KnowledgeBackendRegistry) => void)(registry);
+  } catch (err) {
+    if (err instanceof KnowledgeBackendError) throw err;
+    throw new KnowledgeBackendError(
+      `knowledge backend '${backend}': registerKnowledgeBackends in '${spec}' threw: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  loadedModules.add(spec);
+}
+
+/**
+ * Open the knowledge store for a `KnowledgeConfig` (or the roots a caller writes to plus the
+ * configured backend). `backend` is required: a missing one throws rather than picking files.
+ * `files` gives `FilesKnowledgeStore`; relative roots resolve against
+ * `projectRoot`, else the working directory. Any other backend must be registered, by
+ * `backendModule` (resolved from `projectRoot`) or in process; otherwise this throws
+ * `KnowledgeBackendError` naming the backend and the module (DEC-0427, fail closed).
  */
 export function openKnowledgeStore(cfg: KnowledgeStoreRoots, projectRoot?: string): KnowledgeStore {
-  return new FilesKnowledgeStore(cfg, projectRoot);
+  const backend = (cfg as Partial<KnowledgeStoreRoots>).backend;
+  if (typeof backend !== 'string' || backend === '') {
+    throw new KnowledgeBackendError(
+      'no knowledge backend selected; pass knowledge.backend from the loaded config (refusing to assume files)',
+    );
+  }
+  if (backend === DEFAULT_KNOWLEDGE_BACKEND) return new FilesKnowledgeStore(cfg, projectRoot);
+  const spec = cfg.backendModule ?? null;
+  if (spec !== null) loadBackendModule(spec, backend, projectRoot ?? process.cwd());
+  const factory = backends.get(backend);
+  if (!factory) {
+    throw new KnowledgeBackendError(
+      `knowledge backend '${backend}' is not registered (knowledge.backendModule: ${
+        spec === null ? 'unset' : `'${spec}'`
+      }); refusing to fall back to files`,
+    );
+  }
+  return factory(cfg, projectRoot);
 }

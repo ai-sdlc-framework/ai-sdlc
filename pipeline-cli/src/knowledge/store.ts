@@ -6,7 +6,7 @@ import { isAbsolute, join, relative } from 'node:path';
 import { loadKnowledgeConfig, type KnowledgeConfig } from './config.js';
 import { classifyEntry } from './classify.js';
 import { toEntry, validateEntryFields } from './entry.js';
-import { openKnowledgeStore, toEntries } from './knowledge-store.js';
+import { backendSelection, openKnowledgeStore, toEntries } from './knowledge-store.js';
 import { loadOntology } from './ontology.js';
 
 export interface Finding {
@@ -92,7 +92,10 @@ export function findProtectedCitations(
   config: KnowledgeConfig = loadKnowledgeConfig(projectRoot),
 ): string[] {
   const cited: string[] = [];
-  const store = openKnowledgeStore({ protectedRoot: config.protectedRoot }, projectRoot);
+  const store = openKnowledgeStore(
+    { ...backendSelection(config), protectedRoot: config.protectedRoot },
+    projectRoot,
+  );
   for (const e of toEntries(store.list('protected'))) {
     const re = new RegExp(
       `(^|[^A-Za-z0-9_-])${e.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_-])`,

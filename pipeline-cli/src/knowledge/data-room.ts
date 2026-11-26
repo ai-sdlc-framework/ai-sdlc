@@ -8,7 +8,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, join, relative } from 'node:path';
 import { hashValue, type KnowledgeEntry } from './entry.js';
-import { openKnowledgeStore } from './knowledge-store.js';
+import { openKnowledgeStore, type KnowledgeBackendSelection } from './knowledge-store.js';
 
 export type DocumentKind = 'signed' | 'plan' | 'deck' | 'document';
 
@@ -93,7 +93,11 @@ export interface CaptureInput {
  * document. Agent-written, so authority is capped at inferred (RFC-0053 OQ-3). Writes only
  * under the protected root, never the data room.
  */
-export function captureFact(protectedRootAbs: string, input: CaptureInput): string {
+export function captureFact(
+  sel: KnowledgeBackendSelection,
+  protectedRootAbs: string,
+  input: CaptureInput,
+): string {
   const fields = {
     id: input.id,
     trunk: input.trunk ?? 'memory',
@@ -110,7 +114,7 @@ export function captureFact(protectedRootAbs: string, input: CaptureInput): stri
     writtenBy: 'agent',
     reverify: `Re-check against ${input.sourceDoc} in the data room`,
   };
-  const { path } = openKnowledgeStore({ protectedRoot: protectedRootAbs }).put(
+  const { path } = openKnowledgeStore({ ...sel, protectedRoot: protectedRootAbs }).put(
     { fields, body: `Source: ${input.sourceDoc}\n` },
     { scope: 'protected', path: `${input.id}.md` },
   );
