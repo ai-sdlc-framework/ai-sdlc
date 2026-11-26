@@ -59,6 +59,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 import { extractBlockedReason } from './upstream-oq-gate.js';
+import { isFilingSubject } from '../hierarchy/filing-branches.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -339,7 +340,8 @@ export function findShippedCommits(taskId: string, opts: CheckDispatchReadinessO
     // token as the SHA; reject lines that don't start with a hex SHA so
     // we don't index into wrapper output (warnings, mocked status lines).
     const shaMatch = trimmed.match(/^([0-9a-f]{7,40})\b/i);
-    if (shaMatch) shas.push(shaMatch[1]);
+    // AISDLC-1428: a `cli-file` file/update commit files the task; it never ships it.
+    if (shaMatch && !isFilingSubject(trimmed.slice(shaMatch[0].length))) shas.push(shaMatch[1]);
   }
   return shas;
 }

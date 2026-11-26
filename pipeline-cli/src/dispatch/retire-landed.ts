@@ -38,6 +38,20 @@ export interface RetireLandedInput {
   headBranch?: string;
   /** Landing-record kind of the landed PR, when known; anything but `task` is not a code PR. */
   kind?: string;
+  /**
+   * Task ids under `backlog/completed/` on `origin/main` ({@link completedTaskIdsOnMain}); undefined
+   * when main cannot be read. When given, a task not in it has not landed (AISDLC-1428).
+   */
+  completedOnMain?: ReadonlyMap<string, string>;
+}
+
+/**
+ * True when main is readable and the task's file is not under `backlog/completed/` (AISDLC-1381,
+ * AISDLC-1428): the task has not landed, whatever the landing record says. A filing PR record that
+ * lost its kind and branch reads as a `task` PR, so no retire path trusts the record alone.
+ */
+function openOnMain(input: RetireLandedInput): boolean {
+  return input.completedOnMain !== undefined && !input.completedOnMain.has(input.taskId);
 }
 
 /**
@@ -71,6 +85,7 @@ export function retireFailedVerdict(boardDir: string, input: RetireLandedInput):
   if (original['outcome'] === 'success') return false;
   // AISDLC-1177: only the task's own code PR retires its verdict.
   if (!isOwnCodePr(input, original['prNumber'])) return false;
+  if (openOnMain(input)) return false;
   const record: Record<string, unknown> = {
     ...original,
     outcome: 'success',
@@ -113,7 +128,7 @@ export function retireBlockedManifest(boardDir: string, input: RetireLandedInput
   const blocked = path.join(boardDir, 'blocked', `${input.taskId}${MANIFEST_SUFFIX}`);
   const doneVerdict = path.join(boardDir, 'done', `${input.taskId}${VERDICT_SUFFIX}`);
   if (!existsSync(blocked) || existsSync(doneVerdict)) return false;
-  if (!isOwnCodePr(input)) return false;
+  if (!isOwnCodePr(input) || openOnMain(input)) return false;
   const record: Record<string, unknown> = {
     schemaVersion: 'v1',
     taskId: input.taskId,
@@ -154,10 +169,14 @@ export interface RetireLandedReport {
   moved: { taskId: string; pr: number }[];
 }
 
-/** Apply `retireFailedVerdict` to every landed record on the board (the one-off sweep). */
+/**
+ * Apply `retireFailedVerdict` to every landed record on the board (the one-off sweep).
+ * @param completedOnMain task ids completed on `origin/main`; undefined when main is unreadable.
+ */
 export function retireLandedSweep(
   boardDir: string,
   records: readonly LandedRecordLike[],
+  completedOnMain?: ReadonlyMap<string, string>,
 ): RetireLandedReport {
   const moved: RetireLandedReport['moved'] = [];
   for (const r of records) {
@@ -169,6 +188,7 @@ export function retireLandedSweep(
       prNumber: r.pr,
       ...(r.kind ? { kind: r.kind } : {}),
       ...(r.headBranch ? { headBranch: r.headBranch } : {}),
+      ...(completedOnMain ? { completedOnMain } : {}),
     });
     const sha = r.landedSha ?? r.headSha;
     const didBlocked = retireBlockedManifest(boardDir, {
@@ -178,6 +198,7 @@ export function retireLandedSweep(
       prNumber: r.pr,
       ...(r.kind ? { kind: r.kind } : {}),
       ...(r.headBranch ? { headBranch: r.headBranch } : {}),
+      ...(completedOnMain ? { completedOnMain } : {}),
     });
     if (did || didBlocked) moved.push({ taskId: r.taskId, pr: r.pr });
   }
@@ -299,4 +320,18 @@ export function completedTaskIdsOnMain(workDir: string): ReadonlyMap<string, str
     if (m?.[1]) ids.set(m[1].toUpperCase(), sha);
   }
   return ids;
+}
+
+/**
+ * {@link completedTaskIdsOnMain} after a best-effort `git fetch origin main` (AISDLC-1428), so the
+ * code PR that just merged reads as completed. A failed fetch reads the ref as it stands.
+ */
+export function fetchedCompletedOnMain(workDir: string): ReadonlyMap<string, string> | undefined {
+  spawnSync('git', ['fetch', '--quiet', 'origin', 'main'], {
+    cwd: workDir,
+    encoding: 'utf-8',
+    timeout: 60_000,
+    stdio: 'ignore',
+  });
+  return completedTaskIdsOnMain(workDir);
 }

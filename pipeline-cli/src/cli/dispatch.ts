@@ -209,7 +209,11 @@ import { checkHeadVerdict } from '../next-step/head-envelope.js';
 import { formatSessionLine, listSessions, recordAgentSession } from '../dispatch/sessions.js';
 import { assertClaimHolder, completeTask, splitIdList } from '../dispatch/complete.js';
 import { guardedRelease } from '../dispatch/release-guard.js';
-import { retireLandedSweep } from '../dispatch/retire-landed.js';
+import {
+  completedTaskIdsOnMain,
+  fetchedCompletedOnMain,
+  retireLandedSweep,
+} from '../dispatch/retire-landed.js';
 import { clearRuling, setRuling } from '../dispatch/ruling.js';
 import { classifyAndRecord, type PrFacts } from '../hierarchy/pr-state.js';
 import {
@@ -565,6 +569,8 @@ export async function runDispatchCli(
           closeSuperseded,
           stuckAfterMinutes: resolveStuckAfterMinutes(boardDir),
           notifyPlanner,
+          // AISDLC-1428: a task retires as landed only when its file is completed on main.
+          completedOnMain: () => fetchedCompletedOnMain(cwd),
           enqueueFiled: (pr, headBranch) =>
             autoEnqueueFiled(boardDir, pr, headBranch, {
               readTaskOnMain: (id) => readTaskOnMain(createSystemRunner(), cwd, id),
@@ -1240,7 +1246,14 @@ export async function runDispatchCli(
     }
 
     case 'retire-landed': {
-      out(retireLandedSweep(boardDir, listLanding(boardDir)));
+      // AISDLC-1428: a task whose file is not completed on main has not landed.
+      out(
+        retireLandedSweep(
+          boardDir,
+          listLanding(boardDir),
+          completedTaskIdsOnMain(deps.cwd ?? process.cwd()),
+        ),
+      );
       return 0;
     }
 

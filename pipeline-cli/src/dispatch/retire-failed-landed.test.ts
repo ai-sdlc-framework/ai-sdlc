@@ -9,6 +9,7 @@ import { peekQueue } from './board.js';
 import { execFileSync } from 'node:child_process';
 import {
   completedTaskIdsOnMain,
+  fetchedCompletedOnMain,
   retireFailedLanded,
   retireFailedVerdict,
   retireLandedSweep,
@@ -212,6 +213,8 @@ describe('completedTaskIdsOnMain', () => {
       git('update-ref', 'refs/remotes/origin/main', 'HEAD');
       const ids = completedTaskIdsOnMain(repo);
       expect([...(ids?.keys() ?? [])]).toEqual(['AISDLC-77']);
+      // AISDLC-1428: no origin to fetch from; the ref is read as it stands.
+      expect([...(fetchedCompletedOnMain(repo)?.keys() ?? [])]).toEqual(['AISDLC-77']);
     } finally {
       removeFixtureDir(repo);
     }

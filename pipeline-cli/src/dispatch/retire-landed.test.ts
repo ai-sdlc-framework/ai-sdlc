@@ -170,10 +170,12 @@ describe('cli-dispatch retire-landed', () => {
       out += String(c);
       return true;
     });
-    expect(await runDispatchCli(['retire-landed', '--board-dir', board])).toBe(0);
+    // The fixture is not a git repo: main is unreadable, so the landing record decides.
+    const cli = () => runDispatchCli(['retire-landed', '--board-dir', board], { cwd: repo });
+    expect(await cli()).toBe(0);
     expect(JSON.parse(out).moved).toEqual([{ taskId: 'AISDLC-1153', pr: 2282 }]);
     out = '';
-    expect(await runDispatchCli(['retire-landed', '--board-dir', board])).toBe(0);
+    expect(await cli()).toBe(0);
     expect(JSON.parse(out).moved).toEqual([]);
     spy.mockRestore();
   });
@@ -288,5 +290,43 @@ describe('landing retires a blocked manifest (AISDLC-1204)', () => {
     expect(retireLandedSweep(board, [rec]).moved).toEqual([{ taskId: 'AISDLC-1153', pr: 2282 }]);
     expect(retireLandedSweep(board, [rec]).moved).toEqual([]);
     expect(retireBlockedManifest(board, { taskId: 'bad id', landedAt: 'x' })).toBe(false);
+  });
+});
+
+describe('a task not completed on a readable main never retires (AISDLC-1428)', () => {
+  // A filing PR record that lost its branch: kind task, no head branch, the verdict names no PR.
+  const filingLike = { taskId: 'ENT-12', landedAt: '2026-11-25T16:56:57.133Z', kind: 'task' };
+  const open = new Map([['ENT-11', 'aebc2ce8ac07']]);
+  const done = new Map([['ENT-12', 'aebc2ce8ac07']]);
+  function seed(): void {
+    mkdirSync(path.join(board, 'blocked'), { recursive: true });
+    writeFileSync(
+      path.join(board, 'failed', 'ENT-12.verdict.json'),
+      JSON.stringify({ schemaVersion: 'v1', taskId: 'ENT-12', outcome: 'failed' }),
+    );
+    writeFileSync(path.join(board, 'blocked', 'ENT-12.manifest.json'), '{"taskId":"ENT-12"}');
+  }
+
+  it('retireFailedVerdict refuses, and retires once the task is completed', () => {
+    seed();
+    expect(retireFailedVerdict(board, { ...filingLike, completedOnMain: open })).toBe(false);
+    expect(existsSync(path.join(board, 'failed', 'ENT-12.verdict.json'))).toBe(true);
+    expect(retireFailedVerdict(board, { ...filingLike, completedOnMain: done })).toBe(true);
+  });
+
+  it('retireBlockedManifest refuses, and retires once the task is completed', () => {
+    seed();
+    expect(retireBlockedManifest(board, { ...filingLike, completedOnMain: open })).toBe(false);
+    expect(existsSync(path.join(board, 'blocked', 'ENT-12.manifest.json'))).toBe(true);
+    expect(retireBlockedManifest(board, { ...filingLike, completedOnMain: done })).toBe(true);
+  });
+
+  it('retireLandedSweep refuses both, and moves them once the task is completed', () => {
+    seed();
+    const rec = { pr: 13, taskId: 'ENT-12', kind: 'task', landed: '2026-11-25T16:56:57.133Z' };
+    expect(retireLandedSweep(board, [rec], open).moved).toEqual([]);
+    expect(existsSync(path.join(board, 'failed', 'ENT-12.verdict.json'))).toBe(true);
+    expect(existsSync(path.join(board, 'blocked', 'ENT-12.manifest.json'))).toBe(true);
+    expect(retireLandedSweep(board, [rec], done).moved).toEqual([{ taskId: 'ENT-12', pr: 13 }]);
   });
 });
