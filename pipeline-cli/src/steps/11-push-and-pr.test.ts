@@ -16,6 +16,7 @@ import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.j
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import type { AggregatedVerdict, DeveloperReturn, TaskSpec } from '../types.js';
 import { eventsFilePath } from '../orchestrator/events.js';
+import { resolveContextCli } from '../knowledge/push-guard.js';
 
 let tmp: string;
 beforeEach(() => {
@@ -1219,5 +1220,111 @@ describe('workspace rebuild after the late rebase (AISDLC-1111)', () => {
     expect(r.pushed).toBe(false);
     expect(r.reason).toContain('TS2305');
     expect(fake.calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+});
+
+describe('protected knowledge guard (AISDLC-1409)', () => {
+  const PROTECTED = '---\nid: acme-pricing\ntitle: Acme\nscope: protected\n---\nbody\n';
+  const sh = (cwd: string, ...args: string[]) =>
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+      cwd,
+      encoding: 'utf8',
+    }).trim();
+  const put = (repo: string, rel: string, text: string) => {
+    mkdirSync(join(repo, rel, '..'), { recursive: true });
+    writeFileSync(join(repo, rel), text);
+  };
+  /** An adopter repo: knowledge store, protected root ignored, origin/main at the base commit. */
+  const adopter = () => {
+    const repo = mkdtempSync(join(tmpdir(), 'adopter-'));
+    sh(repo, 'init', '-q', '-b', 'main');
+    put(repo, '.gitignore', '.ai-sdlc/knowledge-protected/\n');
+    put(repo, '.ai-sdlc/knowledge/ok.md', '---\nid: ok\nscope: internal\n---\n');
+    sh(repo, 'add', '.');
+    sh(repo, 'commit', '-qm', 'base');
+    sh(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    return repo;
+  };
+  /** Real `node cli-context ...`; every git/gh call is faked. */
+  const fake = () =>
+    new FakeRunner()
+      .on((c) => c === process.execPath, ok())
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/1\n'));
+  const runner = (f: FakeRunner) => {
+    const inner = f.toRunner();
+    return (async (c, a, o) => {
+      const r = await inner(c, a, o);
+      return c === process.execPath ? realRunner(c, a, o) : r;
+    }) as typeof realRunner;
+  };
+  const opts = (repo: string) => ({
+    taskId: 'AISDLC-1',
+    workDir: repo,
+    worktreePath: repo,
+    branch: 'b',
+    task,
+    developerReturn: dev,
+    verdict: approved,
+    leasePreflight: () => ({ status: 'ok' }) as never,
+  });
+  const cliBuilt = resolveContextCli() !== null;
+
+  it.skipIf(!cliBuilt)(
+    'refuses the push and names a protected entry in the tracked root',
+    async () => {
+      const repo = adopter();
+      put(repo, '.ai-sdlc/knowledge/acme-pricing.md', PROTECTED);
+      sh(repo, 'add', '.');
+      sh(repo, 'commit', '-qm', 'leak');
+      // Removing it in a later commit does not hide it: every pushed commit is scanned.
+      sh(repo, 'rm', '-q', '.ai-sdlc/knowledge/acme-pricing.md');
+      sh(repo, 'commit', '-qm', 'hide');
+      const f = fake();
+      const r = await pushAndPr({ ...opts(repo), runner: runner(f) });
+      expect(r.pushed).toBe(false);
+      expect(r.reason).toContain('.ai-sdlc/knowledge/acme-pricing.md');
+      expect(f.calls.some((c) => c.args[0] === 'push')).toBe(false);
+    },
+  );
+
+  it.skipIf(!cliBuilt)(
+    'refuses a PR body that cites a protected entry before posting',
+    async () => {
+      const repo = adopter();
+      put(repo, '.ai-sdlc/knowledge-protected/acme-pricing.md', PROTECTED);
+      const f = fake();
+      const r = await pushAndPr({
+        ...opts(repo),
+        developerReturn: { ...dev, summary: 'priced from acme-pricing' },
+        runner: runner(f),
+      });
+      expect(r.pushed).toBe(true);
+      expect(r.prUrl).toBeNull();
+      expect(r.reason).toContain('acme-pricing');
+      expect(f.calls.some((c) => c.command === 'gh' && c.args[1] === 'create')).toBe(false);
+    },
+  );
+
+  it.skipIf(!cliBuilt)('a clean adopter push opens the PR', async () => {
+    const r = await pushAndPr({ ...opts(adopter()), runner: runner(fake()) });
+    expect(r.prUrl).toBe('https://github.com/x/y/pull/1');
+  });
+
+  it('a store with an unresolvable cli-context fails closed', async () => {
+    const repo = adopter();
+    const f = fake();
+    const r = await pushAndPr({ ...opts(repo), knowledgeCliPath: null, runner: f.toRunner() });
+    expect(r.pushed).toBe(false);
+    expect(r.reason).toMatch(/could not be resolved/);
+    expect(f.calls.some((c) => c.args[0] === 'push')).toBe(false);
+  });
+
+  it('a project with no knowledge store runs no check', async () => {
+    // makeTmpProject scaffolds the store (AISDLC-1408); a bare directory has none.
+    const bare = mkdtempSync(join(tmpdir(), 'no-store-'));
+    const f = fake();
+    const r = await pushAndPr({ ...opts(bare), knowledgeCliPath: null, runner: f.toRunner() });
+    expect(r.prUrl).toBe('https://github.com/x/y/pull/1');
+    expect(f.calls.some((c) => c.command === process.execPath)).toBe(false);
   });
 });

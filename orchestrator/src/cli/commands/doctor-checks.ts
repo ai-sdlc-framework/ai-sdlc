@@ -3280,6 +3280,52 @@ export function checkHuskyPrePushGate(ctx: DoctorRunContext): DoctorCheckResult 
   return { id, severity: 'pass', title: 'pre-push hook runs the attestation sign snippet' };
 }
 
+const DEFAULT_PROTECTED_KNOWLEDGE_ROOT = '.ai-sdlc/knowledge-protected';
+/** A pre-push hook line that runs the protected knowledge scope check (AISDLC-773, AISDLC-1409). */
+const KNOWLEDGE_SCOPE_HOOK = /check-knowledge-scope|cli-context(\.mjs)?["']?\s+check-scope/;
+
+/** `knowledge.protectedRoot` from `.ai-sdlc/context.yaml`, else the RFC-0053 default. */
+function readProtectedKnowledgeRoot(ctx: DoctorRunContext): string {
+  const raw = ctx.adapters.readFile(join(ctx.projectDir, '.ai-sdlc', 'context.yaml'));
+  try {
+    const root = (parseYaml(raw ?? '') as { knowledge?: { protectedRoot?: unknown } } | null)
+      ?.knowledge?.protectedRoot;
+    if (typeof root === 'string' && root !== '') return root;
+  } catch {
+    // An unparseable config falls back to the default root.
+  }
+  return DEFAULT_PROTECTED_KNOWLEDGE_ROOT;
+}
+
+/**
+ * AISDLC-1409 / RFC-0053 OQ-1: a project with a protected knowledge root needs the
+ * scope check on every push. Pipeline pushes (Step 11) run it; a hand push runs it
+ * only when the pre-push hook does. Warns when the root exists and the hook does not.
+ */
+export function checkKnowledgeScopeWired(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'knowledge-scope-wired';
+  const root = readProtectedKnowledgeRoot(ctx);
+  if (!ctx.adapters.exists(isAbsolute(root) ? root : join(ctx.projectDir, root))) {
+    return { id, severity: 'pass', title: 'no protected knowledge root, no scope check needed' };
+  }
+  const hook = readPrePushHook(ctx);
+  if (hook && KNOWLEDGE_SCOPE_HOOK.test(hook.text)) {
+    return {
+      id,
+      severity: 'pass',
+      title: 'pre-push hook runs the protected knowledge scope check',
+    };
+  }
+  return {
+    id,
+    severity: 'warn',
+    title: `protected knowledge root ${root} exists but no pre-push hook runs the scope check`,
+    remediation:
+      'Add `npx --no-install cli-context check-scope --project-dir "$PWD"` to .husky/pre-push ' +
+      '(or .git/hooks/pre-push). Pipeline pushes already run it; a hand push does not.',
+  };
+}
+
 /**
  * Mechanically safe: appends the sentinel-guarded snippet to an existing
  * `.husky/pre-push`, or creates it when `.husky/` already exists. Idempotent
@@ -3804,6 +3850,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Table of registered capabilities; fails when a capability required in .ai-sdlc/capabilities.yaml is degraded or never observed (RFC-0049).',
     run: checkCapabilityLiveness,
+  },
+  {
+    id: 'knowledge-scope-wired',
+    description:
+      'A protected knowledge root exists and the pre-push hook runs the scope check (AISDLC-1409).',
+    run: checkKnowledgeScopeWired,
   },
   {
     id: 'gh-auth',

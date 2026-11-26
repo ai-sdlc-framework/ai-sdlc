@@ -60,6 +60,11 @@ import { detectDraftPrForBranch } from './03-setup-worktree.js';
 import { SUMMARY_BEFORE_PUSH_MARKER } from './10-finalize.js';
 import { composeJudgmentNotes } from '../judgment/agent-output-checks.js';
 import { writeEvent, type WriteEventOpts } from '../orchestrator/events.js';
+import {
+  checkPrBodyKnowledge,
+  checkPushKnowledgeScope,
+  type KnowledgeGuardOptions,
+} from '../knowledge/push-guard.js';
 
 export interface PushAndPrStepOptions extends PushAndPrOptions {
   runner?: Runner;
@@ -82,6 +87,8 @@ export interface PushAndPrStepOptions extends PushAndPrOptions {
   isEnabled?: WriteEventOpts['isEnabled'];
   /** AISDLC-798 — replaces the lease-push preflight (tests). */
   leasePreflight?: (opts: PushAndPrStepOptions) => LeasePreflight;
+  /** AISDLC-1409 — the `cli-context` bin; `null` = unresolvable (tests). Default: the installed bin. */
+  knowledgeCliPath?: string | null;
 }
 
 const DEFAULT_TITLE_TEMPLATE = 'feat: {issueTitle} ({issueId})';
@@ -662,6 +669,25 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
     pushSha = checked.sha;
   }
 
+  // 0d. AISDLC-1409 / RFC-0053 OQ-1 - no protected knowledge entry in any pushed commit, in any
+  //     repository that has a knowledge store. The protected root is git-ignored, so it lives
+  //     in the main checkout only; both checkouts count when deciding whether a store exists.
+  const knowledge: KnowledgeGuardOptions = {
+    projectDir: opts.worktreePath,
+    runner,
+    storeDirs: [opts.worktreePath, opts.workDir],
+    ...(opts.knowledgeCliPath !== undefined ? { cliPath: opts.knowledgeCliPath } : {}),
+  };
+  const scope = await checkPushKnowledgeScope({
+    ...knowledge,
+    // Untrusted runs use the Step 3 base, never remote-derived history (AISDLC-1275).
+    revs: [
+      pushSha ?? 'HEAD',
+      opts.untrusted ? `^${opts.untrustedBaseSha ?? ''}` : `^origin/${targetBranch}`,
+    ],
+  });
+  if (scope.status === 'refused') return { pushed: false, prUrl: null, reason: scope.reason };
+
   // 1. Push -u origin <branch>. NEVER a bare force. A resumed task already has
   //    commits on origin and the late rebase changed their SHAs, so it pushes
   //    with a lease on its own branch only, expecting the origin/<branch> SHA that
@@ -743,6 +769,12 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
       : undefined,
   );
   const body = composeBody({ ...opts, prOpenedByPipeline: true });
+  // AISDLC-1409: a body citing a protected entry is refused before it is posted. Protected
+  // entries live in the main checkout's git-ignored root, so that is the checked project.
+  const bodyCheck = await checkPrBodyKnowledge({ ...knowledge, projectDir: opts.workDir, body });
+  if (bodyCheck.status === 'refused') {
+    return { pushed: true, prUrl: null, reason: bodyCheck.reason };
+  }
 
   // AISDLC-218: open as DRAFT. The slash command body / library caller is
   // responsible for spawning reviewers + signing attestation, then calling

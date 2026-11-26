@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1409
 title: 'Adopters get the protected knowledge scope check on push'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-24'
 labels:
