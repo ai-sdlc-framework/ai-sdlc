@@ -873,7 +873,9 @@ The session ends with its task (one task per executor).
 dynamic executor whose task has a verdict (in `done/` or `failed/`) written at or after its `startedAt`
 and that holds no inflight claim (an `iterate-needed` verdict keeps the claim, so its executor stays).
 The rule is level-triggered from those durable facts, so a down that fails is retried on the next
-tick, and it has no grace delay. No hold gates it: a planner hold, a budget-pacer hold and a quota
+tick, and it has no grace delay. The verdicts the tick read before the failure playbook ran count
+too: a playbook `requeue` removes the failed verdict and re-queues the task, and its executor is
+still downed so the task can be respawned. No hold gates it: a planner hold, a budget-pacer hold and a quota
 skip all leave teardown, orphan reaping and the idle-surplus down running; they gate spawns and
 claims only. A success verdict of a dynamic executor is consumed (marked handled) on the tick that
 downs it, held or not. A failed one under a hold keeps the held behaviour (no playbook, one planner

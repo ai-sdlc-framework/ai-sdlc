@@ -608,14 +608,21 @@ async function watchVerdicts(
   deps: LoopDeps,
   state: LoopState,
   held: Hold | null,
-): Promise<Pick<TickResult, 'verdicts' | 'escalations'>> {
-  const out: Pick<TickResult, 'verdicts' | 'escalations'> = { verdicts: [], escalations: [] };
+): Promise<Pick<TickResult, 'verdicts' | 'escalations'> & { seen: DispatchVerdict[] }> {
+  const out: Pick<TickResult, 'verdicts' | 'escalations'> & { seen: DispatchVerdict[] } = {
+    verdicts: [],
+    escalations: [],
+    seen: [],
+  };
   const executors = new Set(
     readRosterChecked(deps.boardDir)
       .roster.sessions.filter((e) => e.role === 'executor' && e.status === 'running')
       .map((e) => e.name),
   );
   for (const raw of collectVerdicts(deps.boardDir)) {
+    // Read before the playbook runs: a requeue deletes the failed verdict from disk, and
+    // teardown must still see it this tick (AISDLC-1417).
+    out.seen.push(raw);
     const verdictState = stateOf(raw);
     const key = `${verdictState}:${raw.taskId}:${raw.completedAt}`;
     if (state.handled.includes(key)) continue;
@@ -846,13 +853,14 @@ async function runEphemeralSteps(
   quotaSkip: TickResult['quotaSkip'],
   reap: () => Promise<StalledReport[]>,
   state: LoopState,
+  seen: readonly DispatchVerdict[],
   beforeSpawn?: () => Promise<void>,
 ): Promise<{ stalled: StalledReport[]; report?: EphemeralReport }> {
   const eph = deps.ephemeral;
   if (!eph) return { stalled: await reap() };
   const report: EphemeralReport = { downed: [], spawned: [], spawnErrors: [] };
   try {
-    await downFinishedExecutors(deps.boardDir, eph, report);
+    await downFinishedExecutors(deps.boardDir, eph, report, seen);
   } catch {
     /* an unreadable verdict or roster must not stop the dispatch loop */
   }
@@ -1164,7 +1172,8 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
   const githubFresh = githubReadFresh(deps, state);
   const readGithub = !quotaSkip && !githubFresh;
   log.start('verdicts');
-  const watch = await watchVerdicts(deps, state, held);
+  // `seen` holds the raw verdict files: they feed teardown only and never reach the tick result.
+  const { seen, ...watch } = await watchVerdicts(deps, state, held);
   // AISDLC-1189: landing, then the in-tick reconcile, run before any spawn.
   let landed: LandReport | undefined;
   let landDone = false;
@@ -1200,6 +1209,7 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
       return stalled;
     },
     state,
+    seen,
     landAndRepair,
   );
   await landAndRepair();

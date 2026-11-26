@@ -117,15 +117,20 @@ export function finishedAt(
  * verdict newer than its start and that holds no inflight claim (an `iterate-needed` verdict
  * keeps its claim, so its executor stays). Level-triggered: a down that fails this tick is
  * retried on the next. No grace delay: the verdict is the executor's last act.
+ *
+ * `seen` is the verdicts the tick read before the failure playbook ran: a `requeue` removes
+ * the failed verdict from disk and moves the task back to the queue, and its executor must
+ * still be downed so the task can be respawned.
  */
 export async function downFinishedExecutors(
   boardDir: string,
   deps: EphemeralDeps,
   out: EphemeralReport,
+  seen: readonly DispatchVerdict[] = [],
 ): Promise<void> {
   const live = dynamicExecutors(boardDir);
   if (live.length === 0) return;
-  const verdicts = collectVerdicts(boardDir);
+  const verdicts = [...seen, ...collectVerdicts(boardDir)];
   const inflight = listInflight(boardDir);
   for (const entry of live) {
     if (inflight.some((i) => i.workerId === entry.name || i.taskId === entry.taskId)) continue;

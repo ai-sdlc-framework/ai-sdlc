@@ -1,6 +1,6 @@
 /** Ephemeral executors in the dispatch tick (RFC-0059, AISDLC-1074). */
 
-import { mkdirSync, mkdtempSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { writeHeartbeat, writeManifest, writeVerdict } from '../dispatch/board.js';
 import type { DispatchManifest } from '../dispatch/types.js';
 import { enqueueTasks } from '../dispatch/enqueue.js';
+import { requeueFailed, snapshotFailedManifest } from '../dispatch/requeue.js';
 import { readLoopState, runDispatchTick, type LoopDeps } from './dispatch-loop.js';
 import { readRosterChecked, writeRoster } from './roster.js';
 import type { RosterEntry } from './types.js';
@@ -173,6 +174,36 @@ describe('ephemeral executors in the tick', () => {
     const r = await runDispatchTick(deps());
     expect(downs).toEqual(['ai-sdlc-executor-aisdlc-71']);
     expect(r.ephemeral?.downed[0]?.why).toBe('verdict');
+  });
+
+  it('downs the executor of a failed verdict the playbook re-queues, then respawns the task (AISDLC-1417)', async () => {
+    writeRoster(board, { schemaVersion: 'v1', sessions: [entry('AISDLC-71')] });
+    claim('AISDLC-71', 'ai-sdlc-executor-aisdlc-71', 2 * MIN);
+    // As the executor does before its failure verdict: keep the manifest for a requeue.
+    snapshotFailedManifest(
+      board,
+      JSON.parse(
+        readFileSync(path.join(board, 'inflight', 'AISDLC-71.dispatch.json'), 'utf-8'),
+      ) as DispatchManifest,
+    );
+    verdictAt('AISDLC-71', clock - MIN, 'failed');
+    expect(existsSync(path.join(board, 'failed', 'AISDLC-71.verdict.json'))).toBe(true);
+    const r = await runDispatchTick(
+      deps({
+        // The real playbook path: requeueFailed deletes the failed verdict and re-queues.
+        playbook: (v) => {
+          requeueFailed(board, v.taskId);
+          return { taskId: v.taskId, action: 'requeue', result: 'done', reason: 'ok' };
+        },
+      }),
+    );
+    expect(r.verdicts[0]?.playbook?.action).toBe('requeue');
+    expect(existsSync(path.join(board, 'failed', 'AISDLC-71.verdict.json'))).toBe(false);
+    expect(existsSync(path.join(board, 'queue', 'AISDLC-71.dispatch.json'))).toBe(true);
+    expect(downs).toEqual(['ai-sdlc-executor-aisdlc-71']);
+    expect(r.ephemeral?.downed[0]).toMatchObject({ taskId: 'AISDLC-71', why: 'verdict', ok: true });
+    expect(readRosterChecked(board).roster.sessions).toHaveLength(0);
+    expect(spawns).toEqual(['AISDLC-71']);
   });
 
   it('downs an executor idle with its claim and re-queues the task (AISDLC-1218)', async () => {
