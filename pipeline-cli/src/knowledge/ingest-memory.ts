@@ -8,7 +8,6 @@
  * `inferred`. The note file is the citation. A note that disappears from the folder (for example
  * after a dream swap) has its entry marked superseded, never deleted.
  */
-import { existsSync } from 'node:fs';
 import { basename, isAbsolute, join, relative } from 'node:path';
 import { readMemoryFolder, stemOf, type Note } from '../memory-dream/notes.js';
 import { now } from '../clock.js';
@@ -115,11 +114,14 @@ export function ingestMemoryTrunk(o: MemoryIngestOptions): MemoryIngestResult {
     superseded: 0,
     skipped: 0,
   };
-  const store = openKnowledgeStore({
-    backend: o.backend,
-    backendModule: o.backendModule,
-    protectedRoot: o.protectedRootAbs,
-  });
+  const store = openKnowledgeStore(
+    {
+      backend: o.backend,
+      backendModule: o.backendModule,
+      protectedRoot: o.protectedRootAbs,
+    },
+    o.projectDir,
+  );
   const live = new Set<string>();
   for (const n of readMemoryFolder(o.memoryDir).notes) {
     if (n.problems.length > 0) {
@@ -184,15 +186,23 @@ export function ingestMemoryForProject(
 
 /**
  * Re-ingest hook for the dream's apply and undo, run under the dream lock. Opt-in: it only acts
- * once the memory trunk exists, so a project that never ingested memory is untouched.
+ * once the memory trunk holds entries, so a project that never ingested memory is untouched.
+ * The store answers that question, never a filesystem probe, so a non-files backend (DEC-0427)
+ * is re-ingested too; a backend that cannot be opened throws `KnowledgeBackendError`.
  */
 export function reingestAfterSwap(projectDir: string): (liveDir: string) => void {
   return (liveDir) => {
     const config = loadKnowledgeConfig(projectDir);
-    const root = isAbsolute(config.protectedRoot)
-      ? config.protectedRoot
-      : join(projectDir, config.protectedRoot);
-    if (!existsSync(join(root, MEMORY_TRUNK))) return;
+    const store = openKnowledgeStore(
+      {
+        ...backendSelection(config),
+        protectedRoot: isAbsolute(config.protectedRoot)
+          ? config.protectedRoot
+          : join(projectDir, config.protectedRoot),
+      },
+      projectDir,
+    );
+    if (store.list({ scope: 'protected', trunk: MEMORY_TRUNK }).length === 0) return;
     ingestMemoryForProject(projectDir, liveDir, now().toISOString().slice(0, 10));
   };
 }

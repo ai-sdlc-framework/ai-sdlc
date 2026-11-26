@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -7,7 +8,18 @@ import { applyDream } from '../memory-dream/apply.js';
 import { metaPathFor } from '../memory-dream/run.js';
 import { readMemoryFolder, serializeNote } from '../memory-dream/notes.js';
 import { parseEntryFile } from './entry.js';
-import { ingestMemoryForProject, memoryEntryId, reingestAfterSwap } from './ingest-memory.js';
+import {
+  ingestMemoryForProject,
+  memoryEntryId,
+  MEMORY_TRUNK,
+  reingestAfterSwap,
+} from './ingest-memory.js';
+import {
+  KnowledgeBackendError,
+  registerKnowledgeBackend,
+  type KnowledgeStore,
+  type StoredEntry,
+} from './knowledge-store.js';
 import { readLedger } from './retrieval/ledger.js';
 import { queryIndex, rebuildIndex, recordHarnessRecall } from './retrieval/service.js';
 import { checkKnowledgeScope } from './scope-check.js';
@@ -143,5 +155,86 @@ describe('ledger and scope', () => {
       'memory-user-role',
     ]);
     expect(findProtectedCitations(dir, 'nothing here')).toEqual([]);
+  });
+});
+
+/** An in-memory protected root, keyed by path, registered as a non-files backend (DEC-0427). */
+function memoryStore(entries: Map<string, StoredEntry>): KnowledgeStore {
+  const inTrunk = (trunk: string): StoredEntry[] =>
+    [...entries.values()].filter((e) => e.path.startsWith(`${trunk}/`));
+  return {
+    kind: 'in-memory',
+    get: (id, opts) =>
+      (opts?.path
+        ? entries.get(opts.path)
+        : [...entries.values()].find((e) => e.fields.id === id)) ?? null,
+    put: (entry, opts) => {
+      const path = opts.path ?? `${String(entry.fields.trunk)}/${String(entry.fields.id)}.md`;
+      const created = !entries.has(path);
+      entries.set(path, { ...entry, scope: opts.scope, path });
+      return { path, created };
+    },
+    update: () => null,
+    list: (scope) => (typeof scope === 'object' ? inTrunk(scope.trunk) : [...entries.values()]),
+    listRaw: () => [],
+  };
+}
+
+const stored = (id: string): StoredEntry => ({
+  fields: { id, trunk: MEMORY_TRUNK, contentHash: 'old', source: '.claude/memory/old.md' },
+  body: '\nold\n',
+  scope: 'protected',
+  path: `${MEMORY_TRUNK}/${id}.md`,
+});
+
+function useBackend(name: string, backendModule?: string): void {
+  mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+  const mod = backendModule ? `\n  backendModule: ${backendModule}` : '';
+  writeFileSync(join(dir, '.ai-sdlc/context.yaml'), `knowledge:\n  backend: ${name}${mod}\n`);
+}
+
+describe('reingestAfterSwap on a non-files backend (AISDLC-1426)', () => {
+  const entries = new Map<string, StoredEntry>();
+  registerKnowledgeBackend('in-memory-1426', () => memoryStore(entries));
+  beforeEach(() => entries.clear());
+
+  it('re-ingests through the backend when it holds memory entries and no folder exists', () => {
+    useBackend('in-memory-1426');
+    entries.set(`${MEMORY_TRUNK}/memory-old.md`, stored('memory-old'));
+    reingestAfterSwap(dir)(mem);
+    expect(existsSync(protectedMem())).toBe(false);
+    expect(entries.get(`${MEMORY_TRUNK}/memory-user-role.md`)?.fields.authority).toBe('specialist');
+    expect(entries.size).toBe(5);
+    expect(entries.get(`${MEMORY_TRUNK}/memory-old.md`)?.fields.status).toBe('superseded');
+  });
+
+  it('writes nothing when the backend holds no memory entries', () => {
+    useBackend('in-memory-1426');
+    reingestAfterSwap(dir)(mem);
+    expect(entries.size).toBe(0);
+  });
+
+  it('throws KnowledgeBackendError for an unregistered backend', () => {
+    useBackend('unregistered-1426');
+    expect(() => reingestAfterSwap(dir)(mem)).toThrow(KnowledgeBackendError);
+  });
+
+  it('resolves backendModule from the project, not the working directory', () => {
+    const pkgDir = join(dir, 'node_modules/ai-sdlc-fixture-1426');
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(
+      join(pkgDir, 'package.json'),
+      '{"name":"ai-sdlc-fixture-1426","main":"index.js"}',
+    );
+    writeFileSync(
+      join(pkgDir, 'index.js'),
+      `exports.roots = [];\nexports.registerKnowledgeBackends = (r) => r.registerKnowledgeBackend('module-1426', (cfg, root) => { exports.roots.push(root); return { kind: 'module', get: () => null, put: () => ({ path: 'x', created: true }), update: () => null, list: () => [], listRaw: () => [] }; });\n`,
+    );
+    useBackend('module-1426', 'ai-sdlc-fixture-1426');
+    expect(process.cwd()).not.toBe(dir);
+    const r = ingestMemoryForProject(dir, mem, '2026-11-26');
+    expect(r.created).toBe(4);
+    const req = createRequire(join(dir, 'package.json'));
+    expect((req('ai-sdlc-fixture-1426') as { roots: string[] }).roots).toEqual([dir]);
   });
 });
