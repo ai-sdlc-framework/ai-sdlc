@@ -1,12 +1,15 @@
 /**
- * The idle-with-claim check the dispatch tick runs on every wake (AISDLC-826, AISDLC-1218, AISDLC-1226).
+ * The idle-with-claim check the dispatch tick runs on every wake (AISDLC-826, AISDLC-1218, AISDLC-1226, AISDLC-1416).
  *
- * The pipeline (`next-step`) is the single writer of progress: it refreshes the claim's
- * `inflight/<task>.state.json` (step marker, `lastHeartbeat`, `phase`) at every step boundary. A claim is
- * idle-with-claim only when (a) its phase is `done` or `aborted` and no verdict was written, or (b) its
- * `lastHeartbeat` is older than `stallMs`; in both cases only when no live `next-step` runs under the
- * holder. The holder is cleared (which restarts its executor loop) and the task goes back to `queue/`
- * through `requeueFailed`. An executor whose pane exits is handled at once by `pane-exited` (AISDLC-1217).
+ * Liveness comes only from the three signals DEC-0392 names; heartbeat age is never one of them:
+ * 1. Pane death requeues the claim at once through `pane-exited` (AISDLC-1217).
+ * 2. A terminal phase (`done` or `aborted`) with no verdict is reaped here, a `done` claim only after
+ *    the terminal grace (AISDLC-1226, AISDLC-1230), and only when no live `next-step` runs under the holder.
+ * 3. A wedged developer round ends on its step-owned budget in `next-step` (AISDLC-1219), which reports
+ *    `iterate-needed` and keeps the worktree.
+ * The pipeline (`next-step`) is the single writer of the claim's `inflight/<task>.state.json`. A reaped
+ * holder is cleared (which restarts its executor loop) and the task goes back to `queue/` through
+ * `requeueFailed`.
  */
 
 import { existsSync } from 'node:fs';
@@ -55,8 +58,6 @@ export interface StallDeps {
    * backgrounded verification keeps the session idle while real work runs.
    */
   hasLiveNextStep?: (worker: string) => boolean;
-  /** A claim whose heartbeat is older than this is stalled (AISDLC-1226). Default {@link DEFAULT_STALL_MS}. */
-  stallMs?: number;
   /**
    * A `phase: 'done'` claim is not reaped until this long after the flip (AISDLC-1230): the executor
    * reports the verdict on its next turn, which runs after the phase flips. Default
@@ -70,9 +71,6 @@ export interface StallDeps {
   /** Open pull request number of the task, when one exists. */
   findPr?: (taskId: string) => number | undefined;
 }
-
-/** Default stall window: the pipeline refreshes the heartbeat at every step boundary (AISDLC-1226). */
-export const DEFAULT_STALL_MS = 20 * 60_000;
 
 /** Grace between the `done` phase flip and the idle-with-claim reap (AISDLC-1230). */
 export const DEFAULT_TERMINAL_GRACE_MS = 5 * 60_000;
@@ -143,10 +141,10 @@ export async function reapStalledClaims(
     const ageMs = Number.isNaN(last) ? 0 : Math.max(0, nowMs - last);
     const worker = heartbeat?.workerId ?? manifest.workerId ?? 'unknown';
     const reason: StalledReport['reason'] = 'idle-with-claim';
-    const terminal = heartbeat?.phase === 'done' || heartbeat?.phase === 'aborted';
-    if (heartbeat?.phase === 'done' && ageMs <= (deps.terminalGraceMs ?? DEFAULT_TERMINAL_GRACE_MS))
+    // Heartbeat age never reaps a non-terminal claim (DEC-0392, AISDLC-1416).
+    if (heartbeat?.phase !== 'done' && heartbeat?.phase !== 'aborted') continue;
+    if (heartbeat.phase === 'done' && ageMs <= (deps.terminalGraceMs ?? DEFAULT_TERMINAL_GRACE_MS))
       continue;
-    if (!terminal && ageMs <= (deps.stallMs ?? DEFAULT_STALL_MS)) continue;
     if (deps.hasLiveNextStep && worker !== 'unknown' && safeProbe(deps.hasLiveNextStep, worker)) {
       try {
         deps.onSpared?.({
@@ -164,9 +162,7 @@ export async function reapStalledClaims(
 
     const step = heartbeat?.currentStep ?? 'unknown';
     const reapedAt = deps.now().toISOString();
-    const flipNote = terminal
-      ? `phase ${heartbeat?.phase} at ${new Date(last).toISOString()}, reaped at ${reapedAt}, verdict expected from ${worker}; `
-      : '';
+    const flipNote = `phase ${heartbeat.phase} at ${new Date(last).toISOString()}, reaped at ${reapedAt}, verdict expected from ${worker}; `;
     snapshotFailedManifest(deps.boardDir, manifest);
     const verdict: DispatchVerdict = {
       schemaVersion: 'v1',

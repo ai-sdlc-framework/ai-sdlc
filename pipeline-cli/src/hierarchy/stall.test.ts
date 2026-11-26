@@ -107,19 +107,17 @@ describe('reapStalledClaims on the pipeline progress record (AISDLC-1226)', () =
     expect(await reap()).toHaveLength(1);
   });
 
-  it('reaps a claim whose heartbeat is older than stallMs, default and configured', async () => {
-    hold('awaiting-reviewers', T0);
-    expect(await reap({ now: () => new Date(T0 + 19 * 60_000) })).toEqual([]);
-    expect(await reap({ now: () => new Date(T0 + 21 * 60_000) })).toHaveLength(1);
-  });
+  it.each<Phase>(['awaiting-developer', 'awaiting-reviewers'])(
+    'never reaps a %s claim on heartbeat age, 3 hours old with no live next-step (DEC-0392, AISDLC-1416)',
+    async (phase) => {
+      hold(phase, T0);
+      expect(await reap({ hasLiveNextStep: () => false })).toEqual([]);
+      expect(existsSync(path.join(dir, 'inflight', 'AISDLC-9.dispatch.json'))).toBe(true);
+    },
+  );
 
-  it('honours a configured stallMs', async () => {
-    hold('awaiting-developer', T0);
-    expect(await reap({ now: () => new Date(T0 + 5 * 60_000), stallMs: 60_000 })).toHaveLength(1);
-  });
-
-  it('reaps a claim with no heartbeat file once the manifest is older than stallMs', async () => {
-    expect(await reap()).toHaveLength(1);
+  it('never reaps a claim with no heartbeat file, however old the manifest (AISDLC-1416)', async () => {
+    expect(await reap()).toEqual([]);
   });
 
   it('skips an idle claim whose verdict is in done/', async () => {

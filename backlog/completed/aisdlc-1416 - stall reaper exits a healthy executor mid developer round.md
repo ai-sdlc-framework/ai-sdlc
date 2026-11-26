@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1416
 title: Delete the heartbeat-age reap that AISDLC-1226 put back against DEC-0392
-status: To Do
+status: Done
 priority: high
 created_date: '2026-11-26 01:40'
 updated_date: '2026-11-26 01:50'
