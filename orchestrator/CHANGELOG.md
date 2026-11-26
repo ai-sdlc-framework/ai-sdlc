@@ -5,6 +5,27 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.45.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.44.0...orchestrator-v0.45.0) (2026-11-26)
+
+
+### Features
+
+* **pipeline-cli:** init scaffolds the knowledge store configuration (AISDLC-1408) ([#3009](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3009)) ([8195911](https://github.com/ai-sdlc-framework/ai-sdlc/commit/81959114d39a1548e1b6ff07899f4e8d16bc5438))
+* **pipeline-cli:** run the protected knowledge checks on adopter pushes (AISDLC-1409) ([#3010](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3010)) ([949b65e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/949b65e66163000a80ede36982563846a592b798))
+
+
+### Bug Fixes
+
+* **orchestrator:** repair the runtime gitignore on every setup and init (AISDLC-1407) ([#3004](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3004)) ([b287e2b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b287e2b0a82b3e6d09b3a820b4d1c4b09c860f74))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/pipeline-cli bumped to 0.45.0
+    * @ai-sdlc/reference bumped to 0.45.0
+
 ## [0.44.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.43.0...orchestrator-v0.44.0) (2026-11-22)
 
 

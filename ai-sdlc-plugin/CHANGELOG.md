@@ -5,6 +5,19 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.45.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.44.0...ai-sdlc-plugin-v0.45.0) (2026-11-26)
+
+
+### Features
+
+* **pipeline-cli:** add knowledge.backend registration seam (AISDLC-1421) ([#3021](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3021)) ([535c025](https://github.com/ai-sdlc-framework/ai-sdlc/commit/535c025072afebde4b79457ac78a150b67faf8b7))
+* **pipeline-cli:** poll on the slow interval while the webhook is healthy (AISDLC-1379) ([#2955](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2955)) ([9a907c6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9a907c6e9149c0bd7347affd09ba0b6f8de81ab6))
+
+
+### Bug Fixes
+
+* **pipeline-cli:** stop six false planner escalations (AISDLC-1382) ([#3001](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3001)) ([117bfcc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/117bfcc3dbd02c5d5dbacd5e0d57fddac0dedda0))
+
 ## [0.44.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.43.0...ai-sdlc-plugin-v0.44.0) (2026-11-22)
 
 

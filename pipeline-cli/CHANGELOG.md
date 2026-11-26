@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.45.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.44.0...pipeline-cli-v0.45.0) (2026-11-26)
+
+
+### Features
+
+* **pipeline-cli:** add knowledge.backend registration seam (AISDLC-1421) ([#3021](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3021)) ([535c025](https://github.com/ai-sdlc-framework/ai-sdlc/commit/535c025072afebde4b79457ac78a150b67faf8b7))
+* **pipeline-cli:** export the knowledge store seam as ./knowledge (AISDLC-1422) ([#3022](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3022)) ([7f86663](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7f86663ef0bca65ef339d182b0b93ad59ab86a9b))
+* **pipeline-cli:** init scaffolds the knowledge store configuration (AISDLC-1408) ([#3009](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3009)) ([8195911](https://github.com/ai-sdlc-framework/ai-sdlc/commit/81959114d39a1548e1b6ff07899f4e8d16bc5438))
+* **pipeline-cli:** poll on the slow interval while the webhook is healthy (AISDLC-1379) ([#2955](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2955)) ([9a907c6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9a907c6e9149c0bd7347affd09ba0b6f8de81ab6))
+* **pipeline-cli:** print a result on success for dor-check --task and init --check (AISDLC-1371) ([#2959](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2959)) ([cc7f14a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cc7f14ab825453663b84a6d36cb8a003dcf04dcd))
+* **pipeline-cli:** record the acting principal on knowledge-log events (AISDLC-1420) ([#3019](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3019)) ([df2f11e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/df2f11e4cb7dc87fc292fe51d1e617ffa2cb4ad4))
+* **pipeline-cli:** run the protected knowledge checks on adopter pushes (AISDLC-1409) ([#3010](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3010)) ([949b65e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/949b65e66163000a80ede36982563846a592b798))
+
+
+### Bug Fixes
+
+* **orchestrator:** repair the runtime gitignore on every setup and init (AISDLC-1407) ([#3004](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3004)) ([b287e2b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b287e2b0a82b3e6d09b3a820b4d1c4b09c860f74))
+* **pipeline-cli:** delete the heartbeat-age reap DEC-0392 rejected (AISDLC-1416) ([#3008](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3008)) ([2d1b4a9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2d1b4a97bfc8ea50f1007b4802fd2e877ac1f4ac))
+* **pipeline-cli:** retire a task as landed only when completed on main (AISDLC-1381) ([#2941](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2941)) ([f1d15a5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f1d15a53c25ee24a3440c8b470231993a7f60455))
+* **pipeline-cli:** send planner notices to the session socket, never the pane (AISDLC-1391) ([#2958](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2958)) ([f12e244](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f12e24413415a8f42e2f079619e12c37d39e25e4))
+* **pipeline-cli:** stop six false planner escalations (AISDLC-1382) ([#3001](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3001)) ([117bfcc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/117bfcc3dbd02c5d5dbacd5e0d57fddac0dedda0))
+* **pipeline-cli:** sweep removes only registered worktrees (AISDLC-1412) ([#3003](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3003)) ([066866b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/066866be8611c66169ec50472461325c2853a178))
+* **pipeline-cli:** zero branch and statement floors in related-only coverage (AISDLC-1407.1) ([#3006](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3006)) ([05716e4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/05716e4069c3403e5cd1e13e0a6923d541e6640e))
+
+
+### Performance Improvements
+
+* cache static and sha-keyed dispatch gh reads (AISDLC-1380) ([#2940](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2940)) ([a0c7761](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a0c7761e68f95028be255c0b50a8db8689c50190))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.45.0
+
 ## [0.44.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.43.0...pipeline-cli-v0.44.0) (2026-11-22)
 
 
