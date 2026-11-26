@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1438
 title: "A dependency limitation (rate limit, API quota, platform limit) is escalated to the operator, never worked around"
-status: In Progress
+status: Done
 priority: high
 labels:
   - governance
