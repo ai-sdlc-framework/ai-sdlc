@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1437
 title: "Delete the cli-file filing spacing (AISDLC-986) and the dead filing queue"
-status: In Progress
+status: Done
 priority: high
 labels:
   - pipeline-cli
