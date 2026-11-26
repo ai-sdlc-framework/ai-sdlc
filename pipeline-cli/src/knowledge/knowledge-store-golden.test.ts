@@ -221,7 +221,7 @@ describe('entry bytes on disk (golden)', () => {
       sourceDoc: 'plan.md',
       observed: '2026-10-09',
     });
-    expect(captured).toBe(join(prot, 'fact-1.md'));
+    expect(captured).toBe(join(prot, 'memory', 'fact-1.md'));
     expect(read(captured)).toMatchInlineSnapshot(`
       "---
       id: fact-1

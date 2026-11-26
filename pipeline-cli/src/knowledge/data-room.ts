@@ -6,7 +6,8 @@
  * Export and sharing paths drop the protected partition by scope alone.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, extname, join, relative } from 'node:path';
+import { basename, extname, isAbsolute, join, relative } from 'node:path';
+import { loadKnowledgeConfig } from './config.js';
 import { hashValue, type KnowledgeEntry } from './entry.js';
 import { openKnowledgeStore, type KnowledgeBackendSelection } from './knowledge-store.js';
 
@@ -21,6 +22,9 @@ export interface DocumentAuthority {
 const DECK_EXT = new Set(['.ppt', '.pptx', '.key']);
 const TEXT_EXT = new Set(['.md', '.txt', '.csv', '.json', '.yaml', '.yml']);
 const MAX_VALUE_CHARS = 2000;
+
+/** `source` prefix of every data-room entry; the memory re-ingest sweep skips these. */
+export const DATA_ROOM_SOURCE_PREFIX = 'data-room:';
 
 /** Authority by document kind: signed 0.95 canonical, plans 0.85, decks and other documents 0.7. */
 export function classifyDocument(relPath: string): DocumentAuthority {
@@ -67,7 +71,7 @@ export function readDataRoomEntries(rootAbs: string, observed = '1970-01-01'): K
       confidence: a.confidence,
       authority: a.authority,
       scope: 'protected',
-      source: `data-room:${rel}`,
+      source: `${DATA_ROOM_SOURCE_PREFIX}${rel}`,
       observed:
         observed === '1970-01-01' ? statSync(file).mtime.toISOString().slice(0, 10) : observed,
       decay: 'durable',
@@ -91,7 +95,8 @@ export interface CaptureInput {
 /**
  * Capture a fact from a document as a protected entry in the protected root, citing the
  * document. Agent-written, so authority is capped at inferred (RFC-0053 OQ-3). Writes only
- * under the protected root, never the data room.
+ * under the protected root, never the data room. The entry lands at the store default
+ * `<trunk>/<id>.md`, the layout `validateKnowledge` requires (AISDLC-1425).
  */
 export function captureFact(
   sel: KnowledgeBackendSelection,
@@ -106,7 +111,7 @@ export function captureFact(
     confidence: 0.7,
     authority: 'inferred',
     scope: 'protected',
-    source: `data-room:${input.sourceDoc}`,
+    source: `${DATA_ROOM_SOURCE_PREFIX}${input.sourceDoc}`,
     observed: input.observed,
     decay: 'durable',
     relations: [],
@@ -116,9 +121,18 @@ export function captureFact(
   };
   const { path } = openKnowledgeStore({ ...sel, protectedRoot: protectedRootAbs }).put(
     { fields, body: `Source: ${input.sourceDoc}\n` },
-    { scope: 'protected', path: `${input.id}.md` },
+    { scope: 'protected' },
   );
   return join(protectedRootAbs, path);
+}
+
+/** `cli-context capture`: resolve the project's knowledge config and capture into its protected root. */
+export function captureFactForProject(projectDir: string, input: CaptureInput): string {
+  const config = loadKnowledgeConfig(projectDir);
+  const protectedAbs = isAbsolute(config.protectedRoot)
+    ? config.protectedRoot
+    : join(projectDir, config.protectedRoot);
+  return captureFact(config, protectedAbs, input);
 }
 
 /** Export and sharing paths: the protected partition is excluded by scope alone. */

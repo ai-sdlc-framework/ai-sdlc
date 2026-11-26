@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { loadKnowledgeConfig } from './config.js';
 import {
   captureFact,
+  captureFactForProject,
   classifyDocument,
   exportableEntries,
   readDataRoomEntries,
@@ -13,6 +14,9 @@ import { parseEntryFile, toEntry, validateEntryFields } from './entry.js';
 import { DEFAULT_ONTOLOGY } from './ontology.js';
 import { rebuildIndex, queryIndex } from './retrieval/service.js';
 import { openKnowledgeStore } from './knowledge-store.js';
+import { ingestMemoryForProject } from './ingest-memory.js';
+import { validateKnowledge } from './store.js';
+import { serializeNote } from '../memory-dream/notes.js';
 
 let root: string;
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -92,6 +96,55 @@ describe('capture and export', () => {
     expect(
       openKnowledgeStore({ backend: 'files', protectedRoot: prot }).list('protected'),
     ).toHaveLength(1);
+  });
+
+  it('writes <protectedRoot>/<trunk>/<id>.md through the CLI path and passes validate (AISDLC-1425)', () => {
+    mk();
+    const file = captureFactForProject(root, {
+      id: 'fact-1',
+      value: 'Payment is net 30',
+      sourceDoc: 'msa-signed.md',
+      observed: '2026-11-01',
+    });
+    expect(file).toBe(join(root, '.ai-sdlc/knowledge-protected/memory/fact-1.md'));
+    expect(readFileSync(file, 'utf-8')).toContain('source: data-room:msa-signed.md');
+    expect(validateKnowledge(root).errors).toEqual([]);
+  });
+
+  it('survives a memory re-ingest that supersedes notes gone from the folder (AISDLC-1425)', () => {
+    mk();
+    const mem = join(root, '.claude/memory');
+    mkdirSync(mem, { recursive: true });
+    const note = (f: string): void =>
+      writeFileSync(
+        join(mem, f),
+        serializeNote({ name: f, description: 'd', type: 'user', body: 'banana smoothie' }),
+      );
+    note('user_role.md');
+    note('user_gone.md');
+    ingestMemoryForProject(root, mem, '2026-11-01');
+    captureFactForProject(root, {
+      id: 'fact-1',
+      value: 'Payment is net 30',
+      sourceDoc: 'msa-signed.md',
+      observed: '2026-11-01',
+    });
+    rmSync(join(mem, 'user_gone.md'));
+    const r = ingestMemoryForProject(root, mem, '2026-11-02');
+    expect(r.superseded).toBe(1);
+    const store = openKnowledgeStore({
+      backend: 'files',
+      protectedRoot: join(root, '.ai-sdlc/knowledge-protected'),
+    });
+    const byStatus = Object.fromEntries(
+      store
+        .list({ scope: 'protected', trunk: 'memory' })
+        .map((e) => [String(e.fields.source), e.fields.status]),
+    );
+    expect(byStatus['data-room:msa-signed.md']).toBeUndefined();
+    expect(byStatus['.claude/memory/user_gone.md']).toBe('superseded');
+    expect(byStatus['.claude/memory/user_role.md']).toBeUndefined();
+    expect(validateKnowledge(root).errors).toEqual([]);
   });
 
   it('export excludes the protected partition by scope', () => {
