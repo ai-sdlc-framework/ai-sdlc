@@ -3,10 +3,11 @@
  * The fixture packages are written into a temp project's node_modules and resolved from
  * the project root, the way an adopter's installed package would be.
  */
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   FilesKnowledgeStore,
@@ -20,10 +21,10 @@ import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let project: string;
 
-function pkg(name: string, source: string): void {
+function pkg(name: string, source: string, type?: 'module'): void {
   const dir = join(project, 'node_modules', name);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name, main: 'index.js' }));
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name, main: 'index.js', type }));
   writeFileSync(join(dir, 'index.js'), source);
 }
 
@@ -39,6 +40,12 @@ beforeAll(() => {
   pkg(
     'ai-sdlc-fixture-duplicate',
     `exports.registerKnowledgeBackends = (r) => r.registerKnowledgeBackend('fixture', () => (${STORE}));\n`,
+  );
+  // AISDLC-1427: an ES-module backend loads through require(esm) (Node >=22.12.0).
+  pkg(
+    'ai-sdlc-fixture-esm-backend',
+    `export function registerKnowledgeBackends(r) { r.registerKnowledgeBackend('fixture-esm', () => (${STORE.replace("'fixture'", "'fixture-esm'")})); }\n`,
+    'module',
   );
   pkg('ai-sdlc-fixture-throws', `throw new Error('boom at load');\n`);
   pkg('ai-sdlc-fixture-noexport', `exports.other = 1;\n`);
@@ -69,6 +76,12 @@ describe('openKnowledgeStore backend selection (DEC-0427)', () => {
     expect(store.kind).toBe('fixture');
     // Loading the module again does not re-register (no duplicate error).
     expect(open('fixture', 'ai-sdlc-fixture-backend').kind).toBe('fixture');
+  });
+
+  it('returns the backend an ES-module fixture package registers (AISDLC-1427)', () => {
+    const store = open('fixture-esm', 'ai-sdlc-fixture-esm-backend');
+    expect(store).not.toBeInstanceOf(FilesKnowledgeStore);
+    expect(store.kind).toBe('fixture-esm');
   });
 
   it('passes the factory the config and the project root it was opened with', () => {
@@ -128,5 +141,29 @@ describe('openKnowledgeStore backend selection (DEC-0427)', () => {
     );
     open('fixture', 'ai-sdlc-fixture-backend');
     expect(() => open('fixture', 'ai-sdlc-fixture-duplicate')).toThrow(KnowledgeBackendError);
+  });
+});
+
+/** Parse the minimum version out of a `>=X.Y.Z` range. */
+function minimumVersion(range: string): [number, number, number] {
+  const m = /^>=\s*(\d+)\.(\d+)\.(\d+)$/.exec(range.trim());
+  if (!m) throw new Error(`engines.node '${range}' is not a >=X.Y.Z range`);
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+describe('pipeline-cli engines.node (AISDLC-1427)', () => {
+  it('declares a minimum of at least 22.12.0, the first Node 22 with unflagged require(esm)', () => {
+    const manifest = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json');
+    const { engines } = JSON.parse(readFileSync(manifest, 'utf8')) as {
+      engines?: { node?: string };
+    };
+    expect(engines?.node).toBeDefined();
+    const [major, minor] = minimumVersion(engines!.node!);
+    expect(major > 22 || (major === 22 && minor >= 12)).toBe(true);
+  });
+
+  it('parses only >=X.Y.Z ranges', () => {
+    expect(minimumVersion('>=22.12.0')).toEqual([22, 12, 0]);
+    expect(() => minimumVersion('^22')).toThrow(/not a >=X.Y.Z range/);
   });
 });

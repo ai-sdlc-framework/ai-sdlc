@@ -96,8 +96,10 @@ jobs:
     strategy:
       matrix:
         # AISDLC-368: dropped Node 20 to halve Build & Test wall time.
-        # Node 22 is the canonical pin (engines.node ^22 across all packages);
-        # Node 20 was advisory-only and added ~5min per PR with little signal.
+        # Node 22 is the canonical pin (.nvmrc; root package.json engines.node
+        # >=22.22.1). Of the published packages only pipeline-cli declares
+        # engines.node (>=22.12.0, AISDLC-1427: require(esm) of an ES-module
+        # knowledge.backendModule). Node 20 is end-of-life and was dropped.
         node-version: [22]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

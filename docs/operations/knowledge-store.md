@@ -67,6 +67,12 @@ specifiers are refused. Selection fails closed: an unregistered backend or a mod
 fails to load raises `KnowledgeBackendError`, `cli-context` exits 1, and the surfacing hook
 surfaces nothing and prints the error to stderr. It never falls back to files.
 
+The module is loaded with `require`, so an ES-module backend package (`"type": "module"`)
+relies on `require(esm)`, which runs without a flag from Node 22.12.0. `pipeline-cli`
+declares `engines.node` `>=22.12.0` for that reason (AISDLC-1427); on older Node an
+ES-module backend fails closed with `KnowledgeBackendError ... failed to load`. A CommonJS
+backend loads on any supported Node.
+
 ## Scaffold
 
 `/ai-sdlc init` (and `ai-sdlc init`, `cli-init`, `doctor --fix`) writes two optional files
