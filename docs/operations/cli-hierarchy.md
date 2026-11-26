@@ -284,9 +284,9 @@ the last sweep classed removable but could not remove (written to `.git/ai-sdlc-
 (`hierarchy.worktrees.ceiling`, default 40) an `ALARM:` line follows. `--json` carries the same under `worktrees`.
 A `gh calls last hour` line (AISDLC-963) gives each `HIERARCHY_SESSION`'s `gh` calls in the last hour and the live remaining
 quota for the core and graphql buckets (`gh api rate_limit`, not metered). The source is `<board-dir>/gh-calls.jsonl`, one
-JSON line per call (`at`, `session`, `argv`, `exit`, `remaining` when `gh api -i` printed it), written by the runner in
+JSON line per call (`at`, `session`, `argv`, `exit`, `remaining` when `gh api -i` printed it; `error`, `rateLimited` and the hourly `quota` snapshot, see `gh-usage`), written by the runner in
 `runtime/exec.ts` and by a `gh` shim that `up` puts first on each session PATH (`<board-dir>/bin/gh`, which execs the real
-binary) for callers that spawn `gh` directly. Lines older than 24 hours are dropped on each `status`. The dispatch tick skips its
+binary) for callers that spawn `gh` directly. Lines older than 8 days are dropped on each `status`. The dispatch tick skips its
 GitHub reads (human-attention list, mark-ready, landing) and reports the skip when the lowest remaining bucket is below the floor
 (default 300, override with `AI_SDLC_GH_QUOTA_FLOOR`). The gate workflow prints the Actions quota at the start (`detect`) and end
 (`pr-ready`) of each run in the job summary.
@@ -1207,6 +1207,18 @@ Executor cap (AISDLC-1076). The ephemeral-executor spawn cap is `min(executors.m
 Priority floor (RFC-0062 OQ-1, DEC-0385). `<board>/config.json` `{ "budget": { "priorityFloor": "none" } }` takes `none` (default), `high` or `medium`. With a floor set and a window projecting 100 percent before its reset (the `projected 100% at` time is earlier than `resets`), `cli-dispatch claim` and `peek --order` skip every task whose backlog `priority:` ranks below the floor (high above medium above low; a task with no priority counts as below) until the projection recovers; the `BUDGET` line ends with `FLOOR <value>` and `(active)` while it applies. An active `resume --budget` override suspends the floor, and the floor needs the repo's `backlog/` to read priorities. With `none` the line differs from before only by the trailing `FLOOR none`. The pacer's hold and the executor cap are unchanged.
 
 The planner or operator overrides with `cli-hierarchy resume --budget`: it lifts a budget hold and exempts the current seven-day and five-hour windows until their reset; the override is written to `<board>/budget-override.json` and logged as `budget-override` in `hold-events.jsonl`.
+
+### `gh-usage`
+
+GitHub usage evidence per token (AISDLC-1439), attached to any `dependency-limit:github` escalation. It reads `<board>/gh-calls.jsonl` (the local user token) and every file or directory passed with `--ledger` (comma-separated; a directory contributes each `*.jsonl` below it, such as downloaded `gh-quota-*` artifacts of the gate workflow, token `actions`), and prints for each token: calls per hour over the window (mean, p95 and max of hourly buckets, empty hours included; unmetered `gh api rate_limit` reads are not counted), the lowest remaining quota seen per resource with its time, the count and times of rate-limit errors, and the top 10 call shapes (`api <endpoint>` with numeric ids as `:n`, else the first two words). `--since` takes `<n>d`, `<n>h` or `<n>m` (default `7d`); `--json` prints the same as one JSON object.
+
+```bash
+cli-hierarchy gh-usage report --since 7d
+gh run download <run-id> --pattern 'gh-quota-*' --dir /tmp/gh-quota
+cli-hierarchy gh-usage report --ledger /tmp/gh-quota
+```
+
+The ledger feeds it: a failed call carries `error` (first stderr line, at most 300 characters) and `rateLimited` (`true` when the text says `rate limit exceeded`, `secondary rate limit` or `abuse detection`). At most once per hour per session the runner or the shim appends a `gh api rate_limit` line whose `quota` holds `remaining`, `limit` and `reset` for `core`, `graphql` and `search`; an explicit `gh api rate_limit` call counts as that hour's snapshot. The gate workflow's `pr-ready` job ends, on success and failure, with a step that writes the Actions token's core and graphql remaining, limit and reset plus the run id to the job summary and the `gh-quota-<run-id>-<attempt>` artifact, and names any failed job whose log contains `API rate limit exceeded` (`rateLimitedJobs`).
 
 ### `hold`
 

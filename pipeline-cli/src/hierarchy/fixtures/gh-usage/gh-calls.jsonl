@@ -1,0 +1,9 @@
+{"at":"2026-11-10T00:00:00.000Z","session":"old","argv":["pr","list"],"exit":0}
+{"at":"2026-11-20T10:05:00.000Z","session":"dispatch","argv":["pr","list","--json","number"],"exit":0}
+{"at":"2026-11-20T10:06:00.000Z","session":"dispatch","argv":["api","rate_limit"],"exit":0,"quota":{"core":{"remaining":4100,"limit":5000,"reset":1795000000},"graphql":{"remaining":3900,"limit":5000,"reset":1795000000}}}
+{"at":"2026-11-20T10:10:00.000Z","session":"ex1","argv":["api","-i","repos/o/r/pulls/123/reviews?per_page=100"],"exit":0,"remaining":4050,"resource":"core"}
+{"at":"2026-11-20T10:20:00.000Z","session":"ex1","argv":["api","repos/o/r/pulls/456/reviews"],"exit":0}
+{"at":"2026-11-25T08:00:00.000Z","session":"ex1","argv":["pr","view","12"],"exit":1,"error":"GraphQL: API rate limit exceeded for user ID 1.","rateLimited":true}
+{"at":"2026-11-25T08:01:00.000Z","session":"ex1","argv":["pr","view","13"],"exit":1,"error":"GraphQL: API rate limit exceeded for user ID 1.","rateLimited":true}
+{"at":"2026-11-25T08:02:00.000Z","session":"ex1","argv":["api","rate_limit"],"exit":0,"quota":{"core":{"remaining":3000},"graphql":{"remaining":0}}}
+{"at":"2026-11-25T08:30:00.000Z","session":"ex1","argv":["issue","view","9"],"exit":1,"error":"HTTP 404: Not Found","rateLimited":false}

@@ -5,6 +5,11 @@
  * and the remaining quota when `gh api -i` printed it. The runner in `runtime/exec.ts` writes
  * the lines for its own calls; a `gh` shim first on each session PATH writes them for callers
  * that spawn `gh` directly, then execs the real binary.
+ *
+ * AISDLC-1439: a failed call also records the first line of its stderr (`error`) and whether it was
+ * a rate-limit refusal (`rateLimited`); at most once per hour per session a `gh api rate_limit`
+ * snapshot (`quota`, per resource remaining/limit/reset) is appended, so `cli-hierarchy gh-usage
+ * report` can show headroom over a week. Lines are kept for 8 days.
  */
 
 import {
@@ -26,7 +31,10 @@ export const GH_CALL_LOGGED_ENV = 'AI_SDLC_GH_CALL_LOGGED';
 /** Default floor of remaining quota below which the dispatch tick skips GitHub reads. */
 export const DEFAULT_QUOTA_FLOOR = 300;
 const HOUR_MS = 3_600_000;
-const RETENTION_MS = 24 * HOUR_MS;
+/** Long enough for the weekly `gh-usage report` (AISDLC-1439). */
+const RETENTION_MS = 8 * 24 * HOUR_MS;
+/** Longest error text kept on a ledger line. */
+const ERROR_MAX = 300;
 
 /** Flags whose value can carry a credential or private text; the value is never logged. */
 const SECRET_FLAGS = new Set([
@@ -74,7 +82,30 @@ export interface GhCall {
   argv: string[];
   exit: number;
   remaining?: number;
+  /** `x-ratelimit-resource` printed by `gh api -i` alongside `remaining`. */
+  resource?: string;
+  /** First non-empty stderr line of a failed call (AISDLC-1439). */
+  error?: string;
+  /** True when the failure was a rate-limit refusal (AISDLC-1439). */
+  rateLimited?: boolean;
+  /** Per-resource quota from a `gh api rate_limit` snapshot (AISDLC-1439). */
+  quota?: QuotaSnapshot;
+  /** Which token made the call; absent means the local user token. CI writes `actions`. */
+  token?: string;
+  /** CI only: the workflow run the snapshot belongs to. */
+  runId?: string;
+  /** CI only: failed jobs whose log contains `API rate limit exceeded`. */
+  rateLimitedJobs?: string[];
 }
+
+export interface QuotaBucket {
+  remaining: number;
+  limit?: number;
+  /** Epoch seconds of the next reset. */
+  reset?: number;
+}
+
+export type QuotaSnapshot = Record<string, QuotaBucket>;
 
 export interface Quota {
   core?: number;
@@ -89,6 +120,87 @@ export function ghCallsPath(boardDir: string): string {
 export function parseRemaining(stdout: string): number | undefined {
   const m = /^x-ratelimit-remaining:\s*(\d+)/im.exec(stdout);
   return m ? Number(m[1]) : undefined;
+}
+
+/** Parse `x-ratelimit-resource` out of `gh api -i` output. */
+export function parseResource(stdout: string): string | undefined {
+  const m = /^x-ratelimit-resource:\s*([\w-]+)/im.exec(stdout);
+  return m ? m[1] : undefined;
+}
+
+/** Text GitHub uses for a primary or secondary rate-limit refusal. */
+const RATE_LIMIT_RE = /rate limit exceeded|secondary rate limit|abuse detection/i;
+
+export function isRateLimitError(text: string): boolean {
+  return RATE_LIMIT_RE.test(text);
+}
+
+/** `error` and `rateLimited` for a failed call; empty for a success. */
+export function failureFields(exit: number, stderr: string): Pick<GhCall, 'error' | 'rateLimited'> {
+  if (exit === 0) return {};
+  const first = stderr
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l !== '');
+  return {
+    ...(first ? { error: first.slice(0, ERROR_MAX) } : {}),
+    rateLimited: isRateLimitError(stderr),
+  };
+}
+
+/** True when `argv` is the unmetered `gh api rate_limit` read. */
+export function isRateLimitRead(argv: readonly string[]): boolean {
+  return argv[0] === 'api' && argv.includes('rate_limit');
+}
+
+/** Per-resource remaining/limit/reset out of the `gh api rate_limit` JSON. */
+export function parseQuotaSnapshot(stdout: string): QuotaSnapshot | undefined {
+  try {
+    const r = (JSON.parse(stdout) as { resources?: Record<string, Partial<QuotaBucket>> })
+      .resources;
+    if (!r || typeof r !== 'object') return undefined;
+    const out: QuotaSnapshot = {};
+    for (const name of ['core', 'graphql', 'search']) {
+      const b = r[name];
+      if (typeof b?.remaining !== 'number') continue;
+      out[name] = {
+        remaining: b.remaining,
+        ...(typeof b.limit === 'number' ? { limit: b.limit } : {}),
+        ...(typeof b.reset === 'number' ? { reset: b.reset } : {}),
+      };
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Stamp file marking a session's last quota snapshot. */
+export function quotaStampPath(logPath: string, session: string): string {
+  return `${logPath}.quota-${session.replace(/[^\w.-]/g, '_')}`;
+}
+
+/**
+ * Claim this session's hourly quota snapshot: true (and the stamp is renewed) when the last one is
+ * an hour old or missing. Bounds the extra `gh api rate_limit` calls to one per hour per session.
+ */
+export function claimQuotaSnapshot(logPath: string, session: string, now: Date): boolean {
+  const stamp = quotaStampPath(logPath, session);
+  try {
+    const last = Date.parse(readFileSync(stamp, 'utf-8').trim());
+    if (Number.isFinite(last) && now.getTime() - last < HOUR_MS && last <= now.getTime()) {
+      return false;
+    }
+  } catch {
+    /* no stamp yet */
+  }
+  try {
+    mkdirSync(path.dirname(stamp), { recursive: true });
+    writeFileSync(stamp, now.toISOString());
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Append one call; never throws (logging must not fail a gh call). */
@@ -168,7 +280,12 @@ export function lowestRemaining(q: Quota | undefined): number | undefined {
   return v.length > 0 ? Math.min(...v) : undefined;
 }
 
-/** Shell shim: logs the call, then runs the real gh found on the PATH without the shim dir. */
+/**
+ * Shell shim: logs the call, then runs the real gh found on the PATH without the shim dir.
+ * stdout and stderr are buffered so a failure's first stderr line can be logged (AISDLC-1439);
+ * `auth` stays unbuffered for interactive prompts. The hourly quota snapshot mirrors
+ * `claimQuotaSnapshot` and `parseQuotaSnapshot`.
+ */
 export const GH_SHIM = `#!/bin/sh
 self_dir=$(cd "$(dirname "$0")" && pwd)
 PATH=$(printf %s "$PATH" | tr ':' '\\n' | grep -vxF "$self_dir" | paste -sd: -)
@@ -177,30 +294,73 @@ if [ -n "$${GH_CALL_LOGGED_ENV}" ] || [ -z "$${GH_CALL_LOG_ENV}" ] ; then exec "
 if [ "$1" = auth ]; then
   # Logged too, but unbuffered so interactive prompts (gh auth login) keep working.
   out=/dev/null
+  err=/dev/null
   "$real" "$@"
   code=$?
 else
   out=$(mktemp)
-  trap 'rm -f "$out"' EXIT INT TERM HUP
-  "$real" "$@" > "$out"
+  err=$(mktemp)
+  trap 'rm -f "$out" "$err"' EXIT INT TERM HUP
+  "$real" "$@" > "$out" 2> "$err"
   code=$?
   cat "$out"
+  cat "$err" >&2
 fi
 node -e '
 const fs = require("fs");
-const m = /^x-ratelimit-remaining:\\s*(\\d+)/im.exec(fs.readFileSync(process.argv[1], "utf8"));
+const [outFile, errFile, codeArg, real, ...args] = process.argv.slice(1);
+const out = fs.readFileSync(outFile, "utf8");
+const m = /^x-ratelimit-remaining:\\s*(\\d+)/im.exec(out);
+const res = /^x-ratelimit-resource:\\s*([\\w-]+)/im.exec(out);
 const secret = new Set(${JSON.stringify([...SECRET_FLAGS])});
 const argv = []; let hide = false;
-for (const a of process.argv.slice(3)) {
+for (const a of args) {
   if (hide) { argv.push("***"); hide = false; }
   else if (secret.has(a)) { argv.push(a); hide = true; }
   else if (/^--(header|raw-field|field|body|input)=/.test(a)) argv.push(a.slice(0, a.indexOf("=")) + "=***");
   else argv.push(a);
 }
-const c = { at: (new Date).toISOString(), session: process.env.AI_SDLC_HIERARCHY_SESSION || "-", argv, exit: Number(process.argv[2]) };
+const log = process.env.${GH_CALL_LOG_ENV};
+const session = process.env.AI_SDLC_HIERARCHY_SESSION || "-";
+const now = new Date;
+const exit = Number(codeArg);
+const c = { at: now.toISOString(), session, argv, exit };
 if (m) c.remaining = Number(m[1]);
-fs.appendFileSync(process.env.${GH_CALL_LOG_ENV}, JSON.stringify(c) + "\\n");
-' "$out" "$code" "$@" 2>/dev/null
+if (m && res) c.resource = res[1];
+const quota = (text) => {
+  try {
+    const r = JSON.parse(text).resources; const q = {};
+    for (const n of ["core", "graphql", "search"]) {
+      const b = r && r[n];
+      if (b && typeof b.remaining === "number") q[n] = { remaining: b.remaining, limit: b.limit, reset: b.reset };
+    }
+    return Object.keys(q).length ? q : undefined;
+  } catch { return undefined; }
+};
+if (exit !== 0) {
+  const e = fs.readFileSync(errFile, "utf8");
+  const first = e.split("\\n").map((l) => l.trim()).find((l) => l !== "");
+  if (first) c.error = first.slice(0, ${ERROR_MAX});
+  c.rateLimited = ${RATE_LIMIT_RE.toString()}.test(e);
+}
+const stamp = log + ".quota-" + session.replace(/[^\\w.-]/g, "_");
+const isRead = args[0] === "api" && args.includes("rate_limit");
+if (isRead && exit === 0) { const q = quota(out); if (q) { c.quota = q; fs.writeFileSync(stamp, c.at); } }
+fs.appendFileSync(log, JSON.stringify(c) + "\\n");
+if (!isRead) {
+  let last = NaN;
+  try { last = Date.parse(fs.readFileSync(stamp, "utf8").trim()); } catch {}
+  if (!(now - last < ${HOUR_MS} && last <= +now)) {
+    fs.writeFileSync(stamp, c.at);
+    const env = { ...process.env, ${GH_CALL_LOGGED_ENV}: "1" };
+    const r = require("child_process").spawnSync(real, ["api", "rate_limit"], { env, encoding: "utf8", timeout: 30000 });
+    const s = { at: (new Date).toISOString(), session, argv: ["api", "rate_limit"], exit: r.status === null ? 1 : r.status };
+    const q = r.status === 0 ? quota(r.stdout) : undefined;
+    if (q) s.quota = q;
+    fs.appendFileSync(log, JSON.stringify(s) + "\\n");
+  }
+}
+' "$out" "$err" "$code" "$real" "$@" 2>/dev/null
 exit $code
 `;
 

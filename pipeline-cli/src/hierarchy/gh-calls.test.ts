@@ -7,6 +7,12 @@ import { defaultRunner } from '../runtime/exec.js';
 import {
   appendGhCall,
   callsPerSession,
+  claimQuotaSnapshot,
+  failureFields,
+  isRateLimitError,
+  parseQuotaSnapshot,
+  parseResource,
+  quotaStampPath,
   ghCallsPath,
   installGhShim,
   lowestRemaining,
@@ -19,6 +25,10 @@ import {
 } from './gh-calls.js';
 
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'gh-calls-'));
+/** Ledger lines without the hourly `gh api rate_limit` snapshots. */
+const metered = (log: string) => readGhCalls(log).filter((c) => c.argv[1] !== 'rate_limit');
+const RATE_LIMIT_JSON =
+  '{"resources":{"core":{"limit":5000,"remaining":4321,"reset":1790000000},"graphql":{"limit":5000,"remaining":77,"reset":1790000001}}}';
 
 describe('gh call log (AISDLC-963)', () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -34,7 +44,7 @@ describe('gh call log (AISDLC-963)', () => {
     vi.stubEnv('AI_SDLC_HIERARCHY_SESSION', 's1');
     vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
     await defaultRunner('gh', ['api', '-i', 'x']);
-    const calls = readGhCalls(log);
+    const calls = metered(log);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       session: 's1',
@@ -59,9 +69,15 @@ describe('gh call log (AISDLC-963)', () => {
     await expect(defaultRunner('gh', ['pr', 'view'])).rejects.toThrow(/boom/);
     const r = await defaultRunner('gh', ['issue', 'list'], { allowFailure: true });
     expect(r.code).toBe(4);
-    const calls = readGhCalls(log);
+    const calls = metered(log);
     expect(calls).toHaveLength(2);
-    expect(calls[0]).toMatchObject({ session: 's2', argv: ['pr', 'view'], exit: 4 });
+    expect(calls[0]).toMatchObject({
+      session: 's2',
+      argv: ['pr', 'view'],
+      exit: 4,
+      error: 'boom',
+      rateLimited: false,
+    });
     expect(calls[1]).toMatchObject({ argv: ['issue', 'list'], exit: 4 });
   });
 
@@ -92,7 +108,7 @@ describe('gh call log (AISDLC-963)', () => {
     }
     expect(status).toBe(3);
     expect(out).toContain('hi');
-    expect(readGhCalls(log)).toEqual([
+    expect(metered(log)).toEqual([
       expect.objectContaining({ session: 'ex1', argv: ['api', '-i', 'z'], exit: 3, remaining: 7 }),
     ]);
     // A call already logged by the runner is not logged again.
@@ -101,22 +117,134 @@ describe('gh call log (AISDLC-963)', () => {
     } catch {
       /* exit 3 */
     }
-    expect(readGhCalls(log)).toHaveLength(1);
+    expect(metered(log)).toHaveLength(1);
     // auth subcommands are logged too.
     try {
       execFileSync('gh', ['auth', 'status'], { env, stdio: 'pipe' });
     } catch {
       /* exit 3 */
     }
-    expect(readGhCalls(log)[1]).toMatchObject({ argv: ['auth', 'status'], exit: 3 });
+    expect(metered(log)[1]).toMatchObject({ argv: ['auth', 'status'], exit: 3 });
   });
 
-  it('prunes to 24 hours and counts the last hour per session', () => {
+  it('a canned rate-limit stderr sets rateLimited and keeps the first line (AISDLC-1439)', async () => {
+    const dir = tmp();
+    const bin = path.join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(
+      path.join(bin, 'gh'),
+      `#!/bin/sh\nif [ "$2" = rate_limit ]; then echo '${RATE_LIMIT_JSON}'; exit 0; fi\n` +
+        'printf "\\ngh: API rate limit exceeded for user ID 1.\\nmore\\n" >&2\nexit 1\n',
+    );
+    chmodSync(path.join(bin, 'gh'), 0o755);
+    const log = ghCallsPath(dir);
+    vi.stubEnv('AI_SDLC_GH_CALL_LOG', log);
+    vi.stubEnv('AI_SDLC_HIERARCHY_SESSION', 'rl');
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
+    await defaultRunner('gh', ['pr', 'list'], { allowFailure: true });
+    await defaultRunner('gh', ['pr', 'list'], { allowFailure: true });
+    const calls = readGhCalls(log);
+    expect(calls[0]).toMatchObject({
+      argv: ['pr', 'list'],
+      exit: 1,
+      error: 'gh: API rate limit exceeded for user ID 1.',
+      rateLimited: true,
+    });
+    // One hourly snapshot after the first call, none after the second.
+    expect(calls.map((c) => c.argv.join(' '))).toEqual(['pr list', 'api rate_limit', 'pr list']);
+    expect(calls[1]!.quota).toEqual({
+      core: { remaining: 4321, limit: 5000, reset: 1790000000 },
+      graphql: { remaining: 77, limit: 5000, reset: 1790000001 },
+    });
+    // An explicit rate_limit read is recorded with its quota and renews the stamp.
+    await defaultRunner('gh', ['api', 'rate_limit']);
+    expect(readGhCalls(log)[3]).toMatchObject({
+      argv: ['api', 'rate_limit'],
+      quota: { core: { remaining: 4321 } },
+    });
+  });
+
+  it('the shim records error, rateLimited and one hourly snapshot (AISDLC-1439)', () => {
+    const dir = tmp();
+    const real = path.join(dir, 'real');
+    mkdirSync(real);
+    writeFileSync(
+      path.join(real, 'gh'),
+      `#!/bin/sh\nif [ "$2" = rate_limit ]; then echo '${RATE_LIMIT_JSON}'; exit 0; fi\n` +
+        'echo "API rate limit exceeded for installation" >&2\nexit 1\n',
+    );
+    chmodSync(path.join(real, 'gh'), 0o755);
+    const shim = installGhShim(dir);
+    const log = ghCallsPath(dir);
+    const env = {
+      ...process.env,
+      PATH: `${shim}:${real}:${process.env.PATH}`,
+      AI_SDLC_GH_CALL_LOG: log,
+      AI_SDLC_HIERARCHY_SESSION: 'ex/2',
+    };
+    let stderr = '';
+    for (let i = 0; i < 2; i++) {
+      try {
+        execFileSync('gh', ['issue', 'list'], { env, stdio: 'pipe' });
+      } catch (e) {
+        stderr = String((e as { stderr: Buffer }).stderr);
+      }
+    }
+    expect(stderr).toContain('API rate limit exceeded');
+    const calls = readGhCalls(log);
+    expect(calls.map((c) => c.argv.join(' '))).toEqual([
+      'issue list',
+      'api rate_limit',
+      'issue list',
+    ]);
+    expect(calls[0]).toMatchObject({
+      exit: 1,
+      error: 'API rate limit exceeded for installation',
+      rateLimited: true,
+    });
+    expect(calls[1]!.quota?.graphql).toEqual({ remaining: 77, limit: 5000, reset: 1790000001 });
+    expect(readFileSync(quotaStampPath(log, 'ex/2'), 'utf-8')).toMatch(/^\d{4}-/);
+    // A direct rate_limit read through the shim carries its quota.
+    execFileSync('gh', ['api', 'rate_limit'], { env, stdio: 'pipe' });
+    expect(readGhCalls(log)[3]?.quota?.core?.remaining).toBe(4321);
+  });
+
+  it('failure fields, rate-limit text, resource header and snapshot parsing', () => {
+    expect(failureFields(0, 'whatever')).toEqual({});
+    expect(failureFields(1, '')).toEqual({ rateLimited: false });
+    expect(failureFields(1, 'x'.repeat(400)).error).toHaveLength(300);
+    expect(isRateLimitError('You have exceeded a secondary rate limit')).toBe(true);
+    expect(isRateLimitError('HTTP 404: Not Found')).toBe(false);
+    expect(parseResource('X-RateLimit-Resource: graphql\n')).toBe('graphql');
+    expect(parseResource('none')).toBeUndefined();
+    expect(parseQuotaSnapshot('nope')).toBeUndefined();
+    expect(parseQuotaSnapshot('{}')).toBeUndefined();
+    expect(parseQuotaSnapshot('{"resources":{"core":{"limit":1}}}')).toBeUndefined();
+    expect(parseQuotaSnapshot('{"resources":{"search":{"remaining":3}}}')).toEqual({
+      search: { remaining: 3 },
+    });
+  });
+
+  it('claims the quota snapshot at most once per hour per session', () => {
+    const log = ghCallsPath(tmp());
+    const t0 = new Date('2026-11-26T10:00:00Z');
+    expect(claimQuotaSnapshot(log, 'a', t0)).toBe(true);
+    expect(claimQuotaSnapshot(log, 'a', new Date(t0.getTime() + 59 * 60_000))).toBe(false);
+    expect(claimQuotaSnapshot(log, 'b', t0)).toBe(true);
+    expect(claimQuotaSnapshot(log, 'a', new Date(t0.getTime() + 60 * 60_000))).toBe(true);
+    // A stamp from the future (clock skew) does not block forever.
+    expect(claimQuotaSnapshot(log, 'b', new Date(t0.getTime() - 60_000))).toBe(true);
+    // An unwritable location never throws.
+    expect(claimQuotaSnapshot('/dev/null/x/gh-calls.jsonl', 'a', t0)).toBe(false);
+  });
+
+  it('prunes to 8 days and counts the last hour per session', () => {
     const dir = tmp();
     const log = ghCallsPath(dir);
     const now = new Date('2026-10-20T12:00:00Z');
     const at = (h: number) => new Date(now.getTime() - h * 3_600_000).toISOString();
-    appendGhCall(log, { at: at(30), session: 'a', argv: [], exit: 0 });
+    appendGhCall(log, { at: at(200), session: 'a', argv: [], exit: 0 });
+    appendGhCall(log, { at: at(30), session: 'c', argv: [], exit: 0 });
     appendGhCall(log, { at: at(0.5), session: 'a', argv: [], exit: 0 });
     appendGhCall(log, { at: at(0.2), session: 'b', argv: [], exit: 0 });
     appendGhCall(log, { at: at(5), session: 'b', argv: [], exit: 0 });
