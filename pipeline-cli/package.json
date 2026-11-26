@@ -140,6 +140,10 @@
     "./import-spec": {
       "types": "./dist/import-spec/index.d.ts",
       "import": "./dist/import-spec/index.js"
+    },
+    "./knowledge": {
+      "types": "./dist/knowledge/index.d.ts",
+      "import": "./dist/knowledge/index.js"
     }
   },
   "publishConfig": {

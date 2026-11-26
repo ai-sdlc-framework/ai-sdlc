@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1422
 title: Export the knowledge store and backend registry from the pipeline-cli package
-status: To Do
+status: Done
 priority: high
 labels:
   - pipeline-cli
