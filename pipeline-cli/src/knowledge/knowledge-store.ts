@@ -269,8 +269,12 @@ export function registerKnowledgeBackend(name: string, factory: KnowledgeBackend
  * Refuse anything but a bare npm package specifier: no relative or absolute path, no
  * `file:`/`data:` or other URL scheme (a colon also rules out `node:` and drive letters).
  */
+/** An npm package name (optionally scoped) with an optional subpath; `.`/`..` segments refused. */
+const BARE_SPECIFIER = /^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(\/[\w.-]+)*$/i;
+
 function assertBareSpecifier(spec: string, backend: string): void {
-  if (spec === '' || /^[./\\]/.test(spec) || spec.includes(':')) {
+  const dotSegment = spec.split('/').some((seg) => seg === '.' || seg === '..');
+  if (!BARE_SPECIFIER.test(spec) || dotSegment) {
     throw new KnowledgeBackendError(
       `knowledge.backendModule '${spec}' (backend '${backend}') must be a bare npm package specifier; ` +
         'relative paths, absolute paths and URL specifiers are refused',

@@ -4,6 +4,7 @@
  * the project root, the way an adopter's installed package would be.
  */
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -33,7 +34,7 @@ beforeAll(() => {
   writeFileSync(join(project, 'package.json'), '{"name":"adopter","private":true}');
   pkg(
     'ai-sdlc-fixture-backend',
-    `exports.registerKnowledgeBackends = (r) => r.registerKnowledgeBackend('fixture', (cfg) => (${STORE}));\n`,
+    `exports.seen = [];\nexports.registerKnowledgeBackends = (r) => r.registerKnowledgeBackend('fixture', (cfg, root) => { exports.seen.push({ cfg, root }); return (${STORE}); });\n`,
   );
   pkg(
     'ai-sdlc-fixture-duplicate',
@@ -70,6 +71,15 @@ describe('openKnowledgeStore backend selection (DEC-0427)', () => {
     expect(open('fixture', 'ai-sdlc-fixture-backend').kind).toBe('fixture');
   });
 
+  it('passes the factory the config and the project root it was opened with', () => {
+    const cfg = { trackedRoot: 'kb', backend: 'fixture', backendModule: 'ai-sdlc-fixture-backend' };
+    openKnowledgeStore(cfg, project);
+    const req = createRequire(join(project, 'package.json'));
+    const seen = (req('ai-sdlc-fixture-backend') as { seen: { cfg: unknown; root: string }[] })
+      .seen;
+    expect(seen.at(-1)).toEqual({ cfg, root: project });
+  });
+
   it('throws for an unregistered name, naming backend and module', () => {
     expect(() => open('remote', null)).toThrow(KnowledgeBackendError);
     expect(() => open('remote', null)).toThrow(/'remote' is not registered.*unset/);
@@ -96,6 +106,10 @@ describe('openKnowledgeStore backend selection (DEC-0427)', () => {
     ['data URL', 'data:text/javascript,export default 1'],
     ['https URL', 'https://example.com/evil.js'],
     ['node builtin', 'node:fs'],
+    ['dot-dot subpath', 'x/../../evil.js'],
+    ['scoped dot-dot subpath', '@scope/pkg/../../../evil.js'],
+    ['dot subpath', 'pkg/./evil.js'],
+    ['backslash path', 'pkg\\..\\evil.js'],
   ])('refuses a %s specifier, naming the key', (_label, spec) => {
     expect(() => open('fixture', spec)).toThrow(KnowledgeBackendError);
     expect(() => open('fixture', spec)).toThrow(/knowledge\.backendModule/);
