@@ -4,7 +4,7 @@ import { isAbsolute, join } from 'node:path';
 import { readDataRoomEntries } from '../data-room.js';
 import { loadKnowledgeConfig, loadRetrievalConfig } from '../config.js';
 import { harnessRecallHits } from '../ingest-memory.js';
-import { readEntries } from '../store.js';
+import { openKnowledgeStore, toEntries } from '../knowledge-store.js';
 import {
   compactLedger,
   ensureLedger,
@@ -31,8 +31,7 @@ function open(projectRoot: string, embedder?: Embedder) {
 export async function rebuildIndex(projectRoot: string, embedder?: Embedder): Promise<number> {
   const k = loadKnowledgeConfig(projectRoot);
   const entries = [
-    ...readEntries(abs(projectRoot, k.trackedRoot)),
-    ...readEntries(abs(projectRoot, k.protectedRoot)),
+    ...toEntries(openKnowledgeStore(k, projectRoot).list('all')),
     ...(k.dataRoomRoot ? readDataRoomEntries(abs(projectRoot, k.dataRoomRoot)) : []),
   ].filter((e) => !e.superseded);
   const cfg = loadRetrievalConfig(projectRoot);
@@ -111,10 +110,7 @@ export function compactSession(
   const k = loadKnowledgeConfig(projectRoot);
   const text = squash(summary);
   const values = new Map<string, string>();
-  for (const e of [
-    ...readEntries(abs(projectRoot, k.trackedRoot)),
-    ...readEntries(abs(projectRoot, k.protectedRoot)),
-  ]) {
+  for (const e of toEntries(openKnowledgeStore(k, projectRoot).list('all'))) {
     values.set(e.id, squash(e.value));
   }
   return compactLedger(projectRoot, sessionId, (row) => {

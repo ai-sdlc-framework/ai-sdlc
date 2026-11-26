@@ -12,7 +12,7 @@ import {
 import { parseEntryFile, toEntry, validateEntryFields } from './entry.js';
 import { DEFAULT_ONTOLOGY } from './ontology.js';
 import { rebuildIndex, queryIndex } from './retrieval/service.js';
-import { readEntries } from './store.js';
+import { openKnowledgeStore } from './knowledge-store.js';
 
 let root: string;
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -89,7 +89,7 @@ describe('capture and export', () => {
     const e = toEntry(parsed.fields, parsed.body);
     expect(e.scope).toBe('protected');
     expect(e.source).toBe('data-room:msa-signed.md');
-    expect(readEntries(prot)).toHaveLength(1);
+    expect(openKnowledgeStore({ protectedRoot: prot }).list('protected')).toHaveLength(1);
   });
 
   it('export excludes the protected partition by scope', () => {

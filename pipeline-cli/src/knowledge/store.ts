@@ -1,12 +1,12 @@
 /**
- * Scans the two knowledge roots (tracked + protected) and validates entries
- * and the ontology. Also checks a PR body for citations of protected entries.
+ * Validates the entries of the two knowledge roots (tracked + protected), read through the
+ * `KnowledgeStore`, and the ontology. Also checks a PR body for citations of protected entries.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import { loadKnowledgeConfig, type KnowledgeConfig } from './config.js';
 import { classifyEntry } from './classify.js';
-import { parseEntryFile, toEntry, validateEntryFields, type KnowledgeEntry } from './entry.js';
+import { toEntry, validateEntryFields } from './entry.js';
+import { openKnowledgeStore, toEntries } from './knowledge-store.js';
 import { loadOntology } from './ontology.js';
 
 export interface Finding {
@@ -24,27 +24,6 @@ function abs(projectRoot: string, p: string): string {
   return isAbsolute(p) ? p : join(projectRoot, p);
 }
 
-function listMarkdown(dir: string): string[] {
-  if (!existsSync(dir)) return [];
-  const out: string[] = [];
-  for (const d of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, d.name);
-    if (d.isDirectory()) out.push(...listMarkdown(full));
-    else if (d.isFile() && d.name.endsWith('.md')) out.push(full);
-  }
-  return out.sort();
-}
-
-/** Parse every entry file under a root, skipping unparseable ones (reported by validate). */
-export function readEntries(dir: string): KnowledgeEntry[] {
-  const entries: KnowledgeEntry[] = [];
-  for (const file of listMarkdown(dir)) {
-    const parsed = parseEntryFile(readFileSync(file, 'utf-8'));
-    if ('fields' in parsed) entries.push(toEntry(parsed.fields, parsed.body));
-  }
-  return entries;
-}
-
 export function validateKnowledge(
   projectRoot: string,
   config: KnowledgeConfig = loadKnowledgeConfig(projectRoot),
@@ -58,18 +37,15 @@ export function validateKnowledge(
   }
   if (ontologyErrors.length > 0) return report;
 
-  const roots: [string, string][] = [
-    [trackedAbs, 'tracked'],
-    [protectedAbs, 'protected'],
-  ];
+  const dirs = { tracked: trackedAbs, protected: protectedAbs };
+  const store = openKnowledgeStore(config, projectRoot);
   const seenIds = new Map<string, string>();
-  for (const [dir, kind] of roots) {
-    for (const file of listMarkdown(dir)) {
+  for (const kind of ['tracked', 'protected'] as const) {
+    for (const { path, parsed } of store.listRaw(kind)) {
       // The README init scaffolds at the root (AISDLC-1408) describes the store; it is not an entry.
-      if (relative(dir, file) === 'README.md') continue;
-      const rel = relative(projectRoot, file);
+      if (path === 'README.md') continue;
+      const rel = relative(projectRoot, join(dirs[kind], path));
       report.entries++;
-      const parsed = parseEntryFile(readFileSync(file, 'utf-8'));
       if ('error' in parsed) {
         report.errors.push({ file: rel, message: parsed.error });
         continue;
@@ -94,7 +70,7 @@ export function validateKnowledge(
         });
       }
       // Layout: <root>/<trunk>/<topic>.md
-      const parts = relative(dir, file).split(/[\\/]/);
+      const parts = path.split(/[\\/]/);
       if (parts.length !== 2 || parts[0] !== entry.trunk) {
         report.errors.push({
           file: rel,
@@ -116,8 +92,8 @@ export function findProtectedCitations(
   config: KnowledgeConfig = loadKnowledgeConfig(projectRoot),
 ): string[] {
   const cited: string[] = [];
-  const protectedAbs = abs(projectRoot, config.protectedRoot);
-  for (const e of readEntries(protectedAbs)) {
+  const store = openKnowledgeStore({ protectedRoot: config.protectedRoot }, projectRoot);
+  for (const e of toEntries(store.list('protected'))) {
     const re = new RegExp(
       `(^|[^A-Za-z0-9_-])${e.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_-])`,
     );

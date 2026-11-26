@@ -112,3 +112,38 @@ describe('FilesKnowledgeStore roots', () => {
     expect(() => protectedOnly.get('dup', { scope: 'tracked' })).toThrow(/no tracked root/);
   });
 });
+
+describe('FilesKnowledgeStore list(scope) and listRaw(scope)', () => {
+  it('lists every entry of a root recursively in path order, skipping unparseable files', () => {
+    const store = openKnowledgeStore(ROOTS, root);
+    expect(store.list('tracked')).toEqual([]);
+    store.put({ fields: fields('b', 'systems'), body: '' }, { scope: 'tracked' });
+    store.put({ fields: fields('a', 'memory'), body: '' }, { scope: 'tracked' });
+    store.put({ fields: fields('p'), body: '' }, { scope: 'protected' });
+    writeFileSync(join(root, ROOTS.trackedRoot, 'systems/junk.md'), 'no frontmatter');
+    expect(store.list('tracked').map((e) => e.path)).toEqual(['memory/a.md', 'systems/b.md']);
+    expect(store.list('protected').map((e) => e.fields.id)).toEqual(['p']);
+    expect(store.list('all').map((e) => [e.scope, e.fields.id])).toEqual([
+      ['tracked', 'a'],
+      ['tracked', 'b'],
+      ['protected', 'p'],
+    ]);
+  });
+
+  it('listRaw reports the parse error of an unparseable file', () => {
+    const store = openKnowledgeStore(ROOTS, root);
+    store.put({ fields: fields('a'), body: '' }, { scope: 'tracked' });
+    writeFileSync(join(root, ROOTS.trackedRoot, 'systems/junk.md'), 'no frontmatter');
+    const raw = store.listRaw('all');
+    expect(raw.map((r) => r.path)).toEqual(['systems/a.md', 'systems/junk.md']);
+    expect(raw[1]!.parsed).toEqual({ error: 'missing YAML frontmatter' });
+  });
+
+  it('all covers only the configured roots', () => {
+    const tracked = join(root, ROOTS.trackedRoot);
+    const store = openKnowledgeStore({ trackedRoot: tracked });
+    store.put({ fields: fields('a'), body: '' }, { scope: 'tracked' });
+    expect(store.list('all').map((e) => e.fields.id)).toEqual(['a']);
+    expect(() => store.listRaw('protected')).toThrow(/no protected root/);
+  });
+});

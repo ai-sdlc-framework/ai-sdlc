@@ -13,7 +13,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import * as yaml from '../../util/yaml.js';
 import { loadKnowledgeConfig } from '../config.js';
-import { readEntries } from '../store.js';
+import { openKnowledgeStore, toEntries } from '../knowledge-store.js';
 import { ndcgAtK, recallAtK, reciprocalRank, type Judgments } from './metrics.js';
 
 export const GOLDEN_SET_PATH = '.ai-sdlc/context-eval/golden.yaml';
@@ -73,9 +73,8 @@ export function loadGolden(projectRoot: string, file = GOLDEN_SET_PATH): EvalQue
 /** Ids of the live (non-superseded) entries in both knowledge roots. */
 export function liveEntryIds(projectRoot: string): Set<string> {
   const k = loadKnowledgeConfig(projectRoot);
-  const at = (p: string): string => (isAbsolute(p) ? p : join(projectRoot, p));
   return new Set(
-    [...readEntries(at(k.trackedRoot)), ...readEntries(at(k.protectedRoot))]
+    toEntries(openKnowledgeStore(k, projectRoot).list('all'))
       .filter((e) => !e.superseded)
       .map((e) => e.id),
   );
