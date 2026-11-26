@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1426
 title: Memory re-ingest after a dream swap is skipped on a non-files knowledge backend
-status: To Do
+status: In Progress
 priority: medium
 labels:
   - pipeline-cli
