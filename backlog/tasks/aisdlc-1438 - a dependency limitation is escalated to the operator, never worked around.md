@@ -12,7 +12,6 @@ references:
   - docs/operations/prompt-rules.md
   - docs/operations/decision-authority.md
   - docs/operations/tooling-limitations.md
-  - pipeline-cli/src/cli/file-pacing.ts
 ---
 
 ## Description

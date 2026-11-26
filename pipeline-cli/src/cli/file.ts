@@ -9,7 +9,7 @@
  * through the docs lane (`--source-kind docs`); no replacement PR is opened.
  *
  *   cli-file task --close <id> --reason <text> [--superseded-by <id>] [--pr]
- *   cli-file task <path> [--pr] [--no-brief] [--fixes-pr <n>] [--queue] [--spacing-minutes <n>]
+ *   cli-file task <path> [--pr] [--no-brief] [--fixes-pr <n>]
  *   cli-file decision <DEC-NNNN> --task-id <ID> [--answer <option>] [--rationale <t>] [--pr]
  *   cli-file rebase <id> [--pr]
  */
@@ -25,7 +25,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import yargs, { type Argv } from 'yargs';
+import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { now as clockNow } from '../clock.js';
 import {
@@ -34,7 +34,6 @@ import {
   readDecisionEvents,
   resolveEventsDir,
 } from '../decisions/event-log.js';
-import { defaultPacingDeps, paceFiling, recordFiling, type PacingDeps } from './file-pacing.js';
 import { FILE_BRANCH_PREFIX, UPDATE_BRANCH_PREFIX } from '../hierarchy/filing-branches.js';
 import { isProtectedBranch } from '../hierarchy/lease-policy.js';
 import { writeAutoBrief } from '../hierarchy/auto-brief.js';
@@ -257,7 +256,6 @@ function publish(
     const r = deps.exec('gh', buildPrCreateArgs(p), wt);
     if (r.status !== 0) throw new Error(`gh pr create failed: ${r.stderr.trim()}`);
     prUrl = r.stdout.trim().split('\n').pop() ?? null;
-    recordFiling(p.repo);
     removeLocalFilingBranch(deps, p, wt);
   }
   return { branch: p.branch, prUrl };
@@ -987,34 +985,9 @@ function armDocsPr(deps: FileDeps, repo: string, number: number): boolean {
 
 // -- CLI --------------------------------------------------------------------------
 
-/** Quotes one argument for a POSIX shell; plain words pass through unchanged. */
-function shellQuote(arg: string): string {
-  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
-}
-
-/**
- * AISDLC-1160: the replay line for a queued filing, built from the argv the CLI received
- * (pacing flags removed) so every flag the operator passed is carried.
- */
-export function replayCommand(argv: string[]): string {
-  const kept: string[] = [];
-  for (let i = 0; i < argv.length; i++) {
-    const t = argv[i];
-    if (/^--(no-)?queue(=.*)?$/.test(t)) continue;
-    if (/^--spacing-?[mM]inutes=/.test(t)) continue;
-    if (/^--spacing-?[mM]inutes$/.test(t)) {
-      i++;
-      continue;
-    }
-    kept.push(t);
-  }
-  return ['cli-file', ...kept].map(shellQuote).join(' ');
-}
-
 export async function runFileCli(
   argv: string[] = hideBin(process.argv),
   deps: FileDeps = defaultDeps,
-  pacingDeps: PacingDeps = defaultPacingDeps,
 ): Promise<number> {
   const repo = process.cwd();
   let code = 0;
@@ -1032,45 +1005,13 @@ export async function runFileCli(
       return undefined;
     }
   };
-  /** AISDLC-986: pace a `--pr` filing; false when it was queued instead. */
-  const paced = async (a: Record<string, unknown>, id: string): Promise<boolean> => {
-    if (!a.pr) return true;
-    try {
-      const outcome = await paceFiling(
-        repo,
-        {
-          id,
-          command: replayCommand(argv),
-          spacingMinutes: a.spacingMinutes as number | undefined,
-          queue: a.queue as boolean,
-        },
-        pacingDeps,
-      );
-      return outcome === 'proceed';
-    } catch (err) {
-      process.stderr.write(`[cli-file] error: ${(err as Error).message}\n`);
-      code = 2;
-      return false;
-    }
-  };
-  const pacingOptions = <T>(y: Argv<T>) =>
-    y
-      .option('queue', {
-        type: 'boolean',
-        default: false,
-        describe: 'with --pr: queue a brief for the next window instead of waiting on the spacing',
-      })
-      .option('spacing-minutes', {
-        type: 'number',
-        describe: 'minutes between PR filings (default 15; env AI_SDLC_FILE_SPACING_MINUTES)',
-      });
   await yargs(argv)
     .scriptName('cli-file')
     .command(
       'task [path]',
       'validate and file a backlog task, or close one with --close',
       (y) =>
-        pacingOptions(y)
+        y
           .positional('path', { type: 'string' })
           .option('close', {
             type: 'string',
@@ -1101,7 +1042,6 @@ export async function runFileCli(
           }),
       async (a) => {
         if (a.close !== undefined) {
-          if (!(await paced(a, a.close as string))) return;
           const c = guard(() =>
             closeTask(
               repo,
@@ -1122,7 +1062,6 @@ export async function runFileCli(
           code = 2;
           return;
         }
-        if (!(await paced(a, basename(a.path as string)))) return;
         const r = guard(() =>
           fileTask(
             repo,
@@ -1143,16 +1082,13 @@ export async function runFileCli(
       'decision <id>',
       'validate and file decision-log events',
       (y) =>
-        pacingOptions(
-          y
-            .positional('id', { type: 'string', demandOption: true })
-            .option('task-id', { type: 'string', demandOption: true })
-            .option('answer', { type: 'string' })
-            .option('rationale', { type: 'string' })
-            .option('pr', { type: 'boolean', default: false }),
-        ),
+        y
+          .positional('id', { type: 'string', demandOption: true })
+          .option('task-id', { type: 'string', demandOption: true })
+          .option('answer', { type: 'string' })
+          .option('rationale', { type: 'string' })
+          .option('pr', { type: 'boolean', default: false }),
       async (a) => {
-        if (!(await paced(a, a.id as string))) return;
         const r = guard(() =>
           fileDecision(
             repo,
@@ -1173,17 +1109,14 @@ export async function runFileCli(
       'rebase <id>',
       'rebuild a conflicting filing branch in place (lease push, same PR) and re-arm it',
       (y) =>
-        pacingOptions(
-          y
-            .positional('id', { type: 'string', demandOption: true })
-            .option('source', {
-              type: 'string',
-              describe: 'corrected task file that replaces the branch copy (same id required)',
-            })
-            .option('pr', { type: 'boolean', default: false }),
-        ),
+        y
+          .positional('id', { type: 'string', demandOption: true })
+          .option('source', {
+            type: 'string',
+            describe: 'corrected task file that replaces the branch copy (same id required)',
+          })
+          .option('pr', { type: 'boolean', default: false }),
       async (a) => {
-        if (!(await paced(a, a.id as string))) return;
         const r = guard(() =>
           fileRebase(
             repo,

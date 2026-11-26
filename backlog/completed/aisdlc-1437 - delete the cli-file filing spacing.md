@@ -1,22 +1,20 @@
 ---
 id: AISDLC-1437
 title: "Delete the cli-file filing spacing (AISDLC-986) and the dead filing queue"
-status: To Do
+status: Done
 priority: high
 labels:
   - pipeline-cli
   - delete
 dependencies: []
 references:
-  - pipeline-cli/src/cli/file-pacing.ts
-  - pipeline-cli/src/cli/file-pacing.test.ts
   - pipeline-cli/src/cli/file.ts
   - pipeline-cli/src/cli/file.test.ts
   - docs/operations/tooling-limitations.md
   - docs/operations/pre-push-and-ci-reference.md
   - docs/operations/incidents/README.md
   - docs/operations/incidents/2026-10-15-installation-api-quota-exhaustion.md
-  - backlog/tasks/aisdlc-1415 - cli-file queues paced filings by default and the host runs them.md
+  - backlog/completed/aisdlc-1415 - cli-file queues paced filings by default and the host runs them.md
   - backlog/tasks/aisdlc-1414 - command and gate timing telemetry with a slow-command report.md
 ---
 

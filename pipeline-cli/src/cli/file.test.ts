@@ -21,13 +21,10 @@ import {
   buildPrCreateArgs,
   closeTask,
   parseLogStrict,
-  replayCommand,
   runFileCli,
   taskIdOf,
   type FileDeps,
 } from './file.js';
-import { setClock } from '../clock.js';
-import { recordFiling, type PacingDeps } from './file-pacing.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const sh = (cwd: string, ...args: string[]) =>
@@ -855,15 +852,12 @@ describe('cli-file', () => {
 
     it('the CLI routes --close and refuses a missing path', async () => {
       seed();
-      const pacing: PacingDeps = { ...(await import('./file-pacing.js')).defaultPacingDeps };
       const cwd = process.cwd();
       process.chdir(repo);
       try {
-        expect(
-          await runFileCli(['task', '--close', 'AISDLC-900', '--reason', 'r'], deps, pacing),
-        ).toBe(0);
-        expect(await runFileCli(['task'], deps, pacing)).toBe(2);
-        expect(await runFileCli(['task', '--close', 'AISDLC-900'], deps, pacing)).toBe(1);
+        expect(await runFileCli(['task', '--close', 'AISDLC-900', '--reason', 'r'], deps)).toBe(0);
+        expect(await runFileCli(['task'], deps)).toBe(2);
+        expect(await runFileCli(['task', '--close', 'AISDLC-900'], deps)).toBe(1);
       } finally {
         process.chdir(cwd);
       }
@@ -924,106 +918,64 @@ describe('cli-file', () => {
     expect(() => fileTask(repo, writeTask(), { pr: false }, deps)).not.toThrow();
   });
 
-  describe('AISDLC-1160 queued brief replays the real argv', () => {
-    const T0 = new Date('2026-10-20T12:00:00Z');
-    let restore: () => void;
-    let pacing: PacingDeps;
+  describe('AISDLC-1437 filings are not spaced', () => {
     let cwd0: string;
     beforeEach(() => {
-      commitMain(
-        EVENT_LOG_REL,
-        [
-          ev('DEC-0001', 'decision-opened'),
-          ev('DEC-0005', 'decision-opened', { options: [{ id: 'opt-a' }, { id: 'opt-b' }] }),
-        ].join('\n') + '\n',
-      );
       cwd0 = process.cwd();
       process.chdir(repo);
-      restore = setClock(() => new Date(T0.getTime() + 60_000));
-      pacing = { readRateLimit: () => null, sleep: async () => {}, log: () => {} };
-      const prev = setClock(() => T0);
-      recordFiling(repo);
-      prev();
-      restore();
-      restore = setClock(() => new Date(T0.getTime() + 60_000));
     });
-    afterEach(() => {
-      restore();
-      process.chdir(cwd0);
-    });
-    const briefRun = (id: string): string => {
-      const f = join(repo, `.ai-sdlc/dispatch/queued-filings/filing-${id}.md`);
-      const m = readFileSync(f, 'utf8').match(/^Run: `(.*)`$/m);
-      return m![1];
-    };
-    const words = (line: string): string[] =>
-      spawnSync('sh', ['-c', `printf '%s\\n' ${line}`], { encoding: 'utf8' })
-        .stdout.split('\n')
-        .slice(0, -1);
+    afterEach(() => process.chdir(cwd0));
 
-    it('decision: carries --answer and quoted --rationale, drops --queue; replay appends the answer', async () => {
-      const argv = [
-        'decision',
-        'DEC-0005',
-        '--task-id',
-        'X-1',
-        '--answer',
-        'opt-a',
-        '--rationale',
-        'two words',
-        '--pr',
-        '--queue',
-      ];
-      expect(await runFileCli(argv, deps, pacing)).toBe(0);
-      const line = briefRun('dec-0005');
-      expect(line).toContain('--answer opt-a');
-      expect(line).toContain("--rationale 'two words'");
-      expect(line).not.toContain('--queue');
-      restore();
-      restore = setClock(() => new Date(T0.getTime() + 20 * 60_000));
-      const replay = words(line);
-      expect(replay[0]).toBe('cli-file');
-      expect(await runFileCli(replay.slice(1), deps, pacing)).toBe(0);
-      const branch = sh(remote, 'branch', '--list', 'ai-sdlc/file-dec-0005-*')
-        .replace('*', '')
-        .trim();
-      const log = sh(remote, 'show', `${branch}:${EVENT_LOG_REL}`);
-      const answered = log.split('\n').filter((l) => l.includes('"operator-answered"'));
-      expect(answered).toHaveLength(1);
-      expect(answered[0]).toContain('"chosenOptionId":"opt-a"');
+    it('two back-to-back task --pr filings both open a PR with no wait and no rate_limit call', async () => {
+      const execCalls: string[][] = [];
+      const recording: FileDeps = {
+        ...deps,
+        exec(cmd, args, cwd) {
+          execCalls.push([cmd, ...args]);
+          return deps.exec(cmd, args, cwd);
+        },
+      };
+      const a = writeTask('aisdlc-900 - thing.md');
+      mkdirSync(join(repo, 'backlog/tasks'), { recursive: true });
+      const b = join('backlog/tasks', 'aisdlc-901 - other.md');
+      writeFileSync(join(repo, b), '---\nid: AISDLC-901\n---\nbody\n');
+      const out: string[] = [];
+      const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
+        out.push(String(chunk));
+        return true;
+      });
+      const started = Date.now();
+      try {
+        expect(await runFileCli(['task', a, '--pr', '--no-brief'], recording)).toBe(0);
+        expect(await runFileCli(['task', b, '--pr', '--no-brief'], recording)).toBe(0);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(Date.now() - started).toBeLessThan(60_000);
+      const prs = out.map((l) => JSON.parse(l) as { prUrl: string | null });
+      expect(prs.map((r) => r.prUrl)).toEqual([
+        'https://github.com/o/r/pull/1',
+        'https://github.com/o/r/pull/1',
+      ]);
+      expect(ghCalls.filter((c) => c[0] === 'pr' && c[1] === 'create')).toHaveLength(2);
+      expect(execCalls.some((c) => c.includes('rate_limit'))).toBe(false);
+      expect(existsSync(join(repo, '.ai-sdlc/dispatch'))).toBe(false);
     });
 
-    it('task: carries --no-brief, --fixes-pr and --update', async () => {
-      const argv = [
-        'task',
-        'backlog/tasks/a.md',
-        '--no-brief',
-        '--fixes-pr',
-        '12',
-        '--update',
-        '--pr',
-        '--queue',
-        '--spacing-minutes',
-        '30',
-      ];
-      expect(await runFileCli(argv, deps, pacing)).toBe(0);
-      expect(briefRun('a.md')).toBe(
-        'cli-file task backlog/tasks/a.md --no-brief --fixes-pr 12 --update --pr',
-      );
-    });
-
-    it('rebase: carries --source', async () => {
-      const argv = ['rebase', 'aisdlc-9', '--source', '/tmp/my dir/x.md', '--pr', '--queue'];
-      expect(await runFileCli(argv, deps, pacing)).toBe(0);
-      expect(briefRun('aisdlc-9')).toBe(
-        "cli-file rebase aisdlc-9 --source '/tmp/my dir/x.md' --pr",
-      );
-    });
-
-    it('replayCommand strips pacing flags in every spelling and quotes quotes', () => {
-      expect(
-        replayCommand(['task', "it's", '--queue=true', '--spacing-minutes=3', '--no-queue']),
-      ).toBe("cli-file task 'it'\\''s'");
+    it('the removed pacing flags are refused as unknown options', async () => {
+      const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      const exit = vi.spyOn(process, 'exit').mockImplementation(((c?: number) => {
+        throw new Error(`exit ${c}`);
+      }) as never);
+      try {
+        await expect(runFileCli(['task', writeTask(), '--pr', '--queue'], deps)).rejects.toThrow(
+          /exit 1/,
+        );
+      } finally {
+        err.mockRestore();
+        exit.mockRestore();
+      }
+      expect(ghCalls).toHaveLength(0);
     });
   });
 
