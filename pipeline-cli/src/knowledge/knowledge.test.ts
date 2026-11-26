@@ -212,6 +212,30 @@ describe('loadKnowledgeConfig', () => {
     expect(c.trackedRoot).toBe('kb');
     expect(c.protectedRoot).toBe('../kb-private');
   });
+  it('defaults knowledge.backend to files with no backendModule when the key is missing', () => {
+    const c = loadKnowledgeConfig(
+      project({ '.ai-sdlc/context.yaml': 'knowledge:\n  trackedRoot: kb\n' }),
+    );
+    expect(c.backend).toBe('files');
+    expect(c.backendModule).toBeNull();
+  });
+  it('reads backend: files', () => {
+    const c = loadKnowledgeConfig(
+      project({ '.ai-sdlc/context.yaml': 'knowledge:\n  backend: files\n' }),
+    );
+    expect(c.backend).toBe('files');
+    expect(c.backendModule).toBeNull();
+  });
+  it('reads a named backend and its backendModule', () => {
+    const c = loadKnowledgeConfig(
+      project({
+        '.ai-sdlc/context.yaml':
+          'knowledge:\n  backend: remote\n  backendModule: "@acme/knowledge-remote"\n',
+      }),
+    );
+    expect(c.backend).toBe('remote');
+    expect(c.backendModule).toBe('@acme/knowledge-remote');
+  });
 });
 
 describe('ontology', () => {

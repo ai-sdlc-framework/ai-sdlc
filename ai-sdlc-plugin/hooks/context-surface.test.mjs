@@ -142,6 +142,19 @@ describe('fail-open', () => {
     assert.equal(res.stdout.trim(), '');
   });
 
+  it('unregistered knowledge backend: exit 0, no injection, error on stderr (DEC-0427)', () => {
+    const bad = join(dir, 'backend-error.sh');
+    writeFileSync(
+      bad,
+      '#!/bin/bash\necho "KnowledgeBackendError: knowledge backend \'remote\' is not registered" >&2\nexit 1\n',
+    );
+    chmodSync(bad, 0o755);
+    const res = run('userPrompt', INPUTS.userPrompt, { cli: bad });
+    assert.equal(res.status, 0);
+    assert.equal(res.stdout.trim(), '');
+    assert.match(res.stderr, /knowledge backend 'remote' is not registered/);
+  });
+
   it('garbage output and garbage stdin: exit 0, no injection', () => {
     const junk = join(dir, 'junk.sh');
     writeFileSync(junk, '#!/bin/bash\necho nope\n');

@@ -159,7 +159,13 @@ function surface(moment, input, env, projectDir, spawn = spawnSync) {
       ],
       { encoding: 'utf-8', timeout: 4000, cwd: projectDir },
     );
-    if (!res || res.error || res.status !== 0) return null;
+    if (!res || res.error) return null;
+    if (res.status !== 0) {
+      // Fail open (RFC-0053): surface nothing, block nothing, but report why (e.g. DEC-0427
+      // KnowledgeBackendError for an unregistered knowledge.backend).
+      if (res.stderr) process.stderr.write(String(res.stderr));
+      return null;
+    }
     const hits = (JSON.parse(res.stdout).results || []).filter((h) => h && h.id);
     if (hits.length === 0) return null;
     return {

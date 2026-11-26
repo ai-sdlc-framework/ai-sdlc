@@ -31,7 +31,7 @@ import process from 'node:process';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { now } from '../clock.js';
-import { loadKnowledgeConfig } from '../knowledge/config.js';
+import { DEFAULT_KNOWLEDGE_BACKEND, loadKnowledgeConfig } from '../knowledge/config.js';
 import { openKnowledgeStore, toEntries } from '../knowledge/knowledge-store.js';
 import { captureFact, exportableEntries } from '../knowledge/data-room.js';
 import { checkKnowledgeScope, checkKnowledgeScopeRange } from '../knowledge/scope-check.js';
@@ -116,6 +116,13 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
   return yargs(argv)
     .scriptName('cli-context')
     .option('project-dir', { type: 'string', default: process.cwd() })
+    .middleware((args) => {
+      // DEC-0427: a configured non-files backend must resolve before any subcommand runs;
+      // KnowledgeBackendError propagates and the command exits non-zero (fail closed).
+      const projectDir = String(args['project-dir']);
+      const config = loadKnowledgeConfig(projectDir);
+      if (config.backend !== DEFAULT_KNOWLEDGE_BACKEND) openKnowledgeStore(config, projectDir);
+    })
     .command(
       'validate',
       'Validate knowledge entries and the ontology',

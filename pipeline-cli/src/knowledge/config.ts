@@ -9,8 +9,14 @@ import * as yaml from '../util/yaml.js';
 export const DEFAULT_TRACKED_ROOT = '.ai-sdlc/knowledge';
 export const DEFAULT_PROTECTED_ROOT = '.ai-sdlc/knowledge-protected';
 export const CONTEXT_CONFIG_PATH = '.ai-sdlc/context.yaml';
+/** The only store backend open source ships (RFC-0053 OQ-1/OQ-2, amendment DEC-0427). */
+export const DEFAULT_KNOWLEDGE_BACKEND = 'files';
 
 export interface KnowledgeConfig {
+  /** Store backend name (DEC-0427). `files` unless a package registers another through `backendModule`. */
+  backend: string;
+  /** Bare npm package specifier that registers non-files backends; resolved from the project root. */
+  backendModule: string | null;
   trackedRoot: string;
   protectedRoot: string;
   /** Optional raw data-room root (RFC-0053 OQ-7), indexed read-only at scope protected. Unset by default. */
@@ -29,6 +35,8 @@ function stringList(v: unknown): string[] {
 
 export function loadKnowledgeConfig(projectRoot: string): KnowledgeConfig {
   const config: KnowledgeConfig = {
+    backend: DEFAULT_KNOWLEDGE_BACKEND,
+    backendModule: null,
     trackedRoot: DEFAULT_TRACKED_ROOT,
     protectedRoot: DEFAULT_PROTECTED_ROOT,
     dataRoomRoot: null,
@@ -41,6 +49,12 @@ export function loadKnowledgeConfig(projectRoot: string): KnowledgeConfig {
   const doc = yaml.load(readFileSync(file, 'utf-8'), { schema: yaml.JSON_SCHEMA });
   const knowledge = (doc as { knowledge?: Record<string, unknown> } | null)?.knowledge;
   if (!knowledge || typeof knowledge !== 'object') return config;
+  if (typeof knowledge.backend === 'string' && knowledge.backend !== '') {
+    config.backend = knowledge.backend;
+  }
+  if (typeof knowledge.backendModule === 'string' && knowledge.backendModule !== '') {
+    config.backendModule = knowledge.backendModule;
+  }
   if (typeof knowledge.trackedRoot === 'string' && knowledge.trackedRoot !== '') {
     config.trackedRoot = knowledge.trackedRoot;
   }

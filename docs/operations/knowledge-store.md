@@ -57,6 +57,16 @@ knowledge:
     clientIdentifiers: [Acme]                # names that mark protected material
 ```
 
+### Store backend (DEC-0427)
+
+`knowledge.backend` defaults to `files`, the only backend open source ships. Another name
+needs `knowledge.backendModule`: a bare npm package specifier, resolved from the project
+root, whose package exports `registerKnowledgeBackends(registry)` and calls
+`registry.registerKnowledgeBackend(name, factory)`. Relative or absolute paths and URL
+specifiers are refused. Selection fails closed: an unregistered backend or a module that
+fails to load raises `KnowledgeBackendError`, `cli-context` exits 1, and the surfacing hook
+surfaces nothing and prints the error to stderr. It never falls back to files.
+
 ## Scaffold
 
 `/ai-sdlc init` (and `ai-sdlc init`, `cli-init`, `doctor --fix`) writes two optional files
