@@ -182,41 +182,51 @@ health_missing() {
 #
 # Every session runs this from SessionStart; a hierarchy starts several at once.
 # Overlapping `npm install --prefix <same dir>` runs (and the stale-upgrade
-# rm -rf below) race each other's extraction and leave a partial tree. A
-# mkdir lock (atomic, portable to macOS) serialises them; a waiter re-checks
-# health once it holds the lock and usually finds nothing left to do.
-LOCK_DIR="$PLUGIN_DIR/.ai-sdlc-install.lock"
+# rm -rf below) race each other's extraction and leave a partial tree. A lock
+# file serialises them; a waiter re-checks health once it holds the lock and
+# usually finds nothing left to do.
+#
+# AISDLC-1423: the lock is taken by bash itself (noclobber, i.e. open(2) with
+# O_CREAT|O_EXCL), never by the exit status of the `mkdir` binary. uutils
+# coreutils 0.8.0 (Ubuntu 26.04) `mkdir` exits 0 when the kernel returns EEXIST
+# for an existing directory (uutils#13970), so two racing installers both "won"
+# a mkdir lock. A directory lock left by an older installer is still honoured
+# (its holder pid is read from `<lock>/pid`) and removed when that pid is dead.
+LOCK_FILE="$PLUGIN_DIR/.ai-sdlc-install.lock"
 LOCK_TIMEOUT="${AI_SDLC_INSTALL_LOCK_TIMEOUT:-300}"
 LOCK_HELD=0
 release_lock() {
   if [ "$LOCK_HELD" = "1" ]; then
-    rm -rf "$LOCK_DIR"
+    rm -f "$LOCK_FILE"
     LOCK_HELD=0
   fi
 }
 trap release_lock EXIT
 waited=0
 waited_s=0
-while ! mkdir "$LOCK_DIR" 2>/dev/null; do
-  holder="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+while ! (set -o noclobber; echo "$$" > "$LOCK_FILE") 2>/dev/null; do
+  if [ -d "$LOCK_FILE" ]; then
+    holder="$(cat "$LOCK_FILE/pid" 2>/dev/null || true)"
+  else
+    holder="$(cat "$LOCK_FILE" 2>/dev/null || true)"
+  fi
   if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
     echo "install-runtime-deps.sh: removing stale install lock left by dead pid $holder" >&2
-    rm -rf "$LOCK_DIR"
+    rm -rf "$LOCK_FILE"
     continue
   fi
   if [ "$waited" = "0" ]; then
-    echo "install-runtime-deps.sh: waited for lock held by another installer ($LOCK_DIR) ..." >&2
+    echo "install-runtime-deps.sh: waited for lock held by another installer ($LOCK_FILE) ..." >&2
     waited=1
   fi
   if [ "$waited_s" -ge "$LOCK_TIMEOUT" ]; then
-    echo "install-runtime-deps.sh: gave up waiting ${LOCK_TIMEOUT}s for install lock $LOCK_DIR (holder pid ${holder:-unknown})" >&2
+    echo "install-runtime-deps.sh: gave up waiting ${LOCK_TIMEOUT}s for install lock $LOCK_FILE (holder pid ${holder:-unknown})" >&2
     exit 1
   fi
   sleep 1
   waited_s=$((waited_s + 1))
 done
 LOCK_HELD=1
-echo "$$" > "$LOCK_DIR/pid"
 
 # ── Version-convergence check (AISDLC-580) ───────────────────────────────────
 #
