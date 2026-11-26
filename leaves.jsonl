@@ -1,0 +1,2 @@
+{"name":"correctness-reviewer","harness":"claude-code","model":"","independenceTier":"none","verdict":"approved","findings":2}
+{"name":"security-reviewer","harness":"claude-code","model":"","independenceTier":"attested","verdict":"approved","findings":0}
