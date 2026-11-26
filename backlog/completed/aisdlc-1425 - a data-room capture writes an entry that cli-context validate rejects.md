@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1425
 title: A data-room capture writes an entry that cli-context validate rejects
-status: In Progress
+status: Done
 priority: medium
 labels:
   - pipeline-cli
