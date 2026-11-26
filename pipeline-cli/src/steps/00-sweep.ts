@@ -25,19 +25,30 @@
  * `rm -rf` plus `git worktree prune`. A failed removal is reported, never counted
  * as swept.
  *
+ * ## Only registered worktrees are touched (AISDLC-1412)
+ *
+ * `git worktree list --porcelain` in the repository is the single source of
+ * truth for "is a worktree". An entry under `.worktrees/` it does not list (a
+ * symlink, a plain folder, a separate clone) gets no branch read, no PR lookup,
+ * does not count toward the cap and is never removed, so the `rm -rf` fallback
+ * only ever runs on a registered worktree. When the list itself fails, the
+ * sweep removes nothing and logs a warning.
+ *
  * @module steps/00-sweep
  */
 
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { SweepResult } from '../types.js';
 import { listInflight } from '../hierarchy/inflight.js';
@@ -283,6 +294,36 @@ async function headAgeMs(wt: string, runner: Runner, nowMs: number): Promise<num
   }
 }
 
+/** Canonical path for comparison: realpath when it exists, else the resolved path. */
+function canonical(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+}
+
+/**
+ * Paths of the repository's registered worktrees (canonical), from
+ * `git worktree list --porcelain`; null when git fails.
+ */
+async function registeredWorktrees(workDir: string, runner: Runner): Promise<Set<string> | null> {
+  try {
+    const r = await runner('git', ['worktree', 'list', '--porcelain'], {
+      cwd: workDir,
+      allowFailure: true,
+    });
+    if (r.code !== 0) return null;
+    const paths = new Set<string>();
+    for (const line of r.stdout.split('\n')) {
+      if (line.startsWith('worktree ')) paths.add(canonical(line.slice('worktree '.length)));
+    }
+    return paths;
+  } catch {
+    return null;
+  }
+}
+
 type Removal = { ok: true; fallback: boolean } | { ok: false; reason: string };
 
 /** `git worktree remove --force`, checked; on refusal `rm -rf` plus `git worktree prune`. */
@@ -336,6 +377,14 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
     return { swept: [] };
   }
 
+  const registered = await registeredWorktrees(opts.workDir, runner);
+  if (registered === null) {
+    log.warn(
+      `[step-0-sweep] git worktree list --porcelain failed in ${opts.workDir}; removing nothing this sweep`,
+    );
+    return { swept: [] };
+  }
+
   let inflight: Set<string>;
   try {
     inflight = new Set(listInflight(boardDir).map((i) => i.taskId.toLowerCase()));
@@ -358,11 +407,14 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
     const wt = join(worktreesDir, entry);
     let st;
     try {
-      st = statSync(wt);
+      // lstat: a symlink is never a worktree directory, whatever it points to.
+      st = lstatSync(wt);
     } catch {
       continue;
     }
     if (!st.isDirectory()) continue;
+    // Not listed by git (plain folder, separate clone): not ours, never touched.
+    if (!registered.has(canonical(wt))) continue;
     count++;
 
     let branch: string;

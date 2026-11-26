@@ -45,6 +45,7 @@ describe('runParentUpkeep worktree sweep (AISDLC-1108)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'upkeep-'));
     mkdirSync(join(dir, '.worktrees', 'gone-1'), { recursive: true });
     const fake = new FakeRunner()
+      .on(/^git worktree list --porcelain/, ok(`worktree ${join(dir, '.worktrees', 'gone-1')}\n`))
       .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/gone-1\n'))
       .on(/^git -C .+ rev-parse HEAD/, ok('sha\n'))
       .on(/^git -C .+ status/, ok(''))

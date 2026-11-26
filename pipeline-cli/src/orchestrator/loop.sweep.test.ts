@@ -54,17 +54,23 @@ function captureSink(): { events: OrchestratorEvent[]; sink: (e: OrchestratorEve
 }
 
 /**
- * Create a minimal worktree fixture under `<workDir>/.worktrees/<wtName>/`
- * with a real git repo so `git rev-parse --abbrev-ref HEAD` returns `<branch>`.
+ * Create a registered worktree under `<workDir>/.worktrees/<wtName>/` on
+ * `<branch>`; `workDir` becomes a git repository on first use. The sweep only
+ * touches worktrees `git worktree list --porcelain` names (AISDLC-1412).
  */
 function makeWorktreeFixture(workDir: string, wtName: string, branch: string): string {
   const wtPath = join(workDir, '.worktrees', wtName);
-  mkdirSync(wtPath, { recursive: true });
-  execSync('git init -b ' + branch, { cwd: wtPath, env: GIT_ENV, stdio: 'pipe' });
-  // Commit so HEAD is not detached (rev-parse needs a resolvable HEAD).
-  writeFileSync(join(wtPath, 'README.md'), '# fixture', 'utf8');
-  execSync('git add README.md', { cwd: wtPath, env: GIT_ENV, stdio: 'pipe' });
-  execSync('git commit -m "init"', { cwd: wtPath, env: GIT_ENV, stdio: 'pipe' });
+  if (!existsSync(join(workDir, '.git'))) {
+    execSync('git init -b main', { cwd: workDir, env: GIT_ENV, stdio: 'pipe' });
+    writeFileSync(join(workDir, 'README.md'), '# fixture', 'utf8');
+    execSync('git add README.md', { cwd: workDir, env: GIT_ENV, stdio: 'pipe' });
+    execSync('git commit -m "init"', { cwd: workDir, env: GIT_ENV, stdio: 'pipe' });
+  }
+  execSync(`git worktree add -b ${branch} ${wtPath}`, {
+    cwd: workDir,
+    env: GIT_ENV,
+    stdio: 'pipe',
+  });
   return wtPath;
 }
 
@@ -105,8 +111,7 @@ function makeRunner(branchStates: Record<string, 'MERGED' | 'OPEN' | null>): {
 
     // Real git execution — allows rev-parse to work against the fixture repos
     // created by makeWorktreeFixture(). `git worktree remove` is intercepted
-    // and handled via rmSync because the fixture repos are standalone (not
-    // linked worktrees), so `git worktree remove` would fail in that context.
+    // and handled via rmSync so the test asserts on directory existence only.
     if (command === 'git') {
       // Intercept `git worktree remove --force <path>` — remove the directory
       // directly so the test can assert on directory existence.
