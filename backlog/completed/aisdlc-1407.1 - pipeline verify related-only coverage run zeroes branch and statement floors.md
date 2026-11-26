@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1407.1
 title: Pipeline verify related-only coverage run zeroes branch and statement floors
-status: To Do
+status: Done
 priority: high
 created_date: '2026-11-26 01:23'
 updated_date: '2026-11-26 01:23'

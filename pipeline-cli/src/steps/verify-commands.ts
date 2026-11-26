@@ -181,7 +181,7 @@ function shQuote(f: string): string {
 export function coverageCommand(pkg: string, related?: readonly string[]): string {
   if (!related || related.length === 0) return `pnpm --filter ./${pkg} test:coverage`;
   // CI keeps the package-wide floors; a related-only run cannot meet them.
-  return `pnpm --filter ./${pkg} exec vitest related --run --passWithNoTests --coverage --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 ${related.map(shQuote).join(' ')}`;
+  return `pnpm --filter ./${pkg} exec vitest related --run --passWithNoTests --coverage --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 --coverage.thresholds.branches=0 --coverage.thresholds.statements=0 ${related.map(shQuote).join(' ')}`;
 }
 
 /** The gate runner invocation that runs only the gates related to the diff against `base`. */
