@@ -12,9 +12,8 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { loadKnowledgeConfig } from '../knowledge/config.js';
-import { readEntries } from '../knowledge/store.js';
+import { openKnowledgeStore, toEntries } from '../knowledge/knowledge-store.js';
 import { queryIndex } from '../knowledge/retrieval/service.js';
 import {
   decisionCatalogDisabledMessage,
@@ -107,9 +106,7 @@ export function createDefaultRetrieval(projectRoot: string): DecisionPointRetrie
     const hits = await queryIndex(projectRoot, { text: query });
     if (hits.length === 0) return [];
     const k = loadKnowledgeConfig(projectRoot);
-    const entries = [k.trackedRoot, k.protectedRoot].flatMap((r) =>
-      readEntries(join(projectRoot, r)),
-    );
+    const entries = toEntries(openKnowledgeStore(k, projectRoot).list('all'));
     const byId = new Map(entries.map((e) => [e.id, e]));
     const out: DecisionPointFinding[] = [];
     for (const h of hits) {

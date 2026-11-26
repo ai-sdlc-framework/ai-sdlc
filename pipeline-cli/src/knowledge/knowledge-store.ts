@@ -1,5 +1,6 @@
 /**
- * The knowledge-store seam (AISDLC-1418): every entry write goes through `KnowledgeStore`.
+ * The knowledge-store seam (AISDLC-1418, AISDLC-1419): every entry read and write goes through
+ * `KnowledgeStore`.
  *
  * RFC-0053 OQ-2 stands: the entries on disk remain the source of truth. `FilesKnowledgeStore`
  * is therefore the only implementation, and `openKnowledgeStore` returns it unconditionally;
@@ -11,10 +12,13 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, join, resolve } from 'node:path';
 import { dump } from '../util/yaml.js';
 import type { KnowledgeConfig } from './config.js';
-import { parseEntryFile } from './entry.js';
+import { parseEntryFile, toEntry, type KnowledgeEntry } from './entry.js';
 
 /** The two RFC-0053 roots: the git-tracked root and the git-ignored protected root. */
 export type StoreScope = 'tracked' | 'protected';
+
+/** A root to list, or every configured root (tracked first). */
+export type ListScope = StoreScope | 'all';
 
 export interface StoredEntry {
   fields: Record<string, unknown>;
@@ -23,6 +27,14 @@ export interface StoredEntry {
   scope: StoreScope;
   /** Location of the entry inside its root (files: path relative to the root). */
   path: string;
+}
+
+/** One stored file with its parse result, so a validator can report what does not parse. */
+export interface RawStoredEntry {
+  scope: StoreScope;
+  /** Location of the file inside its root (files: path relative to the root). */
+  path: string;
+  parsed: { fields: Record<string, unknown>; body: string } | { error: string };
 }
 
 export interface GetOptions {
@@ -57,8 +69,13 @@ export interface KnowledgeStore {
     edit: (fields: Record<string, unknown>) => void,
     opts?: { scope?: StoreScope },
   ): Record<string, unknown> | null;
-  /** Parseable entries stored directly under one trunk of a root. */
-  list(opts: { scope: StoreScope; trunk: string }): StoredEntry[];
+  /**
+   * Parseable entries: every entry of a root (or of all configured roots) in path order, or,
+   * given a trunk, those stored directly under that trunk of one root.
+   */
+  list(scope: ListScope | { scope: StoreScope; trunk: string }): StoredEntry[];
+  /** Every stored file of a root (or of all configured roots) with its parse result or error. */
+  listRaw(scope: ListScope): RawStoredEntry[];
 }
 
 export type KnowledgeStoreRoots = Partial<Pick<KnowledgeConfig, 'trackedRoot' | 'protectedRoot'>>;
@@ -83,6 +100,18 @@ export class FilesKnowledgeStore implements KnowledgeStore {
   private scopes(scope?: StoreScope): StoreScope[] {
     if (scope) return [scope];
     return (['tracked', 'protected'] as const).filter((s) => this.roots[s] !== undefined);
+  }
+
+  private files(scope: StoreScope, dir: string): string[] {
+    const full = join(this.root(scope), dir);
+    if (!existsSync(full)) return [];
+    const out: string[] = [];
+    for (const d of readdirSync(full, { withFileTypes: true })) {
+      const rel = dir === '' ? d.name : join(dir, d.name);
+      if (d.isDirectory()) out.push(...this.files(scope, rel));
+      else if (d.isFile() && d.name.endsWith('.md')) out.push(rel);
+    }
+    return out;
   }
 
   private read(scope: StoreScope, path: string): StoredEntry | null {
@@ -146,7 +175,13 @@ export class FilesKnowledgeStore implements KnowledgeStore {
     return before;
   }
 
-  list(opts: { scope: StoreScope; trunk: string }): StoredEntry[] {
+  list(scope: ListScope | { scope: StoreScope; trunk: string }): StoredEntry[] {
+    if (typeof scope === 'string') {
+      return this.listRaw(scope).flatMap((r) =>
+        'fields' in r.parsed ? [{ ...r.parsed, scope: r.scope, path: r.path }] : [],
+      );
+    }
+    const opts = scope;
     const dir = join(this.root(opts.scope), opts.trunk);
     if (!existsSync(dir)) return [];
     const out: StoredEntry[] = [];
@@ -156,6 +191,24 @@ export class FilesKnowledgeStore implements KnowledgeStore {
     }
     return out;
   }
+
+  listRaw(scope: ListScope): RawStoredEntry[] {
+    const scopes = scope === 'all' ? this.scopes() : [scope];
+    return scopes.flatMap((s) =>
+      this.files(s, '')
+        .sort()
+        .map((path) => ({
+          scope: s,
+          path,
+          parsed: parseEntryFile(readFileSync(join(this.root(s), path), 'utf-8')),
+        })),
+    );
+  }
+}
+
+/** The domain view of stored entries. */
+export function toEntries(stored: StoredEntry[]): KnowledgeEntry[] {
+  return stored.map((e) => toEntry(e.fields, e.body));
 }
 
 /**

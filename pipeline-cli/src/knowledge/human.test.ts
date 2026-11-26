@@ -16,8 +16,11 @@ import {
 } from './human.js';
 import { readKnowledgeLog } from './log.js';
 import { DEFAULT_ONTOLOGY } from './ontology.js';
-import { readEntries } from './store.js';
+import { openKnowledgeStore, toEntries } from './knowledge-store.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
+
+const entriesIn = (trackedRoot: string): KnowledgeEntry[] =>
+  toEntries(openKnowledgeStore({ trackedRoot }).list('tracked'));
 
 let root: string;
 afterEach(() => {
@@ -82,7 +85,7 @@ describe('human surface', () => {
     expect(supersedeEntry(t, 'a', 'b', 'human').ok).toBe(true);
     expect(entryOf(t, 'a').id).toBe('a');
     expect(entryOf(t, 'b').relations).toEqual([{ type: 'supersedes', target: 'a' }]);
-    const all = readEntries(t);
+    const all = entriesIn(t);
     expect(chainHead(all, 'a')).toBe('b');
     expect(liveEntries(all).map((e) => e.id)).toEqual(['b']);
     expect(supersedeEntry(t, 'a', 'a', 'human').ok).toBe(false);
@@ -138,7 +141,7 @@ describe('human surface', () => {
       stale,
       `---\n${JSON.stringify(fields('old', { trunk: 'process', decay: 'volatile', observed: '2025-01-01' }))}\n---\n`,
     );
-    const d = buildDashboard(readEntries(t), DEFAULT_ONTOLOGY.trunks, new Date('2026-10-29'));
+    const d = buildDashboard(entriesIn(t), DEFAULT_ONTOLOGY.trunks, new Date('2026-10-29'));
     const text = renderDashboard(d).join('\n');
     expect(text).toContain("[owner] required trunk 'decisions' has no entries");
     expect(text).toContain("[research] enriching trunk 'products' has no entries");
@@ -167,7 +170,7 @@ describe('human surface', () => {
     await run(['correct', 'a', '--value', 'z']);
     await run(['supersede', 'a', 'b']);
     expect(entryOf(t, 'a').value).toBe('z');
-    expect(chainHead(readEntries(t), 'a')).toBe('b');
+    expect(chainHead(entriesIn(t), 'a')).toBe('b');
     await run(['confirm', 'nope']);
     expect(process.exitCode).toBe(1);
     process.exitCode = 0;

@@ -5,21 +5,10 @@
  * cannot slip past a line-regex.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import { DEFAULT_PROTECTED_ROOT, loadKnowledgeConfig, type KnowledgeConfig } from './config.js';
 import { parseEntryFile } from './entry.js';
-
-function listMarkdown(dir: string): string[] {
-  if (!existsSync(dir)) return [];
-  const out: string[] = [];
-  for (const d of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, d.name);
-    if (d.isDirectory()) out.push(...listMarkdown(full));
-    else if (d.isFile() && d.name.endsWith('.md')) out.push(full);
-  }
-  return out.sort();
-}
+import { openKnowledgeStore, type RawStoredEntry } from './knowledge-store.js';
 
 function git(projectRoot: string, args: string[]): { ok: boolean; out: string } {
   try {
@@ -35,9 +24,8 @@ function git(projectRoot: string, args: string[]): { ok: boolean; out: string } 
   }
 }
 
-/** A violation message when `text` (the content of tracked-root file `rel`) may be a protected entry. */
-function entryScopeViolation(rel: string, text: string): string | null {
-  const parsed = parseEntryFile(text);
+/** A violation message when tracked-root file `rel` (as parsed) may be a protected entry. */
+function entryScopeViolation(rel: string, parsed: RawStoredEntry['parsed']): string | null {
   if ('error' in parsed) {
     // A file with no frontmatter is not an entry; anything else unparseable fails closed.
     if (parsed.error !== 'missing YAML frontmatter') {
@@ -63,9 +51,9 @@ export function checkKnowledgeScope(
   const trackedAbs = isAbsolute(config.trackedRoot)
     ? config.trackedRoot
     : join(projectRoot, config.trackedRoot);
-  for (const file of listMarkdown(trackedAbs)) {
-    const rel = relative(projectRoot, file);
-    const v = entryScopeViolation(rel, readFileSync(file, 'utf-8'));
+  const store = openKnowledgeStore({ trackedRoot: trackedAbs });
+  for (const { path, parsed } of store.listRaw('tracked')) {
+    const v = entryScopeViolation(relative(projectRoot, join(trackedAbs, path)), parsed);
     if (v) violations.push(v);
   }
 
@@ -158,7 +146,7 @@ export function checkKnowledgeScopeRange(
       } else if (trackedRoot && underRoot(path, trackedRoot) && path.endsWith('.md')) {
         const blob = git(projectRoot, ['cat-file', 'blob', newSha]);
         const v = blob.ok
-          ? entryScopeViolation(path, blob.out)
+          ? entryScopeViolation(path, parseEntryFile(blob.out))
           : `${path} (cannot read blob in pushed commit ${short}, cannot prove it is not protected)`;
         if (v) violations.push(blob.ok ? `${v} in pushed commit ${short}` : v);
       }

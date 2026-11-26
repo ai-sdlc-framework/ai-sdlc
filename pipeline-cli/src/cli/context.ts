@@ -32,7 +32,7 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { now } from '../clock.js';
 import { loadKnowledgeConfig } from '../knowledge/config.js';
-import { openKnowledgeStore } from '../knowledge/knowledge-store.js';
+import { openKnowledgeStore, toEntries } from '../knowledge/knowledge-store.js';
 import { captureFact, exportableEntries } from '../knowledge/data-room.js';
 import { checkKnowledgeScope, checkKnowledgeScopeRange } from '../knowledge/scope-check.js';
 import { INGEST_SOURCES, ingestSource, type IngestSource } from '../knowledge/ingest-sources.js';
@@ -71,7 +71,7 @@ import {
   recordHarnessRecall,
   resetSession,
 } from '../knowledge/retrieval/service.js';
-import { findProtectedCitations, readEntries, validateKnowledge } from '../knowledge/store.js';
+import { findProtectedCitations, validateKnowledge } from '../knowledge/store.js';
 
 function knowledgeCtx(projectDir: string) {
   const config = loadKnowledgeConfig(projectDir);
@@ -247,14 +247,9 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
       (y) => y,
       (args) => {
         const projectDir = String(args['project-dir']);
-        const { trackedAbs, verify } = knowledgeCtx(projectDir);
-        const protectedAbs = isAbsolute(verify.config.protectedRoot)
-          ? verify.config.protectedRoot
-          : join(projectDir, verify.config.protectedRoot);
-        const n = writeSynthetic(
-          projectDir,
-          generateSynthetic([...readEntries(trackedAbs), ...readEntries(protectedAbs)]),
-        );
+        const { verify } = knowledgeCtx(projectDir);
+        const store = openKnowledgeStore(verify.config, projectDir);
+        const n = writeSynthetic(projectDir, generateSynthetic(toEntries(store.list('all'))));
         process.stdout.write(`${n} synthetic questions written\n`);
       },
     )
@@ -538,7 +533,10 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
       (y) => y,
       (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
-        const d = buildDashboard(readEntries(ctx.trackedAbs), ctx.verify.ontology.trunks);
+        const d = buildDashboard(
+          toEntries(openKnowledgeStore({ trackedRoot: ctx.trackedAbs }).list('tracked')),
+          ctx.verify.ontology.trunks,
+        );
         process.stdout.write(`${renderDashboard(d).join('\n')}\n`);
       },
     )
@@ -621,10 +619,8 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
       (args) => {
         const projectDir = String(args['project-dir']);
         const config = loadKnowledgeConfig(projectDir);
-        const trackedAbs = isAbsolute(config.trackedRoot)
-          ? config.trackedRoot
-          : join(projectDir, config.trackedRoot);
-        const shared = exportableEntries(readEntries(trackedAbs));
+        const store = openKnowledgeStore({ trackedRoot: config.trackedRoot }, projectDir);
+        const shared = exportableEntries(toEntries(store.list('tracked')));
         process.stdout.write(`${JSON.stringify(shared, null, 2)}\n`);
       },
     )
