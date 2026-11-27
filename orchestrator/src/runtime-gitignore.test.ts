@@ -108,7 +108,9 @@ describe('gitignoreCovers', () => {
     const started = Date.now();
     expect(gitignoreCovers(hostile, ARTIFACTS_GITIGNORE_ENTRY)).toBe(false);
     expect(missingRuntimeGitignorePaths(hostile)).toEqual([...RUNTIME_GITIGNORE_PATHS]);
-    expect(Date.now() - started).toBeLessThan(1000);
+    // Linear runs in under 100ms; a super-linear scan of this input takes far longer.
+    // The ceiling leaves room for a loaded coverage run (one hit 1020ms under 1000).
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 
   it('does not match a comment, a longer name or a different directory', () => {
@@ -256,7 +258,9 @@ describe('gitignoreCovers without git: broader lines and globs', () => {
     const hostile = `${'*'.repeat(5000)}a${'*'.repeat(5000)}b/\n`;
     const started = Date.now();
     expect(gitignoreCovers(hostile, ARTIFACTS_GITIGNORE_ENTRY)).toBe(false);
-    expect(Date.now() - started).toBeLessThan(1000);
+    // Linear runs in under 100ms; a super-linear scan of this input takes far longer.
+    // The ceiling leaves room for a loaded coverage run (one hit 1020ms under 1000).
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 });
 
