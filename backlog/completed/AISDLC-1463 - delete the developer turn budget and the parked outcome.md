@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1463
 title: Delete the developer turn budget (AISDLC-651.3) and the Step 6 parked outcome
-status: In Progress
+status: Done
 priority: high
 labels:
   - ai-sdlc-plugin
@@ -61,9 +61,60 @@ drift_checked: '2026-11-27'
 5. Automate: none.
 
 ## Acceptance Criteria
-- [ ] #1 `developer-turn-budget.js` and its test are gone; `git grep -niE "developer-turn-budget|developerTurnBudget|developer\.turnBudget|TURN BUDGET REACHED|developer-parked|developer-turns\.jsonl|developer-turn-state"` outside `backlog/completed`, CHANGELOG files and `.ai-sdlc/_decisions` returns nothing.
-- [ ] #2 The PostToolUse hook `collect-tool-sequence.js` still records tool sequences as before for every agent type, and adds no `additionalContext` about turns; a `node --test` case covers a developer-agent tool event producing no turn notice.
-- [ ] #3 Step 6 has no parked outcome; the parked types and next-step/execute-host handling are removed and the pipeline-cli tests pass.
-- [ ] #4 The per-role context budget (AISDLC-651.4), hierarchy turn budget (AISDLC-667.1) and escalation-chain `parked` are unchanged (no diff in those files).
-- [ ] #5 `pnpm dark-code:check` passes and `.ai-sdlc/dark-code-baseline.json` does not grow.
-- [ ] #6 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] #1 `developer-turn-budget.js` and its test are gone; `git grep -niE "developer-turn-budget|developerTurnBudget|developer\.turnBudget|TURN BUDGET REACHED|developer-parked|developer-turns\.jsonl|developer-turn-state"` outside `backlog/completed`, CHANGELOG files and `.ai-sdlc/_decisions` returns nothing.
+- [x] #2 The PostToolUse hook `collect-tool-sequence.js` still records tool sequences as before for every agent type, and adds no `additionalContext` about turns; a `node --test` case covers a developer-agent tool event producing no turn notice.
+- [x] #3 Step 6 has no parked outcome; the parked types and next-step/execute-host handling are removed and the pipeline-cli tests pass.
+- [x] #4 The per-role context budget (AISDLC-651.4), hierarchy turn budget (AISDLC-667.1) and escalation-chain `parked` are unchanged (no diff in those files).
+- [x] #5 `pnpm dark-code:check` passes and `.ai-sdlc/dark-code-baseline.json` does not grow.
+- [x] #6 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Final Summary
+
+## Summary
+
+Deleted the AISDLC-651.3 developer turn budget. The hook library and its test are gone, and collect-tool-sequence.js no longer counts turns, adds turn notices, or writes developer-turns.jsonl or developer-turn-state/. The Step 6 parked outcome is removed everywhere it appeared (parse-dev-return, types, execute-pipeline, execute-host, next-step, gh-issue, the replay fixture and its tests), as are the scorecard developer-turn fields, which were fed only by developer-turns.jsonl. The developer.md and execute.md docs no longer mention any of it.
+
+## Changes
+
+- ai-sdlc-plugin/agents/developer.md
+- ai-sdlc-plugin/commands/execute.md
+- ai-sdlc-plugin/commands/execute.test.mjs
+- ai-sdlc-plugin/hooks/collect-tool-sequence.js
+- ai-sdlc-plugin/hooks/collect-tool-sequence.test.mjs
+- ai-sdlc-plugin/hooks/developer-turn-budget.test.mjs
+- ai-sdlc-plugin/hooks/lib/developer-turn-budget.js
+- backlog/tasks/AISDLC-1463 - delete the developer turn budget and the parked outcome.md
+- pipeline-cli/src/execute-pipeline.test.ts
+- pipeline-cli/src/execute-pipeline.ts
+- pipeline-cli/src/next-step/gh-issue.ts
+- pipeline-cli/src/next-step/next-step.test.ts
+- pipeline-cli/src/next-step/next-step.ts
+- pipeline-cli/src/next-step/types.ts
+- pipeline-cli/src/steps/06-parse-dev-return.test.ts
+- pipeline-cli/src/steps/06-parse-dev-return.ts
+- pipeline-cli/src/types.ts
+- pipeline-cli/src/usage/route-commands.ts
+- pipeline-cli/src/usage/scorecard-commands.ts
+- pipeline-cli/src/usage/scorecard-sources.ts
+- pipeline-cli/src/usage/scorecard.test.ts
+- pipeline-cli/src/usage/scorecard.ts
+- pipeline-cli/src/workflow/execute-host.ts
+- pipeline-cli/src/workflow/replay.test.ts
+- pipeline-cli/test/fixtures/workflow/replay/developer-parked.json
+
+## Design decisions
+
+Two grep hits for the AC 1 pattern remain. (1) .ai-sdlc/reviews/aisdlc-762.jsonl is a historical review ledger on a blocked path that agents cannot edit. (2) The AISDLC-1463 task file's own description names the deleted items; the file moves to backlog/completed when the task lands. I ran backlog-drift fix on the task file to drop its references to the three deleted files; the committed file also carries the orchestrator's status change to In Progress. DeveloperReturn.notes is now typed string | Record<string, unknown> so an object notes value still renders through 10-finalize notesText. The replay fixture floor dropped from 29 to 28 because the developer-parked fixture was removed. The scorecard developer-turn fields came only from developer-turns.jsonl, and Step 10 never used them. pnpm dark-code:check passed and the baseline was not changed. The full pnpm test run passed before the rebase onto origin/main; the rebase applied cleanly and the pre-push hook passed.
+
+## Verification
+
+- `pnpm build` — passed (dashboard build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (240 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+
+- 3 reviews approved (harness: code-reviewer=claude-code, test-reviewer=claude-code, security-reviewer=claude-code; harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+
+(none)
