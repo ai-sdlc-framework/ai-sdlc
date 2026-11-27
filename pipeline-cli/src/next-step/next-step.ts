@@ -389,7 +389,8 @@ export function buildSpawnReviewers(
         agent: r.agent,
         subagentType: `${PLUGIN_AGENT_PREFIX}${r.agent}`,
         promptFile: r.promptFile,
-        bootstrapPrompt: bootstrapPromptFor(r.promptFile),
+        ...(r.promptParts ? { promptParts: r.promptParts } : {}),
+        bootstrapPrompt: bootstrapPromptFor(r.promptFile, r.promptParts),
         ...(r.model ? { model: r.model } : {}),
       })),
     replyShape:
