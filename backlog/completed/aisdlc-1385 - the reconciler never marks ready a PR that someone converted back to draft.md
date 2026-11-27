@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1385
 title: 'The reconciler never marks ready a PR that someone converted back to draft'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-22'
 labels:
