@@ -33,7 +33,8 @@ function fixture(exemptions = {}) {
 test('committed manifest is current and sections are sorted', () => {
   assert.deepEqual(checkParity(REPO, null), []);
   const m = JSON.parse(readFileSync(join(REPO, 'conformance/parity/manifest.json'), 'utf8'));
-  assert.equal(Object.keys(m).length, 7);
+  assert.equal(Object.keys(m).length, 8);
+  assert.equal(m.complianceMappings.length, 40);
   assert.equal(m.resourceKinds.length, 11);
   for (const names of Object.values(m)) assert.deepEqual(names, [...names].sort());
 });
@@ -53,6 +54,25 @@ test('fails when a name is added to STANDARD_METRICS without regenerating', () =
   const problems = checkParity(root, {});
   assert.equal(problems.length, 1);
   assert.match(problems[0], /out of date/);
+});
+
+test('fails when a mapping row cites a different clause without regenerating', () => {
+  const root = fixture();
+  const f = join(root, 'reference/src/compliance/mappings.ts');
+  writeFileSync(
+    f,
+    readFileSync(f, 'utf8').replace('Clause 9.2 - Internal Audit', 'Clause 9.9 - Bogus'),
+  );
+  const problems = checkParity(root, {});
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /out of date/);
+});
+
+test('buildManifest refuses a mappings file with no rows', () => {
+  const root = fixture();
+  const f = join(root, 'reference/src/compliance/mappings.ts');
+  writeFileSync(f, readFileSync(f, 'utf8').replaceAll('controlId:', 'control:'));
+  assert.throws(() => buildManifest(root), /complianceMappings: no rows found/);
 });
 
 test('fails when exemptions gain an entry the base lacks', () => {

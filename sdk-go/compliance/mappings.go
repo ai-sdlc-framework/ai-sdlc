@@ -70,11 +70,11 @@ var nistAIRMFMappings = []ControlMapping{
 	{ControlID: "quality-gates", Framework: FrameworkNISTAIRMF, FrameworkReference: "MEASURE 2.6 - AI System Performance", Description: "Quality gates measure and validate system performance continuously"},
 	{ControlID: "audit-logging", Framework: FrameworkNISTAIRMF, FrameworkReference: "GOVERN 1.4 - Organizational Documentation", Description: "Audit logs document AI system decisions and operations"},
 	{ControlID: "autonomy-governance", Framework: FrameworkNISTAIRMF, FrameworkReference: "GOVERN 1.3 - Roles and Responsibilities", Description: "Autonomy governance defines clear AI/human responsibility boundaries"},
-	{ControlID: "provenance-tracking", Framework: FrameworkNISTAIRMF, FrameworkReference: "MAP 2.3 - AI System Provenance", Description: "Provenance tracking maintains artifact lineage and attribution"},
+	{ControlID: "provenance-tracking", Framework: FrameworkNISTAIRMF, FrameworkReference: "MEASURE 2.8 - Transparency and Accountability", Description: "Provenance tracking maintains artifact lineage and attribution"},
 	{ControlID: "human-review", Framework: FrameworkNISTAIRMF, FrameworkReference: "MANAGE 2.2 - Human Oversight", Description: "Human review mechanisms provide oversight at critical decision points"},
 	{ControlID: "kill-switch", Framework: FrameworkNISTAIRMF, FrameworkReference: "MANAGE 4.1 - Incident Response", Description: "Kill switch enables rapid incident response and system halt"},
 	{ControlID: "metrics-collection", Framework: FrameworkNISTAIRMF, FrameworkReference: "MEASURE 1.1 - Measurement Approaches", Description: "Metrics collection provides quantitative measurement of AI performance"},
-	{ControlID: "complexity-routing", Framework: FrameworkNISTAIRMF, FrameworkReference: "MAP 1.5 - Risk Identification", Description: "Complexity routing identifies and mitigates task-level risks"},
+	{ControlID: "complexity-routing", Framework: FrameworkNISTAIRMF, FrameworkReference: "MANAGE 1.2 - Risk Treatment Prioritization", Description: "Complexity routing prioritizes treatment of task-level risks by impact"},
 }
 
 var iso42001Mappings = []ControlMapping{
@@ -85,7 +85,7 @@ var iso42001Mappings = []ControlMapping{
 	{ControlID: "human-review", Framework: FrameworkISO42001, FrameworkReference: "Clause 8.1 - Operational Planning and Control", Description: "Human review supports operational planning and control requirements"},
 	{ControlID: "kill-switch", Framework: FrameworkISO42001, FrameworkReference: "Clause 10.2 - Nonconformity and Corrective Action", Description: "Kill switch enables corrective action for nonconforming AI behavior"},
 	{ControlID: "metrics-collection", Framework: FrameworkISO42001, FrameworkReference: "Clause 9.1 - Performance Evaluation", Description: "Metrics collection supports performance evaluation requirements"},
-	{ControlID: "agent-memory", Framework: FrameworkISO42001, FrameworkReference: "Clause 7.1.6 - Organizational Knowledge", Description: "Agent memory manages organizational knowledge across sessions"},
+	{ControlID: "agent-memory", Framework: FrameworkISO42001, FrameworkReference: "Clause 7.5.3 - Control of Documented Information", Description: "Agent memory controls retained knowledge across sessions"},
 }
 
 var iso12207Mappings = []ControlMapping{

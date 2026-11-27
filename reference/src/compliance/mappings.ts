@@ -149,7 +149,7 @@ export const NIST_AI_RMF_MAPPINGS: readonly ControlMapping[] = [
   {
     controlId: 'provenance-tracking',
     framework: 'nist-ai-rmf',
-    frameworkReference: 'MAP 2.3 - AI System Provenance',
+    frameworkReference: 'MEASURE 2.8 - Transparency and Accountability',
     description: 'Provenance tracking maintains artifact lineage and attribution',
   },
   {
@@ -173,8 +173,8 @@ export const NIST_AI_RMF_MAPPINGS: readonly ControlMapping[] = [
   {
     controlId: 'complexity-routing',
     framework: 'nist-ai-rmf',
-    frameworkReference: 'MAP 1.5 - Risk Identification',
-    description: 'Complexity routing identifies and mitigates task-level risks',
+    frameworkReference: 'MANAGE 1.2 - Risk Treatment Prioritization',
+    description: 'Complexity routing prioritizes treatment of task-level risks by impact',
   },
 ];
 
@@ -225,8 +225,8 @@ export const ISO_42001_MAPPINGS: readonly ControlMapping[] = [
   {
     controlId: 'agent-memory',
     framework: 'iso-42001',
-    frameworkReference: 'Clause 7.1.6 - Organizational Knowledge',
-    description: 'Agent memory manages organizational knowledge across sessions',
+    frameworkReference: 'Clause 7.5.3 - Control of Documented Information',
+    description: 'Agent memory controls retained knowledge across sessions',
   },
 ];
 

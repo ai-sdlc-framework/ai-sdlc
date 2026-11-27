@@ -18,7 +18,7 @@ audit-chain/         — Cross-SDK audit hash chain fixture (fixture.json) and
 
 ## Parity manifest
 
-`parity/manifest.json` lists the named surface of the TypeScript reference in seven sorted sections: `resourceKinds`, `standardMetrics`, `spanNames`, `metricNames`, `attributeKeys`, `complianceControls`, `regulatoryFrameworks`. It is generated from `reference/src/` and `pnpm parity:check` (part of `pnpm test`) fails when it is out of date. Regenerate it with:
+`parity/manifest.json` lists the named surface of the TypeScript reference in eight sorted sections: `resourceKinds`, `standardMetrics`, `spanNames`, `metricNames`, `attributeKeys`, `complianceControls`, `regulatoryFrameworks`, `complianceMappings`. A `complianceMappings` entry is one whole control mapping row, `framework|controlId|frameworkReference|description`, so an SDK that cites a different clause or description for a row fails its suite in both directions (AISDLC-1394). It is generated from `reference/src/` and `pnpm parity:check` (part of `pnpm test`) fails when it is out of date. Regenerate it with:
 
 ```
 node scripts/generate-parity-manifest.mjs
