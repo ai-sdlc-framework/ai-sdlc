@@ -18,6 +18,7 @@ import {
   readInflightManifest,
   releaseInflight,
   TASK_ID_RE,
+  updateQueuedManifest,
   writeVerdict,
 } from './board.js';
 import { writeEscalationFile } from '../hierarchy/escalation-file.js';
@@ -61,6 +62,19 @@ export interface CompleteOptions {
  * `complete` returns it to `queue/` and writes one escalation file instead of a failure verdict.
  */
 export const DEPENDENCY_BLOCKED_CAUSE = 'dependency-blocked';
+
+/**
+ * Blocker ids named by a dependency preflight refusal (`N dependency(ies) not yet Done: A, B`).
+ * Only well-formed task ids are kept; an empty list means the refusal named none.
+ */
+export function refusalBlockerIds(notes: string | undefined): string[] {
+  const m = /not yet Done: ([^;\n"]+)/.exec(notes ?? '');
+  if (!m) return [];
+  return m[1]
+    .split(',')
+    .map((id) => id.trim().toUpperCase())
+    .filter((id) => TASK_ID_RE.test(id));
+}
 
 /** Result of a completion: where the verdict landed. */
 export interface CompleteResult {
@@ -188,9 +202,16 @@ export function completeTask(boardDir: string, opts: CompleteOptions): CompleteR
   if (opts.notes) verdict.notes = opts.notes;
   if (opts.cause) verdict.cause = opts.cause;
   const state = opts.outcome === 'success' || opts.outcome === 'iterate-needed' ? 'done' : 'failed';
-  if (state === 'failed' && opts.cause === DEPENDENCY_BLOCKED_CAUSE) {
+  const blockerIds =
+    state === 'failed' && opts.cause === DEPENDENCY_BLOCKED_CAUSE
+      ? refusalBlockerIds(opts.notes)
+      : [];
+  if (blockerIds.length > 0) {
     // AISDLC-1450: a dependency still open after the origin/main read is a real block. The planner
     // hears of it once (the AISDLC-1382 writer and window); the task waits in the queue for it.
+    // The blockers join the manifest's `after`, so the board holds the claim until they land
+    // instead of handing the task straight back. A refusal naming no blocker (only a dangling
+    // reference) falls through to the failure verdict below: nothing on the board can clear it.
     const reason = oneLine(opts.notes ?? 'dependency preflight refused', 2000);
     const { file } = writeEscalationFile({
       boardDir,
@@ -200,6 +221,8 @@ export function completeTask(boardDir: string, opts: CompleteOptions): CompleteR
       run: () => ({ status: 0, stdout: '', stderr: '' }),
     });
     releaseInflight(boardDir, opts.taskId);
+    const after = [...new Set([...(inflight.after ?? []), ...blockerIds])];
+    updateQueuedManifest(boardDir, opts.taskId, { after });
     return { verdictPath: file, state: 'queue', verdict };
   }
   // The verdict removes the inflight manifest on a failure; keep a copy so the

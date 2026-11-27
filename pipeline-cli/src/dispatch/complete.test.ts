@@ -3,14 +3,25 @@
  * nothing written. The well-formed path is covered in executor-loop.test.ts.
  */
 
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { claimNext, collectVerdicts, readInflightManifest, writeManifest } from './board.js';
-import { completeLandedIterateNeeded, completeTask, DEPENDENCY_BLOCKED_CAUSE } from './complete.js';
+import {
+  claimNext,
+  collectVerdicts,
+  readInflightManifest,
+  updateQueuedManifest,
+  writeManifest,
+} from './board.js';
+import {
+  completeLandedIterateNeeded,
+  completeTask,
+  DEPENDENCY_BLOCKED_CAUSE,
+  refusalBlockerIds,
+} from './complete.js';
 import type { DispatchManifest } from './types.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -179,11 +190,66 @@ describe('completeTask with a dependency-blocked stop (AISDLC-1450)', () => {
     expect(body.message).toContain('ENT-12');
     expect(body.message).toContain('not yet Done');
 
+    // The board now holds the claim until ENT-12 lands, so the task is not handed straight back.
+    const queued = JSON.parse(
+      readFileSync(path.join(board, 'queue', 'ENT-13.dispatch.json'), 'utf-8'),
+    ) as DispatchManifest;
+    expect(queued.after).toEqual(['ENT-12']);
+    expect(
+      claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-a' }).claimed,
+    ).toBe(false);
+
     // A second refusal inside the window reuses the same file.
+    updateQueuedManifest(board, 'ENT-13', { after: [] });
     claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-a' });
     const again = completeTask(board, stop);
     expect(again.verdictPath).toBe(r.verdictPath);
     expect(readdirSync(path.join(board, 'escalations'))).toHaveLength(1);
     expect(existsSync(path.join(board, 'queue', 'ENT-13.dispatch.json'))).toBe(true);
+  });
+
+  it('keeps the existing after entries and adds each blocker once', () => {
+    writeManifest(board, m);
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-a' });
+    // The task file gained ENT-9 after the manifest was queued with ENT-11 and ENT-12.
+    const inflightPath = path.join(board, 'inflight', 'ENT-13.dispatch.json');
+    const claimed = JSON.parse(readFileSync(inflightPath, 'utf-8')) as DispatchManifest;
+    writeFileSync(inflightPath, JSON.stringify({ ...claimed, after: ['ENT-11', 'ENT-12'] }));
+    completeTask(board, {
+      ...stop,
+      notes: stop.notes.replace(
+        '1 dependency(ies) not yet Done: ENT-12',
+        '2 dependency(ies) not yet Done: ENT-12, ENT-9',
+      ),
+    });
+    const queued = JSON.parse(
+      readFileSync(path.join(board, 'queue', 'ENT-13.dispatch.json'), 'utf-8'),
+    ) as DispatchManifest;
+    expect(queued.after).toEqual(['ENT-11', 'ENT-12', 'ENT-9']);
+  });
+
+  it('records a failure when the refusal names no blocker (dangling reference only)', () => {
+    writeManifest(board, m);
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-a' });
+    const r = completeTask(board, {
+      ...stop,
+      notes: 'dependency preflight failed for ENT-13: 1 dangling dependency reference(s): ENT-99',
+    });
+    expect(r.state).toBe('failed');
+    expect(existsSync(path.join(board, 'queue', 'ENT-13.dispatch.json'))).toBe(false);
+    expect(
+      existsSync(path.join(board, 'escalations'))
+        ? readdirSync(path.join(board, 'escalations'))
+        : [],
+    ).toEqual([]);
+  });
+
+  it('reads blocker ids from the refusal reason', () => {
+    expect(refusalBlockerIds(notes)).toEqual(['ENT-12']);
+    expect(
+      refusalBlockerIds('2 dependency(ies) not yet Done: ent-1, AISDLC-2.1; 1 dangling'),
+    ).toEqual(['ENT-1', 'AISDLC-2.1']);
+    expect(refusalBlockerIds(undefined)).toEqual([]);
+    expect(refusalBlockerIds('not yet Done: not an id')).toEqual([]);
   });
 });
