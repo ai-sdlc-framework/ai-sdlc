@@ -229,6 +229,26 @@ item-9 decision record) writes the backend's own replica that `list()` reads, th
 `rebuildIndex` (`pipeline-cli/src/knowledge/retrieval/service.ts`). Nothing but rebuild
 writes the index; the index stays derived, so RFC-0053 OQ-2 is unchanged.
 
+### Sync trigger and status (AISDLC-1459, DEC-0444)
+
+A backend may implement two optional `KnowledgeStore` methods; the `files` backend omits
+both:
+
+- `sync(): Promise<{ pulled, pushed }>` refreshes the replica `list()` reads and sends queued
+  writes.
+- `status(): Promise<{ queued, rejected, lastSyncAt?, lastError? }>` reports writes waiting
+  for the remote, writes it refused, and the backend's own last sync.
+
+`cli-context sync` calls `sync()`, then `rebuildIndex`, prints one JSON line
+(`{"supported":true,"at":...,"ok":true,"pulled":N,"pushed":N,"indexed":N}`) and records the
+same outcome in `.ai-sdlc/state/knowledge-sync.json` (git-ignored runtime state). A sync or
+rebuild error is recorded as `ok: false` with `error` and the command exits 1.
+`cli-context status` prints `status()` merged with that stamp: `queued`, `rejected`,
+`lastSyncAt` and `lastError` (the stamp's time and error win when a `cli-context sync` ran)
+plus the raw stamp as `lastSync`. A `status()` that throws prints
+`{"ok":false,"supported":true,"error":...}` and exits 1. On a backend without the method,
+either command prints `{"ok":true,"supported":false}` and exits 0.
+
 With a configured API embedder each rebuild re-embeds every entry; there is no embedding
 cache. A `contentHash` cache is a follow-up only if measured cost requires it.
 

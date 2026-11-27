@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1459
 title: Knowledge backend optional sync() and status(), with cli-context sync and status
-status: To Do
+status: In Progress
 priority: medium
 labels:
   - pipeline-cli

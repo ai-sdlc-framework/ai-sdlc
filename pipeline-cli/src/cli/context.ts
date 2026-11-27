@@ -27,6 +27,9 @@
  *                     backend declares in `localPaths()` get the protected-root rules (AISDLC-1433).
  *   check-backend   — report whether the configured backend module resolves, its factory opens,
  *                     and each declared local path is git-ignored (`--format json` for doctor).
+ *   sync / status   — run the backend's optional `sync()` then rebuild the index, recording the
+ *                     outcome in a stamp file; print `status()` merged with that stamp. One JSON
+ *                     line each; `supported: false` on a backend without them (AISDLC-1459).
  */
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
@@ -86,6 +89,7 @@ import {
   resetSession,
 } from '../knowledge/retrieval/service.js';
 import { findProtectedCitations, validateKnowledge } from '../knowledge/store.js';
+import { knowledgeSyncStatus, runKnowledgeSync } from '../knowledge/sync.js';
 
 function knowledgeCtx(projectDir: string) {
   const config = loadKnowledgeConfig(projectDir);
@@ -158,6 +162,32 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           process.stdout.write(`indexed ${n} entries\n`);
         } catch (err) {
           process.stderr.write(`error: ${(err as Error).message}\n`);
+          process.exitCode = 1;
+        }
+      },
+    )
+    .command(
+      'sync',
+      "Run the knowledge backend's sync, rebuild the index and record the outcome",
+      (y) => y,
+      async (args) => {
+        const r = await runKnowledgeSync(String(args['project-dir']));
+        process.stdout.write(`${JSON.stringify(r)}\n`);
+        if (!r.ok) process.exitCode = 1;
+      },
+    )
+    .command(
+      'status',
+      'Print the knowledge backend sync status: queued, rejected, last sync time and error',
+      (y) => y,
+      async (args) => {
+        try {
+          const r = await knowledgeSyncStatus(String(args['project-dir']));
+          process.stdout.write(`${JSON.stringify(r)}\n`);
+        } catch (err) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, supported: true, error: (err as Error).message })}\n`,
+          );
           process.exitCode = 1;
         }
       },
