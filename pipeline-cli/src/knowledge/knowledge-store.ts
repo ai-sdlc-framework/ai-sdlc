@@ -50,19 +50,6 @@ export interface GetOptions {
   path?: string;
 }
 
-export interface PutOptions {
-  scope: StoreScope;
-  /** Location inside the root. Default `<trunk>/<id>.md`. */
-  path?: string;
-}
-
-export interface PutResult {
-  /** Location inside the root that was written. */
-  path: string;
-  /** False when an existing entry location was overwritten. */
-  created: boolean;
-}
-
 /**
  * The closed set of named write operations (AISDLC-1455, DEC-0443). A server backend
  * authorizes and audits by kind, so adding a kind is an interface change.
@@ -118,20 +105,18 @@ export interface WriteResult {
   reason?: string;
 }
 
-export type CreateOptions = PutOptions & { principal: string };
+export interface CreateOptions {
+  scope: StoreScope;
+  /** Location inside the root. Default `<trunk>/<id>.md`. */
+  path?: string;
+  /** Who acted; recorded in the local knowledge log only (see `WriteOp.principal`). */
+  principal: string;
+}
 
 export interface KnowledgeStore {
   readonly kind: string;
   /** The entry with this id, or null when none is found (or the addressed file does not parse). */
   get(id: string, opts?: GetOptions): StoredEntry | null;
-  /** Create or overwrite an entry. */
-  put(entry: { fields: Record<string, unknown>; body: string }, opts: PutOptions): PutResult;
-  /** Edit the fields of an existing entry in place; returns the fields as they were before, or null. */
-  update(
-    id: string,
-    edit: (fields: Record<string, unknown>) => void,
-    opts?: { scope?: StoreScope },
-  ): Record<string, unknown> | null;
   /**
    * Parseable entries: every entry of a root (or of all configured roots) in path order, or,
    * given a trunk, those stored directly under that trunk of one root.
@@ -313,26 +298,6 @@ export class FilesKnowledgeStore implements KnowledgeStore {
       if (e) return e;
     }
     return null;
-  }
-
-  put(entry: { fields: Record<string, unknown>; body: string }, opts: PutOptions): PutResult {
-    const path = opts.path ?? join(String(entry.fields.trunk), `${String(entry.fields.id)}.md`);
-    const created = !existsSync(join(this.root(opts.scope), path));
-    this.writeFile(opts.scope, path, entry.fields, entry.body);
-    return { path, created };
-  }
-
-  update(
-    id: string,
-    edit: (fields: Record<string, unknown>) => void,
-    opts: { scope?: StoreScope } = {},
-  ): Record<string, unknown> | null {
-    const e = this.get(id, { scope: opts.scope });
-    if (!e) return null;
-    const before = { ...e.fields };
-    edit(e.fields);
-    this.writeFile(e.scope, e.path, e.fields, e.body);
-    return before;
   }
 
   list(scope: ListScope | { scope: StoreScope; trunk: string }): StoredEntry[] {

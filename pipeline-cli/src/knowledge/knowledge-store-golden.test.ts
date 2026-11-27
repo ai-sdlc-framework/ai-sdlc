@@ -1,6 +1,8 @@
 /**
  * Golden bytes (AISDLC-1418): routing entry writes through `KnowledgeStore` must not change a
- * single byte on disk. The snapshots below were recorded with the pre-store writers.
+ * single byte on disk. The snapshots below were recorded with the pre-store writers, except
+ * where the named writes changed the bytes on purpose (AISDLC-1456, DEC-0443): a canonical
+ * promotion records `proof: operator`, and supersede creates the new entry from the old one.
  */
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -44,7 +46,7 @@ function seed(tracked: string, id: string): void {
 }
 
 describe('entry bytes on disk (golden)', () => {
-  it('promoted, superseded, ingested and captured entries are byte-identical', () => {
+  it('promoted, superseded, ingested and captured entries are byte-identical', async () => {
     root = mkdtempSync(join(tmpdir(), 'ks-golden-'));
     const tracked = join(root, '.ai-sdlc/knowledge');
     const prot = join(root, '.ai-sdlc/knowledge-protected');
@@ -54,7 +56,8 @@ describe('entry bytes on disk (golden)', () => {
 
     const ctx = { projectDir: root, ontology: DEFAULT_ONTOLOGY, config: loadKnowledgeConfig(root) };
     expect(
-      promoteEntry({ backend: 'files' }, tracked, 'a', { to: 'canonical', ...HUMAN }, ctx).ok,
+      (await promoteEntry({ backend: 'files' }, tracked, 'a', { to: 'canonical', ...HUMAN }, ctx))
+        .ok,
     ).toBe(true);
     expect(read(join(tracked, 'systems/a.md'))).toMatchInlineSnapshot(`
       "---
@@ -70,28 +73,43 @@ describe('entry bytes on disk (golden)', () => {
       decay: durable
       relations: []
       contentHash: f8aa46f438ac8f39780e03ec8244ccdc6ce8e6221832a6ed34383ce104496356
+      proof: operator
       ---
       body
       "
     `);
 
-    expect(supersedeEntry({ backend: 'files' }, tracked, 'a', 'b', HUMAN, root).ok).toBe(true);
-    expect(read(join(tracked, 'systems/b.md'))).toMatchInlineSnapshot(`
+    expect(
+      (
+        await supersedeEntry(
+          { backend: 'files' },
+          tracked,
+          'a',
+          'c',
+          'value of c',
+          HUMAN,
+          '2026-10-10',
+          root,
+        )
+      ).status,
+    ).toBe('applied');
+    expect(read(join(tracked, 'systems/c.md'))).toMatchInlineSnapshot(`
       "---
-      id: b
+      id: c
       trunk: systems
       type: fact
-      value: value of b
+      value: value of c
       confidence: 0.5
-      authority: inferred
+      authority: canonical
       scope: internal
       source: src/x.ts
-      observed: '2026-10-09'
+      observed: '2026-10-10'
       decay: durable
       relations:
         - type: supersedes
           target: a
-      contentHash: 5741ee6a70b06dc36f44ea5995db9b289bb54e1eab3b0930bceb5247544a248c
+      contentHash: 49a773cc86b38ae9dd7aa29a54c1c923e439c4a7a31188b0eaf70b40646e972c
+      proof: operator
       supersedes: a
       ---
       body
@@ -109,7 +127,13 @@ describe('entry bytes on disk (golden)', () => {
       observed: '2026-10-09',
       actor: HUMAN,
     };
-    expect(ingestSource('tasks', opts)).toEqual({ created: 1, updated: 0, unchanged: 0 });
+    const none = { proposed: 0, rejected: 0 };
+    expect(await ingestSource('tasks', opts)).toEqual({
+      created: 1,
+      updated: 0,
+      unchanged: 0,
+      ...none,
+    });
     expect(read(join(tracked, 'process/task-t-1.md'))).toMatchInlineSnapshot(`
       "---
       id: task-t-1
@@ -130,7 +154,12 @@ describe('entry bytes on disk (golden)', () => {
       "
     `);
     writeFileSync(task, '---\nid: T-1\ntitle: Do another thing\nstatus: Done\n---\n\nbody\n');
-    expect(ingestSource('tasks', opts)).toEqual({ created: 0, updated: 1, unchanged: 0 });
+    expect(await ingestSource('tasks', opts)).toEqual({
+      created: 0,
+      updated: 1,
+      unchanged: 0,
+      ...none,
+    });
     expect(read(join(tracked, 'process/task-t-1.md'))).toMatchInlineSnapshot(`
       "---
       id: task-t-1
@@ -167,11 +196,12 @@ describe('entry bytes on disk (golden)', () => {
       projectDir: root,
       memoryDir: mem,
       protectedRootAbs: prot,
+      trackedRootAbs: tracked,
       ontology: DEFAULT_ONTOLOGY,
       observed: '2026-10-09',
-      actor: HUMAN,
+      principal: HUMAN.principal,
     };
-    expect(ingestMemoryTrunk(memOpts).created).toBe(2);
+    expect((await ingestMemoryTrunk(memOpts)).created).toBe(2);
     expect(read(join(prot, 'memory/memory-user-role.md'))).toMatchInlineSnapshot(`
       "---
       id: memory-user-role
@@ -193,7 +223,7 @@ describe('entry bytes on disk (golden)', () => {
       "
     `);
     writeFileSync(join(mem, 'project_x.md'), '');
-    expect(ingestMemoryTrunk(memOpts)).toMatchObject({ superseded: 1 });
+    expect(await ingestMemoryTrunk(memOpts)).toMatchObject({ superseded: 1 });
     expect(read(join(prot, 'memory/memory-project-x.md'))).toMatchInlineSnapshot(`
       "---
       id: memory-project-x
@@ -215,14 +245,15 @@ describe('entry bytes on disk (golden)', () => {
       "
     `);
 
-    const captured = captureFact(
+    const { file: captured } = await captureFact(
       { backend: 'files' },
-      prot,
+      { trackedRootAbs: tracked, protectedRootAbs: prot },
       {
         id: 'fact-1',
         value: 'Revenue grew',
         sourceDoc: 'plan.md',
         observed: '2026-10-09',
+        principal: HUMAN.principal,
       },
       root,
     );

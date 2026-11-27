@@ -390,8 +390,6 @@ describe('backend local paths (AISDLC-1433)', () => {
       const store: KnowledgeStore = {
         kind,
         get: () => null,
-        put: () => ({ path: 'x', created: true }),
-        update: () => null,
         list: () => [],
         listRaw: () => [],
         create: () => Promise.reject(new Error('not used')),

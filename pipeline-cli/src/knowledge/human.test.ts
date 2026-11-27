@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { buildContextCli } from '../cli/context.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildContextCli, reportWrite } from '../cli/context.js';
 import { hashValue, parseEntryFile, toEntry, type KnowledgeEntry } from './entry.js';
 import {
   buildDashboard,
@@ -27,9 +27,20 @@ const HUMAN = { by: 'human', principal: 'human:op@example.com' } as const;
 
 let root: string;
 afterEach(() => {
-  removeFixtureDir(root);
+  vi.restoreAllMocks();
+  if (root) removeFixtureDir(root);
   process.exitCode = 0;
 });
+
+/** Capture stdout/stderr writes; `run` drives the context CLI against the fixture root. */
+function captureCli() {
+  const out: string[] = [];
+  const err: string[] = [];
+  vi.spyOn(process.stdout, 'write').mockImplementation((s) => (out.push(String(s)), true));
+  vi.spyOn(process.stderr, 'write').mockImplementation((s) => (err.push(String(s)), true));
+  const run = (a: string[]) => buildContextCli([...a, '--project-dir', root]).parseAsync();
+  return { out, err, run };
+}
 
 function fields(id: string, over: Record<string, unknown> = {}): Record<string, unknown> {
   const value = `value of ${id}`;
@@ -67,34 +78,40 @@ const entryOf = (tracked: string, id: string): KnowledgeEntry => {
 };
 
 describe('human surface', () => {
-  it('confirm moves confidence 30 percent toward the value and keeps authority', () => {
+  it('confirm moves confidence 30 percent toward the value and keeps authority', async () => {
     const t = repo();
-    expect(confirmEntry({ backend: 'files' }, t, 'a', 1, HUMAN, undefined, root)).toBe(0.65);
+    expect(
+      await confirmEntry({ backend: 'files' }, t, 'a', 1, HUMAN, undefined, root),
+    ).toMatchObject({ status: 'applied', confidence: 0.65 });
     expect(entryOf(t, 'a').authority).toBe('inferred');
-    expect(confirmEntry({ backend: 'files' }, t, 'zz', 1, HUMAN, undefined, root)).toBeNull();
+    expect(
+      await confirmEntry({ backend: 'files' }, t, 'zz', 1, HUMAN, undefined, root),
+    ).toMatchObject({ status: 'rejected', reason: "entry 'zz' not found" });
   });
 
-  it('correct replaces value and hash and logs', () => {
+  it('correct replaces value and hash and logs', async () => {
     const t = repo();
-    expect(correctEntry({ backend: 'files' }, t, 'a', 'new text', HUMAN, undefined, root)).toBe(
-      true,
-    );
+    expect(
+      (await correctEntry({ backend: 'files' }, t, 'a', 'new text', HUMAN, undefined, root)).status,
+    ).toBe('applied');
     const e = entryOf(t, 'a');
     expect(e.value).toBe('new text');
     expect(e.contentHash).toBe(hashValue('new text'));
-    expect(correctEntry({ backend: 'files' }, t, 'zz', 'x', HUMAN, undefined, root)).toBe(false);
+    expect(
+      (await correctEntry({ backend: 'files' }, t, 'zz', 'x', HUMAN, undefined, root)).status,
+    ).toBe('rejected');
   });
 
-  it('correct of a tracked entry logs the old value with id, by and principal', () => {
+  it('correct of a tracked entry logs the changed field names with id, by and principal', async () => {
     const t = repo();
-    correctEntry({ backend: 'files' }, t, 'a', 'new text', HUMAN, undefined, root);
+    await correctEntry({ backend: 'files' }, t, 'a', 'new text', HUMAN, undefined, root);
     const [ev] = readKnowledgeLog(t);
     expect(ev).toMatchObject({
       event: 'corrected',
       id: 'a',
       by: 'human',
       principal: HUMAN.principal,
-      detail: "value changed from 'value of a'",
+      detail: 'fields: contentHash, value',
     });
   });
 
@@ -108,7 +125,7 @@ describe('human surface', () => {
 
   it.each(['protected', ' Protected ', 'PROTECTED'])(
     'correct of a %j-scoped entry keeps both values and their hashes out of the raw log',
-    (scope) => {
+    async (scope) => {
       const t = repo();
       const protectedAbs = join(root, '.ai-sdlc/knowledge-protected');
       writeFileSync(
@@ -120,7 +137,9 @@ describe('human surface', () => {
       protectedEntry('.ai-sdlc/knowledge-protected', 'p1', OLD, scope);
       // opened as cli/context.ts opens it: the full loaded config is the backend selection
       const config = loadKnowledgeConfig(root);
-      expect(correctEntry(config, t, 'p1', NEW, HUMAN, undefined, root)).toBe(true);
+      expect((await correctEntry(config, t, 'p1', NEW, HUMAN, undefined, root)).status).toBe(
+        'applied',
+      );
       const raw = readFileSync(join(root, '.ai-sdlc/knowledge-log.jsonl'), 'utf-8');
       for (const needle of [OLD, NEW, hashValue(OLD), hashValue(NEW)]) {
         expect(raw).not.toContain(needle);
@@ -131,7 +150,7 @@ describe('human surface', () => {
           id: 'p1',
           by: 'human',
           principal: HUMAN.principal,
-          detail: 'value corrected (protected; value not logged)',
+          detail: 'fields: contentHash, value (protected; values not logged)',
         }),
       ]);
     },
@@ -144,8 +163,10 @@ describe('human surface', () => {
     writeFileSync(join(root, '.ai-sdlc/context.yaml'), 'knowledge:\n  protectedRoot: secret-kb\n');
     protectedEntry('secret-kb', 'p2', 'CLIENT-VALUE-4410', 'protected');
     const config = loadKnowledgeConfig(root);
-    expect(correctEntry(config, t, 'p2', 'CLIENT-VALUE-5521', HUMAN, undefined, root)).toBe(true);
-    expect(confirmEntry(config, t, 'p2', 1, HUMAN, undefined, root)).toBe(0.65);
+    expect(
+      (await correctEntry(config, t, 'p2', 'CLIENT-VALUE-5521', HUMAN, undefined, root)).status,
+    ).toBe('applied');
+    expect((await confirmEntry(config, t, 'p2', 1, HUMAN, undefined, root)).confidence).toBe(0.65);
     expect(readFileSync(join(root, 'secret-kb/systems/p2.md'), 'utf-8')).toContain(
       'CLIENT-VALUE-5521',
     );
@@ -167,24 +188,39 @@ describe('human surface', () => {
     );
   });
 
-  it('supersede links, keeps the old entry and moves the chain head', () => {
-    const t = repo();
-    expect(supersedeEntry({ backend: 'files' }, t, 'a', 'b', HUMAN, root).ok).toBe(true);
-    expect(entryOf(t, 'a').id).toBe('a');
-    expect(entryOf(t, 'b').relations).toEqual([{ type: 'supersedes', target: 'a' }]);
+  it('supersede is one write: creates the new entry, keeps and marks the old one, moves the chain head', async () => {
+    const t = repo(['a']);
+    const sup = (o: string, n: string) =>
+      supersedeEntry({ backend: 'files' }, t, o, n, 'value of b', HUMAN, '2026-11-27', root);
+    expect(await sup('a', 'b')).toEqual({
+      id: 'b',
+      path: join('systems', 'b.md'),
+      created: true,
+      status: 'applied',
+    });
+    const store = openKnowledgeStore({ backend: 'files', trackedRoot: t }, root);
+    expect(store.get('a')?.fields.status).toBe('superseded');
+    expect(entryOf(t, 'b')).toMatchObject({
+      value: 'value of b',
+      contentHash: hashValue('value of b'),
+      observed: '2026-11-27',
+      supersedes: 'a',
+      relations: [{ type: 'supersedes', target: 'a' }],
+    });
     const all = entriesIn(t);
     expect(chainHead(all, 'a')).toBe('b');
     expect(liveEntries(all).map((e) => e.id)).toEqual(['b']);
-    expect(supersedeEntry({ backend: 'files' }, t, 'a', 'a', HUMAN, root).ok).toBe(false);
-    expect(supersedeEntry({ backend: 'files' }, t, 'a', 'nope', HUMAN, root).ok).toBe(false);
-    expect(supersedeEntry({ backend: 'files' }, t, 'nope', 'a', HUMAN, root).ok).toBe(false);
+    expect((await sup('a', 'a')).status).toBe('rejected');
+    expect((await sup('a', 'b')).status).toBe('rejected');
+    expect((await sup('nope', 'c')).status).toBe('rejected');
+    expect(readKnowledgeLog(t).map((e) => e.event)).toEqual(['superseded']);
   });
 
   it('every mutation writes a knowledge-log event, promote included', async () => {
     const t = repo(['a', 'b', 'c']);
-    confirmEntry({ backend: 'files' }, t, 'a', 1, HUMAN, undefined, root);
-    correctEntry({ backend: 'files' }, t, 'a', 'v', HUMAN, undefined, root);
-    supersedeEntry({ backend: 'files' }, t, 'a', 'b', HUMAN, root);
+    await confirmEntry({ backend: 'files' }, t, 'a', 1, HUMAN, undefined, root);
+    await correctEntry({ backend: 'files' }, t, 'a', 'v', HUMAN, undefined, root);
+    await supersedeEntry({ backend: 'files' }, t, 'a', 'd', 'w', HUMAN, undefined, root);
     // agent caller: refused, no authority change; human path is covered in promote tests
     await buildContextCli([
       'promote',
@@ -250,21 +286,43 @@ describe('human surface', () => {
     expect(out.join('')).toContain('[owner]');
   });
 
-  it('CLI confirm, correct, supersede work end to end', async () => {
-    const t = repo();
-    const run = (a: string[]) => buildContextCli([...a, '--project-dir', root]).parseAsync();
+  it('CLI confirm, correct, supersede work end to end and print the status', async () => {
+    const t = repo(['a']);
+    const { out, err, run } = captureCli();
     await run(['confirm', 'a', '--confidence', '1']);
     await run(['correct', 'a', '--value', 'z']);
-    await run(['supersede', 'a', 'b']);
+    await run(['supersede', 'a', 'b', '--value', 'y']);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(out).toEqual([
+      'applied: confidence 0.65\n',
+      'applied: corrected a\n',
+      'applied: b supersedes a\n',
+    ]);
     expect(entryOf(t, 'a').value).toBe('z');
+    expect(entryOf(t, 'b').value).toBe('y');
     expect(chainHead(entriesIn(t), 'a')).toBe('b');
     await run(['confirm', 'nope']);
     expect(process.exitCode).toBe(1);
+    expect(err.at(-1)).toBe("rejected: entry 'nope' not found\n");
     process.exitCode = 0;
     await run(['correct', 'nope', '--value', 'q']);
     expect(process.exitCode).toBe(1);
     process.exitCode = 0;
-    await run(['supersede', 'nope', 'a']);
+    await run(['supersede', 'nope', 'c', '--value', 'q']);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('reportWrite reports a proposal as queued, never as done, and exits 0', () => {
+    const { out, err } = captureCli();
+    reportWrite({ status: 'proposed' }, 'confidence 0.65');
+    reportWrite({ status: 'proposed', reason: 'needs a reviewer' }, 'x');
+    expect(out).toEqual([
+      'proposed: queued as a proposal\n',
+      'proposed: queued as a proposal (needs a reviewer)\n',
+    ]);
+    expect(process.exitCode ?? 0).toBe(0);
+    reportWrite({ status: 'rejected' }, 'x');
+    expect(err).toEqual(['rejected: no reason given\n']);
     expect(process.exitCode).toBe(1);
   });
 });

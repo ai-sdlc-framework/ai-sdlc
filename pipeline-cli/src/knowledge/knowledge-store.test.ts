@@ -16,6 +16,7 @@ const ROOTS = {
   trackedRoot: '.ai-sdlc/knowledge',
   protectedRoot: '.ai-sdlc/knowledge-protected',
 };
+const P = 'agent:task:AISDLC-1456';
 const fields = (id: string, trunk = 'systems'): Record<string, unknown> => ({
   id,
   trunk,
@@ -24,7 +25,7 @@ const fields = (id: string, trunk = 'systems'): Record<string, unknown> => ({
 });
 
 describe('openKnowledgeStore', () => {
-  it('returns the files implementation unconditionally', () => {
+  it('returns the files implementation unconditionally', async () => {
     const store = openKnowledgeStore(ROOTS, root);
     expect(store).toBeInstanceOf(FilesKnowledgeStore);
     expect(store.kind).toBe('files');
@@ -35,30 +36,44 @@ describe.each<[StoreScope, string]>([
   ['tracked', '.ai-sdlc/knowledge'],
   ['protected', '.ai-sdlc/knowledge-protected'],
 ])('FilesKnowledgeStore on the %s root', (scope, dir) => {
-  it('put creates <trunk>/<id>.md, then reports an overwrite', () => {
+  it('create writes <trunk>/<id>.md, then rejects a second create', async () => {
     const store = openKnowledgeStore(ROOTS, root);
-    expect(store.put({ fields: fields('a'), body: '\nbody\n' }, { scope })).toEqual({
+    expect(
+      await store.create({ fields: fields('a'), body: '\nbody\n' }, { scope, principal: P }),
+    ).toEqual({
+      id: 'a',
       path: join('systems', 'a.md'),
       created: true,
+      status: 'applied',
     });
     const text = readFileSync(join(root, dir, 'systems/a.md'), 'utf-8');
     expect(text).toBe(
       '---\nid: a\ntrunk: systems\nvalue: value of a\nconfidence: 0.5\n---\n\nbody\n',
     );
-    expect(store.put({ fields: fields('a'), body: '' }, { scope }).created).toBe(false);
+    expect(
+      (await store.create({ fields: fields('a'), body: '' }, { scope, principal: P })).status,
+    ).toBe('rejected');
   });
 
-  it('put honours an explicit path', () => {
+  it('create honours an explicit path', async () => {
     const store = openKnowledgeStore(ROOTS, root);
-    expect(store.put({ fields: fields('x'), body: 'B\n' }, { scope, path: 'x.md' }).path).toBe(
-      'x.md',
-    );
+    expect(
+      (
+        await store.create(
+          { fields: fields('x'), body: 'B\n' },
+          { scope, path: 'x.md', principal: P },
+        )
+      ).path,
+    ).toBe('x.md');
     expect(readFileSync(join(root, dir, 'x.md'), 'utf-8')).toContain('id: x');
   });
 
-  it('get returns fields, body, scope and path; null for a missing id', () => {
+  it('get returns fields, body, scope and path; null for a missing id', async () => {
     const store = openKnowledgeStore(ROOTS, root);
-    store.put({ fields: fields('a', 'process'), body: '\nhello\n' }, { scope });
+    await store.create(
+      { fields: fields('a', 'process'), body: '\nhello\n' },
+      { scope, principal: P },
+    );
     expect(store.get('a', { scope })).toEqual({
       fields: fields('a', 'process'),
       body: '\nhello\n',
@@ -70,9 +85,9 @@ describe.each<[StoreScope, string]>([
     expect(store.get('missing')).toBeNull();
   });
 
-  it('get by path reads that location; null when missing or unparseable', () => {
+  it('get by path reads that location; null when missing or unparseable', async () => {
     const store = openKnowledgeStore(ROOTS, root);
-    store.put({ fields: fields('a'), body: '' }, { scope });
+    await store.create({ fields: fields('a'), body: '' }, { scope, principal: P });
     expect(store.get('a', { scope, path: join('systems', 'a.md') })?.fields.id).toBe('a');
     expect(store.get('a', { scope, path: 'nope.md' })).toBeNull();
     mkdirSync(join(root, dir, 'bad'), { recursive: true });
@@ -81,24 +96,29 @@ describe.each<[StoreScope, string]>([
     expect(() => store.get('a', { path: 'x.md' })).toThrow(/requires a scope/);
   });
 
-  it('update edits in place and returns the prior fields; null for a missing id', () => {
+  it('write edits in place and keeps the body; rejected for a missing id', async () => {
     const store = openKnowledgeStore(ROOTS, root);
-    store.put({ fields: fields('a'), body: '\nkeep\n' }, { scope });
-    const before = store.update('a', (f) => {
-      f.confidence = 0.9;
-    });
-    expect(before).toEqual(fields('a'));
-    expect(store.get('a', { scope })).toMatchObject({
+    await store.create({ fields: fields('a'), body: '\nkeep\n' }, { scope, principal: P });
+    const r = await store.write('a', {
+      kind: 'confirm',
       fields: { confidence: 0.9 },
+      principal: P,
+    });
+    expect(r.status).toBe('applied');
+    expect(store.get('a', { scope })).toMatchObject({
+      fields: { ...fields('a'), confidence: 0.9 },
       body: '\nkeep\n',
     });
-    expect(store.update('missing', () => undefined, { scope })).toBeNull();
+    expect(
+      (await store.write('missing', { kind: 'confirm', fields: {}, principal: P }, { scope }))
+        .status,
+    ).toBe('rejected');
   });
 
-  it('list returns parseable entries directly under a trunk', () => {
+  it('list returns parseable entries directly under a trunk', async () => {
     const store = openKnowledgeStore(ROOTS, root);
     expect(store.list({ scope, trunk: 'memory' })).toEqual([]);
-    store.put({ fields: fields('m1', 'memory'), body: '' }, { scope });
+    await store.create({ fields: fields('m1', 'memory'), body: '' }, { scope, principal: P });
     writeFileSync(join(root, dir, 'memory/junk.md'), 'no frontmatter');
     writeFileSync(join(root, dir, 'memory/notes.txt'), 'x');
     expect(store.list({ scope, trunk: 'memory' }).map((e) => e.fields.id)).toEqual(['m1']);
@@ -106,10 +126,10 @@ describe.each<[StoreScope, string]>([
 });
 
 describe('FilesKnowledgeStore roots', () => {
-  it('searches tracked before protected and only the configured roots', () => {
+  it('searches tracked before protected and only the configured roots', async () => {
     const store = openKnowledgeStore(ROOTS, root);
-    store.put({ fields: fields('dup'), body: 'p' }, { scope: 'protected' });
-    store.put({ fields: fields('dup'), body: 't' }, { scope: 'tracked' });
+    await store.create({ fields: fields('dup'), body: 'p' }, { scope: 'protected', principal: P });
+    await store.create({ fields: fields('dup'), body: 't' }, { scope: 'tracked', principal: P });
     expect(store.get('dup')?.scope).toBe('tracked');
     const protectedOnly = openKnowledgeStore(
       { backend: 'files', protectedRoot: join(root, ROOTS.protectedRoot) },
@@ -121,12 +141,18 @@ describe('FilesKnowledgeStore roots', () => {
 });
 
 describe('FilesKnowledgeStore list(scope) and listRaw(scope)', () => {
-  it('lists every entry of a root recursively in path order, skipping unparseable files', () => {
+  it('lists every entry of a root recursively in path order, skipping unparseable files', async () => {
     const store = openKnowledgeStore(ROOTS, root);
     expect(store.list('tracked')).toEqual([]);
-    store.put({ fields: fields('b', 'systems'), body: '' }, { scope: 'tracked' });
-    store.put({ fields: fields('a', 'memory'), body: '' }, { scope: 'tracked' });
-    store.put({ fields: fields('p'), body: '' }, { scope: 'protected' });
+    await store.create(
+      { fields: fields('b', 'systems'), body: '' },
+      { scope: 'tracked', principal: P },
+    );
+    await store.create(
+      { fields: fields('a', 'memory'), body: '' },
+      { scope: 'tracked', principal: P },
+    );
+    await store.create({ fields: fields('p'), body: '' }, { scope: 'protected', principal: P });
     writeFileSync(join(root, ROOTS.trackedRoot, 'systems/junk.md'), 'no frontmatter');
     expect(store.list('tracked').map((e) => e.path)).toEqual(['memory/a.md', 'systems/b.md']);
     expect(store.list('protected').map((e) => e.fields.id)).toEqual(['p']);
@@ -137,19 +163,19 @@ describe('FilesKnowledgeStore list(scope) and listRaw(scope)', () => {
     ]);
   });
 
-  it('listRaw reports the parse error of an unparseable file', () => {
+  it('listRaw reports the parse error of an unparseable file', async () => {
     const store = openKnowledgeStore(ROOTS, root);
-    store.put({ fields: fields('a'), body: '' }, { scope: 'tracked' });
+    await store.create({ fields: fields('a'), body: '' }, { scope: 'tracked', principal: P });
     writeFileSync(join(root, ROOTS.trackedRoot, 'systems/junk.md'), 'no frontmatter');
     const raw = store.listRaw('all');
     expect(raw.map((r) => r.path)).toEqual(['systems/a.md', 'systems/junk.md']);
     expect(raw[1]!.parsed).toEqual({ error: 'missing YAML frontmatter' });
   });
 
-  it('all covers only the configured roots', () => {
+  it('all covers only the configured roots', async () => {
     const tracked = join(root, ROOTS.trackedRoot);
     const store = openKnowledgeStore({ backend: 'files', trackedRoot: tracked }, root);
-    store.put({ fields: fields('a'), body: '' }, { scope: 'tracked' });
+    await store.create({ fields: fields('a'), body: '' }, { scope: 'tracked', principal: P });
     expect(store.list('all').map((e) => e.fields.id)).toEqual(['a']);
     expect(() => store.listRaw('protected')).toThrow(/no protected root/);
   });

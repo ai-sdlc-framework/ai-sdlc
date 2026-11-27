@@ -43,7 +43,14 @@ import {
   openKnowledgeStore,
   storeOntology,
   toEntries,
+  type WriteResult,
 } from '../knowledge/knowledge-store.js';
+import {
+  countIngestWrite,
+  emptyIngestCounts,
+  ingestEntry,
+  type IngestWriteCounts,
+} from '../knowledge/ingest-write.js';
 import { captureFactForProject, exportableEntries } from '../knowledge/data-room.js';
 import {
   checkKnowledgeBackend,
@@ -129,6 +136,34 @@ export function resolveActor(projectDir: string, env: NodeJS.ProcessEnv = proces
     by,
     principal: resolveKnowledgePrincipal(env, systemPrincipalDeps(by, projectDir, env)),
   };
+}
+
+/**
+ * Print a store write result (AISDLC-1456): `applied: <what>`, `proposed: queued as a
+ * proposal`, or `rejected: <reason>` on stderr with exit code 1. A proposal is never reported
+ * as done.
+ */
+export function reportWrite(
+  r: { status: WriteResult['status']; reason?: string },
+  applied: string,
+): void {
+  if (r.status === 'applied') {
+    process.stdout.write(`applied: ${applied}\n`);
+  } else if (r.status === 'proposed') {
+    process.stdout.write(`proposed: queued as a proposal${r.reason ? ` (${r.reason})` : ''}\n`);
+  } else {
+    process.stderr.write(`rejected: ${r.reason ?? 'no reason given'}\n`);
+    process.exitCode = 1;
+  }
+}
+
+/** One line for an ingest run; rejected writes make the command exit 1. */
+function reportIngest<T extends IngestWriteCounts>(r: T, keys: (keyof T & string)[]): void {
+  const parts = keys.map((k) => `${String(r[k])} ${k}`);
+  if (r.proposed > 0) parts.push(`${r.proposed} queued as a proposal`);
+  if (r.rejected > 0) parts.push(`${r.rejected} rejected`);
+  process.stdout.write(`${parts.join(', ')}\n`);
+  if (r.rejected > 0) process.exitCode = 1;
 }
 
 export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
@@ -435,7 +470,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           .positional('file', { type: 'string', demandOption: true })
           .option('heading', { type: 'string', array: true })
           .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
-      (args) => {
+      async (args) => {
         const projectDir = String(args['project-dir']);
         const config = loadKnowledgeConfig(projectDir);
         const trackedAbs = isAbsolute(config.trackedRoot)
@@ -452,10 +487,20 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           observed: String(args.observed),
           headings: args.heading as string[] | undefined,
         });
+        const { principal } = resolveActor(projectDir);
+        const counts = emptyIngestCounts();
+        const report = (line: string): boolean => process.stderr.write(`${line}\n`);
         for (const e of entries) {
-          store.put({ fields: e.fields, body: e.body }, { scope: 'tracked', path: e.path });
+          const exists =
+            store.get(String(e.fields.id), { scope: 'tracked', path: e.path }) !== null;
+          const r = await ingestEntry(
+            store,
+            { fields: e.fields, body: e.body },
+            { scope: 'tracked', path: e.path, principal, exists },
+          );
+          countIngestWrite(counts, r, report);
         }
-        process.stdout.write(`${entries.length} entries written\n`);
+        reportIngest(counts, ['created', 'updated']);
       },
     )
     .command(
@@ -471,7 +516,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
               'JSON array of {id, trunk, type, value, source, proof} records for --source generated (required there). Reads a file you name; outside the enterprise gate',
           })
           .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
-      (args) => {
+      async (args) => {
         const projectDir = String(args['project-dir']);
         const config = loadKnowledgeConfig(projectDir);
         const trackedRootAbs = isAbsolute(config.trackedRoot)
@@ -481,7 +526,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           { ...backendSelection(config), trackedRoot: trackedRootAbs },
           projectDir,
         );
-        const r = ingestSource(args.source as IngestSource, {
+        const r = await ingestSource(args.source as IngestSource, {
           ...backendSelection(config),
           projectDir,
           trackedRootAbs,
@@ -492,9 +537,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           allowlistedCommands: config.allowlistedCommands,
           actor: resolveActor(projectDir),
         });
-        process.stdout.write(
-          `${r.created} created, ${r.updated} updated, ${r.unchanged} unchanged\n`,
-        );
+        reportIngest(r, ['created', 'updated', 'unchanged']);
       },
     )
     .command(
@@ -504,14 +547,17 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
         y
           .option('dir', { type: 'string', describe: 'Memory folder (default: resolved setting)' })
           .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
-      (args) => {
+      async (args) => {
         try {
           const projectDir = String(args['project-dir']);
           const memoryDir = (args.dir as string | undefined) ?? resolveMemoryDir({ projectDir });
-          const r = ingestMemoryForProject(projectDir, memoryDir, String(args.observed));
-          process.stdout.write(
-            `${r.created} created, ${r.updated} updated, ${r.unchanged} unchanged, ${r.superseded} superseded, ${r.skipped} skipped\n`,
+          const r = await ingestMemoryForProject(
+            projectDir,
+            memoryDir,
+            String(args.observed),
+            resolveActor(projectDir).principal,
           );
+          reportIngest(r, ['created', 'updated', 'unchanged', 'superseded', 'skipped']);
         } catch (err) {
           process.stderr.write(`error: ${(err as Error).message}\n`);
           process.exitCode = 1;
@@ -558,9 +604,9 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
             choices: ['specialist', 'canonical'],
             default: 'specialist',
           }),
-      (args) => {
+      async (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
-        const r = promoteEntry(
+        const r = await promoteEntry(
           ctx.verify.config,
           ctx.trackedAbs,
           String(args.id),
@@ -571,8 +617,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           },
           ctx.verify,
         );
-        process.stdout.write(`${r.ok ? 'promoted' : 'refused'}: ${r.reason}\n`);
-        if (!r.ok) process.exitCode = 1;
+        reportWrite(r, r.reason);
       },
     )
     .command(
@@ -583,9 +628,9 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           .positional('id', { type: 'string', demandOption: true })
           .option('confidence', { type: 'number', default: 1 })
           .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
-      (args) => {
+      async (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
-        const next = confirmEntry(
+        const r = await confirmEntry(
           ctx.verify.config,
           ctx.trackedAbs,
           String(args.id),
@@ -594,10 +639,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           String(args.observed),
           ctx.verify.projectDir,
         );
-        if (next === null) {
-          process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
-          process.exitCode = 1;
-        } else process.stdout.write(`confidence ${next}\n`);
+        reportWrite(r, `confidence ${String(r.confidence)}`);
       },
     )
     .command(
@@ -608,9 +650,9 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           .positional('id', { type: 'string', demandOption: true })
           .option('value', { type: 'string', demandOption: true })
           .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
-      (args) => {
+      async (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
-        const ok = correctEntry(
+        const r = await correctEntry(
           ctx.verify.config,
           ctx.trackedAbs,
           String(args.id),
@@ -619,31 +661,31 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           String(args.observed),
           ctx.verify.projectDir,
         );
-        if (!ok) {
-          process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
-          process.exitCode = 1;
-        }
+        reportWrite(r, `corrected ${String(args.id)}`);
       },
     )
     .command(
       'supersede <old> <new>',
-      'Link <new> as superseding <old>; the old entry is kept',
+      'Create <new> from <old> with a new value, superseding <old>; the old entry is kept and marked superseded',
       (y) =>
         y
           .positional('old', { type: 'string', demandOption: true })
-          .positional('new', { type: 'string', demandOption: true }),
-      (args) => {
+          .positional('new', { type: 'string', demandOption: true })
+          .option('value', { type: 'string', demandOption: true })
+          .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
+      async (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
-        const r = supersedeEntry(
+        const r = await supersedeEntry(
           ctx.verify.config,
           ctx.trackedAbs,
           String(args.old),
           String(args.new),
+          String(args.value),
           resolveActor(String(args['project-dir'])),
+          String(args.observed),
           ctx.verify.projectDir,
         );
-        process.stdout.write(`${r.ok ? 'superseded' : 'refused'}: ${r.reason}\n`);
-        if (!r.ok) process.exitCode = 1;
+        reportWrite(r, `${String(args.new)} supersedes ${String(args.old)}`);
       },
     )
     .command(
@@ -681,9 +723,9 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
         y
           .positional('id', { type: 'string', demandOption: true })
           .option('reason', { type: 'string', demandOption: true }),
-      (args) => {
+      async (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
-        const ok = refuteEntry(
+        const r = await refuteEntry(
           ctx.verify.config,
           ctx.trackedAbs,
           String(args.id),
@@ -691,10 +733,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           resolveActor(String(args['project-dir'])),
           ctx.verify.projectDir,
         );
-        if (!ok) {
-          process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
-          process.exitCode = 1;
-        }
+        reportWrite(r, `refuted ${String(args.id)}`);
       },
     )
     .command(
@@ -705,9 +744,9 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           .positional('id', { type: 'string', demandOption: true })
           .option('confidence', { type: 'number', demandOption: true })
           .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
-      (args) => {
+      async (args) => {
         const ctx = knowledgeCtx(String(args['project-dir']));
-        const next = reobserveEntry(
+        const r = await reobserveEntry(
           ctx.verify.config,
           ctx.trackedAbs,
           String(args.id),
@@ -716,10 +755,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           String(args.observed),
           ctx.verify.projectDir,
         );
-        if (next === null) {
-          process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
-          process.exitCode = 1;
-        } else process.stdout.write(`confidence ${next}\n`);
+        reportWrite(r, `confidence ${String(r.confidence)}`);
       },
     )
     .command(
@@ -731,14 +767,16 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           .option('value', { type: 'string', demandOption: true })
           .option('source-doc', { type: 'string', demandOption: true })
           .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
-      (args) => {
-        const file = captureFactForProject(String(args['project-dir']), {
+      async (args) => {
+        const projectDir = String(args['project-dir']);
+        const r = await captureFactForProject(projectDir, {
           id: String(args.id),
           value: String(args.value),
           sourceDoc: String(args['source-doc']),
           observed: String(args.observed),
+          principal: resolveActor(projectDir).principal,
         });
-        process.stdout.write(`captured ${file}\n`);
+        reportWrite(r, `captured ${r.file}`);
       },
     )
     .command(

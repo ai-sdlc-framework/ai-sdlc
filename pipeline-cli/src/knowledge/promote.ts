@@ -6,12 +6,33 @@
  */
 import { execFileSync } from 'node:child_process';
 import type { KnowledgeConfig } from './config.js';
-import { appendKnowledgeEvent } from './log.js';
 import { AGENT_CONFIDENCE_CAP } from './entry.js';
-import { openKnowledgeStore, type KnowledgeBackendSelection } from './knowledge-store.js';
+import {
+  openKnowledgeStore,
+  type KnowledgeBackendSelection,
+  type WriteResult,
+} from './knowledge-store.js';
 import type { Ontology } from './ontology.js';
 
 export const REOBSERVE_WEIGHT = 0.3;
+
+/**
+ * The proof a human canonical promotion records when none is given: the store requires a
+ * proof on every `promote` (DEC-0443), and the operator is the source (as `OPERATOR_SOURCE`).
+ */
+export const HUMAN_PROOF = 'operator';
+
+/** A rejected result for an entry the caller could not find; nothing was written. */
+export function notFound(id: string): WriteResult {
+  return { id, path: '', created: false, status: 'rejected', reason: `entry '${id}' not found` };
+}
+
+/** Confidence moved 30 percent toward `target`, capped for agent-written entries. */
+export function movedConfidence(fields: Record<string, unknown>, target: number): number {
+  const old = Number(fields.confidence);
+  const next = Math.round((old + REOBSERVE_WEIGHT * (target - old)) * 1e6) / 1e6;
+  return fields.writtenBy === 'agent' ? Math.min(next, AGENT_CONFIDENCE_CAP) : next;
+}
 
 export interface TestRunner {
   (file: string, name: string | undefined, cwd: string): boolean;
@@ -168,66 +189,61 @@ export interface Actor {
 
 export interface PromoteResult extends Verdict {
   authority?: string;
+  /** The store status; `rejected` when refused before or by the store. */
+  status: WriteResult['status'];
 }
 
-export function promoteEntry(
+export async function promoteEntry(
   sel: KnowledgeBackendSelection,
   trackedRootAbs: string,
   id: string,
   opts: { to: 'specialist' | 'canonical'; proof?: string; by: Role; principal: string },
   c: VerifyContext,
-): PromoteResult {
+): Promise<PromoteResult> {
   const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, c.projectDir);
   const entry = store.get(id, { scope: 'tracked' });
-  if (!entry) return { ok: false, reason: `entry '${id}' not found` };
+  if (!entry) return { ok: false, reason: `entry '${id}' not found`, status: 'rejected' };
   const current = String(entry.fields.authority);
+  const refuse = (reason: string): PromoteResult => ({
+    ok: false,
+    reason,
+    authority: current,
+    status: 'rejected',
+  });
   if (opts.to === 'canonical') {
-    if (opts.by !== 'human') {
-      return {
-        ok: false,
-        reason: 'canonical requires a human; agent role refused',
-        authority: current,
-      };
-    }
+    if (opts.by !== 'human') return refuse('canonical requires a human; agent role refused');
   } else {
     if (
       AUTHORITY_RANK[current] !== undefined &&
       AUTHORITY_RANK[current] >= AUTHORITY_RANK.specialist
     ) {
-      return {
-        ok: false,
-        reason: `entry is already ${current}; specialist promotion never demotes`,
-        authority: current,
-      };
+      return refuse(`entry is already ${current}; specialist promotion never demotes`);
     }
-    if (!opts.proof)
-      return { ok: false, reason: 'promotion to specialist requires --proof', authority: current };
+    if (!opts.proof) return refuse('promotion to specialist requires --proof');
     const v = verifyProof(opts.proof, c);
-    if (!v.ok) return { ...v, authority: current };
+    if (!v.ok) return refuse(v.reason);
   }
-  store.update(
+  const fields: Record<string, unknown> = {
+    authority: opts.to,
+    proof: opts.proof ?? HUMAN_PROOF,
+  };
+  if (entry.fields.writtenBy === 'agent') fields.writtenBy = 'framework-verifier';
+  const r = await store.write(
     id,
-    (f) => {
-      f.authority = opts.to;
-      if (opts.proof) f.proof = opts.proof;
-      if (f.writtenBy === 'agent') f.writtenBy = 'framework-verifier';
-    },
+    { kind: 'promote', fields, principal: opts.principal },
     { scope: 'tracked' },
   );
-  appendKnowledgeEvent(trackedRootAbs, {
-    event: 'promoted',
-    id,
-    from: current,
-    to: opts.to,
-    proof: opts.proof,
-    by: opts.by,
-    principal: opts.principal,
-  });
-  return { ok: true, reason: `promoted to ${opts.to}`, authority: opts.to };
+  if (r.status === 'rejected') return refuse(r.reason ?? 'rejected by the knowledge store');
+  return {
+    ok: true,
+    reason: r.status === 'applied' ? `promoted to ${opts.to}` : 'queued as a proposal',
+    authority: r.status === 'applied' ? opts.to : current,
+    status: r.status,
+  };
 }
 
 /** Move confidence 30 percent toward the observed value; authority never changes. */
-export function reobserveEntry(
+export async function reobserveEntry(
   sel: KnowledgeBackendSelection,
   trackedRootAbs: string,
   id: string,
@@ -235,53 +251,43 @@ export function reobserveEntry(
   actor: Actor,
   observedDate: string | undefined,
   projectRoot: string,
-): number | null {
-  let next = 0;
-  const before = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot).update(
+): Promise<WriteResult & { confidence?: number }> {
+  const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
+  const e = store.get(id);
+  if (!e) return notFound(id);
+  const next = movedConfidence(e.fields, observedConfidence);
+  const fields: Record<string, unknown> = { confidence: next };
+  if (observedDate) fields.observed = observedDate;
+  const r = await store.write(
     id,
-    (f) => {
-      const old = Number(f.confidence);
-      next = Math.round((old + REOBSERVE_WEIGHT * (observedConfidence - old)) * 1e6) / 1e6;
-      if (f.writtenBy === 'agent') next = Math.min(next, AGENT_CONFIDENCE_CAP);
-      f.confidence = next;
-      if (observedDate) f.observed = observedDate;
-    },
+    { kind: 'reobserve', fields, principal: actor.principal },
+    { scope: e.scope },
   );
-  if (!before) return null;
-  appendKnowledgeEvent(trackedRootAbs, {
-    event: 'reobserved',
-    id,
-    by: actor.by,
-    principal: actor.principal,
-    detail: `confidence ${String(before.confidence)} -> ${next}`,
-  });
-  return next;
+  return r.status === 'rejected' ? r : { ...r, confidence: next };
 }
 
-/** Refutation drops the entry back to `inferred` and logs why. */
-export function refuteEntry(
+/**
+ * Refutation drops the entry back to `inferred`. The store logs field names only, so the
+ * reason is kept on the entry as its `reverify` note.
+ */
+export async function refuteEntry(
   sel: KnowledgeBackendSelection,
   trackedRootAbs: string,
   id: string,
   reason: string,
   actor: Actor,
   projectRoot: string,
-): boolean {
-  const before = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot).update(
+): Promise<WriteResult> {
+  const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
+  const e = store.get(id);
+  if (!e) return notFound(id);
+  return store.write(
     id,
-    (f) => {
-      f.authority = 'inferred';
+    {
+      kind: 'refute',
+      fields: { authority: 'inferred', reverify: `Refuted: ${reason}` },
+      principal: actor.principal,
     },
+    { scope: e.scope },
   );
-  if (!before) return false;
-  appendKnowledgeEvent(trackedRootAbs, {
-    event: 'refuted',
-    id,
-    from: String(before.authority),
-    to: 'inferred',
-    by: actor.by,
-    principal: actor.principal,
-    detail: reason,
-  });
-  return true;
 }

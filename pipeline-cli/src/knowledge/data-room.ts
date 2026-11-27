@@ -9,7 +9,11 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, relative } from 'node:path';
 import { loadKnowledgeConfig } from './config.js';
 import { hashValue, type KnowledgeEntry } from './entry.js';
-import { openKnowledgeStore, type KnowledgeBackendSelection } from './knowledge-store.js';
+import {
+  openKnowledgeStore,
+  type KnowledgeBackendSelection,
+  type WriteResult,
+} from './knowledge-store.js';
 
 export type DocumentKind = 'signed' | 'plan' | 'deck' | 'document';
 
@@ -90,6 +94,8 @@ export interface CaptureInput {
   /** Path of the source document, relative to the data-room root. */
   sourceDoc: string;
   observed: string;
+  /** Who captures; recorded in the local knowledge log (AISDLC-1420). */
+  principal: string;
 }
 
 /**
@@ -98,12 +104,12 @@ export interface CaptureInput {
  * under the protected root, never the data room. The entry lands at the store default
  * `<trunk>/<id>.md`, the layout `validateKnowledge` requires (AISDLC-1425).
  */
-export function captureFact(
+export async function captureFact(
   sel: KnowledgeBackendSelection,
-  protectedRootAbs: string,
+  roots: { trackedRootAbs: string; protectedRootAbs: string },
   input: CaptureInput,
   projectRoot: string,
-): string {
+): Promise<WriteResult & { file: string }> {
   const fields = {
     id: input.id,
     trunk: input.trunk ?? 'memory',
@@ -120,20 +126,30 @@ export function captureFact(
     writtenBy: 'agent',
     reverify: `Re-check against ${input.sourceDoc} in the data room`,
   };
-  const { path } = openKnowledgeStore({ ...sel, protectedRoot: protectedRootAbs }, projectRoot).put(
-    { fields, body: `Source: ${input.sourceDoc}\n` },
-    { scope: 'protected' },
+  const store = openKnowledgeStore(
+    { ...sel, trackedRoot: roots.trackedRootAbs, protectedRoot: roots.protectedRootAbs },
+    projectRoot,
   );
-  return join(protectedRootAbs, path);
+  const r = await store.create(
+    { fields, body: `Source: ${input.sourceDoc}\n` },
+    { scope: 'protected', principal: input.principal },
+  );
+  return { ...r, file: r.path === '' ? '' : join(roots.protectedRootAbs, r.path) };
 }
 
 /** `cli-context capture`: resolve the project's knowledge config and capture into its protected root. */
-export function captureFactForProject(projectDir: string, input: CaptureInput): string {
+export function captureFactForProject(
+  projectDir: string,
+  input: CaptureInput,
+): Promise<WriteResult & { file: string }> {
   const config = loadKnowledgeConfig(projectDir);
-  const protectedAbs = isAbsolute(config.protectedRoot)
-    ? config.protectedRoot
-    : join(projectDir, config.protectedRoot);
-  return captureFact(config, protectedAbs, input, projectDir);
+  const abs = (p: string): string => (isAbsolute(p) ? p : join(projectDir, p));
+  return captureFact(
+    config,
+    { trackedRootAbs: abs(config.trackedRoot), protectedRootAbs: abs(config.protectedRoot) },
+    input,
+    projectDir,
+  );
 }
 
 /** Export and sharing paths: the protected partition is excluded by scope alone. */

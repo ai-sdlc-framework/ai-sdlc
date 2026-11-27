@@ -133,7 +133,7 @@ function entryText(id: string): string {
 }
 
 describe('every knowledge-log emit site records by and principal', () => {
-  it('covers promote, reobserve, refute, confirm, correct, supersede and ingest supersession', () => {
+  it('covers promote, reobserve, refute, confirm, correct, supersede and ingest', async () => {
     root = mkdtempSync(join(tmpdir(), 'principal-emit-'));
     const tracked = join(root, '.ai-sdlc/knowledge');
     for (const id of ['a', 'b']) put(`.ai-sdlc/knowledge/systems/${id}.md`, entryText(id));
@@ -145,28 +145,24 @@ describe('every knowledge-log emit site records by and principal', () => {
       config: { trackedRoot: '.ai-sdlc/knowledge', protectedRoot: '.ai-sdlc/private' },
       ontology: DEFAULT_ONTOLOGY,
     } as unknown as Parameters<typeof promoteEntry>[4];
-    expect(
-      promoteEntry({ backend: 'files' }, tracked, 'a', { to: 'canonical', ...human }, verify).ok,
-    ).toBe(true);
-    expect(
-      reobserveEntry({ backend: 'files' }, tracked, 'a', 1, agent, undefined, root),
-    ).not.toBeNull();
-    expect(refuteEntry({ backend: 'files' }, tracked, 'a', 'wrong', human, root)).toBe(true);
-    expect(
-      confirmEntry({ backend: 'files' }, tracked, 'a', 1, human, undefined, root),
-    ).not.toBeNull();
-    expect(correctEntry({ backend: 'files' }, tracked, 'a', 'new', human, undefined, root)).toBe(
-      true,
-    );
-    expect(supersedeEntry({ backend: 'files' }, tracked, 'a', 'b', human, root).ok).toBe(true);
+    const sel = { backend: 'files' };
+    const results = [
+      await promoteEntry(sel, tracked, 'a', { to: 'canonical', ...human }, verify),
+      await reobserveEntry(sel, tracked, 'a', 1, agent, undefined, root),
+      await refuteEntry(sel, tracked, 'a', 'wrong', human, root),
+      await confirmEntry(sel, tracked, 'a', 1, human, undefined, root),
+      await correctEntry(sel, tracked, 'a', 'new', human, undefined, root),
+      await supersedeEntry(sel, tracked, 'a', 'c', 'newer', human, undefined, root),
+    ];
+    expect(results.map((r) => r.status)).toEqual(Array(6).fill('applied'));
 
     const task = (title: string): void =>
       put(
         'backlog/tasks/T-1 - t.md',
         `---\nid: T-1\ntitle: ${title}\nstatus: To Do\n---\n\nbody\n`,
       );
-    const ingest = (): void => {
-      ingestSource('tasks', {
+    const ingest = async (): Promise<void> => {
+      await ingestSource('tasks', {
         backend: 'files',
         projectDir: root as string,
         trackedRootAbs: tracked,
@@ -176,9 +172,9 @@ describe('every knowledge-log emit site records by and principal', () => {
       });
     };
     task('first');
-    ingest();
+    await ingest();
     task('second');
-    ingest();
+    await ingest();
 
     const events = readKnowledgeLog(tracked);
     expect(events.map((e) => e.event)).toEqual([
@@ -188,14 +184,15 @@ describe('every knowledge-log emit site records by and principal', () => {
       'confirmed',
       'corrected',
       'superseded',
-      'superseded',
+      'created',
+      'reingested',
     ]);
     for (const e of events) {
       expect(e.by === 'human' || e.by === 'agent').toBe(true);
       expect(e.principal).toBeTruthy();
     }
     expect(events[1]).toMatchObject({ by: 'agent', principal: 'agent:task:T-1' });
-    expect(events[6]).toMatchObject({ id: 'task-t-1', by: 'agent', principal: 'agent:task:T-1' });
+    expect(events[7]).toMatchObject({ id: 'task-t-1', by: 'agent', principal: 'agent:task:T-1' });
     expect(auditLines(events)[0]).toContain('by=human principal=human:op@example.com');
   });
 });

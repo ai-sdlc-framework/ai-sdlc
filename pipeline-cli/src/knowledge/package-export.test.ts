@@ -30,8 +30,6 @@ const TYPE_NAMES = [
   'StoreScope',
   'ListScope',
   'GetOptions',
-  'PutOptions',
-  'PutResult',
   'KnowledgeEvent',
   'KnowledgeEventKind',
   'KnowledgeBackendRegistry',

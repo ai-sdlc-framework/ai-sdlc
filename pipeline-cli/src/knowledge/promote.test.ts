@@ -80,9 +80,9 @@ const authority = () =>
   /"?authority"?:\s*"?(\w+)/.exec(readFileSync(join(root, entryPath), 'utf-8'))?.[1];
 
 describe('promotion verifier', () => {
-  it('refuses a proof kind outside the vocabulary and keeps the entry inferred', () => {
+  it('refuses a proof kind outside the vocabulary and keeps the entry inferred', async () => {
     repo();
-    const r = promoteEntry(
+    const r = await promoteEntry(
       { backend: 'files' },
       tracked(),
       'k-1',
@@ -94,7 +94,7 @@ describe('promotion verifier', () => {
     expect(authority()).toBe('inferred');
   });
 
-  it('does not promote on a forged or failing test id', () => {
+  it('does not promote on a forged or failing test id', async () => {
     repo();
     expect(verifyProof('test-id:src/nope.test.ts', ctx()).ok).toBe(false);
     expect(verifyProof('test-id:../x.test.ts', ctx()).ok).toBe(false);
@@ -102,20 +102,20 @@ describe('promotion verifier', () => {
     expect(verifyProof('test-id:src/a.test.ts::t', ctx({ runTest: () => true })).ok).toBe(true);
   });
 
-  it('refuses a test file that differs from the committed tree', () => {
+  it('refuses a test file that differs from the committed tree', async () => {
     repo();
     writeFileSync(join(root, 'src/a.test.ts'), 'changed');
     expect(verifyProof('test-id:src/a.test.ts', ctx({ runTest: () => true })).ok).toBe(false);
   });
 
-  it('promotes a decision id only when present on main', () => {
+  it('promotes a decision id only when present on main', async () => {
     repo();
     expect(verifyProof('decision-id:DEC-0091', ctx()).ok).toBe(true);
     expect(verifyProof('decision-id:DEC-0999', ctx()).ok).toBe(false);
     expect(verifyProof('decision-id:nope', ctx()).ok).toBe(false);
   });
 
-  it('promotes a path only when tracked', () => {
+  it('promotes a path only when tracked', async () => {
     repo();
     writeFileSync(join(root, 'untracked.txt'), 'x');
     expect(verifyProof('path-exists:src/a.test.ts', ctx()).ok).toBe(true);
@@ -123,7 +123,7 @@ describe('promotion verifier', () => {
     expect(verifyProof('path-exists:/etc/passwd', ctx()).ok).toBe(false);
   });
 
-  it('promotes a command proof only for an allowlisted command whose output matches', () => {
+  it('promotes a command proof only for an allowlisted command whose output matches', async () => {
     repo();
     const config = { ...ctx().config, allowlistedCommands: { ver: ['tool', '--version'] } };
     const runCommand = () => 'tool 1.2.3\n';
@@ -144,42 +144,48 @@ describe('promotion verifier', () => {
     ).toBe(false);
   });
 
-  it('refuses canonical for an agent and allows a human', () => {
+  it('refuses canonical for an agent and allows a human', async () => {
     repo();
     expect(
-      promoteEntry(
-        { backend: 'files' },
-        tracked(),
-        'k-1',
-        { to: 'canonical', by: 'agent', principal: 'agent:task:T-1' },
-        ctx(),
+      (
+        await promoteEntry(
+          { backend: 'files' },
+          tracked(),
+          'k-1',
+          { to: 'canonical', by: 'agent', principal: 'agent:task:T-1' },
+          ctx(),
+        )
       ).ok,
     ).toBe(false);
     expect(authority()).toBe('inferred');
     expect(
-      promoteEntry(
-        { backend: 'files' },
-        tracked(),
-        'k-1',
-        { to: 'canonical', by: 'human', principal: 'human:op@example.com' },
-        ctx(),
+      (
+        await promoteEntry(
+          { backend: 'files' },
+          tracked(),
+          'k-1',
+          { to: 'canonical', by: 'human', principal: 'human:op@example.com' },
+          ctx(),
+        )
       ).ok,
     ).toBe(true);
     expect(authority()).toBe('canonical');
   });
 
-  it('does not demote a canonical entry via specialist promotion', () => {
+  it('does not demote a canonical entry via specialist promotion', async () => {
     repo();
     expect(
-      promoteEntry(
-        { backend: 'files' },
-        tracked(),
-        'k-1',
-        { to: 'canonical', by: 'human', principal: 'human:op@example.com' },
-        ctx(),
+      (
+        await promoteEntry(
+          { backend: 'files' },
+          tracked(),
+          'k-1',
+          { to: 'canonical', by: 'human', principal: 'human:op@example.com' },
+          ctx(),
+        )
       ).ok,
     ).toBe(true);
-    const r = promoteEntry(
+    const r = await promoteEntry(
       { backend: 'files' },
       tracked(),
       'k-1',
@@ -190,31 +196,35 @@ describe('promotion verifier', () => {
     expect(authority()).toBe('canonical');
   });
 
-  it('requires a proof for specialist and reports a missing entry', () => {
+  it('requires a proof for specialist and reports a missing entry', async () => {
     repo();
     expect(
-      promoteEntry(
-        { backend: 'files' },
-        tracked(),
-        'k-1',
-        { to: 'specialist', by: 'agent', principal: 'agent:task:T-1' },
-        ctx(),
+      (
+        await promoteEntry(
+          { backend: 'files' },
+          tracked(),
+          'k-1',
+          { to: 'specialist', by: 'agent', principal: 'agent:task:T-1' },
+          ctx(),
+        )
       ).ok,
     ).toBe(false);
     expect(
-      promoteEntry(
-        { backend: 'files' },
-        tracked(),
-        'zzz',
-        { to: 'specialist', by: 'agent', principal: 'agent:task:T-1' },
-        ctx(),
+      (
+        await promoteEntry(
+          { backend: 'files' },
+          tracked(),
+          'zzz',
+          { to: 'specialist', by: 'agent', principal: 'agent:task:T-1' },
+          ctx(),
+        )
       ).ok,
     ).toBe(false);
   });
 
-  it('logs promotion, supersession-style refutation, and audit lists the proof', () => {
+  it('logs promotion, supersession-style refutation, and audit lists the proof', async () => {
     repo({}, { writtenBy: 'agent', reverify: 'check' });
-    const r = promoteEntry(
+    const r = await promoteEntry(
       { backend: 'files' },
       tracked(),
       'k-1',
@@ -223,8 +233,13 @@ describe('promotion verifier', () => {
     );
     expect(r.ok).toBe(true);
     expect(authority()).toBe('specialist');
-    expect(refuteEntry({ backend: 'files' }, tracked(), 'k-1', 'wrong', HUMAN, root)).toBe(true);
-    expect(refuteEntry({ backend: 'files' }, tracked(), 'nope', 'wrong', HUMAN, root)).toBe(false);
+    expect(
+      (await refuteEntry({ backend: 'files' }, tracked(), 'k-1', 'wrong', HUMAN, root)).status,
+    ).toBe('applied');
+    expect(readFileSync(join(root, entryPath), 'utf-8')).toMatch(/reverify: \W?Refuted: wrong/);
+    expect(
+      (await refuteEntry({ backend: 'files' }, tracked(), 'nope', 'wrong', HUMAN, root)).status,
+    ).toBe('rejected');
     const events = readKnowledgeLog(tracked());
     expect(events.map((e) => e.event)).toEqual(['promoted', 'refuted']);
     const lines = auditLines(events);
@@ -233,23 +248,26 @@ describe('promotion verifier', () => {
     expect(authority()).toBe('inferred');
   });
 
-  it('re-observation moves confidence 30 percent toward the value, authority unchanged', () => {
+  it('re-observation moves confidence 30 percent toward the value, authority unchanged', async () => {
     repo({}, { authority: 'specialist' });
     expect(
-      reobserveEntry({ backend: 'files' }, tracked(), 'k-1', 1, AGENT, '2026-10-28', root),
+      (await reobserveEntry({ backend: 'files' }, tracked(), 'k-1', 1, AGENT, '2026-10-28', root))
+        .confidence,
     ).toBeCloseTo(0.65);
     expect(authority()).toBe('specialist');
     expect(
-      reobserveEntry({ backend: 'files' }, tracked(), 'nope', 1, AGENT, undefined, root),
-    ).toBeNull();
+      (await reobserveEntry({ backend: 'files' }, tracked(), 'nope', 1, AGENT, undefined, root))
+        .status,
+    ).toBe('rejected');
     expect(readKnowledgeLog(tracked()).map((e) => e.event)).toEqual(['reobserved']);
   });
 
-  it('caps re-observed confidence for agent-written entries', () => {
+  it('caps re-observed confidence for agent-written entries', async () => {
     repo({}, { writtenBy: 'agent', reverify: 'x', confidence: 0.85 });
-    expect(reobserveEntry({ backend: 'files' }, tracked(), 'k-1', 1, AGENT, undefined, root)).toBe(
-      0.85,
-    );
+    expect(
+      (await reobserveEntry({ backend: 'files' }, tracked(), 'k-1', 1, AGENT, undefined, root))
+        .confidence,
+    ).toBe(0.85);
   });
 });
 

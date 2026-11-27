@@ -112,11 +112,11 @@ export async function cmdRun(a: RunArgs, io: DreamCliIo): Promise<RunResult> {
   return result;
 }
 
-export function cmdApply(
+export async function cmdApply(
   a: { output: string; keep?: number; projectDir?: string },
   io: Pick<DreamCliIo, 'out'>,
-): void {
-  const r = applyDream({
+): Promise<void> {
+  const r = await applyDream({
     outputDir: resolve(a.output),
     keep: a.keep,
     afterSwap: reingestAfterSwap(a.projectDir ?? process.cwd()),
@@ -131,11 +131,11 @@ export function cmdApply(
   if (r.pruned.length > 0) io.out(`pruned ${r.pruned.length} older version(s)`);
 }
 
-export function cmdUndo(
+export async function cmdUndo(
   a: { dir?: string; projectDir?: string },
   io: Pick<DreamCliIo, 'out'>,
-): void {
-  const r = undoDream({
+): Promise<void> {
+  const r = await undoDream({
     liveDir: memoryDirFor(a),
     afterSwap: reingestAfterSwap(a.projectDir ?? process.cwd()),
   });

@@ -35,6 +35,15 @@ describe('cli-context ingest-sections', () => {
     expect(existsSync(join(dir, '.ai-sdlc/knowledge/process/why-it-exists.md'))).toBe(true);
     await buildContextCli(['validate', '--project-dir', dir]).parseAsync();
     expect(process.exitCode ?? 0).toBe(0);
+    // a second run re-ingests the existing entry instead of creating it again
+    const out: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((c) => !!out.push(String(c)));
+    try {
+      await buildContextCli(['ingest-sections', 'NOTES.md', '--project-dir', dir]).parseAsync();
+    } finally {
+      vi.restoreAllMocks();
+    }
+    expect(out).toEqual(['0 created, 1 updated\n']);
   });
 });
 
@@ -70,10 +79,16 @@ exports.registerKnowledgeBackends = (r) =>
   r.registerKnowledgeBackend('recording', () => ({
     kind: 'recording',
     get: () => null,
-    put: (e, o) => (calls.push('put:' + o.scope), { path: o.path ?? 'x.md', created: true }),
-    update: () => null,
     list: () => (calls.push('list'), []),
     listRaw: () => [],
+    // tracked writes are queued as proposals, protected ones rejected (AISDLC-1456)
+    create: async (e, o) => (
+      calls.push('create:' + o.scope + ':' + o.principal.split(':')[0]),
+      o.scope === 'tracked'
+        ? { id: e.fields.id, path: '', created: false, status: 'proposed' }
+        : { id: e.fields.id, path: '', created: false, status: 'rejected', reason: 'read-only replica' }
+    ),
+    write: async (id) => ({ id, path: '', created: false, status: 'rejected', reason: 'unused' }),
   }));
 `,
     );
@@ -87,11 +102,28 @@ exports.registerKnowledgeBackends = (r) =>
         .exitProcess(false)
         .fail(false)
         .parseAsync();
-    await run(['ingest-sections', 'NOTES.md']);
-    await run(['capture', 'fact-1', '--value', 'v', '--source-doc', 'doc.pdf']);
-    await run(['export']);
+    const out: string[] = [];
+    const err: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((c) => !!out.push(String(c)));
+    vi.spyOn(process.stderr, 'write').mockImplementation((c) => !!err.push(String(c)));
+    try {
+      await run(['ingest-sections', 'NOTES.md']);
+      expect(out).toEqual(['0 created, 0 updated, 1 queued as a proposal\n']);
+      expect(process.exitCode ?? 0).toBe(0);
+      await run(['capture', 'fact-1', '--value', 'v', '--source-doc', 'doc.pdf']);
+      expect(err).toEqual(['rejected: read-only replica\n']);
+      expect(process.exitCode).toBe(1);
+      process.exitCode = 0;
+      await run(['export']);
+    } finally {
+      vi.restoreAllMocks();
+    }
     const calls = (globalThis as { __recordingCalls?: string[] }).__recordingCalls;
-    expect(calls).toEqual(['put:tracked', 'put:protected', 'list']);
+    expect(calls?.map((c) => c.replace(/:(human|agent)$/, ':<role>'))).toEqual([
+      'create:tracked:<role>',
+      'create:protected:<role>',
+      'list',
+    ]);
     expect(existsSync(join(dir, '.ai-sdlc/knowledge'))).toBe(false);
     expect(existsSync(join(dir, '.ai-sdlc/knowledge-protected'))).toBe(false);
   });

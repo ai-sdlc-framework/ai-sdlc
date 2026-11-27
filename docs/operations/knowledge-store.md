@@ -121,7 +121,7 @@ resolves, the factory opens, and each declared path is git-ignored; it exits 1 o
 those failures. The `knowledge-backend` check of `ai-sdlc doctor` runs it and maps the report:
 fail when the module does not resolve, the factory does not open, or a path is not
 git-ignored; warn when a non-files backend declares zero paths; pass otherwise and for
-`files` ([doctor.md](doctor.md)). `localPaths()` changes no `put`/`update` signature.
+`files` ([doctor.md](doctor.md)). `localPaths()` changes no write signature.
 
 ### Named writes (AISDLC-1455, DEC-0443)
 
@@ -170,7 +170,21 @@ local knowledge log only, and `by` derives from it (`human:` is a human, anythin
 agent). A server backend takes the principal from its own credential and ignores the value
 passed in.
 
-`put` and `update` remain until their callers move to the named writes (AISDLC-1456).
+`create` and `write` are the only write path; `put` and `update` were removed (AISDLC-1456).
+Every caller awaits its result:
+
+- `cli-context confirm`, `correct`, `reobserve`, `refute`, `promote`, `supersede` and
+  `capture` print `applied: ...`, `proposed: queued as a proposal`, or `rejected: <reason>`
+  on stderr with exit code 1. A proposal is never reported as done.
+- `ingest`, `ingest-sections` and `ingest-memory` create a new entry and re-ingest an
+  existing one; the summary line adds `N queued as a proposal` and `N rejected`, and any
+  rejection exits 1.
+- `supersede <old> <new> --value <v>` is one `supersede` write: `<new>` is created from
+  `<old>` with the new value and must not exist yet; `<old>` is kept and marked superseded.
+- A canonical promotion without `--proof` records `proof: operator`, since every `promote`
+  carries a proof. `refute --reason` keeps the reason as the entry's `reverify` note,
+  because the log records field names only.
+- `capture` of an id that already exists is rejected instead of overwriting it.
 
 ## Scaffold
 
@@ -229,7 +243,8 @@ proof (a path, a test id, free text, or a command id outside the allowlist) is `
 A record with a missing or non-string field, an id outside `[a-z0-9._-]`, or fields that
 fail entry validation (unknown trunk or type, for example) is reported on stderr with its
 index and skipped; the other records are still written and the run does not fail. The
-write interface is unchanged: this source adds no `put`/`update` signature change.
+write interface is unchanged: each record is a `create`, or a `reingest` write when the
+entry exists.
 
 ## Sync contract
 

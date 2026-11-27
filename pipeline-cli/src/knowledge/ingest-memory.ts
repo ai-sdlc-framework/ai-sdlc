@@ -9,6 +9,7 @@
  * after a dream swap) has its entry marked superseded, never deleted.
  */
 import { basename, isAbsolute, join, relative } from 'node:path';
+import process from 'node:process';
 import { readMemoryFolder, stemOf, type Note } from '../memory-dream/notes.js';
 import { now } from '../clock.js';
 import { loadKnowledgeConfig } from './config.js';
@@ -20,7 +21,15 @@ import {
   storeOntology,
   type KnowledgeBackendSelection,
   type KnowledgeStore,
+  type WriteResult,
 } from './knowledge-store.js';
+import {
+  countIngestWrite,
+  emptyIngestCounts,
+  ingestEntry,
+  type IngestWriteCounts,
+} from './ingest-write.js';
+import { resolveKnowledgePrincipal, systemPrincipalDeps } from './principal.js';
 import { slugify } from './ingest-sections.js';
 import type { Ontology } from './ontology.js';
 import { estimateTokens, type QueryHit } from './retrieval/types.js';
@@ -32,15 +41,17 @@ export interface MemoryIngestOptions extends KnowledgeBackendSelection {
   projectDir: string;
   memoryDir: string;
   protectedRootAbs: string;
+  /** The tracked root: the knowledge log every store write appends to sits next to it. */
+  trackedRootAbs: string;
   ontology: Ontology;
   observed: string;
-  /** A store already open on this backend and protected root; default opens one. */
+  /** Who ingests; recorded in the local knowledge log (AISDLC-1420). */
+  principal: string;
+  /** A store already open on this backend and both roots; default opens one. */
   store?: KnowledgeStore;
 }
 
-export interface MemoryIngestResult {
-  created: number;
-  updated: number;
+export interface MemoryIngestResult extends IngestWriteCounts {
   unchanged: number;
   superseded: number;
   skipped: number;
@@ -102,16 +113,22 @@ function writeEntry(
   path: string,
   fields: Record<string, unknown>,
   body: string,
-): boolean {
-  return store.put({ fields, body: `\n${body}${body ? '\n' : ''}` }, { scope: 'protected', path })
-    .created;
+  o: { principal: string; exists: boolean },
+): Promise<WriteResult> {
+  return ingestEntry(
+    store,
+    { fields, body: `\n${body}${body ? '\n' : ''}` },
+    { scope: 'protected', path, ...o },
+  );
 }
 
 /** Ingest (or re-ingest) the memory folder into the `memory` trunk of the protected root. */
-export function ingestMemoryTrunk(o: MemoryIngestOptions): MemoryIngestResult {
+export async function ingestMemoryTrunk(
+  o: MemoryIngestOptions,
+  report: (line: string) => void = (line) => process.stderr.write(`${line}\n`),
+): Promise<MemoryIngestResult> {
   const result: MemoryIngestResult = {
-    created: 0,
-    updated: 0,
+    ...emptyIngestCounts(),
     unchanged: 0,
     superseded: 0,
     skipped: 0,
@@ -123,6 +140,7 @@ export function ingestMemoryTrunk(o: MemoryIngestOptions): MemoryIngestResult {
         backend: o.backend,
         backendModule: o.backendModule,
         backendOptions: o.backendOptions,
+        trackedRoot: o.trackedRootAbs,
         protectedRoot: o.protectedRootAbs,
       },
       o.projectDir,
@@ -150,15 +168,25 @@ export function ingestMemoryTrunk(o: MemoryIngestOptions): MemoryIngestResult {
     if (prior) {
       fields.supersedes = `${String(fields.id)}@${String(prior.fields.contentHash)}`;
     }
-    if (writeEntry(store, path, fields, n.body.trim())) result.created++;
-    else result.updated++;
+    const r = await writeEntry(store, path, fields, n.body.trim(), {
+      principal: o.principal,
+      exists: prior !== null,
+    });
+    countIngestWrite(result, r, report);
   }
   for (const prior of store.list({ scope: 'protected', trunk: MEMORY_TRUNK })) {
     if (live.has(basename(prior.path)) || prior.fields.status === 'superseded') continue;
     // Data-room captures share the memory trunk but are not notes (AISDLC-1425).
     if (String(prior.fields.source ?? '').startsWith(DATA_ROOM_SOURCE_PREFIX)) continue;
-    writeEntry(store, prior.path, { ...prior.fields, status: 'superseded' }, prior.body.trim());
-    result.superseded++;
+    const r = await writeEntry(
+      store,
+      prior.path,
+      { ...prior.fields, status: 'superseded' },
+      prior.body.trim(),
+      { principal: o.principal, exists: true },
+    );
+    if (r.status === 'applied') result.superseded++;
+    else countIngestWrite(result, r, report);
   }
   return result;
 }
@@ -176,7 +204,8 @@ export function ingestMemoryForProject(
   projectDir: string,
   memoryDir: string,
   observed: string,
-): MemoryIngestResult {
+  principal: string = agentPrincipal(projectDir),
+): Promise<MemoryIngestResult> {
   const config = loadKnowledgeConfig(projectDir);
   const abs = (p: string): string => (isAbsolute(p) ? p : join(projectDir, p));
   const store = openKnowledgeStore(
@@ -192,10 +221,17 @@ export function ingestMemoryForProject(
     projectDir,
     memoryDir,
     protectedRootAbs: abs(config.protectedRoot),
+    trackedRootAbs: abs(config.trackedRoot),
     ontology: storeOntology(store, abs(config.trackedRoot)).ontology,
     observed,
+    principal,
     store,
   });
+}
+
+/** The principal of an ingest no person started (a dream swap): the agent of this process. */
+function agentPrincipal(projectDir: string): string {
+  return resolveKnowledgePrincipal(process.env, systemPrincipalDeps('agent', projectDir));
 }
 
 /**
@@ -204,8 +240,8 @@ export function ingestMemoryForProject(
  * The store answers that question, never a filesystem probe, so a non-files backend (DEC-0427)
  * is re-ingested too; a backend that cannot be opened throws `KnowledgeBackendError`.
  */
-export function reingestAfterSwap(projectDir: string): (liveDir: string) => void {
-  return (liveDir) => {
+export function reingestAfterSwap(projectDir: string): (liveDir: string) => Promise<void> {
+  return async (liveDir) => {
     const config = loadKnowledgeConfig(projectDir);
     const store = openKnowledgeStore(
       {
@@ -217,6 +253,6 @@ export function reingestAfterSwap(projectDir: string): (liveDir: string) => void
       projectDir,
     );
     if (store.list({ scope: 'protected', trunk: MEMORY_TRUNK }).length === 0) return;
-    ingestMemoryForProject(projectDir, liveDir, now().toISOString().slice(0, 10));
+    await ingestMemoryForProject(projectDir, liveDir, now().toISOString().slice(0, 10));
   };
 }
