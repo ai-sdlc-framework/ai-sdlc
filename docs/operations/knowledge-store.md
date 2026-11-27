@@ -37,6 +37,15 @@ is absent the built-in default applies. The default trunks are `systems`, `produ
 `customers`, `decisions`, `people`, `process` and `memory` (indexed auto-memory, held at
 `scope: protected`).
 
+A store backend may supply the ontology instead (AISDLC-1435), so a shared remote store
+holds one ontology for every clone. `KnowledgeStore.ontology?(): Ontology` is optional:
+when a backend implements it, validation (`cli-context validate`), `ingest-memory` and the
+`cli-context` ingest, promote and human commands use what it returns and ignore
+`ontology.yaml`. A backend without it, `files` included, reads `<trackedRoot>/ontology.yaml`
+exactly as before: the file replaces the default wholesale, and a malformed file is a
+validation error. Every caller resolves the ontology through `storeOntology(store,
+trackedRoot)` in `knowledge-store.ts`; nothing else calls `loadOntology`.
+
 ## Two roots and the scope rule
 
 Scope decides location:

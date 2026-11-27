@@ -18,6 +18,7 @@ import { dump } from '../util/yaml.js';
 import { DEFAULT_KNOWLEDGE_BACKEND, type KnowledgeConfig } from './config.js';
 import { parseEntryFile, toEntry, type KnowledgeEntry } from './entry.js';
 import { appendKnowledgeEvent, type KnowledgeEventKind } from './log.js';
+import { loadOntology, type Ontology } from './ontology.js';
 
 /** The two RFC-0053 roots: the git-tracked root and the git-ignored protected root. */
 export type StoreScope = 'tracked' | 'protected';
@@ -165,6 +166,25 @@ export interface KnowledgeStore {
    * stamp of the last `cli-context sync`. Optional, like `sync`; the files backend omits it.
    */
   status?(): Promise<{ queued: number; rejected: number; lastSyncAt?: string; lastError?: string }>;
+  /**
+   * The ontology this backend supplies (AISDLC-1435), so a shared remote store can hold one
+   * ontology for every clone. Optional: a backend without it, `files` included, uses
+   * `<trackedRoot>/ontology.yaml` (or the built-in default) through `storeOntology`.
+   */
+  ontology?(): Ontology;
+}
+
+/**
+ * The ontology for a store: the one the backend supplies, else `loadOntology(trackedRootAbs)`
+ * exactly as before (the file replaces the default wholesale; a malformed file yields errors).
+ * The only `loadOntology` caller outside `ontology.ts` (AISDLC-1435).
+ */
+export function storeOntology(
+  store: Pick<KnowledgeStore, 'ontology'>,
+  trackedRootAbs: string,
+): { ontology: Ontology; errors: string[] } {
+  const supplied = store.ontology?.();
+  return supplied ? { ontology: supplied, errors: [] } : loadOntology(trackedRootAbs);
 }
 
 const EVENT_OF: Record<WriteKind, KnowledgeEventKind> = {

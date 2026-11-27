@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1435
 title: A knowledge backend may supply the ontology
-status: To Do
+status: In Progress
 priority: medium
 labels:
   - pipeline-cli
