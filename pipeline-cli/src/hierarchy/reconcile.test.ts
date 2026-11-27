@@ -35,6 +35,8 @@ import {
   takeSuppressedNote,
   taskIdFrom,
   TASK_ACTIONS,
+  TRUST_REFUSAL_NOTE,
+  trustRefusalReason,
   type ActionContext,
   type LandingRecord,
   type ReconcilePr,
@@ -2221,6 +2223,123 @@ describe('review-authority hold (AISDLC-1449, DEC-0440)', () => {
       action: 'arm',
       state: 'no-match',
       headSha: 'sha',
+      boardDir: board,
+    });
+    expect(r).toMatchObject({ ran: true, failed: true });
+    expect(r.hold).toBeUndefined();
+  });
+});
+
+describe('merge gate trust refusal (AISDLC-1387)', () => {
+  const HEAD = 'a'.repeat(40);
+  const AUTHOR_REFUSAL =
+    'the head commit author "Akillies2099" is not on the spec.governance.mergeAuthors allow-list';
+  const ID_REFUSAL =
+    'no backlog task id (ARC-<n>[.<n>]) could be derived from head branch ' +
+    '"feat/dec-0012-x" (expected ai-sdlc/<id>-...) or the PR title (trailing "(<ID>)")';
+  const gate = (reason: string | null) => {
+    const calls: string[][] = [];
+    const run: CommandRunner = (file, args) => {
+      calls.push([file, ...args]);
+      return reason === null
+        ? { status: 0, stdout: 'PR #10 | ARMED | eligible\n', stderr: '' }
+        : { status: 1, stdout: `PR #10 | REFUSED | ${reason}\n`, stderr: '' };
+    };
+    return { calls, run };
+  };
+  const passes = (pr: (at: number) => ReconcilePr, run: CommandRunner, n: number) => {
+    const notify = vi.fn();
+    const reports = [];
+    for (let i = 0; i < n; i++) {
+      reports.push(
+        reconcile([pr(i)], {
+          boardDir: board,
+          execute: commandExecutor(run, '/repo', '/bin'),
+          now: () => new Date(Date.parse('2026-11-27T10:00:00.000Z') + i * 10 * 60_000),
+          notifyPlanner: notify,
+        }),
+      );
+    }
+    return { notify, reports };
+  };
+
+  it('a head commit author off mergeAuthors is not armed and is routed once with the reason', () => {
+    const { calls, run } = gate(AUTHOR_REFUSAL);
+    const { notify, reports } = passes(() => taskPr({ headSha: HEAD }), run, 4);
+    expect(calls.filter((c) => c.includes('--arm'))).toHaveLength(1);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0]![0]).toContain(AUTHOR_REFUSAL);
+    expect(reports[0]!.acted).toEqual([
+      expect.objectContaining({ pr: 10, action: 'route-to-planner', note: TRUST_REFUSAL_NOTE }),
+    ]);
+    const rec = readLanding(board, 10)!;
+    expect(rec).toMatchObject({
+      action: 'route-to-planner',
+      failingLine: AUTHOR_REFUSAL,
+      note: TRUST_REFUSAL_NOTE,
+      authorityHold: { headSha: HEAD, reason: AUTHOR_REFUSAL, note: TRUST_REFUSAL_NOTE },
+    });
+    // Never an `arm failed` record for the head: the refusal is the gate's answer, not a failure.
+    expect(rec.actionFailed).toBeUndefined();
+    expect(rec.history.filter((h) => h.action === 'arm')).toHaveLength(0);
+  });
+
+  it('a task-kind PR with no derivable id is not armed and is routed once with the reason', () => {
+    const { calls, run } = gate(ID_REFUSAL);
+    const pr = () =>
+      taskPr({
+        taskId: 'DEC-0012',
+        title: 'docs: file DEC-0012 decision',
+        headBranch: 'feat/dec-0012-x',
+        headSha: HEAD,
+      });
+    expect(decide(pr())).toMatchObject({ kind: 'task', action: 'arm' });
+    const { notify } = passes(pr, run, 3);
+    expect(calls.filter((c) => c.includes('--arm'))).toHaveLength(1);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0]![0]).toContain(ID_REFUSAL);
+    expect(readLanding(board, 10)!.actionFailed).toBeUndefined();
+  });
+
+  it('a new title or a new head is evaluated by the gate again', () => {
+    const { calls, run } = gate(ID_REFUSAL);
+    const base = { taskId: 'DEC-0012', headBranch: 'feat/dec-0012-x', headSha: HEAD };
+    const titles = ['docs: file DEC-0012', 'docs: file DEC-0012', 'docs: file DEC-0012 (ARC-56)'];
+    passes((i) => taskPr({ ...base, title: titles[i]! }), run, 3);
+    expect(calls.filter((c) => c.includes('--arm'))).toHaveLength(2);
+    passes(() => taskPr({ ...base, title: titles[2]!, headSha: 'b'.repeat(40) }), run, 1);
+    expect(calls.filter((c) => c.includes('--arm'))).toHaveLength(3);
+  });
+
+  it('an eligible PR is armed as before', () => {
+    const { calls, run } = gate(null);
+    const { notify, reports } = passes(() => taskPr({ headSha: HEAD }), run, 1);
+    expect(calls.filter((c) => c.includes('--arm'))).toHaveLength(1);
+    expect(reports[0]!.acted).toEqual([expect.objectContaining({ pr: 10, action: 'arm' })]);
+    expect(notify).not.toHaveBeenCalled();
+    const rec = readLanding(board, 10)!;
+    expect(rec.action).toBe('arm');
+    expect(rec.authorityHold).toBeUndefined();
+  });
+
+  it('a transient refusal stays a failed arm, not a trust hold', () => {
+    expect(trustRefusalReason('PR #1 | REFUSED | checks pending\n', '')).toBeUndefined();
+    expect(
+      trustRefusalReason('', 'could not read the head commit author from GitHub — refusing'),
+    ).toBeUndefined();
+    expect(trustRefusalReason('', `x ${AUTHOR_REFUSAL}`)).toBe(`x ${AUTHOR_REFUSAL}`);
+    const { run } = gate('could not read the PR from GitHub — refusing (fail-closed)');
+    const r = commandExecutor(
+      run,
+      '/repo',
+      '/bin',
+    )({
+      pr: 10,
+      taskId: 'AISDLC-1',
+      kind: 'task',
+      action: 'arm',
+      state: 'no-match',
+      headSha: HEAD,
       boardDir: board,
     });
     expect(r).toMatchObject({ ran: true, failed: true });

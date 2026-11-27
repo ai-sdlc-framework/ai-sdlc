@@ -40,7 +40,11 @@ import { clearRuling, readRuling } from '../dispatch/ruling.js';
 import type { TaskRuling } from '../dispatch/types.js';
 import { DOCS_BRANCH_PREFIXES } from './filing-branches.js';
 import { cachedGh, GH_READ_TTL_MS } from './gh-read-cache.js';
-import { disableAutoMergeArgs, PR_HOLD_LABEL } from '../governance/merge-if-eligible.js';
+import {
+  disableAutoMergeArgs,
+  isStandingTrustRefusal,
+  PR_HOLD_LABEL,
+} from '../governance/merge-if-eligible.js';
 import { isReviewAuthorityHold } from '../governance/rfc-review-authorities.js';
 import type { CommandRunner } from './types.js';
 
@@ -175,8 +179,10 @@ export interface LandingRecord {
   /**
    * AISDLC-1449 (DEC-0440): the merge gate refused to arm this head because it changes an RFC
    * with declared review authorities. The head is never armed again; the operator merges by hand.
+   * AISDLC-1387: also set for a standing trust refusal (`note` set, `title` the PR title then);
+   * that hold lifts when the head or the title changes.
    */
-  authorityHold?: { headSha: string; reason: string };
+  authorityHold?: { headSha: string; reason: string; note?: string; title?: string };
   history: LandingEntry[];
 }
 
@@ -502,10 +508,25 @@ export interface ActionResult {
    * authorities (DEC-0440); the refusal text. Never retried: the PR goes to the planner.
    */
   hold?: string;
+  /** AISDLC-1387: the routing note for `hold`; absent for a review-authority hold. */
+  holdNote?: string;
 }
 
 /** Note on a PR routed to the planner by a review-authority hold (AISDLC-1449). */
 export const AUTHORITY_HOLD_NOTE = 'review-authority hold: the operator merges by hand (DEC-0440)';
+
+/** AISDLC-1387: note on a PR the merge gate refused on a trust fact; no arm until the PR changes. */
+export const TRUST_REFUSAL_NOTE =
+  'merge gate trust refusal: not armed again until the head or title changes';
+
+/** The merge gate's refusal text in the CLI output, when it is a standing trust refusal. */
+export function trustRefusalReason(stdout: string, stderr: string): string | undefined {
+  const line = `${stdout}\n${stderr}`.split('\n').find((l) => isStandingTrustRefusal(l));
+  if (line === undefined) return undefined;
+  const marker = '| REFUSED | ';
+  const at = line.indexOf(marker);
+  return (at >= 0 ? line.slice(at + marker.length) : line).trim();
+}
 
 /** The merge gate's refusal text in the CLI output, when it is a review-authority hold. */
 export function authorityHoldReason(stdout: string, stderr: string): string | undefined {
@@ -708,6 +729,11 @@ export function commandExecutor(run: CommandRunner, cwd: string, cliBin: string)
       if (r.status !== 0) {
         const hold = ctx.action === 'arm' ? authorityHoldReason(r.stdout, r.stderr) : undefined;
         if (hold !== undefined) return { ran: true, hold, note: hold };
+        // AISDLC-1387: a trust refusal is the gate's answer for this head, not a failed arm.
+        const refusal = ctx.action === 'arm' ? trustRefusalReason(r.stdout, r.stderr) : undefined;
+        if (refusal !== undefined) {
+          return { ran: true, hold: refusal, holdNote: TRUST_REFUSAL_NOTE, note: refusal };
+        }
         return {
           ran: true,
           failed: true,
@@ -1253,8 +1279,14 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     const hold = existing?.authorityHold;
     const wouldArm =
       d.action === 'arm' || (d.action === 'route-to-planner' && d.note?.startsWith('arm@'));
-    if (wouldArm && hold !== undefined && hold.headSha === f.headSha) {
-      d = { ...d, action: 'route-to-planner', failingLine: hold.reason, note: AUTHORITY_HOLD_NOTE };
+    if (
+      wouldArm &&
+      hold !== undefined &&
+      hold.headSha === f.headSha &&
+      (hold.title === undefined || hold.title === f.title)
+    ) {
+      const note = hold.note ?? AUTHORITY_HOLD_NOTE;
+      d = { ...d, action: 'route-to-planner', failingLine: hold.reason, note };
     }
     if (d.note === LIVE_CLAIM_NOTE) {
       report.skippedFailures.push({ pr: f.prNumber, taskId: f.taskId, reason: d.note });
@@ -1580,12 +1612,24 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     }
     if (result.hold !== undefined) {
       // AISDLC-1449: the refusal reaches the planner now, once, as the routing reason.
-      d = { ...d, action: 'route-to-planner', failingLine: result.hold, note: AUTHORITY_HOLD_NOTE };
+      const note = result.holdNote ?? AUTHORITY_HOLD_NOTE;
+      d = { ...d, action: 'route-to-planner', failingLine: result.hold, note };
       record.action = d.action;
       record.failingLine = result.hold;
-      record.note = AUTHORITY_HOLD_NOTE;
-      if (f.headSha !== undefined)
-        record.authorityHold = { headSha: f.headSha, reason: result.hold };
+      record.note = note;
+      // AISDLC-1387: a refused arm is not an arm on this head; the same-head guard must not
+      // count it once a new title lifts the trust hold.
+      if (result.holdNote !== undefined) entry.action = d.action;
+      if (f.headSha !== undefined) {
+        record.authorityHold = {
+          headSha: f.headSha,
+          reason: result.hold,
+          // AISDLC-1387: a trust refusal also lifts when the title changes (a task id added).
+          ...(result.holdNote === undefined
+            ? {}
+            : { note: result.holdNote, ...(f.title === undefined ? {} : { title: f.title }) }),
+        };
+      }
     }
     writeLanding(opts.boardDir, record);
     report.records.push(record);
