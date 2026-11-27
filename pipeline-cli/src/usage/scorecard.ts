@@ -33,8 +33,6 @@ export interface TaskOutcome {
   blockingFindings: number;
   /** Developer contract retries seen in orchestrator events. */
   contractRetries: number;
-  /** Tool calls the developer used for the task (AISDLC-651.3); 0 when none were recorded. */
-  developerTurns: number;
 }
 
 export interface TaskInfo {
@@ -69,7 +67,6 @@ export function normalizeRole(role: string): string {
 export function deriveOutcomes(
   records: readonly ReviewLedgerRecord[],
   contractRetries: ReadonlyMap<string, number> = new Map(),
-  developerTurns: ReadonlyMap<string, number> = new Map(),
 ): Map<string, TaskOutcome> {
   const byTask = new Map<string, ReviewLedgerRecord[]>();
   for (const r of records) {
@@ -95,7 +92,6 @@ export function deriveOutcomes(
       iterations: Math.max(...list.map((r) => r.iteration)),
       blockingFindings: blocking,
       contractRetries: contractRetries.get(taskId) ?? 0,
-      developerTurns: developerTurns.get(taskId) ?? 0,
     });
   }
   return out;
@@ -122,8 +118,6 @@ export interface ScorecardRow {
   meanIterations: number | null;
   meanBlockingFindings: number | null;
   meanContractRetries: number | null;
-  /** Mean developer tool calls per task (AISDLC-651.3). */
-  meanDeveloperTurns: number | null;
   meanUnitsPerTask: number;
   /** Task counts per T-shirt size (`unknown` when no estimate). */
   sizes: Record<string, number>;
@@ -284,7 +278,6 @@ export function buildScorecard(input: BuildScorecardInput): Scorecard {
       meanIterations: scored ? mean(c.outcomes.map((o) => o.iterations)) : null,
       meanBlockingFindings: scored ? mean(c.outcomes.map((o) => o.blockingFindings)) : null,
       meanContractRetries: scored ? mean(c.outcomes.map((o) => o.contractRetries)) : null,
-      meanDeveloperTurns: scored ? mean(c.outcomes.map((o) => o.developerTurns)) : null,
       meanUnitsPerTask: mean(c.tasks.map((t) => t.units)),
       sizes,
       source: sources.size > 1 ? 'mixed' : [...sources][0],

@@ -235,7 +235,7 @@ export interface DoneInstruction {
 export interface StopInstruction {
   action: 'stop';
   taskId: string;
-  outcome: 'aborted' | 'developer-failed' | 'developer-parked' | 'developer-json-contract-violated';
+  outcome: 'aborted' | 'developer-failed' | 'developer-json-contract-violated';
   reason: string;
   /** Cause code the executor passes to `cli-dispatch complete --cause` so the playbook can pick a step. */
   cause?: string;

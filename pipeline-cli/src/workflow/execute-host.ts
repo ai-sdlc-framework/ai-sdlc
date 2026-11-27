@@ -313,19 +313,6 @@ class ExecuteHost implements EngineHost {
   private async parse(run: WorkflowRunState): Promise<StepOutcome> {
     const state = this.s;
     const parsed = await parseDeveloperReturn({ developerReturn: extractJson(this.devText) });
-    if (parsed.parked) {
-      // AISDLC-651.3: a parked task is not a failure; keep the status, worktree and WIP commit.
-      return {
-        kind: 'halt',
-        instruction: await failRun(
-          this.ctx,
-          state,
-          'developer-parked',
-          `${parsed.reason ?? 'developer parked the task'}. Worktree preserved at ${state.worktreePath}; return the task to the board or operator with these notes.`,
-          { developer: parsed.developer ?? null },
-        ),
-      };
-    }
     if (!parsed.ok || !parsed.developer) {
       await rollbackStatus(this.ctx, state);
       const reason = parsed.reason ?? 'developer subagent failed';

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1463
-title: "Delete the developer turn budget (AISDLC-651.3) and the Step 6 parked outcome"
-status: To Do
+title: Delete the developer turn budget (AISDLC-651.3) and the Step 6 parked outcome
+status: In Progress
 priority: high
 labels:
   - ai-sdlc-plugin
@@ -9,8 +9,6 @@ labels:
   - delete
 dependencies: []
 references:
-  - ai-sdlc-plugin/hooks/lib/developer-turn-budget.js
-  - ai-sdlc-plugin/hooks/developer-turn-budget.test.mjs
   - ai-sdlc-plugin/hooks/collect-tool-sequence.js
   - ai-sdlc-plugin/agents/developer.md
   - ai-sdlc-plugin/commands/execute.md
@@ -21,11 +19,30 @@ references:
   - pipeline-cli/src/next-step/next-step.ts
   - pipeline-cli/src/next-step/types.ts
   - pipeline-cli/src/next-step/gh-issue.ts
-  - pipeline-cli/test/fixtures/workflow/replay/developer-parked.json
   - pipeline-cli/src/usage/scorecard-sources.ts
   - pipeline-cli/src/usage/scorecard.ts
   - pipeline-cli/src/steps/10-finalize.ts
   - backlog/completed/aisdlc-651.3 - developer run turn budget and parking.md
+drift_log:
+  - date: '2026-11-27'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/lib/developer-turn-budget.js
+    resolution: flagged
+  - date: '2026-11-27'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/developer-turn-budget.test.mjs
+    resolution: flagged
+  - date: '2026-11-27'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      pipeline-cli/test/fixtures/workflow/replay/developer-parked.json
+    resolution: flagged
+drift_checked: '2026-11-27'
 ---
 
 ## Description

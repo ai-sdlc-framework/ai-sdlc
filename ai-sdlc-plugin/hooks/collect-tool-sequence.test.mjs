@@ -253,6 +253,37 @@ describe('large-output notice (AISDLC-651.5)', async () => {
   });
 });
 
+describe('no developer turn notice (AISDLC-1463)', () => {
+  it('records a developer-agent tool event and emits no turn notice or turn state', () => {
+    const sid = `test-dev-${Date.now()}`;
+    const usageDir = join(tempHome, 'dev-usage');
+    let result;
+    for (let i = 0; i < 3; i++) {
+      result = runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: 'git status' },
+          session_id: sid,
+          agent_type: 'ai-sdlc:developer',
+          agent_id: 'dev-agent-1',
+          cwd: tempHome,
+        },
+        { AI_SDLC_USAGE_DIR: usageDir },
+      );
+      assert.equal(result.exitCode, 0);
+      assert.equal(result.output, '', 'no additionalContext for a developer agent');
+    }
+    const jsonlPath = join(tempHome, '.claude', 'usage-data', 'tool-sequences.jsonl');
+    const entries = readFileSync(jsonlPath, 'utf-8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.sid === sid);
+    assert.equal(entries.length, 3, 'every developer tool call is still recorded');
+    assert.equal(existsSync(usageDir), false, 'no turn log or turn state is written');
+  });
+});
+
 describe('explore-first rule in the skills (AISDLC-651.5)', () => {
   for (const skill of ['planner', 'operator-dispatch']) {
     it(`${skill} skill carries the rule`, () => {

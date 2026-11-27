@@ -444,9 +444,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       // playbook handlers route these two failure modes differently.
       const failOutcome: PipelineOutcome = parsedDev.contractViolation
         ? 'developer-json-contract-violated'
-        : parsedDev.parked
-          ? 'developer-parked'
-          : 'developer-failed';
+        : 'developer-failed';
       outcome = failOutcome;
       return abort(opts, branch.branch, branch.worktreePath, null, aborted, failOutcome);
     }

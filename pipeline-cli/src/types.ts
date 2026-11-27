@@ -227,8 +227,6 @@ export type PipelineOutcome =
   | 'approved'
   | 'needs-human-attention'
   | 'developer-failed'
-  /** AISDLC-651.3 — developer hit its turn budget and parked the task with notes. */
-  | 'developer-parked'
   | 'developer-json-contract-violated'
   | 'aborted'
   /**
@@ -396,25 +394,13 @@ export interface DeveloperReturn {
   /** Scope of the last machine verify run: `full` or `affected packages: ...` (AISDLC-1188). */
   verificationScope?: string;
   verificationSummaries?: Partial<Record<'build' | 'test' | 'lint' | 'format', string>>;
-  /**
-   * Free-text notes, or (AISDLC-651.3) a structured object. `parked: true` marks a run that
-   * hit its turn budget and returned its work in progress instead of finishing.
-   */
-  notes?: string | DeveloperNotes;
+  /** Free-text notes; an object return is kept as-is and rendered as JSON. */
+  notes?: string | Record<string, unknown>;
   /**
    * Follow-up items (AISDLC-997). Each is a task id, an issue reference, or
    * `declined: <reason>`. Rendered under `## Follow-up`; absent or empty means `(none)`.
    */
   followups?: string[];
-}
-
-/** Structured developer notes; only `parked` has meaning to the pipeline. */
-export interface DeveloperNotes {
-  parked?: boolean;
-  done?: string;
-  remaining?: string;
-  why?: string;
-  [key: string]: unknown;
 }
 
 export type VerificationStatus = 'passed' | 'failed' | 'skipped';
@@ -458,12 +444,6 @@ export interface ParseDeveloperReturnResult {
    * not be parsed as JSON OR was not an object.
    */
   contractViolation?: boolean;
-  /**
-   * AISDLC-651.3 — the developer parked the task at its turn budget (`notes.parked: true`).
-   * Not a failure: `ok` is false only because there is nothing to review; `developer` carries
-   * the return with its notes preserved.
-   */
-  parked?: boolean;
   /** Advisory `dev.ac-coverage` result; present only when the judgment layer ran. */
   acCoverage?: AcCoverageResult;
 }
