@@ -20,7 +20,17 @@ import {
 } from '../dispatch/board.js';
 import { completeTask } from '../dispatch/complete.js';
 import type { DispatchManifest } from '../dispatch/types.js';
+import { attachPlannerNote, formatResumeFeedback, PUSH_INSTRUCTION } from '../dispatch/resume.js';
 import { reenter, type ReenterDeps } from './reenter.js';
+import {
+  actionCommands,
+  QUEUE_REENTRY_ACTION,
+  readLanding,
+  reconcile,
+  type ActionContext,
+  type ActionResult,
+  type ReconcilePr,
+} from './reconcile.js';
 import type { CommandRunner } from './types.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -522,5 +532,160 @@ describe('reenter, local HEAD ahead of the PR head (AISDLC-946)', () => {
       /loop guard/,
     );
     expect(reenter({ target: '7' }, ahead())).toMatchObject({ kind: 'manifest' });
+  });
+});
+
+describe('AISDLC-1454: a conflicted PR exhausting land-prep goes back to an executor', () => {
+  const behind = () =>
+    gh({
+      merge: 'BEHIND',
+      checks: [{ name: 'ai-sdlc/pr-ready', status: 'COMPLETED', conclusion: 'SUCCESS' }],
+    });
+  const pr = (over: Partial<ReconcilePr> = {}): ReconcilePr => ({
+    prNumber: 7,
+    taskId: TASK,
+    title: `feat: thing (${TASK})`,
+    headBranch: BRANCH,
+    headSha: 'aaaaaaa1111111',
+    draft: false,
+    mergeStateStatus: 'BEHIND',
+    checks: [{ name: 'ai-sdlc/pr-ready', conclusion: 'success' }],
+    ...over,
+  });
+  const queued = () => readdirSync(path.join(board, 'queue')).filter((f) => f.endsWith('.json'));
+
+  it('--executor-round writes one manifest for a BEHIND PR instead of the machine rebase', () => {
+    failTask();
+    const r = reenter({ target: '7', executorRound: true }, deps(behind()));
+    expect(r.kind).toBe('manifest');
+    expect(calls.some((c) => c.args.includes('update-branch'))).toBe(false);
+    expect(queued()).toEqual([`${TASK}.dispatch.json`]);
+    expect(() => reenter({ target: '7', executorRound: true }, deps(behind()))).toThrow(
+      /loop guard: reentry@aaaaaaa/,
+    );
+  });
+
+  it('claim released, land-prep failed x2: one queued re-entry and the route names it', () => {
+    failTask();
+    const executed: string[] = [];
+    const execute = (ctx: ActionContext): ActionResult => {
+      executed.push(ctx.action);
+      if (ctx.action === QUEUE_REENTRY_ACTION) {
+        reenter({ target: String(ctx.pr), executorRound: true }, deps(behind()));
+        return { ran: true };
+      }
+      return { ran: true, failed: true };
+    };
+    const opts = { boardDir: board, execute, now: () => new Date('2026-10-15T10:00:00.000Z') };
+    reconcile([pr()], opts);
+    const second = reconcile([pr()], opts);
+    expect(executed).toEqual(['land-prep', 'land-prep', QUEUE_REENTRY_ACTION]);
+    expect(queued()).toEqual([`${TASK}.dispatch.json`]);
+    const routed = second.acted.filter((a) => a.action === 'route-to-planner');
+    expect(routed).toHaveLength(1);
+    expect(routed[0]!.note).toContain('re-entry queued for an executor');
+    expect(readLanding(board, 7)?.reentry).toMatchObject({
+      status: 'queued',
+      headSha: 'aaaaaaa1111111',
+    });
+    // Later passes queue nothing more and send nothing more.
+    const third = reconcile([pr({ manifestState: 'queue' })], opts);
+    expect(executed).toHaveLength(3);
+    expect(third.acted.filter((a) => a.action === 'route-to-planner')).toHaveLength(0);
+    expect(queued()).toHaveLength(1);
+  });
+
+  it('the queue-reentry action runs reenter --executor-round on the board', () => {
+    const cmds = actionCommands(
+      {
+        pr: 7,
+        taskId: TASK,
+        kind: 'task',
+        action: QUEUE_REENTRY_ACTION,
+        state: 'behind-or-dirty',
+        boardDir: board,
+      },
+      '/bin',
+    );
+    expect(cmds?.[0]?.args).toEqual([
+      path.join('/bin', 'cli-dispatch.mjs'),
+      'reenter',
+      '7',
+      '--executor-round',
+      '--board-dir',
+      board,
+    ]);
+  });
+
+  it('a live executor claim keeps the PR: nothing is queued', () => {
+    const executed: string[] = [];
+    const execute = (ctx: ActionContext): ActionResult => {
+      executed.push(ctx.action);
+      return { ran: true, failed: true };
+    };
+    const opts = { boardDir: board, execute, now: () => new Date('2026-10-15T10:00:00.000Z') };
+    const facts = [pr({ manifestState: 'inflight', executor: 'exec-a' })];
+    reconcile(facts, opts);
+    const second = reconcile(facts, opts);
+    expect(executed).toEqual(['land-prep', 'land-prep']);
+    expect(readLanding(board, 7)?.reentry).toBeUndefined();
+    const note = second.acted.find((a) => a.action === 'route-to-planner')?.note ?? '';
+    expect(note).not.toContain('re-entry');
+  });
+
+  it('an already queued manifest is named, not duplicated', () => {
+    const executed: string[] = [];
+    const execute = (ctx: ActionContext): ActionResult => {
+      executed.push(ctx.action);
+      return { ran: true, failed: true };
+    };
+    const opts = { boardDir: board, execute, now: () => new Date('2026-10-15T10:00:00.000Z') };
+    reconcile([pr({ manifestState: 'queue' })], opts);
+    const second = reconcile([pr({ manifestState: 'queue' })], opts);
+    expect(executed).toEqual(['land-prep', 'land-prep']);
+    expect(readLanding(board, 7)?.reentry?.status).toBe('queued');
+    const note = second.acted.find((a) => a.action === 'route-to-planner')?.note ?? '';
+    expect(note).toContain('re-entry queued');
+  });
+
+  it('a re-entry that cannot be queued says the planner decides, then re-enters', () => {
+    const execute = (ctx: ActionContext): ActionResult =>
+      ctx.action === QUEUE_REENTRY_ACTION
+        ? { ran: false, failed: true, note: 'not in done/' }
+        : { ran: true, failed: true };
+    const opts = { boardDir: board, execute, now: () => new Date('2026-10-15T10:00:00.000Z') };
+    reconcile([pr({ mergeStateStatus: 'DIRTY' })], opts);
+    const second = reconcile([pr({ mergeStateStatus: 'DIRTY' })], opts);
+    const note = second.acted.find((a) => a.action === 'route-to-planner')?.note ?? '';
+    expect(note).toContain('planner decision needed');
+    expect(note).toContain('not in done/');
+    expect(note).toContain('--executor-round');
+    expect(readLanding(board, 7)?.reentry?.status).toBe('failed');
+  });
+
+  it('a planner note rides on the queued re-entry; the executor gets it and pushes from its worktree', () => {
+    failTask();
+    reenter({ target: '7', executorRound: true }, deps(behind()));
+    attachPlannerNote(board, TASK, 'Keep both exports in index.ts; main renamed the helper.');
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-b' });
+    const resume = readInflightManifest(board, TASK)?.resume;
+    expect(resume?.plannerNote).toContain('Keep both exports');
+    expect(resume?.developerRound).toBe(true);
+    const text = formatResumeFeedback(resume!);
+    expect(text).toContain('Planner resolution');
+    expect(text).toContain('Keep both exports');
+    expect(text).toContain('push from this worktree');
+    expect(resume?.note).toContain(PUSH_INSTRUCTION);
+    // Claimed: the planner can no longer change the round.
+    expect(() => attachPlannerNote(board, TASK, 'another note')).toThrow(/inflight/);
+  });
+
+  it('a planner note needs a queued re-entry and prose', () => {
+    expect(() => attachPlannerNote(board, TASK, 'resolve it')).toThrow(/no queued re-entry/);
+    failTask();
+    reenter({ target: '7', executorRound: true }, deps(behind()));
+    expect(() => attachPlannerNote(board, TASK, '   ')).toThrow(/needs text/);
+    expect(() => attachPlannerNote(board, TASK, 'git push --force')).toThrow(/prose/);
+    expect(() => attachPlannerNote(board, TASK, 'x'.repeat(4001))).toThrow(/at most/);
   });
 });

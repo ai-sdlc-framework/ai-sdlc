@@ -70,6 +70,11 @@ export interface ReenterInput {
   pushOnly?: boolean;
   /** An answered catalog record scoped to the task; releases the same-head loop guard. */
   decisionId?: string;
+  /**
+   * AISDLC-1454: send the PR to an executor even when the machine route (a BEHIND rebase)
+   * applies, because land-prep was exhausted. Guarded once per head as `reentry`.
+   */
+  executorRound?: boolean;
 }
 
 export interface ReenterDeps {
@@ -279,7 +284,7 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
   type Route = 'rebase' | 'rerun' | 'executor';
   let route: Route;
   let rerunId: string | undefined;
-  if (localHead) {
+  if (localHead || input.executorRound) {
     route = 'executor';
   } else if (c.state === 'behind-or-dirty') {
     route = view.mergeStateStatus === 'BEHIND' ? 'rebase' : 'executor';
@@ -298,7 +303,8 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
   }
 
   const noteHash = input.developerRound && input.note?.trim() ? hashNote(input.note) : undefined;
-  const action = noteHash ? `${route}:dev-round:${noteHash}` : route;
+  const routeKey = input.executorRound && !localHead ? 'reentry' : route;
+  const action = noteHash ? `${routeKey}:dev-round:${noteHash}` : routeKey;
   let released: string | undefined;
   if (input.decisionId) {
     const resolve =
@@ -322,7 +328,7 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
   );
   if (prior.length > 0 && !released) {
     throw new Error(
-      `loop guard: ${route}@${short(headSha)} x${prior.length + 1} on pull request #${pr}; ` +
+      `loop guard: ${routeKey}@${short(headSha)} x${prior.length + 1} on pull request #${pr}; ` +
         'the head has not changed since the last re-entry. Push a new head, order a developer round with new instructions ' +
         '(`--developer-round --note <different text>`), or pass `--decision <DEC-NNNN>` for an answered catalog record scoped to the task (AISDLC-883, AISDLC-1105)',
     );
@@ -353,7 +359,7 @@ export function reenter(input: ReenterInput, deps: ReenterDeps): ReenterResult {
   const failedChecks = checks.filter((k) => k.conclusion === 'failure');
   const failingLine = c.failingLine ?? failedChecks[0]?.summary;
   const reason =
-    c.state === 'behind-or-dirty'
+    c.state === 'behind-or-dirty' || input.executorRound
       ? CONFLICT_ROUND
       : c.state === 'needs-re-review'
         ? 'the head has no verdict record: carry one forward or review'

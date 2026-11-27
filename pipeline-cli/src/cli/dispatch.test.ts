@@ -2321,3 +2321,99 @@ describe('runDispatchCli board recovery (AISDLC-1130)', () => {
     err.mockRestore();
   });
 });
+
+describe('reenter --executor-round and reentry-note (AISDLC-1454)', () => {
+  const TASK = 'AISDLC-950';
+  const BRANCH = 'ai-sdlc/aisdlc-950-x';
+  let root: string;
+  let board: string;
+  const calls: string[][] = [];
+
+  const gh = (file: string, args: readonly string[]) => {
+    if (file === 'git' && args[0] === 'ls-remote') {
+      return { status: 0, stdout: `aaaaaaa1111111\trefs/heads/${BRANCH}\n`, stderr: '' };
+    }
+    if (args[0] === 'pr' && args[1] === 'view') {
+      return {
+        status: 0,
+        stderr: '',
+        stdout: JSON.stringify({
+          number: 7,
+          title: `feat: thing (${TASK})`,
+          state: 'OPEN',
+          headRefName: BRANCH,
+          headRefOid: 'aaaaaaa1111111',
+          isDraft: false,
+          mergeStateStatus: 'BEHIND',
+          statusCheckRollup: [
+            { name: 'ai-sdlc/pr-ready', status: 'COMPLETED', conclusion: 'SUCCESS' },
+          ],
+        }),
+      };
+    }
+    calls.push([file, ...args]);
+    return { status: 0, stdout: '', stderr: '' };
+  };
+  const identity = (role: string) => ({
+    readSessions: () => [{ name: role, role, pid: 400, status: 'running' }],
+    parentPid: (pid: number) => (pid === 500 ? 400 : null),
+    comm: (pid: number) => (pid === 400 ? 'claude' : 'zsh'),
+    startPid: 500,
+  });
+  const cli = (argv: string[], role = 'operator-dispatch', granted = ['requeue']) =>
+    captureStdout(() =>
+      runDispatchCli([...argv, '--board-dir', board, '--work-dir', root], {
+        ghRun: gh,
+        operational: new Set(granted),
+        identity: identity(role),
+      }),
+    );
+
+  beforeEach(async () => {
+    calls.length = 0;
+    root = mkdtempSync(path.join(tmpdir(), 'dispatch-reentry-'));
+    board = path.join(root, '.ai-sdlc', 'dispatch');
+    dispatchEnsureBoardDirs(board);
+    const { claimNext } = await import('../dispatch/board.js');
+    const { completeTask } = await import('../dispatch/complete.js');
+    dispatchWriteManifest(board, mkManifest(TASK, { branch: BRANCH }));
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'exec-a' });
+    completeTask(board, { taskId: TASK, outcome: 'failed', workerId: 'exec-a', prNumber: 7 });
+  });
+  afterEach(() => removeFixtureDir(root));
+
+  it('queues an executor round for a BEHIND PR, then the planner attaches a note', async () => {
+    const queued = await cli(['reenter', '7', '--executor-round', '--base-sha', 'abc1234']);
+    expect(queued.exit).toBe(0);
+    expect((readLastJson(queued.captured) as { kind: string }).kind).toBe('manifest');
+    expect(calls.some((c) => c.includes('update-branch'))).toBe(false);
+
+    const noted = await cli(
+      ['reentry-note', TASK, '--note', 'Keep both exports; main renamed the helper.'],
+      'planner',
+    );
+    expect(noted.exit).toBe(0);
+    const r = readLastJson(noted.captured) as { resume: { plannerNote: string } };
+    expect(r.resume.plannerNote).toContain('Keep both exports');
+  });
+
+  it('refuses a missing task, a missing note, an executor caller, no grant, and no queued round', async () => {
+    expect((await cli(['reentry-note'])).exit).toBe(2);
+    expect((await cli(['reentry-note', TASK])).exit).toBe(2);
+    expect((await cli(['reentry-note', TASK, '--note', 'x'], 'executor')).exit).toBe(1);
+    expect((await cli(['reentry-note', TASK, '--note', 'x'], 'planner', [])).exit).toBe(1);
+    expect((await cli(['reentry-note', TASK, '--note', 'x'], 'planner')).exit).toBe(1);
+    expect(
+      (await cli(['reentry-note', TASK, '--note-file', path.join(root, 'nope.txt')], 'planner'))
+        .exit,
+    ).toBe(2);
+  });
+
+  it('reads the note from --note-file', async () => {
+    await cli(['reenter', '7', '--executor-round', '--base-sha', 'abc1234']);
+    const file = path.join(board, 'note.txt');
+    writeFileSync(file, 'Take main for the lockfile; keep our test.');
+    const r = await cli(['reentry-note', TASK, '--note-file', file], 'planner');
+    expect(r.exit).toBe(0);
+  });
+});

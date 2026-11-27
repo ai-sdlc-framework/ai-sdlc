@@ -4159,6 +4159,7 @@ export const dispatchManifestV1Schema = {
         priorOutcome: { type: 'string' },
         branchGuessed: { type: 'boolean' },
         resumeMode: { type: 'string', enum: ['push-only'] },
+        plannerNote: { type: 'string', minLength: 1, maxLength: 4000 },
       },
       additionalProperties: false,
     },
