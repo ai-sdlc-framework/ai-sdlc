@@ -6,8 +6,10 @@
  * that is waiting on a long turn. The module consumes the request itself; the marker is
  * removed by dispatch once the session is back under its threshold.
  *
- * AISDLC-1448: the marker also carries `resumeHash`, the hash of the session's sole
- * `## RESUME HERE` block when the rotation was requested (null when there was not exactly one).
+ * AISDLC-1448: the marker also carries `resumeHash`, the hash of the `## RESUME HERE` block a
+ * handoff write would carry over when the rotation was requested (`rotationBaseline`: the last
+ * block of the session's file, or of the newest earlier planner handoff when today's file does
+ * not exist yet; null when there is none).
  * `handoffWrittenSince` compares against it, so a clear or restart needs a block the model
  * rewrote after the request.
  */

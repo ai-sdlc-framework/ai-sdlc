@@ -6,12 +6,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { listDecisions } from '../decisions/projection.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
-import { HANDOFF_BEGIN, HANDOFF_END } from './handoff.js';
+import { HANDOFF_BEGIN, HANDOFF_END, writeHandoff } from './handoff.js';
 import {
   appendRotationLog,
   checkHandoffProof,
   escalateUnprovenRotation,
   handoffWrittenSince,
+  lastResumeHash,
   markRotation,
   resumeBlocks,
   resumeHash,
@@ -135,6 +136,58 @@ describe('handoffWrittenSince (AISDLC-1448 AC-1)', () => {
     const next = markRotation('executor', 'ex-1', later);
     expect(next.since).toBe(after.toISOString());
     expect(readRotateRequest(boardDir, 'ex-1')?.resumeHash).toBe(next.resumeHash);
+  });
+});
+
+describe('rotation baseline matches what a handoff write carries over (AISDLC-1448 round 1)', () => {
+  it('lastResumeHash hashes the last block and is null without one', () => {
+    expect(lastResumeHash('nothing')).toBeNull();
+    expect(lastResumeHash('## RESUME HERE a\n## RESUME HERE b')).toBe(
+      lastResumeHash('## RESUME HERE b'),
+    );
+  });
+
+  it('a missing dated planner file takes its baseline from the inherited handoff', () => {
+    // Board at <repo>/.ai-sdlc/dispatch; planner handoffs live in <repo>/.claude/memory.
+    const memory = path.join(tmp, '.claude', 'memory');
+    mkdirSync(memory, { recursive: true });
+    const yesterday = path.join(memory, 'project_planner_handoff_2026_11_25.md');
+    writeFileSync(yesterday, `${generated('a')}\n## RESUME HERE\nyesterday's notes\n`);
+    const plannerOpts = { boardDir, now: () => T0 };
+    const { since, resumeHash: base } = markRotation('planner', 'planner', plannerOpts);
+    expect(base).not.toBeNull();
+    // The handoff turn runs `handoff write` and is interrupted before the RESUME edit: today's
+    // file now exists with the inherited block and a newer mtime.
+    const later = { ...plannerOpts, now: () => after, archive: false };
+    const written = writeHandoff({ role: 'planner', ...later });
+    expect(written.file).toContain('project_planner_handoff_2026_11_26.md');
+    utimesSync(written.file, after, after);
+    expect(checkHandoffProof('planner', 'planner', since, later).reason).toContain('unchanged');
+    // A real rewrite is proven.
+    const text = readFileSync(written.file, 'utf-8').replace("yesterday's notes", 'OQ-3: B');
+    writeFileSync(written.file, text);
+    utimesSync(written.file, after, after);
+    expect(handoffWrittenSince('planner', 'planner', since, later)).toBe(true);
+  });
+
+  it('a file with two blocks takes the last one, which rollArchive keeps', () => {
+    const memory = path.join(tmp, '.claude', 'memory');
+    mkdirSync(memory, { recursive: true });
+    const today = path.join(memory, 'project_planner_handoff_2026_11_26.md');
+    writeFileSync(today, `${generated('a')}\n## RESUME HERE\nolder\n\n## RESUME HERE\nlatest\n`);
+    utimesSync(today, before, before);
+    const plannerOpts = { boardDir, now: () => T0 };
+    const { since, resumeHash: base } = markRotation('planner', 'planner', plannerOpts);
+    expect(base).toBe(lastResumeHash('## RESUME HERE\nlatest'));
+    const later = { ...plannerOpts, now: () => after };
+    writeHandoff({ role: 'planner', ...later });
+    utimesSync(today, after, after);
+    expect(readFileSync(today, 'utf-8')).not.toContain('older');
+    expect(checkHandoffProof('planner', 'planner', since, later).reason).toContain('unchanged');
+  });
+
+  it('no block anywhere gives a null baseline', () => {
+    expect(markRotation('planner', 'planner', { boardDir, now: () => T0 }).resumeHash).toBeNull();
   });
 });
 

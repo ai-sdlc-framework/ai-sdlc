@@ -766,7 +766,10 @@ never cleared or restarted until its handoff is written.** The one proof is `han
 `cli-hierarchy handoff verify --role <r> --name <n> --since <iso>`, exit 0 proven, 1 not): the
 handoff file holds exactly one `## RESUME HERE` block, its hash differs from the one recorded with
 the rotation request (`rotate-requests/<session>.json`, written by `handoff mark` or the tick), and
-the file was modified after the request. The module and the restart path both call it.
+the file was modified after the request. The recorded hash is the block a `handoff write` would
+carry over without a model edit: the last RESUME block of the session's file, or, when today's dated
+planner file does not exist yet, of the newest earlier planner handoff it inherits from. So a write or
+a regenerating `handoff read` alone never counts as proof. The module and the restart path both call it.
 
 1. The session's own hooks module rotates at the turn boundary: it records the request
    (`handoff mark`) and submits the handoff prompt, also when the session is idle, past the 30-minute

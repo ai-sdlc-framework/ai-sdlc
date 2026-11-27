@@ -135,9 +135,11 @@ export {
   checkHandoffProof,
   escalateUnprovenRotation,
   handoffWrittenSince,
+  lastResumeHash,
   markRotation,
   resumeBlocks,
   resumeHash,
+  rotationBaseline,
   rotationScope,
 } from './handoff-proof.js';
 export { hierarchyDown, stopSessionWindow, type DownOutcome, type DownResult } from './down.js';

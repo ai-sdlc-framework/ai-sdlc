@@ -26,7 +26,7 @@ import {
 } from '../decisions/event-log.js';
 import { listDecisions } from '../decisions/projection.js';
 import { nextDecisionIdDurable, persistDecisionLog } from '../decisions/remote-persist.js';
-import { HANDOFF_BEGIN, HANDOFF_END, handoffPath } from './handoff.js';
+import { HANDOFF_BEGIN, HANDOFF_END, handoffPath, newestPlannerHandoff } from './handoff.js';
 import { readRotateRequest, writeRotateRequest } from './rotate-request.js';
 import type { HierarchyRole } from './types.js';
 
@@ -52,13 +52,20 @@ export function resumeBlocks(content: string): string[] {
   return blocks;
 }
 
+const hashBlock = (block: string): string => createHash('sha256').update(block).digest('hex');
+
 /** Hash of the file's sole RESUME block; null when it holds none or more than one. */
 export function resumeHash(content: string): string | null {
   const blocks = resumeBlocks(content);
   if (blocks.length !== 1) return null;
-  return createHash('sha256')
-    .update(blocks[0] as string)
-    .digest('hex');
+  return hashBlock(blocks[0] as string);
+}
+
+/** Hash of the file's last RESUME block (the one `rollArchive` keeps); null when it holds none. */
+export function lastResumeHash(content: string): string | null {
+  const blocks = resumeBlocks(content);
+  const last = blocks[blocks.length - 1];
+  return last === undefined ? null : hashBlock(last);
 }
 
 /** Where a session's handoff lives and how to read the clock. */
@@ -85,6 +92,31 @@ function readOrEmpty(file: string): string {
 }
 
 /**
+ * The RESUME baseline a rotation request records: the block `writeHandoff` would carry into the
+ * file without any model edit. That is the last block of the session's handoff file (on the next
+ * write `rollArchive` keeps only the last one) or, when today's dated planner file does not exist
+ * yet, the last block of the newest earlier planner handoff it inherits from. A baseline of null
+ * therefore means no RESUME block exists anywhere a write could carry from, so any block found
+ * later was written by the session.
+ */
+export function rotationBaseline(
+  role: HierarchyRole,
+  name: string,
+  opts: ProofOptions,
+): string | null {
+  const file = fileOf(role, name, opts);
+  const carried = existsSync(file)
+    ? file
+    : newestPlannerHandoff(file, {
+        role,
+        name,
+        boardDir: opts.boardDir,
+        ...(opts.file ? { file: opts.file } : {}),
+      });
+  return carried ? lastResumeHash(readOrEmpty(carried)) : null;
+}
+
+/**
  * Record a rotation request with its RESUME-block baseline and return its time. An existing
  * request whose baseline still matches the file is kept (dispatch and the module share one
  * request); a request already satisfied, or one without a baseline, is replaced.
@@ -95,7 +127,7 @@ export function markRotation(
   opts: ProofOptions,
 ): { since: string; resumeHash: string | null; file: string } {
   const file = fileOf(role, name, opts);
-  const current = resumeHash(readOrEmpty(file));
+  const current = rotationBaseline(role, name, opts);
   const existing = readRotateRequest(opts.boardDir, name);
   if (existing && existing.resumeHash !== undefined && existing.resumeHash === current) {
     return { since: existing.at, resumeHash: current, file };

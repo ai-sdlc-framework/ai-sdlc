@@ -352,7 +352,7 @@ export function handoffPath(opts: HandoffOptions, now: Date): string {
 const PLANNER_HANDOFF_RE = /^project_planner_handoff_[0-9_]+\.md$/;
 
 /** The newest earlier dated planner handoff, whose text outside the markers a new day's file inherits. */
-function newestPlannerHandoff(file: string, opts: HandoffOptions): string | undefined {
+export function newestPlannerHandoff(file: string, opts: HandoffOptions): string | undefined {
   if (opts.role !== 'planner' || opts.file) return undefined;
   const dir = path.dirname(file);
   if (!existsSync(dir)) return undefined;
