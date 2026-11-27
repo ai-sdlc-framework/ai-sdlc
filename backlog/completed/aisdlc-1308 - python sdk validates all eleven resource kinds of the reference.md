@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1308
 title: 'Python SDK validates all eleven resource kinds of the reference'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-17'
 labels:
