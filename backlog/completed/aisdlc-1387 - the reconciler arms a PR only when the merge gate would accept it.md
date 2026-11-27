@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1387
 title: 'The reconciler arms a PR only when the merge gate would accept it'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-22'
 labels:
