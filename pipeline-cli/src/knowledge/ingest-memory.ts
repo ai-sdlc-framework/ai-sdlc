@@ -238,7 +238,8 @@ function agentPrincipal(projectDir: string): string {
  * Re-ingest hook for the dream's apply and undo, run under the dream lock. Opt-in: it only acts
  * once the memory trunk holds entries, so a project that never ingested memory is untouched.
  * The store answers that question, never a filesystem probe, so a non-files backend (DEC-0427)
- * is re-ingested too; a backend that cannot be opened throws `KnowledgeBackendError`.
+ * is re-ingested too; a backend that cannot be opened throws `KnowledgeBackendError`. A
+ * rejected write sets exit code 1.
  */
 export function reingestAfterSwap(projectDir: string): (liveDir: string) => Promise<void> {
   return async (liveDir) => {
@@ -253,6 +254,9 @@ export function reingestAfterSwap(projectDir: string): (liveDir: string) => Prom
       projectDir,
     );
     if (store.list({ scope: 'protected', trunk: MEMORY_TRUNK }).length === 0) return;
-    await ingestMemoryForProject(projectDir, liveDir, now().toISOString().slice(0, 10));
+    const r = await ingestMemoryForProject(projectDir, liveDir, now().toISOString().slice(0, 10));
+    // The swap already happened; a rejected re-ingest leaves the store behind the folder, so
+    // the dream command exits non-zero (each rejection is already on stderr).
+    if (r.rejected > 0) process.exitCode = 1;
   };
 }

@@ -7,6 +7,7 @@ import { buildContextCli } from '../cli/context.js';
 import { hashValue } from './entry.js';
 import { loadKnowledgeConfig } from './config.js';
 import { auditLines, readKnowledgeLog } from './log.js';
+import { registerKnowledgeBackend } from './knowledge-store.js';
 import { DEFAULT_ONTOLOGY } from './ontology.js';
 import {
   promoteEntry,
@@ -170,6 +171,41 @@ describe('promotion verifier', () => {
       ).ok,
     ).toBe(true);
     expect(authority()).toBe('canonical');
+  });
+
+  it('passes a proposed promotion through with the backend reason', async () => {
+    repo();
+    registerKnowledgeBackend('promote-proposes', () => ({
+      kind: 'promote-proposes',
+      get: (id: string) =>
+        id === 'k-1'
+          ? { fields: { id: 'k-1', authority: 'inferred' }, body: '', scope: 'tracked', path: 'p' }
+          : null,
+      list: () => [],
+      listRaw: () => [],
+      create: async () => ({ id: '', path: '', created: false, status: 'rejected' }),
+      write: async (id: string) => ({
+        id,
+        path: '',
+        created: false,
+        status: 'proposed',
+        reason: 'awaiting review',
+      }),
+    }));
+    const r = await promoteEntry(
+      { backend: 'promote-proposes' },
+      tracked(),
+      'k-1',
+      { to: 'canonical', ...HUMAN },
+      ctx(),
+    );
+    expect(r).toEqual({
+      ok: true,
+      reason: 'awaiting review',
+      authority: 'inferred',
+      status: 'proposed',
+    });
+    expect(authority()).toBe('inferred');
   });
 
   it('does not demote a canonical entry via specialist promotion', async () => {

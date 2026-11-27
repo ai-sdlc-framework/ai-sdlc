@@ -81,10 +81,11 @@ exports.registerKnowledgeBackends = (r) =>
     get: () => null,
     list: () => (calls.push('list'), []),
     listRaw: () => [],
-    // tracked writes are queued as proposals, protected ones rejected (AISDLC-1456)
+    // tracked writes are queued as proposals; protected ones and REJECT.md sections are
+    // rejected (AISDLC-1456)
     create: async (e, o) => (
       calls.push('create:' + o.scope + ':' + o.principal.split(':')[0]),
-      o.scope === 'tracked'
+      o.scope === 'tracked' && !String(e.fields.id).includes('reject')
         ? { id: e.fields.id, path: '', created: false, status: 'proposed' }
         : { id: e.fields.id, path: '', created: false, status: 'rejected', reason: 'read-only replica' }
     ),
@@ -97,6 +98,7 @@ exports.registerKnowledgeBackends = (r) =>
       'knowledge:\n  backend: recording\n  backendModule: ai-sdlc-fixture-recording\n',
     );
     writeFileSync(join(dir, 'NOTES.md'), '# T\n\n## Why\n\nBecause.\n');
+    writeFileSync(join(dir, 'REJECT.md'), '# T\n\n## Why\n\nBecause.\n');
     const run = (args: string[]) =>
       buildContextCli([...args, '--project-dir', dir])
         .exitProcess(false)
@@ -110,8 +112,15 @@ exports.registerKnowledgeBackends = (r) =>
       await run(['ingest-sections', 'NOTES.md']);
       expect(out).toEqual(['0 created, 0 updated, 1 queued as a proposal\n']);
       expect(process.exitCode ?? 0).toBe(0);
+      await run(['ingest-sections', 'REJECT.md']);
+      expect(out[1]).toBe('0 created, 0 updated, 1 rejected\n');
+      expect(process.exitCode).toBe(1);
+      process.exitCode = 0;
       await run(['capture', 'fact-1', '--value', 'v', '--source-doc', 'doc.pdf']);
-      expect(err).toEqual(['rejected: read-only replica\n']);
+      expect(err).toEqual([
+        'rejected section-reject-md-why: read-only replica\n',
+        'rejected: read-only replica\n',
+      ]);
       expect(process.exitCode).toBe(1);
       process.exitCode = 0;
       await run(['export']);
@@ -120,6 +129,7 @@ exports.registerKnowledgeBackends = (r) =>
     }
     const calls = (globalThis as { __recordingCalls?: string[] }).__recordingCalls;
     expect(calls?.map((c) => c.replace(/:(human|agent)$/, ':<role>'))).toEqual([
+      'create:tracked:<role>',
       'create:tracked:<role>',
       'create:protected:<role>',
       'list',

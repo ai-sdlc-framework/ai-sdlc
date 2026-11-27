@@ -13,7 +13,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { dump } from '../util/yaml.js';
 import { DEFAULT_KNOWLEDGE_BACKEND, type KnowledgeConfig } from './config.js';
 import { parseEntryFile, toEntry, type KnowledgeEntry } from './entry.js';
@@ -286,6 +286,12 @@ export class FilesKnowledgeStore implements KnowledgeStore {
     writeFileSync(file, `---\n${dump(fields)}---\n${body}`);
   }
 
+  /** True when `path` resolves inside the root of `scope` (an id or trunk cannot escape it). */
+  private inside(scope: StoreScope, path: string): boolean {
+    const rel = relative(this.root(scope), resolve(this.root(scope), path));
+    return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+  }
+
   get(id: string, opts: GetOptions = {}): StoredEntry | null {
     if (opts.path !== undefined) {
       if (!opts.scope) throw new Error('knowledge store: get by path requires a scope');
@@ -352,8 +358,13 @@ export class FilesKnowledgeStore implements KnowledgeStore {
   ): Promise<WriteResult> {
     const id = String(entry.fields.id);
     const path = opts.path ?? join(String(entry.fields.trunk), `${id}.md`);
-    if (existsSync(join(this.root(opts.scope), path))) {
-      return { id, path: '', created: false, status: 'rejected', reason: `'${path}' exists` };
+    const reason = !this.inside(opts.scope, path)
+      ? `'${path}' is outside the ${opts.scope} root`
+      : existsSync(join(this.root(opts.scope), path))
+        ? `'${path}' exists`
+        : null;
+    if (reason !== null) {
+      return { id, path: '', created: false, status: 'rejected', reason };
     }
     this.writeFile(opts.scope, path, entry.fields, entry.body);
     this.log('created', id, opts.principal, {
@@ -387,6 +398,7 @@ export class FilesKnowledgeStore implements KnowledgeStore {
       if (newId === id) return reject('an entry cannot supersede itself');
       if (typeof op.fields.trunk !== 'string') return reject('supersede requires the new trunk');
       const path = join(op.fields.trunk, `${newId}.md`);
+      if (!this.inside(e.scope, path)) return reject(`'${path}' is outside the ${e.scope} root`);
       if (existsSync(join(this.root(e.scope), path))) return reject(`'${path}' exists`);
       const rels = Array.isArray(op.fields.relations)
         ? [...(op.fields.relations as { type: string; target: string }[])]

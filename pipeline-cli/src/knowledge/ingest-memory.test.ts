@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyDream } from '../memory-dream/apply.js';
 import { metaPathFor } from '../memory-dream/run.js';
 import { readMemoryFolder, serializeNote } from '../memory-dream/notes.js';
@@ -211,6 +211,29 @@ describe('reingestAfterSwap on a non-files backend (AISDLC-1426)', () => {
     expect(entries.get(`${MEMORY_TRUNK}/memory-user-role.md`)?.fields.authority).toBe('specialist');
     expect(entries.size).toBe(5);
     expect(entries.get(`${MEMORY_TRUNK}/memory-old.md`)?.fields.status).toBe('superseded');
+  });
+
+  it('sets exit code 1 when the backend rejects a re-ingest write', async () => {
+    registerKnowledgeBackend('rejecting-1456', () => ({
+      ...memoryStore(entries),
+      create: async (e) => ({
+        id: String(e.fields.id),
+        path: '',
+        created: false,
+        status: 'rejected',
+        reason: 'read-only replica',
+      }),
+    }));
+    useBackend('rejecting-1456');
+    entries.set(`${MEMORY_TRUNK}/memory-old.md`, stored('memory-old'));
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await reingestAfterSwap(dir)(mem);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      err.mockRestore();
+      process.exitCode = 0;
+    }
   });
 
   it('writes nothing when the backend holds no memory entries', async () => {

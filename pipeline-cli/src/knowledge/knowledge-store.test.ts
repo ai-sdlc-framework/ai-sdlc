@@ -68,6 +68,33 @@ describe.each<[StoreScope, string]>([
     expect(readFileSync(join(root, dir, 'x.md'), 'utf-8')).toContain('id: x');
   });
 
+  it('rejects a create or supersede whose id or trunk leaves the root', async () => {
+    const store = openKnowledgeStore(ROOTS, root);
+    const escape = await store.create(
+      { fields: fields('../../escape'), body: '' },
+      { scope, principal: P },
+    );
+    expect(escape).toMatchObject({ status: 'rejected', path: '' });
+    expect(escape.reason).toMatch(/outside the .* root/);
+    expect(
+      (
+        await store.create(
+          { fields: fields('a'), body: '' },
+          { scope, path: '../a.md', principal: P },
+        )
+      ).status,
+    ).toBe('rejected');
+    await store.create({ fields: fields('old'), body: '' }, { scope, principal: P });
+    const sup = await store.write(
+      'old',
+      { kind: 'supersede', fields: fields('new', '../../out'), principal: P },
+      { scope },
+    );
+    expect(sup.status).toBe('rejected');
+    expect(sup.reason).toMatch(/outside the .* root/);
+    expect(store.get('old', { scope })?.fields.status).toBeUndefined();
+  });
+
   it('get returns fields, body, scope and path; null for a missing id', async () => {
     const store = openKnowledgeStore(ROOTS, root);
     await store.create(

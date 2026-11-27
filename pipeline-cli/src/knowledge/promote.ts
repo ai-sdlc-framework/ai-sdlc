@@ -236,7 +236,8 @@ export async function promoteEntry(
   if (r.status === 'rejected') return refuse(r.reason ?? 'rejected by the knowledge store');
   return {
     ok: true,
-    reason: r.status === 'applied' ? `promoted to ${opts.to}` : 'queued as a proposal',
+    // A proposal carries the backend's own reason; the CLI prints "queued as a proposal".
+    reason: r.status === 'applied' ? `promoted to ${opts.to}` : (r.reason ?? ''),
     authority: r.status === 'applied' ? opts.to : current,
     status: r.status,
   };
