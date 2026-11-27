@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1458
 title: RFC-0053 records the async write contract and the sync trigger
-status: To Do
+status: In Progress
 priority: medium
 labels:
   - docs
