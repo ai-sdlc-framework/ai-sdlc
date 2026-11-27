@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -77,6 +78,20 @@ import { isNodeInstalled, paneNodeVersion, readNvmrc } from './node-pin.js';
 import { overContextWarnings } from './context-size.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 import { resolveSendTarget } from './tmux.js';
+import { markRotation, rotationLogPath } from './handoff-proof.js';
+import { readHandoff } from './handoff.js';
+import { resolveTranscriptSource } from './transcript-recall.js';
+import { transcriptPath } from './context-size.js';
+
+/** AISDLC-1448: record a rotation request for planner `name`, then write a new RESUME block after it. */
+function proveHandoff(board: string, name: string, now: Date): string {
+  const { file } = markRotation('planner', name, { boardDir: board, now: () => now });
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `notes\n\n## RESUME HERE\nproven ${now.toISOString()} ${Math.random()}\n`);
+  const later = new Date(now.getTime() + 60_000);
+  utimesSync(file, later, later);
+  return file;
+}
 
 vi.mock('./context-size.js', async (orig) => {
   const real = await orig<typeof import('./context-size.js')>();
@@ -2822,6 +2837,17 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
 
   describe('busy planner and handoff (AISDLC-1150)', () => {
     const planner = Q('planner');
+    /** Give the planner's registry record a session id and return its transcript path. */
+    const withSessionId = (id: string): string => {
+      for (const f of readdirSync(registryDir)) {
+        const file = path.join(registryDir, f);
+        const rec = JSON.parse(readFileSync(file, 'utf8')) as { name: string; cwd?: string };
+        if (rec.name === planner) writeFileSync(file, JSON.stringify({ ...rec, sessionId: id }));
+      }
+      const t = transcriptPath(path.join(path.dirname(registryDir), 'projects'), '/repo', id);
+      mkdirSync(path.dirname(t), { recursive: true });
+      return t;
+    };
     const markBusy = () => {
       for (const f of readdirSync(registryDir)) {
         const file = path.join(registryDir, f);
@@ -2856,9 +2882,87 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
       expect(readRotateRequests(boardDir)[planner]).toBeTruthy();
     });
 
-    it('restarts an idle planner and records the handoff path', async () => {
+    it('restarts an idle planner whose handoff is proven, and records the handoff path', async () => {
+      proveHandoff(boardDir, planner, deps.now());
       const result = await hierarchyRestart({ session: planner }, deps);
       expect(result.handoff).toBeTruthy();
+    });
+
+    it('refuses a planner with no rotation request, or an unproven handoff, and stops nothing (AISDLC-1448)', async () => {
+      rmSync(path.join(boardDir, 'rotate-requests'), { recursive: true, force: true });
+      await expect(hierarchyRestart({ session: planner }, deps)).rejects.toThrow(
+        /no rotation request is recorded/,
+      );
+      const now = deps.now();
+      const { file } = markRotation('planner', planner, { boardDir, now: () => now });
+      // an unchanged RESUME block, rewritten state block only: still unproven
+      const later = new Date(now.getTime() + 60_000);
+      if (existsSync(file)) utimesSync(file, later, later);
+      await expect(hierarchyRestart({ session: planner }, deps)).rejects.toThrow(
+        /its handoff is unproven/,
+      );
+      expect(fake.calls.some((c) => c.args[0] === 'kill-window')).toBe(false);
+    });
+
+    it('a forced restart skips the proof and is logged as forced (AISDLC-1448)', async () => {
+      rmSync(path.join(boardDir, 'rotate-requests'), { recursive: true, force: true });
+      await hierarchyRestart({ session: planner, force: true }, deps);
+      expect(readFileSync(rotationLogPath(boardDir), 'utf-8')).toContain(
+        `forced restart of '${planner}' by operator (--force)`,
+      );
+    });
+
+    it('refuses a planner waiting on an AskUserQuestion with no answer (AISDLC-1448)', async () => {
+      proveHandoff(boardDir, planner, deps.now());
+      const transcript = withSessionId('dying-sess');
+      writeFileSync(
+        transcript,
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'q1', name: 'AskUserQuestion', input: {} }],
+          },
+        }) + '\n',
+      );
+      await expect(hierarchyRestart({ session: planner }, deps)).rejects.toThrow(
+        /waiting on an operator question/,
+      );
+    });
+
+    it('after a restart, handoff read digests the dying transcript and names its id (AISDLC-1448 AC-5)', async () => {
+      proveHandoff(boardDir, planner, deps.now());
+      const transcript = withSessionId('dying-sess');
+      const rec = (type: string, content: unknown) =>
+        JSON.stringify({
+          type,
+          timestamp: '2026-11-26T21:45:00Z',
+          message: { role: type, content },
+        });
+      writeFileSync(
+        transcript,
+        [
+          rec('user', 'walk me through RFC-0049 OQ-3'),
+          rec('assistant', [{ type: 'text', text: 'OQ-3 answer recorded: option B' }]),
+        ].join('\n') + '\n',
+      );
+      const result = await hierarchyRestart({ session: planner }, deps);
+      expect(result.dyingTranscript).toBe(transcript);
+      // the stopped process's registry record goes with it
+      for (const f of readdirSync(registryDir)) {
+        if (readFileSync(path.join(registryDir, f), 'utf8').includes('dying-sess'))
+          rmSync(path.join(registryDir, f));
+      }
+      const read = readHandoff({
+        role: 'planner',
+        name: planner,
+        boardDir,
+        now: deps.now,
+        transcript: resolveTranscriptSource(deps, 'planner', planner),
+      });
+      expect(read.content).toContain('Previous session: dying-sess');
+      expect(read.content).toContain(`Archived copy: \`${transcript}\``);
+      expect(read.content).toContain('OQ-3 answer recorded: option B');
     });
   });
 
@@ -2967,11 +3071,26 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
     expect(started[0]).toContain("'/ai-sdlc operator-dispatch'");
   });
 
+  it('a failed handoff write blocks the restart unless forced (AISDLC-1448)', async () => {
+    const disp = Q('operator-dispatch');
+    // a directory where the handoff file goes makes the write fail
+    mkdirSync(path.join(boardDir, 'handoff', `${disp}.md`), { recursive: true });
+    await expect(hierarchyRestart({ session: disp }, deps)).rejects.toThrow(
+      /its handoff could not be written/,
+    );
+    expect(fake.calls.some((c) => c.args[0] === 'kill-window')).toBe(false);
+    const t = deps.now().getTime() + 121_000;
+    deps.now = () => new Date(t);
+    const forced = await hierarchyRestart({ session: disp, force: true }, deps);
+    expect(forced.handoffError).toBeTruthy();
+  });
+
   it('restarts the planner with its recorded mode', async () => {
     fake.startedAtMs = later;
     deps.now = () => new Date(later);
     const planner = Q('planner');
     const old = entryOf(planner) as RosterEntry;
+    proveHandoff(boardDir, planner, deps.now());
     await hierarchyRestart({ session: 'planner' }, deps);
     expect(entryOf(planner)).toMatchObject({ permissionMode: old.permissionMode });
     expect(entryOf(planner)?.pid).not.toBe(old.pid);
@@ -3497,6 +3616,7 @@ spec:
     writeModelMarker(boardDir, marker);
     fake.calls.length = 0;
     logs.length = 0;
+    proveHandoff(boardDir, Q('planner'), deps.now());
     await hierarchyRestart({ session: Q('planner') }, deps);
     expect(newWindowCommands()[0]).toContain("--model 'opus'");
     expect(fallbackLines()).toHaveLength(1);

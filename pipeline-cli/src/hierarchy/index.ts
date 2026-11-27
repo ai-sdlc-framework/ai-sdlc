@@ -124,9 +124,31 @@ export {
   type HandoffOptions,
   type HandoffResult,
 } from './handoff.js';
-export { recallTranscript, resolveTranscriptSource } from './transcript-recall.js';
+export {
+  pendingOperatorQuestion,
+  recallTranscript,
+  recordDyingTranscript,
+  resolveTranscriptSource,
+} from './transcript-recall.js';
+export {
+  appendRotationLog,
+  checkHandoffProof,
+  escalateUnprovenRotation,
+  handoffWrittenSince,
+  lastResumeHash,
+  markRotation,
+  resumeBlocks,
+  resumeHash,
+  rotationBaseline,
+  rotationScope,
+} from './handoff-proof.js';
 export { hierarchyDown, stopSessionWindow, type DownOutcome, type DownResult } from './down.js';
-export { clearRotateRequest, readRotateRequests, writeRotateRequest } from './rotate-request.js';
+export {
+  clearRotateRequest,
+  readRotateRequest,
+  readRotateRequests,
+  writeRotateRequest,
+} from './rotate-request.js';
 export {
   acquireRestartLock,
   takeRestartRequests,

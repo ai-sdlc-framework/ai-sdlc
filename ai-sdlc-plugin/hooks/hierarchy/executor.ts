@@ -68,18 +68,29 @@ export interface RotationPlan {
   role: string;
   /** Slash command run in the new session after the clear. */
   resume: string;
-  /** `handoff write --role <role>`, run first. */
-  handoff: { command: string; args: string };
+  /**
+   * The handoff turn the module submits before any clear (AISDLC-1448); the clear runs only once
+   * `cli-hierarchy handoff verify` proves the RESUME block was rewritten.
+   */
+  prompt: string;
   /** Summary prompt for the compact fallback. */
   summary: string;
   /** Carry the last reply into the resume command's arguments (the planner prints it after a clear). */
   replyAsArgs?: boolean;
 }
 
+/** The executor's handoff turn (AISDLC-1448): the same RESUME-block contract as the planner's. */
+export const EXECUTOR_HANDOFF_PROMPT =
+  'Handoff routine (context rotation; the clear waits until this is proven): run ' +
+  '`node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" handoff write --role executor --board-dir "$BOARD_DIR"`, then ' +
+  'rewrite the ONE `## RESUME HERE` block at the end of that file, outside the markers (replace it, never ' +
+  'add a second). It must name: the task you hold and its pipeline step, what you were doing, and what ' +
+  'you wait on. Reply with the file path only.';
+
 export const EXECUTOR_PLAN: RotationPlan = {
   role: 'executor',
   resume: RESUME_COMMAND,
-  handoff: { command: 'ai-sdlc:hierarchy', args: 'handoff write --role executor' },
+  prompt: EXECUTOR_HANDOFF_PROMPT,
   summary:
     'Summarise for the hierarchy executor: its role (executor), that it holds no task, the board ' +
     'directory, and that its next step is /ai-sdlc:executor. Drop everything about the finished task.',
@@ -325,6 +336,187 @@ export interface ExecutorState {
   lastReply: string;
   /** Board directory the busy predicate reads (module option `boardDir`). */
   boardDir?: string;
+  /** Path of `cli-hierarchy.mjs` (from `<board>/handoff/cli-bin.json`, else the repo-relative bin). */
+  cliBin?: string;
+  /** The handoff prompt turn was submitted; its turn.complete checks the proof. */
+  handoffTurnPending?: boolean;
+  /** Handoff prompts submitted for the current rotation request. */
+  handoffAttempts?: number;
+  /** ISO time of the current rotation request (`handoff mark`), the proof's `--since`. */
+  rotationSince?: string;
+  /** No proof after the resubmit: alerted, not cleared; each turn end checks the proof again. */
+  rotationBlocked?: boolean;
+}
+
+/** The repo-relative bin, right in this repository; `up` records the adopter's in `cli-bin.json`. */
+export const HIERARCHY_CLI = 'pipeline-cli/bin/cli-hierarchy.mjs';
+/** Handoff prompts per rotation request: the first and one resubmit (AISDLC-1448). */
+export const MAX_HANDOFF_ATTEMPTS = 2;
+export const UNPROVEN_LINE = 'handoff unproven; not clearing';
+
+/** Run `cli-hierarchy handoff <action>` for this session; never throws (a failed run reads as code 1). */
+async function handoffCli(
+  p: Ports,
+  state: ExecutorState,
+  role: string,
+  args: string[],
+): Promise<{ code: number; json: Any }> {
+  if (!p.runProcess) return { code: 1, json: null };
+  const r = await safe(() =>
+    p.runProcess!({
+      command: 'node',
+      args: [
+        state.cliBin ?? HIERARCHY_CLI,
+        'handoff',
+        ...args,
+        '--role',
+        role,
+        '--name',
+        state.name ?? role,
+        ...(state.boardDir ? ['--board-dir', state.boardDir] : []),
+      ],
+    }),
+  );
+  const v = (r.value ?? {}) as Any;
+  const code = v.exitCode ?? v.status ?? v.code;
+  let json: Any = null;
+  try {
+    json = JSON.parse(
+      String(v.stdout ?? '')
+        .trim()
+        .split('\n')
+        .pop() ?? '',
+    );
+  } catch {
+    json = null;
+  }
+  return { code: r.ok && typeof code === 'number' ? code : 1, json };
+}
+
+/** True while an AskUserQuestion has no answer (pipeline-cli `handoff asking`); such a session is busy. */
+export async function operatorQuestionPending(
+  p: Ports,
+  state: ExecutorState,
+  role: string,
+): Promise<boolean> {
+  const r = await handoffCli(p, state, role, ['asking']);
+  return r.code === 0 && r.json?.pending === true;
+}
+
+/** The one proof predicate, `handoffWrittenSince`, through `cli-hierarchy handoff verify`. */
+export async function handoffProven(
+  p: Ports,
+  state: ExecutorState,
+  role: string,
+): Promise<boolean> {
+  if (!state.rotationSince) return false;
+  const r = await handoffCli(p, state, role, ['verify', '--since', state.rotationSince]);
+  return r.code === 0 && r.json?.proven === true;
+}
+
+/** No proof: log to the store and the pane, record it under the board and notify; never clear. */
+async function alertUnproven(
+  p: Ports,
+  state: ExecutorState,
+  role: string,
+  reason: string,
+): Promise<void> {
+  state.rotationBlocked = true;
+  state.pendingRotate = false;
+  state.handoffTurnPending = false;
+  await log(p, `${role}: ${UNPROVEN_LINE} (${reason}); the operator is alerted`);
+  await handoffCli(p, state, role, ['unproven', '--reason', reason]);
+}
+
+/** Submit the handoff prompt, once more on a refusal, up to {@link MAX_HANDOFF_ATTEMPTS}; else alert. */
+async function submitHandoff(p: Ports, state: ExecutorState, plan: RotationPlan): Promise<void> {
+  while ((state.handoffAttempts ?? 0) < MAX_HANDOFF_ATTEMPTS) {
+    state.handoffAttempts = (state.handoffAttempts ?? 0) + 1;
+    const sent = await safe(() => p.submit({ text: plan.prompt }));
+    if (ran(sent)) {
+      state.handoffTurnPending = true;
+      state.pendingRotate = false;
+      await log(
+        p,
+        `handoff turn submitted (attempt ${state.handoffAttempts}); the clear waits for handoff verify`,
+      );
+      return;
+    }
+    await log(p, `handoff turn refused (attempt ${state.handoffAttempts})`);
+  }
+  await alertUnproven(p, state, plan.role, 'the handoff prompt was refused');
+}
+
+/**
+ * Begin a rotation (AISDLC-1448): every rotation submits the handoff prompt, idle or not. A pending
+ * operator question defers it to the first turn.complete after the answer.
+ */
+export async function beginRotation(
+  p: Ports,
+  state: ExecutorState,
+  plan: RotationPlan,
+): Promise<void> {
+  if (state.handoffTurnPending) return;
+  // An alerted rotation restarts only on a new "rotate" request; a measure waits for a turn end's proof.
+  if (state.rotationBlocked) return;
+  if (await operatorQuestionPending(p, state, plan.role)) {
+    if (!state.pendingRotate)
+      await log(
+        p,
+        `${plan.role}: rotation deferred, an operator question is pending; the handoff prompt follows the answer`,
+      );
+    state.pendingRotate = true;
+    return;
+  }
+  if (!state.rotationSince) {
+    const mark = await handoffCli(p, state, plan.role, ['mark']);
+    state.rotationSince =
+      typeof mark.json?.since === 'string' ? mark.json.since : new Date().toISOString();
+    state.handoffAttempts = 0;
+    state.rotationBlocked = false;
+  }
+  await submitHandoff(p, state, plan);
+}
+
+/**
+ * At a main-thread turn end: check the handoff turn's proof and clear only on it; resubmit once
+ * without it, then alert. A blocked rotation clears as soon as a later turn proves it. Returns
+ * true when this turn end belonged to the rotation (the caller does nothing else with it).
+ */
+export async function rotationTurnEnd(
+  p: Ports,
+  state: ExecutorState,
+  plan: RotationPlan,
+): Promise<boolean> {
+  if (state.handoffTurnPending) {
+    state.handoffTurnPending = false;
+    if (await handoffProven(p, state, plan.role)) {
+      await clearProven(p, state, plan);
+    } else if ((state.handoffAttempts ?? 0) < MAX_HANDOFF_ATTEMPTS) {
+      await log(p, 'handoff turn ended without proof; resubmitting the handoff prompt once');
+      await submitHandoff(p, state, plan);
+    } else {
+      await alertUnproven(
+        p,
+        state,
+        plan.role,
+        'the handoff turn ended without a new RESUME HERE block',
+      );
+    }
+    return true;
+  }
+  if (state.rotationBlocked && (await handoffProven(p, state, plan.role))) {
+    await clearProven(p, state, plan);
+    return true;
+  }
+  return false;
+}
+
+async function clearProven(p: Ports, state: ExecutorState, plan: RotationPlan): Promise<void> {
+  state.rotationSince = undefined;
+  state.rotationBlocked = false;
+  state.handoffAttempts = 0;
+  await rotate(p, state, plan);
 }
 
 /**
@@ -372,18 +564,16 @@ export async function logWake(
 }
 
 /**
- * The one rotation (OQ-1): handoff write, then `clear` with the role, resume command and last reply in
- * `$.store`; on `{ drop }` or a throw, `compact` with the hierarchy summary prompt; on a second failure,
- * end the session so `cli-hierarchy up` starts a fresh one. Returns the path taken.
+ * The one rotation (OQ-1), run only once the handoff is proven (AISDLC-1448): `clear` with the role,
+ * resume command and last reply in `$.store`; on `{ drop }` or a throw, `compact` with the hierarchy
+ * summary prompt; on a second failure, end the session so `cli-hierarchy up` starts a fresh one.
+ * Returns the path taken.
  */
 export async function rotate(
   p: Ports,
   state: ExecutorState,
   plan: RotationPlan = EXECUTOR_PLAN,
 ): Promise<'clear' | 'compact' | 'exit'> {
-  const handoff = await safe(() => p.runCommand(plan.handoff));
-  if (!ran(handoff))
-    await log(p, `handoff write was refused; the ${plan.role} writes its own on resume`);
   await p.storeSet(ROTATION_KEY, {
     role: plan.role,
     resume: plan.resume,
@@ -410,7 +600,7 @@ export async function rotate(
   return 'exit';
 }
 
-/** A rotation is a wake of the clear path: it never runs while the board names this worker as holder. */
+/** A rotation is a wake of the clear path: it never starts while the board names this worker as holder. */
 async function rotateUnlessHeld(p: Ports, state: ExecutorState, event: string): Promise<void> {
   const held = await heldTask(p, state);
   if (held) {
@@ -418,7 +608,7 @@ async function rotateUnlessHeld(p: Ports, state: ExecutorState, event: string): 
     await logWake(p, state, `rotate(${event})`, 'skip', `board holds ${held}`);
     return;
   }
-  await rotate(p, state);
+  await beginRotation(p, state, EXECUTOR_PLAN);
 }
 
 /**
@@ -520,7 +710,12 @@ export async function executorSessionReceive(
     }
     if (/^rotate\b/i.test(text)) {
       // AISDLC-1121: a rotate wake is a signal, never a prompt; consume it and act deterministically.
-      if (taskRunning(state)) {
+      // AISDLC-1448: a new request re-arms an alerted rotation (a fresh baseline, two more prompts).
+      if (state.rotationBlocked) {
+        state.rotationBlocked = false;
+        state.rotationSince = undefined;
+      }
+      if (taskRunning(state) || state.handoffTurnPending) {
         state.pendingRotate = true;
         await logWake(p, state, 'rotate', 'skip', 'turn state says a task runs; rotate at its end');
       } else {
@@ -575,6 +770,8 @@ export async function executorTurnComplete(
   // A subagent's own turn.complete never ends the main thread's turn.
   if (e?.agentId) return next(e);
   state.turnInFlight = false;
+  // AISDLC-1448: the handoff turn's end checks the proof; nothing else happens on it.
+  if (await rotationTurnEnd(p, state, EXECUTOR_PLAN)) return next(e);
   const reply = String(e?.text ?? e?.reply ?? '');
   if (reply) state.lastReply = reply;
   // The turn boundary ends the task for the wake predicate, so a pending threshold rotation fires here

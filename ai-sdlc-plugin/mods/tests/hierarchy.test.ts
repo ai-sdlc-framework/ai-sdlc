@@ -12,6 +12,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BUSY_SCRIPT,
+  EXECUTOR_HANDOFF_PROMPT,
   LAST_REPLY_MAX_CHARS,
   RESUME_COMMAND,
   ROTATION_TTL_MS,
@@ -24,6 +25,7 @@ import {
   recognisedTokens,
   senderAddressOf,
   senderOf,
+  UNPROVEN_LINE,
 } from '../../hooks/hierarchy/executor.ts';
 import {
   recordReceivedSender,
@@ -293,7 +295,8 @@ describe('hierarchy module: executor wake', () => {
     expect(await recv(s.$, wake('enqueue AISDLC-3'), s.next)).toEqual({
       consumed: 'hierarchy:enqueue',
     });
-    expect(submits(s)).toEqual([]);
+    // AISDLC-1448: the only prompt a rotate wake submits is the handoff turn
+    expect(submits(s).every((c: any[]) => c[0].text === EXECUTOR_HANDOFF_PROMPT)).toBe(true);
     const lines = wakeLines2(s);
     expect(lines.filter((l) => l.includes('event=rotate'))).toHaveLength(3);
     expect(lines.filter((l) => l.includes('event=enqueue'))).toHaveLength(3);
@@ -579,44 +582,95 @@ describe('hierarchy module: socket-path envelope (AISDLC-1090)', () => {
   });
 });
 
+/**
+ * AISDLC-1448: the module's `process.run` stands in for pipeline-cli. `handoff verify` proves the handoff
+ * only when `proven` says so, `handoff asking` reports an operator question, `handoff mark` returns the
+ * request time, and the transcript script returns `reply`.
+ */
+const SINCE = '2026-11-26T21:45:28.000Z';
+interface CliFake {
+  proven: boolean;
+  asking: boolean;
+  reply: string;
+  calls: string[][];
+}
+function cliFake(s: ReturnType<typeof setup>, over: Partial<CliFake> = {}): CliFake {
+  const f: CliFake = { proven: false, asking: false, reply: '', calls: [], ...over };
+  s.$.process.run.mockImplementation(async (a: any) => {
+    if (!Array.isArray(a) || a.length === 0) throw new Error('process.run: takes argv');
+    f.calls.push(a);
+    const action = a[2] === 'handoff' ? a[3] : '';
+    if (action === 'mark')
+      return { exitCode: 0, stdout: JSON.stringify({ ok: true, since: SINCE }) };
+    if (action === 'verify')
+      return {
+        exitCode: f.proven ? 0 : 1,
+        stdout: JSON.stringify({ proven: f.proven, reason: 'x' }),
+      };
+    if (action === 'asking')
+      return { exitCode: f.asking ? 0 : 1, stdout: JSON.stringify({ pending: f.asking }) };
+    if (a[1] === '-e' && a[2] === TRANSCRIPT_REPLY_SCRIPT)
+      return { exitCode: 0, stdout: JSON.stringify({ reply: f.reply }) + '\n' };
+    return { exitCode: 0, stdout: '' };
+  });
+  return f;
+}
+const handoffCalls = (f: CliFake, action: string) =>
+  f.calls.filter((a) => a[2] === 'handoff' && a[3] === action);
+
 describe('hierarchy module: rotation', () => {
   async function verdict(s: ReturnType<typeof setup>) {
     await s.start();
     await s.handlers.get('turn.complete')(s.$, { text: 'done' }, s.next);
     await s.handlers.get('session.measure')(s.$, { tokens: 130_000 }, s.next);
   }
+  const handoffEnds = async (s: ReturnType<typeof setup>) => {
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+  };
 
-  it('writes the handoff, then clears with role, resume command and last reply in the store', async () => {
+  it('submits the handoff prompt first and clears only once handoff verify proves it (AISDLC-1448)', async () => {
     const s = setup();
+    const f = cliFake(s);
     await verdict(s);
-    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
+    expect(submits(s).map((c: any[]) => c[0].text)).toEqual([EXECUTOR_HANDOFF_PROMPT]);
+    expect(ran(s)).toEqual([]);
+    expect(handoffCalls(f, 'mark')[0]).toEqual(
+      expect.arrayContaining(['--role', 'executor', '--name', 'executor']),
+    );
+    f.proven = true;
+    await handoffEnds(s);
+    expect(handoffCalls(f, 'verify')[0]).toEqual(expect.arrayContaining(['--since', SINCE]));
+    expect(ran(s)).toEqual(['clear']);
     expect(s.kv.get(ROTATION_KEY)).toMatchObject({
       role: 'executor',
       resume: RESUME_COMMAND,
       lastReply: 'done',
     });
-    expect(s.kv.get(ROTATION_KEY)).toMatchObject({ resume: RESUME_COMMAND });
   });
 
   it('resumes from the first hook of the new session, since session.start does not fire after a clear', async () => {
     const s = setup();
+    cliFake(s, { proven: true });
     await verdict(s);
+    await handoffEnds(s);
     await s.handlers.get('session.measure')(s.$, { tokens: 10 }, s.next);
-    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear', RESUME_COMMAND]);
-    expect(submits(s)).toEqual([]);
+    expect(ran(s)).toEqual(['clear', RESUME_COMMAND]);
     expect(s.kv.get(ROTATION_KEY)).toBeNull();
     // run once only
     await s.handlers.get('turn.start')(s.$, {}, s.next);
-    expect(ran(s)).toHaveLength(3);
+    expect(ran(s)).toHaveLength(2);
   });
 
   it('does not resume from a stale record, and session.start clears a stale one', async () => {
     vi.useFakeTimers();
     const s = setup();
+    cliFake(s, { proven: true });
     await verdict(s);
+    await handoffEnds(s);
     vi.setSystemTime(Date.now() + ROTATION_TTL_MS + 1000);
     await s.handlers.get('turn.start')(s.$, {}, s.next);
-    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
+    expect(ran(s)).toEqual(['clear']);
     const t = setup();
     t.kv.set(ROTATION_KEY, { role: 'executor', resume: RESUME_COMMAND, at: Date.now() });
     await t.start();
@@ -630,11 +684,14 @@ describe('hierarchy module: rotation', () => {
     await s.handlers.get('turn.start')(s.$, {}, s.next);
     await s.handlers.get('turn.complete')(s.$, { text: '[executor] verdict reported' }, s.next);
     expect(ran(s)).toEqual([]);
+    expect(submits(s)).toEqual([]);
   });
 
-  it('compacts with the hierarchy summary prompt when clear is dropped', async () => {
+  it('compacts with the hierarchy summary prompt when a proven clear is dropped', async () => {
     const s = setup({ drop: ['clear'] });
+    cliFake(s, { proven: true });
     await verdict(s);
+    await handoffEnds(s);
     expect(compacts(s)).toHaveLength(1);
     expect(compacts(s)[0][0].instructions).toContain('hierarchy executor');
     expect(ran(s)).not.toContain('exit');
@@ -643,35 +700,43 @@ describe('hierarchy module: rotation', () => {
 
   it('ends the session on a second failure, also when the calls throw', async () => {
     const s = setup({ drop: ['clear'] });
+    cliFake(s, { proven: true });
     s.$.session.compact.mockRejectedValue(new Error('boom'));
     await verdict(s);
-    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear', 'exit']);
+    await handoffEnds(s);
+    expect(ran(s)).toEqual(['clear', 'exit']);
     expect(logOf(s.kv).some((l) => l.includes('ending the session'))).toBe(true);
   });
 
   it('never rotates mid-task: a measure over the threshold waits for the last turn', async () => {
     const s = setup();
+    cliFake(s);
     await s.start();
     await s.handlers.get('turn.start')(s.$, {}, s.next);
     await s.handlers.get('turn.start')(s.$, { agentId: 'sub' }, s.next);
     await s.handlers.get('session.measure')(s.$, { tokens: 130_000 }, s.next);
-    expect(ran(s)).toEqual([]);
+    expect(submits(s)).toEqual([]);
     await s.handlers.get('turn.complete')(s.$, { agentId: 'sub', text: 'sub done' }, s.next);
+    expect(submits(s)).toEqual([]);
     await s.handlers.get('turn.complete')(s.$, { text: 'still working' }, s.next);
-    expect(ran(s)).toContain('clear');
+    expect(submits(s)).toHaveLength(1);
+    expect(ran(s)).toEqual([]);
   });
 
-  it('rotates at once on a measure over the threshold when idle, and ignores a small one', async () => {
+  it('an idle session over the threshold gets the handoff prompt, never an immediate clear', async () => {
     const s = setup();
+    cliFake(s);
     await s.start();
     await s.handlers.get('session.measure')(s.$, { tokens: 1000 }, s.next);
-    expect(ran(s)).toEqual([]);
+    expect(submits(s)).toEqual([]);
     await s.handlers.get('session.measure')(s.$, { tokens: 120_000 }, s.next);
-    expect(ran(s)).toContain('clear');
+    expect(submits(s)).toHaveLength(1);
+    expect(ran(s)).toEqual([]);
   });
 
   it('rotates on the real session.measure shape and a reply-less turn.complete (AISDLC-1100)', async () => {
     const s = setup();
+    cliFake(s);
     await s.start();
     await s.handlers.get('turn.start')(s.$, {}, s.next);
     await s.handlers.get('session.measure')(
@@ -679,13 +744,13 @@ describe('hierarchy module: rotation', () => {
       { context: { tokens: 125_000, window: 200_000, percent: 62 } },
       s.next,
     );
-    expect(ran(s)).toEqual([]);
+    expect(submits(s)).toEqual([]);
     await s.handlers.get('turn.complete')(
       s.$,
       { event: 'turn.complete', reason: 'end_turn', turnId: 't1', usage: {} },
       s.next,
     );
-    expect(ran(s)).toContain('clear');
+    expect(submits(s)).toHaveLength(1);
     expect(s.kv.get('hierarchy/measure/executor')).toMatchObject({ tokens: 125_000 });
   });
 
@@ -697,28 +762,71 @@ describe('hierarchy module: rotation', () => {
     expect(logOf(s.kv).filter((l) => l.includes('not recognised'))).toHaveLength(1);
   });
 
-  it('logs a refused handoff and still rotates', async () => {
-    const s = setup({ drop: ['ai-sdlc:hierarchy'] });
+  it('an interrupted handoff turn is resubmitted once, then alerts instead of clearing (AISDLC-1448)', async () => {
+    const s = setup();
+    const f = cliFake(s);
+    await verdict(s);
+    await handoffEnds(s);
+    expect(submits(s)).toHaveLength(2);
+    expect(logOf(s.kv).some((l) => l.includes('resubmitting the handoff prompt once'))).toBe(true);
+    await handoffEnds(s);
+    expect(submits(s)).toHaveLength(2);
+    expect(ran(s)).toEqual([]);
+    expect(logOf(s.kv).some((l) => l.includes(UNPROVEN_LINE))).toBe(true);
+    expect(handoffCalls(f, 'unproven')).toHaveLength(1);
+    // a measure does not restart an alerted rotation; a later proven turn end clears
+    await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
+    expect(submits(s)).toHaveLength(2);
+    f.proven = true;
+    await handoffEnds(s);
+    expect(ran(s)).toEqual(['clear']);
+  });
+
+  it('a refused handoff submit never clears: two refusals alert (AISDLC-1448)', async () => {
+    const s = setup({ drop: ['submit'] });
+    const f = cliFake(s, { proven: true });
+    await verdict(s);
+    expect(ran(s)).toEqual([]);
+    expect(logOf(s.kv).filter((l) => l.includes('handoff turn refused'))).toHaveLength(2);
+    expect(logOf(s.kv).some((l) => l.includes(UNPROVEN_LINE))).toBe(true);
+    expect(handoffCalls(f, 'unproven')).toHaveLength(1);
+  });
+
+  it('a new rotate wake re-arms an alerted rotation with a fresh baseline', async () => {
+    const s = setup({ drop: ['submit'] });
+    const f = cliFake(s);
+    await verdict(s);
+    expect(handoffCalls(f, 'mark')).toHaveLength(1);
+    await s.handlers.get('session.receive')(
+      s.$,
+      { text: env('proj-operator-dispatch', 'rotate') },
+      s.next,
+    );
+    expect(handoffCalls(f, 'mark')).toHaveLength(2);
+  });
+
+  it('a pending operator question defers the rotation to the turn end after the answer', async () => {
+    const s = setup();
+    const f = cliFake(s, { asking: true });
     await s.start();
     await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
-    expect(ran(s)).toContain('clear');
-    expect(logOf(s.kv).some((l) => l.includes('handoff write was refused'))).toBe(true);
+    expect(submits(s)).toEqual([]);
+    expect(logOf(s.kv).some((l) => l.includes('operator question is pending'))).toBe(true);
+    f.asking = false;
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    expect(submits(s)).toHaveLength(1);
+    expect(ran(s)).toEqual([]);
   });
 });
 
 describe('hierarchy module: planner role (AISDLC-1036)', () => {
   const planner = () => setup({ role: 'planner', name: 'proj-planner' });
-  const handoffs = (s: ReturnType<typeof setup>) =>
-    s.$.command.run.mock.calls
-      .map((c: any[]) => c[0])
-      .filter((a: any) => a?.command === 'ai-sdlc:hierarchy');
-
   // The module has no fs: the transcript read is a process.run whose stdout is {"reply": text}.
-  const transcriptReply = (s: ReturnType<typeof setup>, reply: string) =>
-    s.$.process.run.mockImplementation(async (a: any) => {
-      if (!Array.isArray(a) || a.length === 0) throw new Error('process.run: takes argv');
-      return { exitCode: 0, stdout: JSON.stringify({ reply }) + '\n' };
-    });
+  const turn = async (s: ReturnType<typeof setup>) => {
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+  };
 
   it('registers the planner hooks and nothing for the executor wake', async () => {
     const s = planner();
@@ -728,24 +836,27 @@ describe('hierarchy module: planner role (AISDLC-1036)', () => {
     expect(logOf(s.kv)[0]).toContain('role=planner');
   });
 
-  it('at 150k writes the planner handoff, clears, and shows the stored last reply after the clear', async () => {
+  it('at 150k submits the handoff prompt, clears on proof, and shows the stored last reply after the clear', async () => {
     const s = planner();
+    const f = cliFake(s, { reply: 'ruling recorded' });
     await s.start();
-    await s.handlers.get('turn.start')(s.$, {}, s.next);
-    transcriptReply(s, 'ruling recorded');
-    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    await turn(s);
     expect(s.kv.get(lastReplyKey('proj-planner'))).toBe('ruling recorded');
-    expect(ran(s)).toEqual([]);
     await s.handlers.get('session.measure')(s.$, { tokens: PLANNER_ROTATE_AT_TOKENS }, s.next);
-    expect(handoffs(s)).toEqual([
-      { command: 'ai-sdlc:hierarchy', args: 'handoff write --role planner' },
-    ]);
-    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
+    expect(submits(s).map((c: any[]) => c[0].text)).toEqual([HANDOFF_PROMPT]);
+    expect(ran(s)).toEqual([]);
+    expect(handoffCalls(f, 'mark')[0]).toEqual(
+      expect.arrayContaining(['--role', 'planner', '--name', 'proj-planner']),
+    );
+    f.proven = true;
+    f.reply = '/memory/handoff.md';
+    await turn(s);
+    expect(ran(s)).toEqual(['clear']);
     expect(s.kv.get(ROTATION_KEY)).toMatchObject({
       role: 'planner',
       resume: PLANNER_RESUME_COMMAND,
     });
-    // the new session: the resume command receives the stored reply, which is still readable
+    // the new session: the resume command receives the stored reply, not the handoff turn's path
     await s.handlers.get('turn.start')(s.$, {}, s.next);
     expect(s.$.command.run).toHaveBeenLastCalledWith({
       command: PLANNER_RESUME_COMMAND,
@@ -756,60 +867,57 @@ describe('hierarchy module: planner role (AISDLC-1036)', () => {
 
   it('never rotates mid-turn: a measure during a turn waits for turn.complete', async () => {
     const s = planner();
+    const f = cliFake(s);
     await s.start();
     await s.handlers.get('turn.start')(s.$, {}, s.next);
     await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
-    expect(ran(s)).toEqual([]);
+    expect(submits(s)).toEqual([]);
     // a subagent's turn does not end the main thread's turn
     await s.handlers.get('turn.complete')(s.$, { agentId: 'a1', text: 'x' }, s.next);
-    expect(ran(s)).toEqual([]);
+    expect(submits(s)).toEqual([]);
     await s.handlers.get('turn.complete')(s.$, { text: 'final' }, s.next);
-    // two steps: the handoff prompt turn first, the clear when it completes
-    expect(ran(s)).toEqual([]);
     expect(submits(s)).toHaveLength(1);
-    await s.handlers.get('turn.complete')(s.$, {}, s.next);
-    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
+    expect(ran(s)).toEqual([]);
+    f.proven = true;
+    await turn(s);
+    expect(ran(s)).toEqual(['clear']);
   });
 
-  it('a turn whose turn.complete never fired stops deferring rotation after the stale bound', async () => {
+  it('a turn older than 30 minutes gets the handoff prompt, never an immediate clear (AISDLC-1448)', async () => {
     vi.useFakeTimers();
     const s = planner();
+    cliFake(s);
     await s.start();
     await s.handlers.get('turn.start')(s.$, {}, s.next);
     await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
-    expect(ran(s)).toEqual([]);
+    expect(submits(s)).toEqual([]);
     vi.setSystemTime(Date.now() + PLANNER_TURN_STALE_MS + 1000);
     await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
-    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
+    expect(submits(s)).toHaveLength(1);
+    expect(ran(s)).toEqual([]);
   });
 
   it('prints one operator line and flags rotate pending when a mid-turn measure crosses (AC-5)', async () => {
     const s = planner();
+    const f = cliFake(s);
     await s.start();
     await s.handlers.get('turn.start')(s.$, {}, s.next);
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     await s.handlers.get('session.measure')(s.$, { tokens: 162_000 }, s.next);
     await s.handlers.get('session.measure')(s.$, { tokens: 163_000 }, s.next);
-    err.mockRestore();
     const lines = logOf(s.kv).filter((l) => l.includes('rotating at end of this turn'));
     expect(lines).toEqual([
       '[hierarchy] planner: context 162k, rotating at end of this turn; handoff routine runs first',
     ]);
     expect(s.kv.get(rotatePendingKey('proj-planner'))).toMatchObject({ pending: true });
     await s.handlers.get('turn.complete')(s.$, {}, s.next);
-    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    f.proven = true;
+    await turn(s);
+    err.mockRestore();
     expect(s.kv.get(rotatePendingKey('proj-planner'))).toBeNull();
   });
 
-  it('runs the handoff prompt turn at turn end, clears only when it completes, keeps the real last reply (AC-1, AC-3)', async () => {
-    const s = planner();
-    await s.start();
-    await s.handlers.get('turn.start')(s.$, {}, s.next);
-    transcriptReply(s, 'two drafts await your go');
-    await s.handlers.get('session.measure')(s.$, { tokens: 170_000 }, s.next);
-    await s.handlers.get('turn.complete')(s.$, {}, s.next);
-    expect(submits(s)).toHaveLength(1);
-    expect(submits(s)[0][0].text).toBe(HANDOFF_PROMPT);
+  it('the handoff prompt names what the RESUME block must hold', () => {
     for (const needle of [
       'open rulings',
       'owed items',
@@ -817,49 +925,54 @@ describe('hierarchy module: planner role (AISDLC-1036)', () => {
       'decision id',
       'scheduled jobs',
       'peer waits',
+      'RESUME HERE',
     ])
       expect(HANDOFF_PROMPT).toContain(needle);
-    expect(ran(s)).toEqual([]);
-    // the handoff turn replies with a path only: it must not replace the stored last reply
-    transcriptReply(s, '/memory/handoff.md');
-    await s.handlers.get('turn.start')(s.$, {}, s.next);
-    await s.handlers.get('turn.complete')(s.$, {}, s.next);
-    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
-    expect(s.kv.get(lastReplyKey('proj-planner'))).toBe('two drafts await your go');
-    await s.handlers.get('turn.start')(s.$, {}, s.next);
-    expect(s.$.command.run).toHaveBeenLastCalledWith({
-      command: PLANNER_RESUME_COMMAND,
-      args: 'last-reply: two drafts await your go',
-    });
   });
 
   it('truncates the carried last reply to the documented cap', async () => {
     const s = planner();
+    cliFake(s, { reply: 'x'.repeat(LAST_REPLY_MAX_CHARS + 500), proven: true });
     await s.start();
-    transcriptReply(s, 'x'.repeat(LAST_REPLY_MAX_CHARS + 500));
-    await s.handlers.get('turn.start')(s.$, {}, s.next);
-    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    await turn(s);
     await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
+    await turn(s);
     await s.handlers.get('turn.start')(s.$, {}, s.next);
     const args = s.$.command.run.mock.calls.at(-1)[0].args as string;
     expect(args.length).toBe('last-reply: '.length + LAST_REPLY_MAX_CHARS);
   });
 
-  it('falls back to the CLI-only handoff when the prompt turn is refused (AC-1)', async () => {
+  it('a refused handoff submit never clears with the state block only (AISDLC-1448)', async () => {
     const s = setup({ role: 'planner', name: 'proj-planner', drop: ['submit'] });
+    const f = cliFake(s, { proven: true });
     await s.start();
     await s.handlers.get('turn.start')(s.$, {}, s.next);
     await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
     await s.handlers.get('turn.complete')(s.$, {}, s.next);
-    expect(logOf(s.kv)).toContain('[hierarchy] handoff turn refused; state block only');
-    expect(ran(s)).toEqual(['ai-sdlc:hierarchy', 'clear']);
+    expect(ran(s)).toEqual([]);
+    expect(logOf(s.kv).some((l) => l.includes(UNPROVEN_LINE))).toBe(true);
+    expect(handoffCalls(f, 'unproven')[0]).toEqual(
+      expect.arrayContaining(['--reason', 'the handoff prompt was refused']),
+    );
+  });
+
+  it('an interrupted planner handoff turn is resubmitted once, then alerted, not cleared (AISDLC-1448)', async () => {
+    const s = planner();
+    const f = cliFake(s);
+    await s.start();
+    await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, { reason: 'interrupted' }, s.next);
+    expect(submits(s)).toHaveLength(2);
+    await turn(s);
+    expect(ran(s)).toEqual([]);
+    expect(handoffCalls(f, 'unproven')).toHaveLength(1);
   });
 
   it('reads no reply when the transcript is unreadable', async () => {
     const s = planner();
     await s.start();
-    await s.handlers.get('turn.start')(s.$, {}, s.next);
-    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    await turn(s);
     expect(s.kv.get(lastReplyKey('proj-planner'))).toBeUndefined();
     s.$.process.run.mockImplementation(async () => {
       throw new Error('boom');
@@ -898,8 +1011,10 @@ describe('hierarchy module: planner role (AISDLC-1036)', () => {
 
   it('keeps a planner rotation record when session.start fires after the clear, resuming once (AC-4)', async () => {
     const s = planner();
+    cliFake(s, { proven: true });
     await s.start();
     await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
+    await turn(s);
     expect(s.kv.get(ROTATION_KEY)).toMatchObject({ role: 'planner' });
     await s.start();
     const resumes = () => ran(s).filter((c: string) => c === PLANNER_RESUME_COMMAND);
@@ -910,6 +1025,7 @@ describe('hierarchy module: planner role (AISDLC-1036)', () => {
 
   it('a rotate wake mid-turn schedules the rotation and flags it', async () => {
     const s = planner();
+    cliFake(s);
     await s.start();
     await s.handlers.get('turn.start')(s.$, {}, s.next);
     const out = await s.handlers.get('session.receive')(
@@ -923,23 +1039,65 @@ describe('hierarchy module: planner role (AISDLC-1036)', () => {
     expect(submits(s)).toHaveLength(1);
   });
 
+  it('a rotate wake on an idle planner submits the handoff prompt, never an immediate clear (AISDLC-1448)', async () => {
+    const s = planner();
+    cliFake(s);
+    await s.start();
+    await s.handlers.get('session.receive')(
+      s.$,
+      { text: env('proj-operator-dispatch', 'rotate') },
+      s.next,
+    );
+    expect(submits(s)).toHaveLength(1);
+    expect(ran(s)).toEqual([]);
+  });
+
+  it('replays 2026-11-26: a queued rotate and an unanswered AskUserQuestion past the grace never clear (AISDLC-1448)', async () => {
+    vi.useFakeTimers();
+    const s = planner();
+    const f = cliFake(s, { asking: true });
+    await s.start();
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('session.receive')(
+      s.$,
+      { text: env('proj-operator-dispatch', 'rotate') },
+      s.next,
+    );
+    for (let i = 0; i < 8; i++) {
+      vi.setSystemTime(Date.now() + 10 * 60 * 1000);
+      await s.handlers.get('session.measure')(s.$, { tokens: 151_000 }, s.next);
+    }
+    expect(submits(s)).toEqual([]);
+    expect(ran(s)).toEqual([]);
+    // the operator answers; the turn ends; the handoff prompt goes in right after
+    f.asking = false;
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    expect(submits(s).map((c: any[]) => c[0].text)).toEqual([HANDOFF_PROMPT]);
+    expect(ran(s)).toEqual([]);
+  });
+
   it('ignores a measure under the threshold', async () => {
     const s = planner();
     await s.start();
     await s.handlers.get('session.measure')(s.$, { tokens: 1000 }, s.next);
     expect(ran(s)).toEqual([]);
+    expect(submits(s)).toEqual([]);
   });
 
   it('falls back to compact, then ends the session, through the shared rotation', async () => {
     const s = setup({ role: 'planner', name: 'proj-planner', drop: ['clear'] });
+    cliFake(s, { proven: true });
     await s.start();
     await s.handlers.get('session.measure')(s.$, { tokens: 200_000 }, s.next);
+    await turn(s);
     expect(compacts(s)).toHaveLength(1);
     expect(compacts(s)[0][0].instructions).toContain('planner');
     const t = setup({ role: 'planner', drop: ['clear', 'compact'] });
+    cliFake(t, { proven: true });
     await t.start();
     await t.handlers.get('session.measure')(t.$, { tokens: 200_000 }, t.next);
-    expect(ran(t)).toEqual(['ai-sdlc:hierarchy', 'clear', 'exit']);
+    await turn(t);
+    expect(ran(t)).toEqual(['clear', 'exit']);
   });
 
   it('passes rulings and escalations through unchanged and consumes status noise from dispatch', async () => {
@@ -1055,9 +1213,10 @@ describe('hierarchy module: configured rotation thresholds (AISDLC-1163)', () =>
       await start();
       return { s, h };
     };
+    // AISDLC-1448: a planner or executor rotation starts with the handoff prompt, the dispatch one with a clear
     const rotated = (x: { s: ReturnType<typeof setup> }) =>
       x.s.$.command.run.mock.calls.some((c: any[]) => c[0]?.command === 'clear') ||
-      x.s.$.command.run.mock.calls.some((c: any[]) => c[0]?.command === 'ai-sdlc:hierarchy');
+      x.s.$.prompt.submit.mock.calls.some((c: any[]) => typeof c[0]?.text === 'string');
     const measure = async (x: any, tokens: number) =>
       x.h.get('session.measure')(x.s.$, { tokens }, x.s.next);
 

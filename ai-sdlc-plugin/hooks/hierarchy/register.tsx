@@ -15,6 +15,7 @@ import {
   resumeAfterClear,
   resolveRotateAt,
   ROTATE_AT_TOKENS,
+  HIERARCHY_CLI,
   safe,
   setSwallowSink,
   startPinnedTask,
@@ -28,6 +29,7 @@ import {
   newDispatchState,
   attempt,
   refreshPaneBounded,
+  readBinDir,
   dispatchSessionMeasure,
   dispatchSessionReceive,
   dispatchUiRender,
@@ -265,8 +267,13 @@ export const register = (on: Any, options?: Any): void => {
       if (timer === 'ok') void attempt(run);
       return next(e);
     }
+    // AISDLC-1448: the handoff proof runs `cli-hierarchy handoff verify`; adopters' bins are in cli-bin.json.
+    const binDir = await readBinDir(p.runProcess!, options?.boardDir, router.projectDir);
+    const cliBin = binDir ? `${binDir.replace(/[\\/]+$/, '')}/cli-hierarchy.mjs` : HIERARCHY_CLI;
     if (role === 'planner') {
       await health({ state: 'loaded' });
+      planner.cliBin = cliBin;
+      if (options?.boardDir) planner.boardDir = options.boardDir;
       // The roster name keys the stored last reply; the launcher sets it, the role is the fallback.
       planner.name = typeof named === 'string' && named ? named : 'planner';
       router.current = 'planner';
@@ -279,6 +286,7 @@ export const register = (on: Any, options?: Any): void => {
     await health({ state: 'loaded' });
     router.current = 'executor';
     state.name = typeof named === 'string' && named ? named : 'executor';
+    state.cliBin = cliBin;
     state.enabled = true;
     if (options?.boardDir) state.boardDir = options.boardDir;
     // INTERIM: if a host fires session.start after a mod-run clear, resume from here as well.

@@ -154,6 +154,8 @@ export interface LoopState {
   overCapTicks?: number;
   /** Ticks since dispatch asked an over-context session to rotate (AISDLC-1150); dropped once it is under threshold. */
   rotateAsked?: Record<string, number>;
+  /** Over-context sessions whose grace lapsed without handoff proof and were escalated once (AISDLC-1448). */
+  rotateEscalated?: string[];
   /**
    * Failed verdicts already escalated while the board was held (AISDLC-1382), as
    * `<handled key>:<outcome>:<head sha>`; dropped on the first tick that is not held.
@@ -176,7 +178,7 @@ export interface SessionHealth {
 export interface RestartReport {
   session: string;
   cause: 'unknown-no-task' | 'idle-with-queue' | 'over-context' | 'request';
-  status: 'restarted' | 'failed' | 'requested-rotate';
+  status: 'restarted' | 'failed' | 'requested-rotate' | 'escalated';
   reason?: string;
 }
 
@@ -233,6 +235,9 @@ export function readLoopState(boardDir: string): LoopState {
       ...(parsed.restartStreak ? { restartStreak: parsed.restartStreak } : {}),
       ...(typeof parsed.overCapTicks === 'number' ? { overCapTicks: parsed.overCapTicks } : {}),
       ...(parsed.rotateAsked ? { rotateAsked: parsed.rotateAsked } : {}),
+      ...(Array.isArray(parsed.rotateEscalated) && parsed.rotateEscalated.length > 0
+        ? { rotateEscalated: parsed.rotateEscalated }
+        : {}),
       ...(Array.isArray(parsed.heldEscalated) && parsed.heldEscalated.length > 0
         ? { heldEscalated: parsed.heldEscalated }
         : {}),
@@ -546,6 +551,13 @@ export interface LoopDeps {
   restartSession?: (name: string) => Promise<{ ok: boolean; reason?: string }>;
   /** Asks a session's hooks module to rotate (AISDLC-1150); absent means over-context restarts directly. */
   requestRotate?: (name: string) => Promise<{ ok: boolean; reason?: string }>;
+  /**
+   * `handoffWrittenSince` for the session's current rotation request (AISDLC-1448). Absent or
+   * false: the over-context hard restart never runs; the lapse is escalated instead.
+   */
+  handoffProven?: (name: string) => boolean;
+  /** Files the one `session-rotation:<name>` escalation and alerts the operator; returns its id. */
+  escalateRotation?: (name: string) => string | Promise<string>;
   /** Records the tick marker; its failure never fails the tick. */
   recordTick?: (marker: DispatchTickMarker) => void;
   /** Checks the turns-per-tick budget and files a Decision on an overrun; its failure never fails the tick. */
@@ -1031,6 +1043,14 @@ async function runRestarts(
   const nextAsked: Record<string, number> = {};
   const next: Record<string, number> = {};
   const askRotate = deps.requestRotate;
+  const escalated = new Set(state.rotateEscalated ?? []);
+  const proven = (name: string): boolean => {
+    try {
+      return deps.handoffProven?.(name) === true;
+    } catch {
+      return false;
+    }
+  };
   for (const s of sessions) {
     if (s.name === deps.workerId || s.role === 'operator-dispatch' || done.has(s.name)) continue;
     let cause: RestartReport['cause'] | undefined;
@@ -1070,11 +1090,22 @@ async function runRestarts(
         nextAsked[s.name] = 0;
         continue;
       }
-      if (age + 1 >= ROTATE_GRACE_TICKS && s.state !== 'busy') {
+      // AISDLC-1448: the hard restart needs handoff proof; without it the lapse is escalated, once.
+      if (age + 1 >= ROTATE_GRACE_TICKS && s.state !== 'busy' && proven(s.name)) {
         await attempt(s.name, cause);
         delete next[s.name];
-      } else {
-        nextAsked[s.name] = age + 1;
+        continue;
+      }
+      nextAsked[s.name] = age + 1;
+      if (age + 1 >= ROTATE_GRACE_TICKS && s.state !== 'busy' && !escalated.has(s.name)) {
+        escalated.add(s.name);
+        let reason = 'grace lapsed without handoff proof; not restarted';
+        try {
+          if (deps.escalateRotation) reason += `; escalated ${await deps.escalateRotation(s.name)}`;
+        } catch (err) {
+          reason += `; escalation failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+        out.push({ session: s.name, cause, status: 'escalated', reason });
       }
       continue;
     }
@@ -1089,6 +1120,9 @@ async function runRestarts(
     }
   }
   state.rotateAsked = nextAsked;
+  const stillEscalated = [...escalated].filter((n) => nextAsked[n] !== undefined);
+  if (stillEscalated.length > 0) state.rotateEscalated = stillEscalated;
+  else delete state.rotateEscalated;
   state.restartStreak = next;
   return out;
 }

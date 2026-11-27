@@ -25,6 +25,13 @@ import { releaseInflight } from '../dispatch/board.js';
 import { createSystemIdentity } from './caller-identity.js';
 import { holdsInflight } from './clear.js';
 import { writeHandoff } from './handoff.js';
+import { appendRotationLog, checkHandoffProof } from './handoff-proof.js';
+import { readRotateRequest } from './rotate-request.js';
+import {
+  pendingOperatorQuestion,
+  recordDyingTranscript,
+  resolveTranscriptSource,
+} from './transcript-recall.js';
 import { stopSessionWindow } from './down.js';
 import { listInflight } from './inflight.js';
 import { schedulerDown, schedulerUp } from './reconcile-scheduler.js';
@@ -69,7 +76,10 @@ export interface RestartOptions {
   waitSec?: number;
   /** Roster name of the calling session; restarting it would kill this very command. */
   callerName?: string;
-  /** Restart a busy planner or dispatch session anyway (AISDLC-1150). */
+  /**
+   * The operator's explicit `--force` (AISDLC-1150, AISDLC-1448): restart a busy session, or a
+   * planner or rotating executor whose handoff is unproven. Logged as such in `rotation.log`.
+   */
   force?: boolean;
   /** Who takes the restart lock (default `callerName`, else `operator`). */
   lockHolder?: string;
@@ -95,8 +105,10 @@ export interface RestartResult {
   waitedFor?: string;
   /** Handoff file written just before the stop (planner, dispatch; AISDLC-1150). */
   handoff?: string;
-  /** The handoff could not be written; the restart went ahead. */
+  /** The handoff could not be written; only a `--force` restart goes ahead then. */
   handoffError?: string;
+  /** Transcript of the stopped session, recorded as the next session's archived copy (AISDLC-1448). */
+  dyingTranscript?: string;
   /** Task the executor claimed in the instant before the stop; returned to `queue/`. */
   requeued?: string;
 }
@@ -235,6 +247,34 @@ export async function hierarchyRestart(
       `refusing to restart '${entry.name}': it is the calling session, and stopping it would kill this command before the new window starts. Ask another session (the planner for dispatch, dispatch for the planner) to run cli-hierarchy restart ${entry.name}`,
     );
   }
+  // AISDLC-1448: a session waiting on an operator question counts as busy.
+  const transcript = resolveTranscriptSource(deps, entry.role, entry.name);
+  const asking = entry.role !== 'operator-dispatch' && pendingOperatorQuestion(transcript.file);
+  if (!opts.force && asking) {
+    throw new Error(
+      `refusing to restart '${entry.name}': it is waiting on an operator question (AskUserQuestion has no answer yet). It rotates after the answer; pass --force to restart anyway`,
+    );
+  }
+  // AISDLC-1448: a planner, or an executor with a rotation request, is never killed before its handoff is proven.
+  const request = readRotateRequest(deps.boardDir, entry.name);
+  const gated = entry.role === 'planner' || (entry.role === 'executor' && request !== undefined);
+  if (gated && !opts.force) {
+    if (!request) {
+      throw new Error(
+        `refusing to restart '${entry.name}': no rotation request is recorded, so its handoff cannot be proven written. Ask it to rotate with cli-hierarchy clear ${entry.name}, or the operator may pass --force (its unrecorded state is lost)`,
+      );
+    }
+    const proof = checkHandoffProof(entry.role, entry.name, request.at, {
+      boardDir: deps.boardDir,
+      now: deps.now,
+    });
+    if (!proof.proven) {
+      throw new Error(
+        `refusing to restart '${entry.name}': its handoff is unproven (${proof.reason}). Ask it to write its RESUME HERE block, or the operator may pass --force (its unrecorded state is lost)`,
+      );
+    }
+  }
+  // Refusals above take no lock, so the operator's --force is never locked out by one.
   acquireRestartLock(
     deps.boardDir,
     entry.name,
@@ -242,6 +282,11 @@ export async function hierarchyRestart(
     deps.now(),
   );
 
+  if (gated && opts.force) {
+    const line = `forced restart of '${entry.name}' by operator (--force): handoff proof not checked`;
+    deps.log(line);
+    appendRotationLog(deps.boardDir, deps.now(), line);
+  }
   const held = entry.role === 'executor' ? holdsInflight(deps.boardDir, entry.name) : undefined;
   if (held && !opts.afterTask) {
     throw new Error(
@@ -273,8 +318,27 @@ export async function hierarchyRestart(
       }).file;
     } catch (err) {
       handoffError = err instanceof Error ? err.message : String(err);
-      deps.log(`warning: handoff not written before restart: ${handoffError}`);
+      // AISDLC-1448: a failed write blocks the restart; only the operator's --force goes ahead.
+      if (!opts.force) {
+        throw new Error(
+          `refusing to restart '${entry.name}': its handoff could not be written (${handoffError}). Nothing was stopped; fix the board, or the operator may pass --force`,
+          { cause: err },
+        );
+      }
+      deps.log(`warning: handoff not written before the forced restart: ${handoffError}`);
     }
+  }
+  // AISDLC-1448: on every restart, forced or not, the dying transcript becomes the archived copy.
+  let dyingTranscript: string | undefined;
+  try {
+    dyingTranscript = recordDyingTranscript(
+      deps.boardDir,
+      entry.name,
+      transcript,
+      deps.now(),
+    )?.file;
+  } catch (err) {
+    deps.log(`warning: dying transcript not recorded: ${(err as Error).message}`);
   }
 
   const stop = await stopSessionWindow(entry, deps);
@@ -344,6 +408,7 @@ export async function hierarchyRestart(
     ...(requeued ? { requeued } : {}),
     ...(handoff ? { handoff } : {}),
     ...(handoffError ? { handoffError } : {}),
+    ...(dyingTranscript ? { dyingTranscript } : {}),
   };
 }
 

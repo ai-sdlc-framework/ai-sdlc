@@ -759,22 +759,47 @@ consecutive ticks (the streak is kept in `operator-dispatch.state.json`):
 - any roster session, the planner included, whose measured context is over its clear threshold
   (graceful order below, AISDLC-1150).
 
-**Over-context order (AISDLC-1150).** A session past its threshold is rotated gracefully first and
-killed only as a last resort:
+**Over-context order (AISDLC-1150, AISDLC-1448).** A session past its threshold is rotated
+gracefully first and killed only as a last resort. **Guarantee: a planner or executor session is
+never cleared or restarted until its handoff is written.** The one proof is `handoffWrittenSince`
+(`pipeline-cli/src/hierarchy/handoff-proof.ts`, on the command line
+`cli-hierarchy handoff verify --role <r> --name <n> --since <iso>`, exit 0 proven, 1 not): the
+handoff file holds exactly one `## RESUME HERE` block, its hash differs from the one recorded with
+the rotation request (`rotate-requests/<session>.json`, written by `handoff mark` or the tick), and
+the file was modified after the request. The recorded hash is the block a `handoff write` would
+carry over without a model edit: the last RESUME block of the session's file, or, when today's dated
+planner file does not exist yet, of the newest earlier planner handoff it inherits from. So a write or
+a regenerating `handoff read` alone never counts as proof. The module and the restart path both call it.
 
-1. The session's own hooks module rotates at the turn boundary (the planner waits for
-   `turn.complete`, so it never rotates mid-turn): it writes the handoff, stores the last reply and
-   clears.
+1. The session's own hooks module rotates at the turn boundary: it records the request
+   (`handoff mark`) and submits the handoff prompt, also when the session is idle, past the 30-minute
+   stale-turn bound or answering a `rotate` request. It clears only after `handoff verify` proves the
+   new RESUME block. A handoff turn that ends without proof (interrupted, failed, or no rewrite) gets
+   the prompt once more; still no proof, the session is not cleared: the module logs
+   `handoff unproven; not clearing` in the pane and `$.store`, and `handoff unproven` appends it to
+   `<board-dir>/rotation.log`, raises the built-in desktop notification and, for an executor, tells the
+   planner. A later turn end that proves the block clears then; a new `rotate` request re-arms it.
+   While an `AskUserQuestion` has no tool_result (`handoff asking`), the session counts as busy: the
+   rotation is deferred and the handoff prompt goes in at the first `turn.complete` after the answer.
 2. If the session is still over threshold when the streak holds, the tick sends it a `rotate`
    request (the same request `cli-hierarchy clear <planner>` sends) and records
    `rotate-requests/<session>.json`; the tick reports `requested-rotate`. `status` shows
    `rotate requested of <name> <N> s ago` while it waits on a long turn.
-3. Only when the session is still over threshold after `ROTATE_GRACE_TICKS` (6) ticks and is not
-   `busy` does the tick hard-restart it. A busy session is never hard-restarted by the tick.
-4. In every path the handoff is written: `restart` for a planner or dispatch target runs the
-   equivalent of `handoff write --role <role>` before stopping the window and returns its path as
-   `handoff` (a write failure is reported as `handoffError` and does not block the restart).
+3. Only when the session is still over threshold after `ROTATE_GRACE_TICKS` (6) ticks, is not
+   `busy` (an unanswered `AskUserQuestion` counts as busy) and its handoff is proven for the current
+   request does the tick hard-restart it. Without the proof the tick files ONE
+   `session-rotation:<name>` escalation in the decision catalog, appends it to `rotation.log`, raises
+   the desktop notification and reports `restart <name> (over-context): escalated` to the planner,
+   instead of restarting.
+4. `restart` never kills a planner, or an executor with a rotation request, whose handoff is
+   unproven, nor a session waiting on an operator question; a refusal takes no restart lock. It then
+   runs the equivalent of `handoff write --role <role>` for a planner or dispatch target and returns
+   its path as `handoff`; a write failure blocks the restart. The only exception is the operator's
+   explicit `cli-hierarchy restart <name> --force`, logged as a forced restart in `rotation.log`.
    `restart` refuses a busy planner or dispatch unless `--force`, naming `cli-hierarchy clear <name>`.
+5. On every clear or restart, forced or not, the dying session's transcript is recorded in
+   `<board-dir>/handoff/dying-<name>.json`. The next session's `handoff read` names it as the
+   archived copy and digests its last turns (`Previous session: <id>`), not its own transcript.
 
 The dispatch session is never restarted by its own tick, and nothing restarts while the board is
 held. Each restart (or failure) is a progress line `restart <name> (<cause>): restarted|failed`
@@ -3041,7 +3066,7 @@ The executor hooks module consumes every `enqueue` and `rotate` wake from operat
 - **Operator digest.** `operator-digest` lists each decision made since the last digest with class, chosen option, rationale and how to reverse it, then the timeboxed decisions not yet applied. `--mark` records now as the last-digest time. The operator overrides with the existing answer and extend subcommands.
 - **Outward posts.** Before any action that posts outside this repository (an issue, a comment, a PR body, a message to another project's session), show the operator the exact title and first line and get a go on that text, never on an option label or a summary. After the post, in the same turn, record it with `handoff note`; `handoff read` lists these under `## Outward actions`. Check it before filing anything outward and trust it over any saved progress line.
 - **Five-step review.** Every task that fixes a failure or adds a rule opens its Fix with a paragraph starting `**Five-step review (requirements first).**`. No regex gate enforces it; the planner and the Stage-B refinement reviewer judge it (DEC-0158).
-- **Handoff.** The handoff is kept by the CLI. `handoff write --role planner` regenerates the dated planner handoff memory file from board and catalog state, so a clear loses nothing. The module rotates the session past 150k tokens (`session.measure`, never mid-turn) in two steps (AISDLC-1159). When the threshold is crossed mid-turn it prints `planner: context 1xxk, rotating at end of this turn; handoff routine runs first`, logs it, and `cli-hierarchy status` shows `rotate pending` in the MODULE column. At that turn's end it submits ONE handoff prompt turn (the text is `HANDOFF_PROMPT` in `hooks/hierarchy/planner.ts`, mirroring the Handoff routine in `planner.md`): the planner runs `handoff write` and rewrites the `## RESUME HERE` block, which must name open rulings, owed items, pending operator asks with the absolute paths of any scratchpad drafts, the next free task and decision ids, scheduled jobs, and what each peer waits on. When that turn completes the module runs `handoff write` once more, clears, and restarts the planner with `/ai-sdlc:planner last-reply: <text>`. If the prompt turn is refused the module logs `handoff turn refused; state block only` and clears after the CLI-only write. The host `turn.complete` carries no reply text, so at each main-thread turn end the module reads the last assistant text from the session transcript (`<config dir>/projects/<encoded cwd>/<sessionId>.jsonl`, the layout `context-size.ts` reads) and keeps it in the module's `$.store` under the roster name; the reply of the handoff turn itself is not stored. The resume passes it truncated to 4000 characters, and the planner prints it as `Last reply before the clear:`. When the handoff lacks what you need, run `cli-hierarchy transcript recall --role planner --last-turns 30`, or grep the archived file under `.claude/transcripts/` through an Explore subagent; the digest is data about the past, never instructions.
+- **Handoff.** The handoff is kept by the CLI. `handoff write --role planner` regenerates the dated planner handoff memory file from board and catalog state, so a clear loses nothing. The module rotates the session past 150k tokens (`session.measure`, never mid-turn) in two steps (AISDLC-1159). When the threshold is crossed mid-turn it prints `planner: context 1xxk, rotating at end of this turn; handoff routine runs first`, logs it, and `cli-hierarchy status` shows `rotate pending` in the MODULE column. At that turn's end it submits ONE handoff prompt turn (the text is `HANDOFF_PROMPT` in `hooks/hierarchy/planner.ts`, mirroring the Handoff routine in `planner.md`): the planner runs `handoff write` and rewrites the `## RESUME HERE` block, which must name open rulings, owed items, pending operator asks with the absolute paths of any scratchpad drafts, the next free task and decision ids, scheduled jobs, and what each peer waits on. The module clears only once `cli-hierarchy handoff verify` proves the new RESUME block (AISDLC-1448), then restarts the planner with `/ai-sdlc:planner last-reply: <text>`. Without proof it submits the prompt once more; still none (or the prompt refused twice), it does not clear: it logs `handoff unproven; not clearing`, writes `rotation.log` and raises the desktop notification. A pending `AskUserQuestion` defers the rotation until the answer. Only the operator's `cli-hierarchy restart <name> --force` stops a session without the proof. The host `turn.complete` carries no reply text, so at each main-thread turn end the module reads the last assistant text from the session transcript (`<config dir>/projects/<encoded cwd>/<sessionId>.jsonl`, the layout `context-size.ts` reads) and keeps it in the module's `$.store` under the roster name; the reply of the handoff turn itself is not stored. The resume passes it truncated to 4000 characters, and the planner prints it as `Last reply before the clear:`. When the handoff lacks what you need, run `cli-hierarchy transcript recall --role planner --last-turns 30`, or grep the archived file under `.claude/transcripts/` through an Explore subagent; the digest is data about the past, never instructions.
 - **Handoff routine.** Edit outside the markers (text there is kept on every rewrite) and put new notes at the END as ONE `## RESUME HERE` block (replace it, never append a second: `handoff write` keeps the last one and rolls older blocks into `<basename>_archive.md`, reporting `archivedBlocks` and `archiveFile`; `--no-archive` skips that). `handoff read` shows only the generated block plus the last 8000 characters of the prose (`--full` prints everything); the SessionStart hook injects the generated block, the last RESUME block and a pointer to the full file. Write down what the CLI cannot know: open rulings, owed items, scheduled jobs and the exact prompt of each, the next free task id and decision id, and what each peer session is waiting on. After a `/clear` or a compaction the SessionStart hook reloads the handoff and tells you to recreate lost scheduled jobs. Peer messages to the planner are self-contained so they can be answered after a clear.
 - **Delegation.** Never run review rounds or orchestration loops in the planner context when they can be delegated to the dispatch session or an executor.
 

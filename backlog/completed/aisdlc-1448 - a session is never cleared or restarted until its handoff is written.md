@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1448
 title: "A planner or executor session is never cleared or restarted until its handoff is written"
-status: To Do
+status: Done
 priority: high
 labels:
   - hierarchy

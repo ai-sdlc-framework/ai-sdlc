@@ -4,11 +4,12 @@
 import {
   DISPATCH_NAME,
   STATUS_NOISE,
+  beginRotation,
   innerText,
   log,
-  ran,
+  operatorQuestionPending,
   readMeasure,
-  rotate,
+  rotationTurnEnd,
   resumeAfterClear,
   safe,
   senderOf,
@@ -20,10 +21,24 @@ type Any = any;
 /** Context size, in tokens, at which the planner rotates (OQ-1). */
 export const PLANNER_ROTATE_AT_TOKENS = 150_000;
 export const PLANNER_RESUME_COMMAND = 'ai-sdlc:planner';
+/**
+ * The handoff turn the module submits before a rotation clear (AISDLC-1159). It mirrors steps 1-2 of the
+ * Handoff routine in `ai-sdlc-plugin/commands/planner.md`; the text lives here only. The clear runs only
+ * once `cli-hierarchy handoff verify` proves the block was rewritten (AISDLC-1448).
+ */
+export const HANDOFF_PROMPT =
+  'Handoff routine (context rotation; the clear waits until this is proven): run ' +
+  '`node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" handoff write --role planner --board-dir "$BOARD_DIR"`, then ' +
+  'rewrite the ONE `## RESUME HERE` block at the end of that file, outside the markers (replace it, never ' +
+  'add a second). It must name: open ' +
+  'rulings; owed items; pending operator asks, with the absolute path of every draft in the scratchpad; the ' +
+  'next free task id and decision id; scheduled jobs; and what each peer waits on. Reply with the file ' +
+  'path only.';
+
 export const PLANNER_PLAN: RotationPlan = {
   role: 'planner',
   resume: PLANNER_RESUME_COMMAND,
-  handoff: { command: 'ai-sdlc:hierarchy', args: 'handoff write --role planner' },
+  prompt: HANDOFF_PROMPT,
   summary:
     'Summarise for the hierarchy planner: its role (planner), the board directory, the open ' +
     'briefs and rulings, and that its next step is /ai-sdlc:planner followed by handoff read.',
@@ -32,18 +47,6 @@ export const PLANNER_PLAN: RotationPlan = {
 
 /** `$.store` key of a session's last reply, under its roster name; replaces LAST_MESSAGE.md (AISDLC-914). */
 export const lastReplyKey = (name: string): string => `hierarchy/last-reply/${name}`;
-
-/**
- * The handoff turn the module submits before a rotation clear (AISDLC-1159). It mirrors steps 1-2 of the
- * Handoff routine in `ai-sdlc-plugin/commands/planner.md`; the text lives here only.
- */
-export const HANDOFF_PROMPT =
-  'Handoff routine (context rotation, the clear follows this turn): run ' +
-  '`node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" handoff write --role planner --board-dir "$BOARD_DIR"`, then ' +
-  'rewrite the `## RESUME HERE` block at the end of that file, outside the markers. It must name: open ' +
-  'rulings; owed items; pending operator asks, with the absolute path of every draft in the scratchpad; the ' +
-  'next free task id and decision id; scheduled jobs; and what each peer waits on. Reply with the file ' +
-  'path only.';
 
 /** `$.store` key of a session's rotate-pending flag, read by `cli-hierarchy status`. */
 export const rotatePendingKey = (name: string): string => `hierarchy/rotate-pending/${name}`;
@@ -73,12 +76,13 @@ export async function readTranscriptReply(p: Ports, e: Any): Promise<string> {
   }
 }
 
-/** A planner turn with no turn.complete for this long no longer defers rotation. */
+/**
+ * A planner turn with no turn.complete for this long is presumed lost, unless an operator question is
+ * pending; either way the rotation still submits the handoff prompt and never clears without proof.
+ */
 export const PLANNER_TURN_STALE_MS = 30 * 60 * 1000;
 
 export interface PlannerState extends ExecutorState {
-  /** The handoff prompt turn was submitted; the clear runs when it completes. */
-  handoffTurnPending?: boolean;
   /** Roster name of this session (the launcher's `AI_SDLC_HIERARCHY_SESSION`), else the role. */
   name: string;
   /** A main-thread turn is running: rotation waits for its `turn.complete`. */
@@ -87,11 +91,16 @@ export interface PlannerState extends ExecutorState {
   turnStartedAt?: number;
 }
 
-/** True while a main-thread turn is believed to run; stale after PLANNER_TURN_STALE_MS so a lost turn.complete cannot block rotation. */
-function turnRunning(state: PlannerState): boolean {
+/**
+ * True while a main-thread turn is believed to run. Past PLANNER_TURN_STALE_MS a lost turn.complete is
+ * presumed, unless an operator question is still unanswered (AISDLC-1448): that turn is waiting, not lost.
+ */
+async function turnRunning(p: Ports, state: PlannerState): Promise<boolean> {
   if (!state.inTurn) return false;
-  if (Date.now() - (state.turnStartedAt ?? 0) > PLANNER_TURN_STALE_MS) state.inTurn = false;
-  return state.inTurn;
+  if (Date.now() - (state.turnStartedAt ?? 0) <= PLANNER_TURN_STALE_MS) return true;
+  if (await operatorQuestionPending(p, state, 'planner')) return true;
+  state.inTurn = false;
+  return false;
 }
 
 /** Defer the rotation to the turn end: print and log one operator line, flag it for `cli-hierarchy status`. */
@@ -104,19 +113,26 @@ async function scheduleRotation(p: Ports, state: PlannerState, line: string): Pr
   );
 }
 
-/** The shared rotation with the planner's plan; the stored last reply is read back if memory lost it. */
+/** Read back the stored last reply if memory lost it, so the gated clear carries it. */
+async function restoreLastReply(p: Ports, state: PlannerState): Promise<void> {
+  if (state.lastReply) return;
+  const stored = (await safe(() => p.storeGet(lastReplyKey(state.name)))).value;
+  if (typeof stored === 'string') state.lastReply = stored;
+}
+
+/**
+ * Start the planner's rotation (AISDLC-1448): always the handoff prompt first, idle or not; the clear
+ * waits for `handoff verify`.
+ */
 export async function rotatePlanner(
   p: Ports,
   state: PlannerState,
   plan: RotationPlan = PLANNER_PLAN,
 ): Promise<void> {
-  if (!state.lastReply) {
-    const stored = (await safe(() => p.storeGet(lastReplyKey(state.name)))).value;
-    if (typeof stored === 'string') state.lastReply = stored;
-  }
-  const path = await rotate(p, state, plan);
-  await safe(() => p.storeSet(rotatePendingKey(state.name), null));
-  if (path === 'exit') await log(p, `${plan.role} rotation ended the session`);
+  await restoreLastReply(p, state);
+  await beginRotation(p, state, plan);
+  if (!state.pendingRotate && !state.handoffTurnPending)
+    await safe(() => p.storeSet(rotatePendingKey(state.name), null));
 }
 
 /** Event handlers, called by the module's single registration point (register.tsx) for the armed role. */
@@ -143,13 +159,21 @@ export async function plannerSessionReceive(
       const text = innerText(raw);
       // `cli-hierarchy clear planner` (RFC-0058 phase 4): rotate now, or at the end of the turn.
       if (/^rotate\b/i.test(text)) {
-        if (turnRunning(state))
+        // A new request re-arms an alerted rotation: a fresh baseline and two more prompts.
+        if (state.rotationBlocked) {
+          state.rotationBlocked = false;
+          state.rotationSince = undefined;
+        }
+        if ((await turnRunning(p, state)) || state.handoffTurnPending)
           await scheduleRotation(
             p,
             state,
             'planner: rotate requested, rotating at end of this turn; handoff routine runs first',
           );
-        else await rotatePlanner(p, state, PLANNER_PLAN);
+        else {
+          await scheduleRotation(p, state, 'planner: rotate requested; handoff routine runs first');
+          await rotatePlanner(p, state, PLANNER_PLAN);
+        }
         return { consumed: 'hierarchy:rotate' };
       }
       if (STATUS_NOISE.test(text)) return { consumed: 'hierarchy:status' };
@@ -200,8 +224,7 @@ export async function plannerTurnComplete(
   if (e?.agentId) return next(e);
   state.inTurn = false;
   // The handoff turn replies with a file path only: it must not replace the operator-facing last reply.
-  const wasHandoffTurn = state.handoffTurnPending === true;
-  if (!wasHandoffTurn) {
+  if (state.handoffTurnPending !== true) {
     // The host's turn.complete carries no reply text (AISDLC-1100): read it from the transcript.
     const reply = await readTranscriptReply(p, e);
     if (reply) {
@@ -209,19 +232,13 @@ export async function plannerTurnComplete(
       await safe(() => p.storeSet(lastReplyKey(state.name), reply));
     }
   }
-  if (wasHandoffTurn) {
-    state.handoffTurnPending = false;
-    await rotatePlanner(p, state, PLANNER_PLAN);
+  // AISDLC-1448: the clear runs only on proof; without it the prompt is resubmitted once, then alerted.
+  await restoreLastReply(p, state);
+  if (await rotationTurnEnd(p, state, PLANNER_PLAN)) {
+    if (!state.pendingRotate && !state.handoffTurnPending)
+      await safe(() => p.storeSet(rotatePendingKey(state.name), null));
   } else if (state.pendingRotate) {
-    // Step one: the model writes the RESUME block; the clear runs when this turn completes.
-    const sent = await safe(() => p.submit({ text: HANDOFF_PROMPT }));
-    if (ran(sent)) {
-      state.handoffTurnPending = true;
-      await log(p, 'handoff turn submitted; clear runs when it completes');
-    } else {
-      await log(p, 'handoff turn refused; state block only');
-      await rotatePlanner(p, state, PLANNER_PLAN);
-    }
+    await rotatePlanner(p, state, PLANNER_PLAN);
   }
   return next(e);
 }
@@ -245,7 +262,9 @@ export async function plannerSessionMeasure(
   const tokens = await readMeasure(p, state.name, e);
   if (tokens >= (state.rotateAt ?? PLANNER_ROTATE_AT_TOKENS)) {
     // Never mid-turn: a measure that lands while the main thread runs waits for its turn.complete.
-    if (turnRunning(state)) {
+    if (state.handoffTurnPending || state.rotationBlocked) {
+      // a handoff turn runs, or the operator was alerted: the turn end checks the proof
+    } else if (await turnRunning(p, state)) {
       await scheduleRotation(
         p,
         state,
