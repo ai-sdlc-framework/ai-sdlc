@@ -109,6 +109,20 @@ Total wall-clock time: ~5-10 min (CI time) vs ~15-25 min with the queue (CI + qu
 
 ---
 
+## RFCs with declared review authorities (AISDLC-1449, DEC-0440)
+
+An RFC can declare `reviewAuthorities` in its frontmatter (see `spec/rfcs/README.md`). `cli-merge-if-eligible` refuses, for every source kind, a PR that changes, renames or deletes an RFC whose copy on main declares a non-empty list, in merge mode and in `--arm` mode, and turns off auto-merge on such a PR when it finds it armed. The copy is read from main, never the PR head; a copy that cannot be read or parsed is refused as well. The refusal names the RFC, each role and login, and ends "merge by hand after they reply (DEC-0440)".
+
+- The reconciler routes the PR to the planner once, with the refusal as the reason, and never arms that head again.
+- The landing pass records the refusal under `<board>/notes/land-<pr>-<sha>.authority-hold.txt` and never attempts that head again.
+- **The only release is the operator's hand merge**, after the declared authorities have replied. Nothing detects the reply.
+
+A newly added RFC and an RFC with no declaration are not affected, so a repository with no `reviewAuthorities` anywhere sees no change.
+
+Known gap: `auto-enable-auto-merge.yml` arms a `mergeAuthors` PR with `gh pr merge --auto` and does not call the merge gate, so it does not read the declaration. Until that is closed, open an RFC amendment as a draft PR and keep it a draft until the operator merges it (the workflow and the landing pass skip drafts; flipping it ready re-arms it through the workflow).
+
+---
+
 ## Open task PR bounds (AISDLC-1234, DEC-0396)
 
 Dispatch holds new-task claims on two bounds, never repairs. The count (limit `openPrLimit`, default `executors.max`) excludes task PRs that are re-entering (inflight claim or queued repair manifest). The ceiling `openPrLimit + executors.max` caps total open task PRs of any state. See `docs/operations/cli-hierarchy.md`, "Land and repair before new tasks".

@@ -41,6 +41,7 @@ import type { TaskRuling } from '../dispatch/types.js';
 import { DOCS_BRANCH_PREFIXES } from './filing-branches.js';
 import { cachedGh, GH_READ_TTL_MS } from './gh-read-cache.js';
 import { disableAutoMergeArgs, PR_HOLD_LABEL } from '../governance/merge-if-eligible.js';
+import { isReviewAuthorityHold } from '../governance/rfc-review-authorities.js';
 import type { CommandRunner } from './types.js';
 
 /** Task set: one action per classifier state (RFC-0054 ownership table). */
@@ -171,6 +172,11 @@ export interface LandingRecord {
   closedUnlanded?: string;
   /** AISDLC-1454: the executor re-entry queued when land-prep was exhausted with no live claim. */
   reentry?: ReentryMark;
+  /**
+   * AISDLC-1449 (DEC-0440): the merge gate refused to arm this head because it changes an RFC
+   * with declared review authorities. The head is never armed again; the operator merges by hand.
+   */
+  authorityHold?: { headSha: string; reason: string };
   history: LandingEntry[];
 }
 
@@ -491,6 +497,23 @@ export interface ActionResult {
   note?: string;
   /** The action's command exited non-zero; the next pass retries it. */
   failed?: boolean;
+  /**
+   * AISDLC-1449: the arm was refused because the PR changes an RFC with declared review
+   * authorities (DEC-0440); the refusal text. Never retried: the PR goes to the planner.
+   */
+  hold?: string;
+}
+
+/** Note on a PR routed to the planner by a review-authority hold (AISDLC-1449). */
+export const AUTHORITY_HOLD_NOTE = 'review-authority hold: the operator merges by hand (DEC-0440)';
+
+/** The merge gate's refusal text in the CLI output, when it is a review-authority hold. */
+export function authorityHoldReason(stdout: string, stderr: string): string | undefined {
+  const line = `${stdout}\n${stderr}`.split('\n').find((l) => isReviewAuthorityHold(l));
+  if (line === undefined) return undefined;
+  const marker = '| REFUSED | ';
+  const at = line.indexOf(marker);
+  return (at >= 0 ? line.slice(at + marker.length) : line).trim();
 }
 
 export interface ActionContext {
@@ -683,6 +706,8 @@ export function commandExecutor(run: CommandRunner, cwd: string, cliBin: string)
         continue;
       }
       if (r.status !== 0) {
+        const hold = ctx.action === 'arm' ? authorityHoldReason(r.stdout, r.stderr) : undefined;
+        if (hold !== undefined) return { ran: true, hold, note: hold };
         return {
           ran: true,
           failed: true,
@@ -1223,6 +1248,14 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     const existing = readLanding(opts.boardDir, f.prNumber);
     const ruled = rulingFacts(opts.boardDir, f, facts);
     let d = decide(f, existing, ruled, opts.maxSameHeadActions, opts.maxCiRounds);
+    // AISDLC-1449: a head the merge gate held for review authorities is never armed again; the
+    // arm (or the same-head guard's `arm@<head>` routing of it) keeps the one hold routing.
+    const hold = existing?.authorityHold;
+    const wouldArm =
+      d.action === 'arm' || (d.action === 'route-to-planner' && d.note?.startsWith('arm@'));
+    if (wouldArm && hold !== undefined && hold.headSha === f.headSha) {
+      d = { ...d, action: 'route-to-planner', failingLine: hold.reason, note: AUTHORITY_HOLD_NOTE };
+    }
     if (d.note === LIVE_CLAIM_NOTE) {
       report.skippedFailures.push({ pr: f.prNumber, taskId: f.taskId, reason: d.note });
       console.error(`[reconcile] PR #${f.prNumber} ${f.taskId}: ${d.note}`);
@@ -1544,6 +1577,15 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
     if (result.failed) {
       record.actionFailed = true;
       record.failedAttempts = 1;
+    }
+    if (result.hold !== undefined) {
+      // AISDLC-1449: the refusal reaches the planner now, once, as the routing reason.
+      d = { ...d, action: 'route-to-planner', failingLine: result.hold, note: AUTHORITY_HOLD_NOTE };
+      record.action = d.action;
+      record.failingLine = result.hold;
+      record.note = AUTHORITY_HOLD_NOTE;
+      if (f.headSha !== undefined)
+        record.authorityHold = { headSha: f.headSha, reason: result.hold };
     }
     writeLanding(opts.boardDir, record);
     report.records.push(record);

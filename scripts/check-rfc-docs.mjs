@@ -39,6 +39,7 @@ import { readFileSync, readdirSync, existsSync, realpathSync } from 'node:fs';
 import { join, basename, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import {
   checkAllTransitions,
   reportTransitionsAndExit,
@@ -870,6 +871,10 @@ export function checkAllRfcs({
     const ev = validateRuntimeEvidence(readFileSync(file, 'utf-8'), rfcIdForEvidence);
     failures.push(...ev.failures);
     warnings.push(...ev.warnings);
+    // AISDLC-1449: a malformed `reviewAuthorities` declaration fails CI.
+    failures.push(
+      ...validateReviewAuthorities(readFileSync(file, 'utf-8'), rfcIdForEvidence).failures,
+    );
   }
 
   return {
@@ -969,6 +974,56 @@ export function validateRuntimeEvidence(source, rfcId, { extraCapabilityIds = []
     }
   }
   return { failures, warnings };
+}
+
+const REVIEW_AUTHORITY_LOGIN_RE = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
+
+/**
+ * AISDLC-1449 (DEC-0440): validate the optional `reviewAuthorities` frontmatter field,
+ * a list of `{ role, login? }`. The merge gate holds any PR that changes an RFC
+ * declaring it, so a malformed entry fails CI here rather than at merge time.
+ * Parsed with js-yaml (the hand-rolled parser above does not read lists of mappings); a
+ * frontmatter js-yaml cannot read fails only when it names the field.
+ *
+ * @param {string} source  Full RFC file content.
+ * @param {string} rfcId   RFC id for messages.
+ * @returns {{ failures: Array<{rfc: string, surface: null, reason: string}> }}
+ */
+export function validateReviewAuthorities(source, rfcId) {
+  const failures = [];
+  const fail = (reason) => failures.push({ rfc: rfcId, surface: null, reason });
+  const text = source.replace(/\r\n/g, '\n');
+  if (!text.startsWith('---\n')) return { failures };
+  const end = text.indexOf('\n---', 4);
+  if (end === -1) return { failures };
+  const block = text.slice(4, end);
+  if (!/^["']?reviewAuthorities["']?\s*:/m.test(block)) return { failures };
+  let value;
+  try {
+    const yaml = createRequire(import.meta.url)('js-yaml');
+    value = yaml.load(block)?.reviewAuthorities;
+  } catch {
+    fail("the frontmatter declaring 'reviewAuthorities' could not be parsed");
+    return { failures };
+  }
+  if (value === undefined || value === null) return { failures };
+  if (!Array.isArray(value)) {
+    fail("'reviewAuthorities' must be a list of { role, login? } entries");
+    return { failures };
+  }
+  for (const [i, entry] of value.entries()) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      fail(`'reviewAuthorities' entry ${i + 1} must be a mapping`);
+    } else if (typeof entry.role !== 'string' || entry.role.trim() === '') {
+      fail(`'reviewAuthorities' entry ${i + 1} is missing 'role'`);
+    } else if (
+      entry.login !== undefined &&
+      (typeof entry.login !== 'string' || !REVIEW_AUTHORITY_LOGIN_RE.test(entry.login))
+    ) {
+      fail(`'reviewAuthorities' entry ${i + 1} has an invalid 'login' (expected a GitHub login)`);
+    }
+  }
+  return { failures };
 }
 
 /** Read the published-docs baseline from `path`; missing or invalid = empty. */
