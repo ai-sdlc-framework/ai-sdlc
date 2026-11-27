@@ -34,7 +34,7 @@ import { clearRuling, readRuling } from '../dispatch/ruling.js';
 import type { TaskRuling } from '../dispatch/types.js';
 import { DOCS_BRANCH_PREFIXES } from './filing-branches.js';
 import { cachedGh, GH_READ_TTL_MS } from './gh-read-cache.js';
-import { PR_HOLD_LABEL } from '../governance/merge-if-eligible.js';
+import { disableAutoMergeArgs, PR_HOLD_LABEL } from '../governance/merge-if-eligible.js';
 import type { CommandRunner } from './types.js';
 
 /** Task set: one action per classifier state (RFC-0054 ownership table). */
@@ -221,7 +221,9 @@ export function decide(
     ...(c.failingLine === undefined ? {} : { failingLine: c.failingLine }),
   };
   // AISDLC-1386: a held PR waits for a human; no arm, flip, merge or fix round runs on it.
+  // An armed held PR would still merge on green (GitHub auto-merge), so it is disarmed first.
   if (f.held === true && !f.merged) {
+    if (f.autoMergeArmed === true) return { ...base, action: 'disarm-held' };
     return { ...base, action: 'held', ruling: `label ${PR_HOLD_LABEL}` };
   }
   // No lane owns it: a written reason and the planner, never a silent `none`.
@@ -510,6 +512,9 @@ export function actionCommands(
     case 'flip-ready-takeover':
       // The flip is followed by the arm on the next pass (the PR is then ready, green and CLEAN).
       return [{ file: 'gh', args: ['pr', 'ready', String(ctx.pr)] }];
+    case 'disarm-held':
+      // AISDLC-1386: turns GitHub auto-merge off; never merges.
+      return [{ file: 'gh', args: disableAutoMergeArgs(ctx.pr) }];
     case 'update-branch':
       return [{ file: 'gh', args: ['pr', 'update-branch', String(ctx.pr)] }];
     case 'rebase-in-place':

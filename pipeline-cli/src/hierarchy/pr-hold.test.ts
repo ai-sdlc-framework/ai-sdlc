@@ -70,18 +70,37 @@ describe('cli-hierarchy pr-hold', () => {
       held: true,
       label: 'ai-sdlc/hold',
       by: 'proj-planner',
+      disarmed: true,
     });
     expect(gh.calls[0]!.slice(0, 3)).toEqual(['label', 'create', 'ai-sdlc/hold']);
     expect(gh.calls[1]).toEqual(['pr', 'edit', '184', '--add-label', 'ai-sdlc/hold']);
-    expect(gh.calls[2]!.slice(0, 4)).toEqual(['pr', 'comment', '184', '--body']);
-    expect(gh.calls[2]![4]).toMatch(/Held by proj-planner: workflow needs review/);
+    // An armed PR would merge on green regardless of the label: the hold turns auto-merge off.
+    expect(gh.calls[2]).toEqual(['pr', 'merge', '184', '--disable-auto']);
+    expect(gh.calls[3]!.slice(0, 4)).toEqual(['pr', 'comment', '184', '--body']);
+    expect(gh.calls[3]![4]).toMatch(/Held by proj-planner: workflow needs review/);
 
     const cleared = ghFake();
     const r = await cli(['pr-hold', '184', '--clear'], identityFor(null), cleared.run);
     expect(r.code).toBe(0);
     expect(JSON.parse(r.out[0]!)).toMatchObject({ held: false, by: 'the operator' });
+    expect(JSON.parse(r.out[0]!).disarmed).toBeUndefined();
     expect(cleared.calls[0]).toEqual(['pr', 'edit', '184', '--remove-label', 'ai-sdlc/hold']);
     expect(cleared.calls[1]![4]).toMatch(/Hold lifted by the operator\./);
+    expect(cleared.calls.some((a) => a[1] === 'merge')).toBe(false);
+  });
+
+  it('still holds an unarmed PR when gh refuses to disable auto-merge', () => {
+    const gh = ghFake('pr merge');
+    expect(prHold(gh.run, '/', 7, { clear: false, reason: 'r', by: 'b' })).toEqual({
+      ok: true,
+      disarmed: false,
+    });
+    expect(gh.calls.map((a) => a.slice(0, 2).join(' '))).toEqual([
+      'label create',
+      'pr edit',
+      'pr merge',
+      'pr comment',
+    ]);
   });
 
   it('refuses an executor or dispatch caller and calls no gh', async () => {

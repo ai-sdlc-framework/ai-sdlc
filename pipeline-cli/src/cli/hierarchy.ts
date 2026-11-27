@@ -1258,7 +1258,16 @@ export async function runHierarchyCli(
           process.stderr.write(`cli-hierarchy pr-hold: ${r.error ?? 'failed'}\n`);
           return 1;
         }
-        deps.log(JSON.stringify({ ok: true, pr, held: !clear, label: PR_HOLD_LABEL, by }));
+        deps.log(
+          JSON.stringify({
+            ok: true,
+            pr,
+            held: !clear,
+            label: PR_HOLD_LABEL,
+            by,
+            ...(r.disarmed === undefined ? {} : { disarmed: r.disarmed }),
+          }),
+        );
         return 0;
       }
       case 'scale': {

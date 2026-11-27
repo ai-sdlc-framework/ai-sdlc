@@ -2,15 +2,18 @@
  * AISDLC-1386: hold one PR open for a human. `cli-hierarchy pr-hold <pr> --reason <text>`
  * adds the `ai-sdlc/hold` label and posts the reason as a PR comment; `--clear` removes the
  * label. `cli-merge-if-eligible` and the reconciler read the label and never arm, flip or
- * merge a held PR.
+ * merge a held PR. Holding also turns GitHub auto-merge off: an armed PR would otherwise
+ * merge on green with nothing re-reading the label.
  */
 
-import { PR_HOLD_LABEL } from '../governance/merge-if-eligible.js';
+import { disableAutoMergeArgs, PR_HOLD_LABEL } from '../governance/merge-if-eligible.js';
 import type { CommandRunner } from './types.js';
 
 export interface PrHoldResult {
   ok: boolean;
   error?: string;
+  /** Auto-merge was turned off by this hold (false when the PR was not armed). */
+  disarmed?: boolean;
 }
 
 function failed(step: string, r: { status: number | null; stderr: string }): PrHoldResult {
@@ -49,10 +52,12 @@ export function prHold(
     { cwd },
   );
   if (edit.status !== 0) return failed('gh pr edit', edit);
+  // `gh` exits non-zero when auto-merge is not enabled; that PR is already held by the label.
+  const disarmed = !opts.clear && run('gh', disableAutoMergeArgs(pr), { cwd }).status === 0;
   const body = opts.clear
     ? `Hold lifted by ${opts.by}${opts.reason ? `: ${opts.reason}` : ''}. The pipeline may arm and merge this PR again.`
     : `Held by ${opts.by}: ${opts.reason ?? ''}\n\nLabel \`${PR_HOLD_LABEL}\`: the pipeline does not arm, flip or merge this PR until \`cli-hierarchy pr-hold ${n} --clear\`.`;
   const comment = run('gh', ['pr', 'comment', n, '--body', body], { cwd });
   if (comment.status !== 0) return failed('gh pr comment', comment);
-  return { ok: true };
+  return { ok: true, ...(opts.clear ? {} : { disarmed }) };
 }

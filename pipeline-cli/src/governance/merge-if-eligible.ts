@@ -1292,6 +1292,21 @@ export async function armPr(
   return { ok: out.code === 0, error: out.stderr.trim() };
 }
 
+/**
+ * AISDLC-1386: the `gh` argv that turns auto-merge off on a PR. It never merges; it lives here so
+ * every invocation of the merge subcommand stays in this module (AISDLC-975). `pr-hold` and the
+ * reconciler's `disarm-held` action use it.
+ */
+export function disableAutoMergeArgs(prNumber: number, repoSlug?: string): string[] {
+  return [
+    'pr',
+    'merge',
+    String(prNumber),
+    '--disable-auto',
+    ...(repoSlug === undefined ? [] : ['--repo', repoSlug]),
+  ];
+}
+
 /** AISDLC-1386: turn off auto-merge on a held PR. Refusals are returned, not thrown. */
 export async function disarmPr(
   prNumber: number,
@@ -1299,11 +1314,10 @@ export async function disarmPr(
   runner: Runner,
   cwd?: string,
 ): Promise<MergePrResult> {
-  const out = await runner(
-    'gh',
-    ['pr', 'merge', String(prNumber), '--disable-auto', '--repo', repoSlug],
-    { cwd, allowFailure: true },
-  );
+  const out = await runner('gh', disableAutoMergeArgs(prNumber, repoSlug), {
+    cwd,
+    allowFailure: true,
+  });
   return { ok: out.code === 0, error: out.stderr.trim() };
 }
 

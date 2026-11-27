@@ -1921,6 +1921,33 @@ describe('hold label (AISDLC-1386)', () => {
     expect(report.acted.map((a) => a.action)).toEqual(['held', 'held']);
   });
 
+  it('disarms a held PR that is armed, then holds it', () => {
+    const armed = taskPr({ autoMergeArmed: true, ...held });
+    expect(decide(armed).action).toBe('disarm-held');
+    expect(
+      actionCommands(
+        {
+          pr: 10,
+          taskId: 'AISDLC-1',
+          kind: 'task',
+          action: 'disarm-held',
+          state: 'armed-clean',
+          boardDir: board,
+        },
+        '/bin',
+      ),
+    ).toEqual([{ file: 'gh', args: ['pr', 'merge', '10', '--disable-auto'] }]);
+
+    const execute = vi.fn((_ctx: ActionContext) => ({ ran: true }));
+    reconcile([armed], { boardDir: board, execute, now: fixedNow });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute.mock.calls[0]![0]).toMatchObject({ pr: 10, action: 'disarm-held' });
+    // Once disarmed, the next pass only records the hold.
+    reconcile([{ ...armed, autoMergeArmed: false }], { boardDir: board, execute, now: fixedNow });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(readLanding(board, 10)).toMatchObject({ action: 'held' });
+  });
+
   it('gatherFacts requests labels and marks a PR carrying the hold label', () => {
     const calls: string[][] = [];
     const list = [
