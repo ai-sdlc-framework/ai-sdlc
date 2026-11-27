@@ -140,8 +140,8 @@ export function resolveActor(projectDir: string, env: NodeJS.ProcessEnv = proces
 
 /**
  * Print a store write result (AISDLC-1456): `applied: <what>`, `proposed: queued as a
- * proposal`, or `rejected: <reason>` on stderr with exit code 1. A proposal is never reported
- * as done.
+ * proposal`, or `rejected: <reason>` / `conflict: <reason>` (AISDLC-1457) on stderr with exit
+ * code 1. A proposal is never reported as done.
  */
 export function reportWrite(
   r: { status: WriteResult['status']; reason?: string },
@@ -151,6 +151,9 @@ export function reportWrite(
     process.stdout.write(`applied: ${applied}\n`);
   } else if (r.status === 'proposed') {
     process.stdout.write(`proposed: queued as a proposal${r.reason ? ` (${r.reason})` : ''}\n`);
+  } else if (r.status === 'conflict') {
+    process.stderr.write(`conflict: ${r.reason ?? 'the entry changed concurrently'}\n`);
+    process.exitCode = 1;
   } else {
     process.stderr.write(`rejected: ${r.reason ?? 'no reason given'}\n`);
     process.exitCode = 1;

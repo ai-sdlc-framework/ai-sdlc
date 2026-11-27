@@ -28,5 +28,6 @@ export {
   type StoredEntry,
   type WriteKind,
   type WriteOp,
+  type WriteOptions,
   type WriteResult,
 } from './knowledge-store.js';

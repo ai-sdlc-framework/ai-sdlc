@@ -2,12 +2,15 @@
  * Human surface for the knowledge layer (RFC-0053): confirm, correct, supersede,
  * coverage scoring and the plain-text gap dashboard. Every mutation is one named store write
  * (DEC-0443), which logs its knowledge-log event. Entries are superseded, never deleted.
+ * Each write passes the version it read; on `conflict` it re-reads and retries
+ * (`retryOnConflict`, AISDLC-1457).
  */
 import { createHash } from 'node:crypto';
 import { now } from '../clock.js';
 import type { KnowledgeEntry } from './entry.js';
 import {
   openKnowledgeStore,
+  retryOnConflict,
   type KnowledgeBackendSelection,
   type WriteResult,
 } from './knowledge-store.js';
@@ -27,17 +30,19 @@ export async function confirmEntry(
   projectRoot: string,
 ): Promise<WriteResult & { confidence?: number }> {
   const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
-  const e = store.get(id);
-  if (!e) return notFound(id);
-  const next = movedConfidence(e.fields, confidence);
-  const fields: Record<string, unknown> = { confidence: next };
-  if (observed) fields.observed = observed;
-  const r = await store.write(
-    id,
-    { kind: 'confirm', fields, principal: actor.principal },
-    { scope: e.scope },
-  );
-  return r.status === 'rejected' ? r : { ...r, confidence: next };
+  return retryOnConflict(async () => {
+    const e = store.get(id);
+    if (!e) return notFound(id);
+    const next = movedConfidence(e.fields, confidence);
+    const fields: Record<string, unknown> = { confidence: next };
+    if (observed) fields.observed = observed;
+    const r = await store.write(
+      id,
+      { kind: 'confirm', fields, principal: actor.principal },
+      { scope: e.scope, expectedVersion: e.version },
+    );
+    return r.status === 'applied' || r.status === 'proposed' ? { ...r, confidence: next } : r;
+  });
 }
 
 /**
@@ -55,18 +60,20 @@ export async function correctEntry(
   projectRoot: string,
 ): Promise<WriteResult> {
   const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
-  const e = store.get(id);
-  if (!e) return notFound(id);
-  const fields: Record<string, unknown> = {
-    value,
-    contentHash: createHash('sha256').update(value).digest('hex'),
-  };
-  if (observed) fields.observed = observed;
-  return store.write(
-    id,
-    { kind: 'correct', fields, principal: actor.principal },
-    { scope: e.scope },
-  );
+  return retryOnConflict(async () => {
+    const e = store.get(id);
+    if (!e) return notFound(id);
+    const fields: Record<string, unknown> = {
+      value,
+      contentHash: createHash('sha256').update(value).digest('hex'),
+    };
+    if (observed) fields.observed = observed;
+    return store.write(
+      id,
+      { kind: 'correct', fields, principal: actor.principal },
+      { scope: e.scope, expectedVersion: e.version },
+    );
+  });
 }
 
 /**
@@ -85,26 +92,28 @@ export async function supersedeEntry(
   projectRoot: string,
 ): Promise<WriteResult> {
   const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
-  const old = store.get(oldId, { scope: 'tracked' });
-  if (!old) return notFound(oldId);
-  const { status: _status, supersedes: _supersedes, ...kept } = old.fields;
-  const fields: Record<string, unknown> = {
-    ...kept,
-    id: newId,
-    value,
-    contentHash: createHash('sha256').update(value).digest('hex'),
-    relations: Array.isArray(old.fields.relations)
-      ? (old.fields.relations as { type: string; target: string }[]).filter(
-          (r) => r.type !== 'supersedes',
-        )
-      : [],
-  };
-  if (observed) fields.observed = observed;
-  return store.write(
-    oldId,
-    { kind: 'supersede', fields, body: old.body, principal: actor.principal },
-    { scope: 'tracked' },
-  );
+  return retryOnConflict(async () => {
+    const old = store.get(oldId, { scope: 'tracked' });
+    if (!old) return notFound(oldId);
+    const { status: _status, supersedes: _supersedes, ...kept } = old.fields;
+    const fields: Record<string, unknown> = {
+      ...kept,
+      id: newId,
+      value,
+      contentHash: createHash('sha256').update(value).digest('hex'),
+      relations: Array.isArray(old.fields.relations)
+        ? (old.fields.relations as { type: string; target: string }[]).filter(
+            (r) => r.type !== 'supersedes',
+          )
+        : [],
+    };
+    if (observed) fields.observed = observed;
+    return store.write(
+      oldId,
+      { kind: 'supersede', fields, body: old.body, principal: actor.principal },
+      { scope: 'tracked', expectedVersion: old.version },
+    );
+  });
 }
 
 /** Follow `supersedes` links forward: the head is the newest entry in the chain. */

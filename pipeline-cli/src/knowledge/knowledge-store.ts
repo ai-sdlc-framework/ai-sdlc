@@ -33,6 +33,12 @@ export interface StoredEntry {
   scope: StoreScope;
   /** Location of the entry inside its root (files: path relative to the root). */
   path: string;
+  /**
+   * Opaque concurrency token (AISDLC-1457, DEC-0443). Optional for backends: one that
+   * supports it returns the entry's current version here and refuses a `write` whose
+   * `expectedVersion` differs with `status: 'conflict'`. The files backend returns none.
+   */
+  version?: string;
 }
 
 /** One stored file with its parse result, so a validator can report what does not parse. */
@@ -99,10 +105,44 @@ export interface WriteResult {
   path: string;
   /** True when a new entry was created (`create`, `supersede`). */
   created: boolean;
-  /** `proposed`: queued as a proposal. The files backend returns `applied` or `rejected`. */
-  status: 'applied' | 'proposed' | 'rejected';
-  /** Why the write was rejected or proposed. */
+  /**
+   * `proposed`: queued as a proposal. `conflict`: `expectedVersion` no longer matched the
+   * stored entry, nothing was written (optional for backends; AISDLC-1457). The files backend
+   * returns `applied` or `rejected`, never `conflict`.
+   */
+  status: 'applied' | 'proposed' | 'rejected' | 'conflict';
+  /** Why the write was rejected, proposed or in conflict. */
   reason?: string;
+  /** The entry's version after the write, when the backend supports versions (optional). */
+  version?: string;
+}
+
+export interface WriteOptions {
+  scope?: StoreScope;
+  /**
+   * The `version` the caller read (AISDLC-1457). A backend that supports versions returns
+   * `status: 'conflict'` when the stored entry's version differs; one that does not (files)
+   * ignores it. Undefined means no check.
+   */
+  expectedVersion?: string;
+}
+
+/** Attempts a core write helper makes in total when the backend reports `conflict`. */
+export const WRITE_ATTEMPTS = 3;
+
+/**
+ * Run `attempt` (re-read the entry, re-run the caller's decision, write with the version it
+ * read) until the result is not a `conflict`, at most `WRITE_ATTEMPTS` times in total
+ * (AISDLC-1457). A conflict on the last attempt is returned with the attempts in its reason.
+ */
+export async function retryOnConflict<T extends { status: string; reason?: string }>(
+  attempt: () => Promise<T>,
+): Promise<T> {
+  let r = await attempt();
+  for (let n = 1; n < WRITE_ATTEMPTS && r.status === 'conflict'; n++) r = await attempt();
+  if (r.status !== 'conflict') return r;
+  const why = r.reason ? `: ${r.reason}` : '';
+  return { ...r, reason: `write conflict persisted after ${WRITE_ATTEMPTS} attempts${why}` };
 }
 
 export interface CreateOptions {
@@ -137,7 +177,7 @@ export interface KnowledgeStore {
     opts: CreateOptions,
   ): Promise<WriteResult>;
   /** Apply a named operation to the entry `id`; logs exactly one event when applied. */
-  write(id: string, op: WriteOp, opts?: { scope?: StoreScope }): Promise<WriteResult>;
+  write(id: string, op: WriteOp, opts?: WriteOptions): Promise<WriteResult>;
   /**
    * Refresh the local replica that `list()` reads from the backend's remote source and send
    * queued local writes (AISDLC-1459, DEC-0444). `cli-context sync` calls it, then
@@ -373,7 +413,8 @@ export class FilesKnowledgeStore implements KnowledgeStore {
     return { id, path, created: true, status: 'applied' };
   }
 
-  async write(id: string, op: WriteOp, opts: { scope?: StoreScope } = {}): Promise<WriteResult> {
+  /** Ignores `expectedVersion`: files entries carry no version and never conflict. */
+  async write(id: string, op: WriteOp, opts: WriteOptions = {}): Promise<WriteResult> {
     const reject = (reason: string): WriteResult => ({
       id,
       path: '',

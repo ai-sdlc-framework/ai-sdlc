@@ -9,7 +9,9 @@ import type { KnowledgeConfig } from './config.js';
 import { AGENT_CONFIDENCE_CAP } from './entry.js';
 import {
   openKnowledgeStore,
+  retryOnConflict,
   type KnowledgeBackendSelection,
+  type KnowledgeStore,
   type WriteResult,
 } from './knowledge-store.js';
 import type { Ontology } from './ontology.js';
@@ -201,6 +203,16 @@ export async function promoteEntry(
   c: VerifyContext,
 ): Promise<PromoteResult> {
   const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, c.projectDir);
+  // Each attempt re-reads the entry and re-runs the authority rules and the proof (AISDLC-1457).
+  return retryOnConflict(() => promoteOnce(store, id, opts, c));
+}
+
+async function promoteOnce(
+  store: KnowledgeStore,
+  id: string,
+  opts: { to: 'specialist' | 'canonical'; proof?: string; by: Role; principal: string },
+  c: VerifyContext,
+): Promise<PromoteResult> {
   const entry = store.get(id, { scope: 'tracked' });
   if (!entry) return { ok: false, reason: `entry '${id}' not found`, status: 'rejected' };
   const current = String(entry.fields.authority);
@@ -231,9 +243,17 @@ export async function promoteEntry(
   const r = await store.write(
     id,
     { kind: 'promote', fields, principal: opts.principal },
-    { scope: 'tracked' },
+    { scope: 'tracked', expectedVersion: entry.version },
   );
   if (r.status === 'rejected') return refuse(r.reason ?? 'rejected by the knowledge store');
+  if (r.status === 'conflict') {
+    return {
+      ok: false,
+      reason: r.reason ?? 'write conflict',
+      authority: current,
+      status: r.status,
+    };
+  }
   return {
     ok: true,
     // A proposal carries the backend's own reason; the CLI prints "queued as a proposal".
@@ -254,17 +274,19 @@ export async function reobserveEntry(
   projectRoot: string,
 ): Promise<WriteResult & { confidence?: number }> {
   const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
-  const e = store.get(id);
-  if (!e) return notFound(id);
-  const next = movedConfidence(e.fields, observedConfidence);
-  const fields: Record<string, unknown> = { confidence: next };
-  if (observedDate) fields.observed = observedDate;
-  const r = await store.write(
-    id,
-    { kind: 'reobserve', fields, principal: actor.principal },
-    { scope: e.scope },
-  );
-  return r.status === 'rejected' ? r : { ...r, confidence: next };
+  return retryOnConflict(async () => {
+    const e = store.get(id);
+    if (!e) return notFound(id);
+    const next = movedConfidence(e.fields, observedConfidence);
+    const fields: Record<string, unknown> = { confidence: next };
+    if (observedDate) fields.observed = observedDate;
+    const r = await store.write(
+      id,
+      { kind: 'reobserve', fields, principal: actor.principal },
+      { scope: e.scope, expectedVersion: e.version },
+    );
+    return r.status === 'applied' || r.status === 'proposed' ? { ...r, confidence: next } : r;
+  });
 }
 
 /**
@@ -280,15 +302,17 @@ export async function refuteEntry(
   projectRoot: string,
 ): Promise<WriteResult> {
   const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
-  const e = store.get(id);
-  if (!e) return notFound(id);
-  return store.write(
-    id,
-    {
-      kind: 'refute',
-      fields: { authority: 'inferred', reverify: `Refuted: ${reason}` },
-      principal: actor.principal,
-    },
-    { scope: e.scope },
-  );
+  return retryOnConflict(async () => {
+    const e = store.get(id);
+    if (!e) return notFound(id);
+    return store.write(
+      id,
+      {
+        kind: 'refute',
+        fields: { authority: 'inferred', reverify: `Refuted: ${reason}` },
+        principal: actor.principal,
+      },
+      { scope: e.scope, expectedVersion: e.version },
+    );
+  });
 }
