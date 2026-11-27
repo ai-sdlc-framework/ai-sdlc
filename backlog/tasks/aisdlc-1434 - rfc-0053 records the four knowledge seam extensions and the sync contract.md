@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1434
 title: RFC-0053 records the four knowledge seam extensions and the sync contract
-status: To Do
+status: In Progress
 priority: medium
 labels:
   - docs
