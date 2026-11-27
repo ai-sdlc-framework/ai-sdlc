@@ -23,6 +23,7 @@ import {
   pruneGhCalls,
   readGhCalls,
   readGhCallsTail,
+  callBuckets,
   ledgerQuota,
   type GhCall,
 } from './gh-calls.js';
@@ -306,7 +307,57 @@ describe('ledgerQuota (AISDLC-1440)', () => {
       line({ at: at(20), token: 'actions', quota: { core: { remaining: 10 } } }),
       line({ at: at(25), remaining: 9, resource: 'search' }),
     ];
-    expect(ledgerQuota(calls, now)).toEqual({ core: 3500, graphql: 4900 });
+    // The two `pr list` lines after the graphql snapshot spend 2 of it.
+    expect(ledgerQuota(calls, now)).toEqual({ core: 3500, graphql: 4898 });
+  });
+
+  it('subtracts calls logged since the snapshot from the bucket they spend', () => {
+    const calls = [
+      line({
+        at: at(50),
+        argv: ['api', 'rate_limit'],
+        quota: { core: { remaining: 1500, reset } },
+      }),
+      ...Array.from({ length: 1200 }, () => line({ at: at(30), argv: ['run', 'list'] })),
+      line({ at: at(20), argv: ['api', 'repos/o/r/commits/main'], exit: 1, error: 'HTTP 404' }),
+      line({ at: at(20), argv: ['api', 'graphql', '-f', '***'] }),
+      line({ at: at(20), argv: ['api', 'rate_limit'] }),
+      line({ at: at(60), argv: ['run', 'list'] }),
+    ];
+    expect(ledgerQuota(calls, now)).toEqual({ core: 299 });
+    const spent = Array.from({ length: 2000 }, () => line({ at: at(5), argv: ['run', 'view'] }));
+    expect(ledgerQuota([calls[0]!, ...spent], now)).toEqual({ core: 0 });
+  });
+
+  it('reads a newer rate-limit refusal as 0 for its bucket until the window resets', () => {
+    const snap = line({
+      at: at(50),
+      argv: ['api', 'rate_limit'],
+      quota: { core: { remaining: 1500, reset }, graphql: { remaining: 4000, reset } },
+    });
+    const refused = line({
+      at: at(5),
+      argv: ['run', 'list'],
+      exit: 1,
+      error: 'API rate limit exceeded for user ID 1.',
+      rateLimited: true,
+    });
+    expect(ledgerQuota([snap, refused], now)).toEqual({ core: 0, graphql: 4000 });
+    const gql = { ...refused, argv: ['pr', 'list'], error: 'GraphQL: API rate limit exceeded' };
+    expect(ledgerQuota([snap, gql], now)).toEqual({ core: 1500, graphql: 0 });
+    // The refusal ends with the snapshot's window; with no known reset it holds an hour.
+    expect(ledgerQuota([snap, refused], new Date(reset * 1000 + 1))).toBeUndefined();
+    expect(ledgerQuota([refused], now)).toEqual({ core: 0 });
+  });
+
+  it('attributes calls to the bucket they spend', () => {
+    expect(callBuckets({ argv: ['api', 'rate_limit'] })).toEqual([]);
+    expect(callBuckets({ argv: [] })).toEqual([]);
+    expect(callBuckets({ argv: ['api', 'graphql'] })).toEqual(['graphql']);
+    expect(callBuckets({ argv: ['api', 'user'] })).toEqual(['core']);
+    expect(callBuckets({ argv: ['repo', 'view'] })).toEqual(['graphql']);
+    expect(callBuckets({ argv: ['run', 'view'] })).toEqual(['core']);
+    expect(callBuckets({ argv: ['api', 'x'], error: 'GraphQL: rate limit' })).toEqual(['graphql']);
   });
 
   it('forgets a bucket whose window has ended and ignores out-of-order or future lines', () => {
