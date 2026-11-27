@@ -131,6 +131,19 @@ function realIngesterBin(dir) {
   return fakeBin(dir, `await import(${JSON.stringify(realBin)});`);
 }
 
+/**
+ * A copy of the hook in a temp plugin dir with no trusted ingester beside it. A test
+ * of the "nothing installed" path runs this copy: the in-repo hook falls back to the
+ * real pipeline-cli ingester, which teardown cannot wait for, and its late writes
+ * race the sandbox removal (ENOTEMPTY).
+ */
+function isolatedPlugin(dir) {
+  const hooks = join(dir, 'plugin', 'hooks');
+  mkdirSync(hooks, { recursive: true });
+  for (const f of ['usage-ingest.js', 'usage-ingest.sh']) cpSync(join(here, f), join(hooks, f));
+  return hooks;
+}
+
 function runHook(script, env) {
   const started = Date.now();
   const res = spawnSync(script.endsWith('.sh') ? 'bash' : process.execPath, [script], {
@@ -195,8 +208,12 @@ await new Promise((r) => setTimeout(r, 4000));`,
   });
 
   it('exits 0 and starts nothing when no ingester is installed', () => {
-    const { env } = sandbox('missing');
-    const res = runHook(HOOK_JS, { ...env, CLAUDE_PLUGIN_ROOT: join(root, 'no-such-plugin') });
+    const { dir, env } = sandbox('missing');
+    const hooks = isolatedPlugin(dir);
+    const res = runHook(join(hooks, 'usage-ingest.js'), {
+      ...env,
+      CLAUDE_PLUGIN_ROOT: join(root, 'no-such-plugin'),
+    });
     assert.equal(res.status, 0);
   });
 
@@ -349,14 +366,8 @@ await new Promise((r) => setTimeout(r, 6000));`,
     assert.equal(failing.stdout + failing.stderr, '');
     const missing = sandbox('stub-missing');
     plantTranscripts(missing.dir, 500);
-    // Run a copy of the hook with no pipeline-cli beside it: from the real plugin
-    // dir the hook would fall back to the checkout's own ingester, which records
-    // no pid and races the teardown removing its usage dir (ENOTEMPTY).
-    const isolated = join(missing.dir, 'plugin', 'hooks');
-    mkdirSync(isolated, { recursive: true });
-    for (const f of ['usage-ingest.js', 'usage-ingest.sh'])
-      cpSync(join(here, f), join(isolated, f));
-    const none = runHook(join(isolated, 'usage-ingest.sh'), {
+    const hooks = isolatedPlugin(missing.dir);
+    const none = runHook(join(hooks, 'usage-ingest.sh'), {
       ...missing.env,
       PIPELINE_CLI_BIN: join(missing.dir, 'nope'),
     });
@@ -367,14 +378,6 @@ await new Promise((r) => setTimeout(r, 6000));`,
 });
 
 describe('hook never runs code from the project being worked on', () => {
-  /** A copy of the hook in a temp plugin dir with no trusted ingester beside it. */
-  function isolatedPlugin(dir) {
-    const hooks = join(dir, 'plugin', 'hooks');
-    mkdirSync(hooks, { recursive: true });
-    for (const f of ['usage-ingest.js', 'usage-ingest.sh']) cpSync(join(here, f), join(hooks, f));
-    return hooks;
-  }
-
   function plantInProject(dir, marker) {
     const project = join(dir, 'project');
     mkdirSync(join(project, 'pipeline-cli', 'bin'), { recursive: true });
