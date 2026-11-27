@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1411
 title: 'Auto-enable workflow arms only PRs from merge authors'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-25'
 labels:

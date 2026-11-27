@@ -1815,6 +1815,23 @@ describe('AISDLC-1336: scaffolded workflows and first-merge rule', () => {
     expect(checked).toBeGreaterThan(0);
   });
 
+  it('AISDLC-1411: enable-auto-merge arms only PRs from governance.mergeAuthors on the base branch', () => {
+    const text = WORKFLOWS_TEMPLATES.files['.github/workflows/auto-enable-auto-merge.yml']!;
+    const doc = parseYaml(text) as {
+      jobs: Record<string, { steps: (Step & { id?: string; if?: string; uses?: string })[] }>;
+    };
+    const steps = doc.jobs['enable-auto-merge']!.steps;
+    const guard = steps.find((s) => s.id === 'guard')!;
+    expect(guard.run).toMatch(/--json [^\n]*\bauthor\b/);
+    expect(guard.run).toContain('contents/.ai-sdlc/agent-role.yaml?ref=$BASE_REF');
+    expect(guard.run).toContain('.governance.mergeAuthors');
+    expect(guard.run).toContain('is not in governance.mergeAuthors');
+    expect(guard.run).toContain('mergeAuthors is missing or empty');
+    const arm = steps.find((s) => String(s.name).startsWith('Refresh auto-merge'))!;
+    expect(arm.if).toContain("steps.guard.outputs.skip == 'false'");
+    expect(steps.some((s) => String(s.uses ?? '').startsWith('actions/checkout'))).toBe(false);
+  });
+
   it('enable-auto-merge first step names AI_SDLC_PAT; no github.token fallback', () => {
     const text = WORKFLOWS_TEMPLATES.files['.github/workflows/auto-enable-auto-merge.yml']!;
     const doc = parseYaml(text) as { jobs: Record<string, { steps: Step[] }> };
