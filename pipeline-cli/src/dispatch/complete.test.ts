@@ -3,14 +3,14 @@
  * nothing written. The well-formed path is covered in executor-loop.test.ts.
  */
 
-import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { claimNext, collectVerdicts, readInflightManifest, writeManifest } from './board.js';
-import { completeLandedIterateNeeded, completeTask } from './complete.js';
+import { completeLandedIterateNeeded, completeTask, DEPENDENCY_BLOCKED_CAUSE } from './complete.js';
 import type { DispatchManifest } from './types.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -133,5 +133,57 @@ describe('completeTask after an existing verdict (AISDLC-1230)', () => {
     expect(completeTask(board, o).verdict.outcome).toBe('success');
     expect(written()).toEqual(files);
     expect(() => completeTask(board, { ...o, outcome: 'failed' })).toThrow(/'success'.*'failed'/);
+  });
+});
+
+describe('completeTask with a dependency-blocked stop (AISDLC-1450)', () => {
+  const m: DispatchManifest = {
+    schemaVersion: 'v1',
+    taskId: 'ENT-13',
+    branch: 'ai-sdlc/ent-13',
+    worktree: '.worktrees/ent-13',
+    baseSha: 'abc1234',
+    workerKind: 'in-session-agent',
+    dispatchedAt: '2026-11-25T18:46:44.784Z',
+    dispatchedBy: 'test',
+    spec: { taskFile: 'backlog/tasks/ent-13.md', verifyCommands: [] },
+  };
+  const notes =
+    'dependency preflight failed for ENT-13: { "ok": false, "reason": "1 dependency(ies) not yet Done: ENT-12", "blockers": [ { "id": "ENT-12", "status": "open" } ], "dangling": [] }';
+  const stop = {
+    taskId: 'ENT-13',
+    outcome: 'failed',
+    workerId: 'executor-a',
+    cause: DEPENDENCY_BLOCKED_CAUSE,
+    notes,
+    now: () => new Date('2026-11-25T18:48:39.199Z'),
+  };
+
+  it('writes exactly one escalation and returns the task to the queue, not failed/', () => {
+    writeManifest(board, m);
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-a' });
+    const r = completeTask(board, stop);
+    expect(r.state).toBe('queue');
+    expect(existsSync(path.join(board, 'queue', 'ENT-13.dispatch.json'))).toBe(true);
+    expect(readInflightManifest(board, 'ENT-13')).toBeUndefined();
+    expect(
+      existsSync(path.join(board, 'failed')) ? readdirSync(path.join(board, 'failed')) : [],
+    ).toEqual([]);
+    const escalations = readdirSync(path.join(board, 'escalations'));
+    expect(escalations).toHaveLength(1);
+    const body = JSON.parse(readFileSync(r.verdictPath, 'utf-8')) as {
+      taskId: string;
+      message: string;
+    };
+    expect(body.taskId).toBe('ENT-13');
+    expect(body.message).toContain('ENT-12');
+    expect(body.message).toContain('not yet Done');
+
+    // A second refusal inside the window reuses the same file.
+    claimNext(board, 'in-session-agent', undefined, { workerId: 'executor-a' });
+    const again = completeTask(board, stop);
+    expect(again.verdictPath).toBe(r.verdictPath);
+    expect(readdirSync(path.join(board, 'escalations'))).toHaveLength(1);
+    expect(existsSync(path.join(board, 'queue', 'ENT-13.dispatch.json'))).toBe(true);
   });
 });

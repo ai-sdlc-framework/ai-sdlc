@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1450
 title: "Dependency preflight reads a just-merged dependency as done"
-status: To Do
+status: In Progress
 priority: high
 labels:
   - dispatch

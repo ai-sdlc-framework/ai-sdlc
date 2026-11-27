@@ -400,6 +400,59 @@ describe('preflight', () => {
   });
 });
 
+describe('preflight against origin/main (AISDLC-1450)', () => {
+  function chain(): ReturnType<typeof buildDependencyGraph> {
+    writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a' });
+    writeTaskFile(tmp, { id: 'AISDLC-C', title: 'c' });
+    writeTaskFile(tmp, { id: 'AISDLC-B', title: 'b', dependencies: ['AISDLC-A', 'AISDLC-C'] });
+    return buildDependencyGraph({ workDir: tmp });
+  }
+
+  it('treats a blocker completed on origin/main as done', () => {
+    const g = chain();
+    const onMain = new Map([
+      ['AISDLC-A', 'abc'],
+      ['AISDLC-C', 'abc'],
+    ]);
+    const p = preflight(g, 'AISDLC-B', { completedOnMain: () => onMain });
+    expect(p).toEqual({ ok: true, reason: '', blockers: [], dangling: [] });
+    // The caller's graph is not mutated.
+    expect(g.nodes.get('aisdlc-a')?.status).toBe('open');
+  });
+
+  it('still refuses, naming only the blocker main does not hold', () => {
+    const p = preflight(chain(), 'AISDLC-B', {
+      completedOnMain: () => new Map([['AISDLC-A', 'abc']]),
+    });
+    expect(p.ok).toBe(false);
+    expect(p.blockers.map((b) => b.id)).toEqual(['AISDLC-C']);
+  });
+
+  it('keeps the local refusal when origin/main cannot be read (fail closed)', () => {
+    const p = preflight(chain(), 'AISDLC-B', { completedOnMain: () => undefined });
+    expect(p.ok).toBe(false);
+    expect(p.blockers.map((b) => b.id)).toEqual(['AISDLC-A', 'AISDLC-C']);
+  });
+
+  it('keeps the local refusal when main holds none of the blockers', () => {
+    const p = preflight(chain(), 'AISDLC-B', { completedOnMain: () => new Map() });
+    expect(p.blockers.map((b) => b.id)).toEqual(['AISDLC-A', 'AISDLC-C']);
+  });
+
+  it('reads main only when the local graph reports an open blocker', () => {
+    writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a' });
+    let reads = 0;
+    const read = () => {
+      reads += 1;
+      return new Map<string, string>();
+    };
+    const g = buildDependencyGraph({ workDir: tmp });
+    expect(preflight(g, 'AISDLC-A', { completedOnMain: read }).ok).toBe(true);
+    expect(preflight(g, 'AISDLC-NOPE', { completedOnMain: read }).ok).toBe(false);
+    expect(reads).toBe(0);
+  });
+});
+
 describe('renderGraph', () => {
   it('emits mermaid with one node per task and one edge per dependency', () => {
     writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a', completed: true });

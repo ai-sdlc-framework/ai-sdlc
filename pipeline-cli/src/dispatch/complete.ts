@@ -16,9 +16,11 @@ import {
   collectVerdicts,
   patchDoneVerdict,
   readInflightManifest,
+  releaseInflight,
   TASK_ID_RE,
   writeVerdict,
 } from './board.js';
+import { writeEscalationFile } from '../hierarchy/escalation-file.js';
 import { assertClaimOwner } from '../hierarchy/caller-identity.js';
 import { snapshotFailedManifest } from './requeue.js';
 import { snapshotDoneManifest } from './resume.js';
@@ -54,10 +56,17 @@ export interface CompleteOptions {
   now?: () => Date;
 }
 
+/**
+ * Cause of a stop whose dependency preflight refused (AISDLC-1450). The task is not at fault:
+ * `complete` returns it to `queue/` and writes one escalation file instead of a failure verdict.
+ */
+export const DEPENDENCY_BLOCKED_CAUSE = 'dependency-blocked';
+
 /** Result of a completion: where the verdict landed. */
 export interface CompleteResult {
+  /** The verdict file, or the escalation file when the task went back to `queue/`. */
   verdictPath: string;
-  state: 'done' | 'failed';
+  state: 'done' | 'failed' | 'queue';
   verdict: DispatchVerdict;
 }
 
@@ -179,6 +188,20 @@ export function completeTask(boardDir: string, opts: CompleteOptions): CompleteR
   if (opts.notes) verdict.notes = opts.notes;
   if (opts.cause) verdict.cause = opts.cause;
   const state = opts.outcome === 'success' || opts.outcome === 'iterate-needed' ? 'done' : 'failed';
+  if (state === 'failed' && opts.cause === DEPENDENCY_BLOCKED_CAUSE) {
+    // AISDLC-1450: a dependency still open after the origin/main read is a real block. The planner
+    // hears of it once (the AISDLC-1382 writer and window); the task waits in the queue for it.
+    const reason = oneLine(opts.notes ?? 'dependency preflight refused', 2000);
+    const { file } = writeEscalationFile({
+      boardDir,
+      taskId: opts.taskId,
+      message: `${opts.taskId}: dependency preflight refused; returned to the queue. ${reason}`,
+      now: now(),
+      run: () => ({ status: 0, stdout: '', stderr: '' }),
+    });
+    releaseInflight(boardDir, opts.taskId);
+    return { verdictPath: file, state: 'queue', verdict };
+  }
   // The verdict removes the inflight manifest on a failure; keep a copy so the
   // task can be queued again by id.
   if (state === 'failed') snapshotFailedManifest(boardDir, inflight);

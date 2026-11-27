@@ -42,6 +42,7 @@ import {
   recommendWorkerKind,
 } from '../dispatch/recommend-worker.js';
 import type { ManifestWorkerKind } from '../dispatch/types.js';
+import { fetchedCompletedOnMain } from '../dispatch/retire-landed.js';
 import { appendOverrideEntry, loadOverrides } from '../deps/override-log.js';
 import {
   gcRollingSnapshots,
@@ -385,7 +386,10 @@ export function buildDepsCli(): Argv {
         }),
       async (argv) => {
         const g = buildDependencyGraph({ workDir: argv['work-dir'] as string }, warnToStderr);
-        const r = preflight(g, String(argv['task-id']));
+        const workDir = argv['work-dir'] as string;
+        const r = preflight(g, String(argv['task-id']), {
+          completedOnMain: () => fetchedCompletedOnMain(workDir),
+        });
         emit({
           ok: r.ok,
           reason: r.reason,
