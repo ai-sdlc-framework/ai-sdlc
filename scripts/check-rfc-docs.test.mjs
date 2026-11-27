@@ -44,6 +44,7 @@ import {
   OQ_SECTION_HEADING_REGEX,
   parseApproverIdentities,
   checkOqResolutionMarkers,
+  oqEvidenceCitation,
   parseNameStatusZ,
   checkPublishedDocs,
 } from './check-rfc-docs.mjs';
@@ -1651,7 +1652,58 @@ describe('AISDLC-764: OQ-resolution marker scan', () => {
     const dirs = [];
     after(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
     const git = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf-8' });
-    function mkRepo() {
+    const LEDGER_REL = '.ai-sdlc/decisions/evidence/DEC-0001.json';
+    const ledger = (quote = 'OQ-1 a') =>
+      JSON.stringify({
+        schemaVersion: 1,
+        ref: 'rfc:RFC-9999#OQ-1',
+        draftSha256: 'b'.repeat(64),
+        researchedBy: 'research-agent',
+        researchedAt: '2026-11-27T10:00:00Z',
+        entries: [
+          {
+            id: 'f1',
+            kind: 'fact',
+            claim: 'the RFC names OQ-1',
+            status: 'checked',
+            source: { file: 'spec/rfcs/RFC-9999-x.md', line: 9, quote },
+          },
+        ],
+      });
+    const EVIDENCED = `- OQ-1 a\n  **Resolution:** pick A\n  Evidence: \`${LEDGER_REL}\``;
+    /** A feat branch adding `oq` to the RFC, and the ledger when given. */
+    function mkResolution(oq, ledgerText, { ledgerOnMain = false } = {}) {
+      const d = mkRepo({ resolve: false });
+      const putLedger = () => {
+        mkdirSync(join(d, '.ai-sdlc', 'decisions', 'evidence'), { recursive: true });
+        writeFileSync(join(d, LEDGER_REL), ledgerText);
+      };
+      if (ledgerOnMain) {
+        git(d, 'checkout', '-q', 'main');
+        putLedger();
+        git(d, 'add', '-A');
+        git(d, 'commit', '-qm', 'ledger on main');
+        git(d, 'checkout', '-q', 'feat');
+        git(d, 'rebase', '-q', 'main');
+      } else if (ledgerText !== undefined) {
+        putLedger();
+      }
+      writeFileSync(join(d, 'spec', 'rfcs', 'RFC-9999-x.md'), rfc(oq));
+      git(d, 'add', '-A');
+      git(d, 'commit', '-qm', 'resolve');
+      return d;
+    }
+    const scanOk = (d, extra = {}) =>
+      checkOqResolutionMarkers({
+        repoRoot: d,
+        baseRef: 'main',
+        headRef: 'feat',
+        approvingLogins: ['opr'],
+        prAuthor: 'dev',
+        ...extra,
+      });
+
+    function mkRepo({ resolve = true } = {}) {
       const d = mkdtempSync(join(tmpdir(), 'oq-scan-'));
       dirs.push(d);
       git(d, 'init', '-q', '-b', 'main');
@@ -1667,6 +1719,7 @@ describe('AISDLC-764: OQ-resolution marker scan', () => {
       git(d, 'add', '-A');
       git(d, 'commit', '-qm', 'base');
       git(d, 'checkout', '-qb', 'feat');
+      if (!resolve) return d;
       writeFileSync(
         join(d, 'spec', 'rfcs', 'RFC-9999-x.md'),
         rfc('- OQ-1 a\n  **Resolution:** pick A'),
@@ -1674,6 +1727,87 @@ describe('AISDLC-764: OQ-resolution marker scan', () => {
       git(d, 'commit', '-qam', 'resolve');
       return d;
     }
+
+    describe('AISDLC-1452: evidence ledger on a new resolution marker', () => {
+      it('passes an approved marker whose cited ledger is in the diff and passes', () => {
+        const d = mkResolution(EVIDENCED, ledger());
+        const r = scanOk(d);
+        assert.deepEqual(r.failures, []);
+        assert.equal(r.approvedBy, 'opr');
+      });
+
+      it('accepts the citation on the marker line itself, and a ledger already on main', () => {
+        const d = mkResolution(
+          `- OQ-1 a\n  **Resolution:** pick A. Evidence: ${LEDGER_REL}`,
+          ledger(),
+          { ledgerOnMain: true },
+        );
+        assert.deepEqual(scanOk(d).failures, []);
+      });
+
+      it('fails an approved marker with no Evidence citation, naming the re-check command', () => {
+        const d = mkResolution('- OQ-1 a\n  **Resolution:** pick A', undefined);
+        const r = scanOk(d);
+        assert.equal(r.failures.length, 1);
+        assert.match(r.failures[0], /cites no evidence ledger/);
+        assert.match(r.failures[0], /cli-decisions\.mjs evidence check/);
+      });
+
+      it('fails a cited ledger that is missing', () => {
+        const d = mkResolution(EVIDENCED, undefined);
+        assert.match(scanOk(d).failures[0], /does not exist at feat/);
+      });
+
+      it('fails a ledger that is neither in the diff nor on the base', () => {
+        const d = mkResolution(EVIDENCED, ledger());
+        // compare against the feat commit's parent with an unrelated base: diff empty, base lacks it
+        const r = checkOqResolutionMarkers({
+          repoRoot: d,
+          baseRef: 'main',
+          headRef: 'feat',
+          approvingLogins: ['opr'],
+          prAuthor: 'dev',
+          gitFn: (args) => {
+            if (args[0] === 'diff' && args[1] === '--name-only') return '';
+            if (args[0] === 'cat-file') throw new Error('missing');
+            return spawnSync('git', args, { cwd: d, encoding: 'utf-8' }).stdout;
+          },
+        });
+        assert.match(r.failures[0], /neither part of this diff nor on main/);
+      });
+
+      it('fails a ledger that does not pass, naming the failing entry and the re-check command', () => {
+        const d = mkResolution(EVIDENCED, ledger('a quote that is not there'));
+        const r = scanOk(d);
+        assert.equal(r.failures.length, 1);
+        assert.match(r.failures[0], /f1: quote not found in spec\/rfcs\/RFC-9999-x\.md/);
+        assert.match(
+          r.failures[0],
+          /re-check: node pipeline-cli\/bin\/cli-decisions\.mjs evidence check \.ai-sdlc\/decisions\/evidence\/DEC-0001\.json/,
+        );
+      });
+
+      it('fails a ledger that is not JSON', () => {
+        const d = mkResolution(EVIDENCED, '{nope');
+        assert.match(scanOk(d).failures[0], /ledger: not valid JSON/);
+      });
+
+      it('an evidenced marker still needs the approval', () => {
+        const d = mkResolution(EVIDENCED, ledger());
+        const r = scanOk(d, { approvingLogins: [] });
+        assert.equal(r.failures.length, 1);
+        assert.match(r.failures[0], /APPROVED/);
+      });
+
+      it('oqEvidenceCitation reads either line and only the evidence dir', () => {
+        assert.equal(
+          oqEvidenceCitation({ line: 'x', next: `Evidence: ${LEDGER_REL}` }),
+          LEDGER_REL,
+        );
+        assert.equal(oqEvidenceCitation({ line: 'Evidence: other/x.json', next: '' }), null);
+        assert.equal(oqEvidenceCitation({ line: 'x' }), null);
+      });
+    });
 
     it('fails a PR that adds a marker with no approval', () => {
       const d = mkRepo();
@@ -1683,14 +1817,16 @@ describe('AISDLC-764: OQ-resolution marker scan', () => {
         headRef: 'feat',
         prBody: '',
       });
-      assert.equal(r.failures.length, 1);
-      assert.match(r.failures[0], /Open Questions resolution marker/);
+      assert.equal(r.failures.length, 2);
+      assert.match(r.failures[0], /cites no evidence ledger/);
+      assert.match(r.failures[1], /adds an Open Questions resolution marker/);
     });
 
     it('passes only with an approving login on the allowlist who is not the PR author', () => {
       const d = mkRepo();
+      const d2 = mkResolution(EVIDENCED, ledger());
       const scan = (extra) =>
-        checkOqResolutionMarkers({ repoRoot: d, baseRef: 'main', headRef: 'feat', ...extra });
+        checkOqResolutionMarkers({ repoRoot: d2, baseRef: 'main', headRef: 'feat', ...extra });
       const ok = scan({ approvingLogins: ['opr'], prAuthor: 'dev' });
       assert.deepEqual(ok.failures, []);
       assert.equal(ok.approvedBy, 'opr');
@@ -1701,7 +1837,7 @@ describe('AISDLC-764: OQ-resolution marker scan', () => {
     });
 
     it('ignores a forged PR-body approval marker', () => {
-      const d = mkRepo();
+      const d = mkResolution(EVIDENCED, ledger());
       const r = checkOqResolutionMarkers({
         repoRoot: d,
         baseRef: 'main',
@@ -1725,8 +1861,8 @@ describe('AISDLC-764: OQ-resolution marker scan', () => {
       );
       git(d, 'commit', '-qam', 'resolve after rename');
       const bad = checkOqResolutionMarkers({ repoRoot: d, baseRef: 'main', headRef: 'ren' });
-      assert.equal(bad.failures.length, 1);
-      assert.match(bad.failures[0], /RFC-9999-y\.md/);
+      assert.equal(bad.failures.length, 2);
+      assert.match(bad.failures[1], /RFC-9999-y\.md: adds an Open Questions resolution marker/);
     });
 
     it('parseNameStatusZ reads plain and rename entries', () => {

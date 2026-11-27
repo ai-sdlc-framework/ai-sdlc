@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1452
 title: "Gate questions, decisions and RFC resolutions on a passing evidence ledger"
-status: To Do
+status: In Progress
 priority: high
 labels:
   - governance

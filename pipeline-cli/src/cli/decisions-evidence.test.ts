@@ -4,7 +4,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -121,5 +121,84 @@ describe('cli-decisions evidence', () => {
       /exit\(1\)/,
     );
     expect(err.join('')).toMatch(/cannot read draft/);
+  });
+});
+
+describe('decision gate (AISDLC-1452)', () => {
+  const ADD = ['add', '--summary', 'Pick a store', '--scope', 'workspace', '--option', 'a:A'];
+  const stored = (id: string): string =>
+    join(tmp, '.ai-sdlc', 'decisions', 'evidence', `${id}.json`);
+  const answer = (...extra: string[]): Promise<void> =>
+    run('answer', 'DEC-0001', 'a', '--by', 'op@test', '--rationale', 'r', ...extra);
+
+  it('add refuses with no --evidence and names the re-check command', async () => {
+    await expect(run(...ADD)).rejects.toThrow(/exit\(1\)/);
+    expect(err.join('')).toMatch(/--evidence <ledger> is required/);
+    expect(err.join('')).toMatch(/cli-decisions\.mjs evidence check/);
+  });
+
+  it('add refuses a failing ledger, naming the failing entry and the re-check command', async () => {
+    const p = writeLedger('A = 2');
+    await expect(run(...ADD, '--evidence', p)).rejects.toThrow(/exit\(1\)/);
+    const msg = err.join('');
+    expect(msg).toMatch(/add: refused, no passing evidence ledger/);
+    expect(msg).toMatch(/f1: quote not found in src\/a\.ts/);
+    expect(msg).toContain(`cli-decisions.mjs evidence check ${p}`);
+    expect(existsSync(stored('DEC-0001'))).toBe(false);
+  });
+
+  it('add refuses an unreadable or invalid ledger', async () => {
+    await expect(run(...ADD, '--evidence', join(tmp, 'none.json'))).rejects.toThrow(/exit/);
+    expect(err.join('')).toMatch(/ledger: cannot read/);
+    writeFileSync(join(tmp, 'bad.json'), '{not json');
+    await expect(run(...ADD, '--evidence', join(tmp, 'bad.json'))).rejects.toThrow(/exit/);
+    expect(err.join('')).toMatch(/ledger: not valid JSON/);
+  });
+
+  it('add with a passing ledger records the decision and stores the ledger under its id', async () => {
+    const p = writeLedger('A = 1');
+    await run(...ADD, '--evidence', p);
+    expect(out.join('')).toMatch(/decision added: DEC-0001/);
+    expect(readFileSync(stored('DEC-0001'), 'utf8')).toBe(readFileSync(p, 'utf8'));
+  });
+
+  it('a subagent escalation needs no ledger', async () => {
+    await run(...ADD, '--source', 'subagent-escalation');
+    expect(out.join('')).toMatch(/decision added: DEC-0001/);
+    expect(existsSync(stored('DEC-0001'))).toBe(false);
+  });
+
+  it('answer refuses a decision with no stored ledger and no --evidence', async () => {
+    await run(...ADD, '--source', 'subagent-escalation');
+    await expect(answer()).rejects.toThrow(/exit\(1\)/);
+    expect(err.join('')).toMatch(/answer DEC-0001: refused, no passing evidence ledger/);
+    expect(err.join('')).toMatch(/evidence check .*DEC-0001\.json/);
+  });
+
+  it('answer passes on the stored ledger', async () => {
+    await run(...ADD, '--evidence', writeLedger('A = 1'));
+    await answer();
+    expect(out.join('')).toMatch(/decision answered: DEC-0001/);
+  });
+
+  it('answer refuses when the stored ledger no longer passes', async () => {
+    await run(...ADD, '--evidence', writeLedger('A = 1'));
+    writeFileSync(join(tmp, 'src', 'a.ts'), 'export const A = 3;\n');
+    await expect(answer()).rejects.toThrow(/exit\(1\)/);
+    expect(err.join('')).toMatch(/f1: quote not found/);
+  });
+
+  it('answer --evidence supplies a ledger for an older decision and stores it', async () => {
+    await run(...ADD, '--source', 'subagent-escalation');
+    const p = writeLedger('A = 1');
+    await answer('--evidence', p);
+    expect(out.join('')).toMatch(/decision answered: DEC-0001/);
+    expect(readFileSync(stored('DEC-0001'), 'utf8')).toBe(readFileSync(p, 'utf8'));
+  });
+
+  it('answer --evidence refuses a failing ledger', async () => {
+    await run(...ADD, '--source', 'subagent-escalation');
+    await expect(answer('--evidence', writeLedger('nope'))).rejects.toThrow(/exit\(1\)/);
+    expect(err.join('')).toMatch(/answer DEC-0001: refused/);
   });
 });

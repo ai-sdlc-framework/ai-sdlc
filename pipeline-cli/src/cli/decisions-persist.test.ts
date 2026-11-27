@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildDecisionsCli } from './decisions.js';
 import { DECISIONS_SYNC_BRANCH } from '../decisions/remote-persist.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
+import { withEvidence } from '../__test-helpers/evidence-ledger-fixture.js';
 
 // Every case runs real git (bare origin, clone, pushes, fetches); under machine load that
 // exceeds vitest's 5 s default (AISDLC-1057). Explicit budget, assertions unchanged.
@@ -95,7 +96,7 @@ afterEach(() => {
 });
 
 async function run(...args: string[]): Promise<void> {
-  process.argv = ['node', 'cli-decisions', '--work-dir', parent, ...args];
+  process.argv = ['node', 'cli-decisions', '--work-dir', parent, ...withEvidence(parent, args)];
   await buildDecisionsCli().parseAsync();
 }
 

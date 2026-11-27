@@ -7,34 +7,84 @@
  * the TypeScript judgment layer through `cli-judgment question-gate`, which a
  * module could not load either. The checks live in `lib/question-gate.js`.
  *
- * Fail posture: anything that goes wrong allows the question. The gate is a
- * nudge toward the documented decision protocol, not a security boundary, and a
- * crash must never stop a session from reaching its operator.
+ * Fail posture: anything that goes wrong in checks 1 to 4 allows the question;
+ * they are a nudge toward the documented decision protocol. The evidence gate
+ * (AISDLC-1452, `lib/evidence-gate.js`) runs after them and refuses instead:
+ * a question with no passing ledger, or whose ledger the checker could not
+ * run, does not go out. Its one exception is a `Preference` header.
  */
 
 'use strict';
 
 const { spawnSync } = require('child_process');
-const { existsSync } = require('fs');
+const { existsSync, mkdtempSync, rmSync, writeFileSync } = require('fs');
+const { tmpdir } = require('os');
 const { join, resolve } = require('path');
 const { readStdinSync } = require('./lib/read-stdin');
 const { appendGateLog, findRoster, runQuestionGate } = require('./lib/question-gate');
+const { runEvidenceGate } = require('./lib/evidence-gate');
 
 const BIN = 'cli-judgment.mjs';
 const JUDGE_TIMEOUT_MS = 8000;
+const EVIDENCE_TIMEOUT_MS = 10000;
 
-/** Path of `cli-judgment`: the env override, the plugin's install, else the monorepo copy. */
-function resolveJudgmentBin(env = process.env, pluginDir = resolve(__dirname, '..')) {
+/** Path of a pipeline-cli bin: the env override, the plugin's install, else the monorepo copy. */
+function resolvePipelineBin(bin, env = process.env, pluginDir = resolve(__dirname, '..')) {
   const candidates = [];
-  if (env.PIPELINE_CLI_BIN) candidates.push(join(env.PIPELINE_CLI_BIN, BIN));
+  if (env.PIPELINE_CLI_BIN) candidates.push(join(env.PIPELINE_CLI_BIN, bin));
   if (env.CLAUDE_PLUGIN_ROOT) {
     candidates.push(
-      join(env.CLAUDE_PLUGIN_ROOT, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin', BIN),
+      join(env.CLAUDE_PLUGIN_ROOT, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin', bin),
     );
   }
-  candidates.push(join(pluginDir, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin', BIN));
-  candidates.push(join(pluginDir, '..', 'pipeline-cli', 'bin', BIN));
+  candidates.push(join(pluginDir, 'node_modules', '@ai-sdlc', 'pipeline-cli', 'bin', bin));
+  candidates.push(join(pluginDir, '..', 'pipeline-cli', 'bin', bin));
   return candidates.find((c) => existsSync(c));
+}
+
+/** Path of `cli-judgment`. */
+function resolveJudgmentBin(env = process.env, pluginDir = resolve(__dirname, '..')) {
+  return resolvePipelineBin(BIN, env, pluginDir);
+}
+
+/**
+ * The evidence checker for `lib/evidence-gate.js`: `cli-decisions evidence check
+ * <ledger> --draft <question text> --format json`, the AISDLC-1451 checker and
+ * its hash. Returns `{ ok, failures }`, or null when it could not run.
+ */
+function makeEvidenceCheck(projectDir, env = process.env, run = spawnSync) {
+  const bin = resolvePipelineBin('cli-decisions.mjs', env);
+  if (!bin) return () => null;
+  return (ledger, draftText) => {
+    const dir = mkdtempSync(join(tmpdir(), 'qgate-draft-'));
+    try {
+      const draft = join(dir, 'draft.md');
+      writeFileSync(draft, draftText);
+      const res = run(
+        process.execPath,
+        [
+          bin,
+          '--work-dir',
+          projectDir,
+          'evidence',
+          'check',
+          resolve(projectDir, ledger),
+          '--draft',
+          draft,
+          '--format',
+          'json',
+        ],
+        { encoding: 'utf-8', timeout: EVIDENCE_TIMEOUT_MS },
+      );
+      if (!res) return null;
+      const out = JSON.parse(String(res.stdout || '').trim() || 'null');
+      return out && typeof out.ok === 'boolean' && Array.isArray(out.failures) ? out : null;
+    } catch {
+      return null;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
 }
 
 /** Checks 2 and 3 through `cli-judgment question-gate`; null on any failure. */
@@ -80,8 +130,17 @@ function main(env = process.env) {
     role = null;
   }
   const result = runQuestionGate({ input, role, judge: makeJudge(projectDir, env), env });
-  appendGateLog(projectDir, result.records);
-  return result;
+  if (result.decision !== 'allow') {
+    appendGateLog(projectDir, result.records);
+    return result;
+  }
+  const evidence = runEvidenceGate({
+    toolInput: input.tool_input || {},
+    check: makeEvidenceCheck(projectDir, env),
+    sessionId: typeof input.session_id === 'string' ? input.session_id : '',
+  });
+  appendGateLog(projectDir, [...result.records, ...evidence.records]);
+  return evidence.decision === 'deny' ? evidence : result;
 }
 
 if (require.main === module) {
@@ -104,4 +163,11 @@ if (require.main === module) {
   process.exit(0);
 }
 
-module.exports = { resolveJudgmentBin, makeJudge, resolveRole, main };
+module.exports = {
+  resolvePipelineBin,
+  resolveJudgmentBin,
+  makeJudge,
+  makeEvidenceCheck,
+  resolveRole,
+  main,
+};

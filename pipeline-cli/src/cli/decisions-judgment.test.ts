@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { FakeJudgmentProvider, registerJudgmentProvider } from '@ai-sdlc/reference';
 import { buildDecisionsCli } from './decisions.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
+import { withEvidence } from '../__test-helpers/evidence-ledger-fixture.js';
 
 let tmp: string;
 let savedArgv: string[];
@@ -41,7 +42,7 @@ afterEach(() => {
 
 async function run(...args: string[]): Promise<Record<string, unknown>> {
   out = [];
-  process.argv = ['node', 'cli-decisions', '--work-dir', tmp, ...args];
+  process.argv = ['node', 'cli-decisions', '--work-dir', tmp, ...withEvidence(tmp, args)];
   await buildDecisionsCli().parseAsync();
   const text = out.join('').trim();
   return JSON.parse(text.slice(text.search(/[{[]/))) as Record<string, unknown>;

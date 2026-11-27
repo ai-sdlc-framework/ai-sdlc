@@ -25,6 +25,8 @@ export interface ScenarioDecision {
   options: { id: string; description: string }[];
   answer: string;
   rationale: string;
+  /** AISDLC-1452: passing evidence ledger the decision gate needs for `add` and `answer`. */
+  evidence?: string;
 }
 
 export interface Scenario {
@@ -73,6 +75,9 @@ export function parseScenario(text: string): Scenario {
       bad(`${at}.answer`, 'must be one of the option ids');
     }
     if (!nonEmpty(d['rationale'])) bad(`${at}.rationale`);
+    if (d['evidence'] !== undefined && !nonEmpty(d['evidence'])) {
+      bad(`${at}.evidence`, 'must be a ledger path when given');
+    }
   });
   const brief = raw['brief'] as { tasks?: unknown } | undefined;
   if (
@@ -228,6 +233,7 @@ export async function runInner(
       '--by',
       scenario.author,
       ...d.options.flatMap((o) => ['--option', `${o.id}:${o.description}`]),
+      ...(d.evidence ? ['--evidence', d.evidence] : []),
     ]);
     const id = r && /DEC-\d{4,}/.exec(r.stdout)?.[0];
     if (!id) {

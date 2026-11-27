@@ -48,6 +48,12 @@ import {
   describeEvidenceEntryProblem,
   RUNTIME_EVIDENCE_STATUSES,
 } from './check-rfc-lifecycle-transitions.mjs';
+import {
+  DECISION_EVIDENCE_DIR,
+  checkEvidenceLedger,
+  formatEvidenceRefusal,
+  parseEvidenceLedger,
+} from '../pipeline-cli/attestation-core/evidence-ledger-core.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -1188,6 +1194,14 @@ export function openQuestionsLines(source) {
  * null for a new file, so every marker in a new RFC's OQ section counts.
  */
 export function findNewOqResolutionMarkers(fromContent, toContent) {
+  return findNewOqResolutionMarkerEntries(fromContent, toContent).map((m) => m.line);
+}
+
+/**
+ * The same scan, with the line after each new marker (`next`, '' at the end of
+ * the section) so the evidence citation can sit on either (AISDLC-1452).
+ */
+export function findNewOqResolutionMarkerEntries(fromContent, toContent) {
   const remaining = new Map();
   for (const line of openQuestionsLines(fromContent)) {
     if (!OQ_RESOLUTION_MARKER_REGEX.test(line)) continue;
@@ -1195,14 +1209,71 @@ export function findNewOqResolutionMarkers(fromContent, toContent) {
     remaining.set(key, (remaining.get(key) ?? 0) + 1);
   }
   const added = [];
-  for (const line of openQuestionsLines(toContent)) {
-    if (!OQ_RESOLUTION_MARKER_REGEX.test(line)) continue;
+  const lines = openQuestionsLines(toContent);
+  lines.forEach((line, i) => {
+    if (!OQ_RESOLUTION_MARKER_REGEX.test(line)) return;
     const key = line.trim();
     const n = remaining.get(key) ?? 0;
     if (n > 0) remaining.set(key, n - 1);
-    else added.push(line.trim());
-  }
+    else added.push({ line: key, next: (lines[i + 1] ?? '').trim() });
+  });
   return added;
+}
+
+/** `Evidence: .ai-sdlc/decisions/evidence/<file>.json` in a resolution (AISDLC-1452). */
+export const OQ_EVIDENCE_CITATION_REGEX = new RegExp(
+  `Evidence:\\s*\`?(${DECISION_EVIDENCE_DIR.replace(/[.]/g, '\\.')}/[A-Za-z0-9._-]+\\.json)`,
+);
+
+/** The ledger a new resolution marker cites on its own line or the next, or null. */
+export function oqEvidenceCitation({ line, next }) {
+  const m = OQ_EVIDENCE_CITATION_REGEX.exec(line) ?? OQ_EVIDENCE_CITATION_REGEX.exec(next ?? '');
+  return m ? m[1] : null;
+}
+
+/**
+ * AISDLC-1452 RFC resolution gate: a new resolution marker cites a ledger that
+ * is part of the diff or already on the base, and passes the one checker
+ * (`pipeline-cli/attestation-core/evidence-ledger-core.mjs`) against the head
+ * tree. Returns the failure strings (empty when it passes).
+ */
+export function checkOqMarkerEvidence({ marker, git, baseRef, headRef, repoRoot }) {
+  const { file, line } = marker;
+  const where = `${file}: Open Questions resolution marker (${JSON.stringify(line.slice(0, 80))})`;
+  const ledgerPath = oqEvidenceCitation(marker);
+  if (!ledgerPath) {
+    return [
+      `${where} cites no evidence ledger. Put \`Evidence: ${DECISION_EVIDENCE_DIR}/<file>.json\` on the marker line or the line after it, citing a ledger that passes \`node pipeline-cli/bin/cli-decisions.mjs evidence check <ledger>\` (DEC-0442).`,
+    ];
+  }
+  let text;
+  try {
+    text = git(['show', `${headRef}:${ledgerPath}`]);
+  } catch {
+    return [`${where} cites ${ledgerPath}, which does not exist at ${headRef}.`];
+  }
+  let tracked = false;
+  try {
+    tracked = git(['diff', '--name-only', baseRef, headRef, '--', ledgerPath]).trim() !== '';
+  } catch {
+    tracked = false;
+  }
+  if (!tracked) {
+    try {
+      git(['cat-file', '-e', `${baseRef}:${ledgerPath}`]);
+      tracked = true;
+    } catch {
+      tracked = false;
+    }
+  }
+  if (!tracked) {
+    return [`${where} cites ${ledgerPath}, which is neither part of this diff nor on ${baseRef}.`];
+  }
+  const parsed = parseEvidenceLedger(text);
+  const result = parsed.failures
+    ? { ok: false, failures: parsed.failures }
+    : checkEvidenceLedger(parsed.ledger, { repoRoot });
+  return result.ok ? [] : [`${where}: ${formatEvidenceRefusal(ledgerPath, result.failures)}`];
 }
 
 /** Operator identities listed in a lifecycle-approvers.yaml text. */
@@ -1319,9 +1390,14 @@ export function checkOqResolutionMarkers({
       failures.push(`oq-scan: cannot read ${file} at ${headRef}: ${err.message}`);
       continue;
     }
-    for (const line of findNewOqResolutionMarkers(from, to)) markers.push({ file, line });
+    for (const m of findNewOqResolutionMarkerEntries(from, to)) markers.push({ file, ...m });
   }
   if (markers.length === 0) return { failures, approvedBy: null, markers };
+
+  // AISDLC-1452: every new marker rests on a passing evidence ledger, approved or not.
+  for (const marker of markers) {
+    failures.push(...checkOqMarkerEvidence({ marker, git, baseRef, headRef, repoRoot }));
+  }
 
   let approvers = new Set();
   try {
