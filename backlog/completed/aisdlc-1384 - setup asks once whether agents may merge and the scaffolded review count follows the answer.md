@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1384
 title: 'Setup asks once whether agents may merge, and the scaffolded review count follows the answer'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-22'
 labels:
