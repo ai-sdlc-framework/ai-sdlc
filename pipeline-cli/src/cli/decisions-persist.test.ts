@@ -137,7 +137,17 @@ describe('cli-decisions remote persistence (AISDLC-546)', () => {
       );
       expect(remoteLedger()).toContain('DEC-0002');
 
-      await run('answer', 'DEC-0001', 'opt-b', '--by', 'op@test', '--format', 'json');
+      await run(
+        'answer',
+        'DEC-0001',
+        'opt-b',
+        '--by',
+        'op@test',
+        '--rationale',
+        'r',
+        '--format',
+        'json',
+      );
       expect(remoteLedger()).toContain('operator-answered');
     },
     LOAD_TIMEOUT_MS,

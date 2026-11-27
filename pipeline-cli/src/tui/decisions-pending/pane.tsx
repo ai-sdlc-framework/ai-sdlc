@@ -400,6 +400,9 @@ export function DecisionsPendingPane({
       const event = makeOperatorAnsweredEvent({
         decisionId: decision.metadata.id,
         chosenOptionId: optionId,
+        // AISDLC-1405: never write an unattributed answer.
+        rationale: 'picked by the operator in the decisions-pending TUI pane',
+        by: 'operator',
       });
       eventAppender(event, { workDir: effectiveWorkDir });
     } catch (err) {

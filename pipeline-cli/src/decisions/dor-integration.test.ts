@@ -181,6 +181,7 @@ describe('AC#5 — DoR clarification round → queryable Decisions via cli-decis
       workDir,
       env: FLAG_ON,
       by: 'operator@example.com',
+      rationale: 'answered in the issue',
     });
 
     // Query via the CLI show command.

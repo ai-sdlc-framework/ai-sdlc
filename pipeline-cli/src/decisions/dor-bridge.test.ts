@@ -17,6 +17,8 @@ import { DECISION_CATALOG_FLAG } from './feature-flag.js';
 import type { RefinementVerdict } from '../dor/types.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
+const ATTRIBUTION = { by: 'operator@example.com', rationale: 'r' };
+
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
 function makeVerdict(
@@ -94,7 +96,11 @@ describe('AC#4 — feature flag degrade-open', () => {
   });
 
   it('resolveDorDecision returns enabled:false and writes nothing when flag is off', () => {
-    const r = resolveDorDecision('DEC-0001', 'provide-answer', { workDir, env: FLAG_OFF });
+    const r = resolveDorDecision('DEC-0001', 'provide-answer', {
+      workDir,
+      env: FLAG_OFF,
+      ...ATTRIBUTION,
+    });
     expect(r.enabled).toBe(false);
     expect(r.path).toBe('');
     const { decisions } = listDecisions({ workDir });
@@ -229,9 +235,13 @@ describe('AC#3 — operator answers resolve Decisions', () => {
       workDir,
       env: FLAG_ON,
       by: 'operator@example.com',
+      rationale: 'answered in the issue',
     });
 
     const decision = projectDecision(decisionId, { workDir });
+    const evt = decision!.decisionLog.at(-1) as { by?: string; rationale?: string };
+    expect(evt.by).toBe('operator@example.com');
+    expect(evt.rationale).toBe('answered in the issue');
     expect(decision!.status.lifecycle).toBe('answered');
     expect(decision!.status.answeredOptionId).toBe('provide-answer');
     expect(decision!.status.answeredBy).toBe('operator@example.com');
@@ -243,7 +253,7 @@ describe('AC#3 — operator answers resolve Decisions', () => {
     const { decisionIds } = emitDorDecisions(verdict, { workDir, env: FLAG_ON });
     const decisionId = decisionIds[0]!;
 
-    resolveDorDecision(decisionId, 'bypass-gate', { workDir, env: FLAG_ON });
+    resolveDorDecision(decisionId, 'bypass-gate', { workDir, env: FLAG_ON, ...ATTRIBUTION });
 
     const decision = projectDecision(decisionId, { workDir });
     expect(decision!.decisionLog).toHaveLength(2);
@@ -259,7 +269,11 @@ describe('AC#3 — operator answers resolve Decisions', () => {
           workDir: tmpVerdictWorkDir,
           env: FLAG_ON,
         });
-        resolveDorDecision(decisionIds[0]!, optId, { workDir: tmpVerdictWorkDir, env: FLAG_ON });
+        resolveDorDecision(decisionIds[0]!, optId, {
+          workDir: tmpVerdictWorkDir,
+          env: FLAG_ON,
+          ...ATTRIBUTION,
+        });
         const d = projectDecision(decisionIds[0]!, { workDir: tmpVerdictWorkDir });
         expect(d!.status.answeredOptionId).toBe(optId);
       } finally {
@@ -271,8 +285,24 @@ describe('AC#3 — operator answers resolve Decisions', () => {
   it('resolveDorDecision returns the path where the event was appended', () => {
     const verdict = makeVerdict(['Q?']);
     const { decisionIds } = emitDorDecisions(verdict, { workDir, env: FLAG_ON });
-    const r = resolveDorDecision(decisionIds[0]!, 'provide-answer', { workDir, env: FLAG_ON });
+    const r = resolveDorDecision(decisionIds[0]!, 'provide-answer', {
+      workDir,
+      env: FLAG_ON,
+      ...ATTRIBUTION,
+    });
     expect(r.enabled).toBe(true);
     expect(r.path).toMatch(/_decisions\/events\/.*\.json$/);
+  });
+
+  it.each([
+    ['by', { by: ' ', rationale: 'r' }],
+    ['rationale', { by: 'operator@example.com', rationale: '' }],
+  ])('AISDLC-1405: refuses an answer with a blank %s and writes nothing', (_n, who) => {
+    const verdict = makeVerdict(['Q?']);
+    const { decisionIds } = emitDorDecisions(verdict, { workDir, env: FLAG_ON });
+    expect(() =>
+      resolveDorDecision(decisionIds[0]!, 'provide-answer', { workDir, env: FLAG_ON, ...who }),
+    ).toThrow(/by and rationale are required/);
+    expect(projectDecision(decisionIds[0]!, { workDir })!.status.lifecycle).not.toBe('answered');
   });
 });

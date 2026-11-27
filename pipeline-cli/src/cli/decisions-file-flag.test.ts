@@ -165,10 +165,10 @@ describe('decisions CLI --file from the Pattern-C parent (AISDLC-1161)', () => {
       git(other, 'commit', '-m', 'open');
       git(other, 'push', 'origin', 'HEAD:main');
 
-      await expect(run('answer', 'DEC-0001', 'nope', '--file')).rejects.toThrow(
-        /process.exit|not an option/,
-      );
-      await run('answer', 'DEC-0001', 'opt-b', '--file');
+      await expect(
+        run('answer', 'DEC-0001', 'nope', '--by', 'op@test', '--rationale', 'r', '--file'),
+      ).rejects.toThrow(/process.exit|not an option/);
+      await run('answer', 'DEC-0001', 'opt-b', '--by', 'op@test', '--rationale', 'r', '--file');
       expect(ids(join(parent, EVENTS))).toEqual([]);
       git(parent, 'fetch', 'origin');
       expect(remoteFiles(remoteBranch('ai-sdlc/file-dec-0001-answer-')).join('\n')).toContain(
@@ -213,7 +213,9 @@ describe('decisions CLI --file from the Pattern-C parent (AISDLC-1161)', () => {
   it(
     'answer without --file on a decision absent locally still fails',
     async () => {
-      await expect(run('answer', 'DEC-0001', 'opt-a')).rejects.toThrow('process.exit(1)');
+      await expect(
+        run('answer', 'DEC-0001', 'opt-a', '--by', 'op@test', '--rationale', 'r'),
+      ).rejects.toThrow('process.exit(1)');
     },
     T,
   );

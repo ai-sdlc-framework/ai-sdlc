@@ -20,6 +20,7 @@ import {
   filterExpiredDecisions,
   isDecisionTimeboxExpired,
   listDecisions,
+  isUnattributedFallbackAnswer,
   projectAll,
   projectDecision,
   rankDecisions,
@@ -39,7 +40,7 @@ afterEach(() => {
   removeFixtureDir(workDir);
 });
 
-function openDecision(id: string, summary: string, ts: string): void {
+function openDecision(id: string, summary: string, ts: string, fallback?: string): void {
   appendDecisionEvent(
     makeDecisionOpenedEvent({
       decisionId: id,
@@ -50,6 +51,7 @@ function openDecision(id: string, summary: string, ts: string): void {
         { id: 'opt-a', description: 'A' },
         { id: 'opt-b', description: 'B' },
       ],
+      ...(fallback !== undefined ? { autonomousFallbackOptionId: fallback } : {}),
       now: new Date(ts),
     }),
     { workDir },
@@ -456,12 +458,13 @@ describe('superseded event (AISDLC-1162)', () => {
     expect(d?.status.answeredOptionId ?? null).toBeNull();
   });
 
-  it('does not supersede an already answered decision', () => {
+  it('does not supersede an attributed answered decision', () => {
     openDecision('DEC-0001', 'old', '2026-10-01T00:00:00.000Z');
     appendDecisionEvent(
       makeOperatorAnsweredEvent({
         decisionId: 'DEC-0001',
         chosenOptionId: 'opt-a',
+        by: 'operator',
         now: new Date('2026-10-03T00:00:00.000Z'),
       }),
       { workDir },
@@ -476,5 +479,65 @@ describe('superseded event (AISDLC-1162)', () => {
       { workDir },
     );
     expect(projectDecision('DEC-0001', { workDir })?.status.lifecycle).toBe('answered');
+  });
+
+  // AISDLC-1405 — only the DEC-0091 shape (no `by`, no rationale, the
+  // fallback option) may be superseded; every other answer stays final.
+  function answerThenSupersede(
+    fallback: string | undefined,
+    answer: { chosenOptionId: string; by?: string; rationale?: string },
+  ): string | undefined {
+    openDecision('DEC-0001', 'old', '2026-10-01T00:00:00.000Z', fallback);
+    appendDecisionEvent(
+      makeOperatorAnsweredEvent({
+        decisionId: 'DEC-0001',
+        ...answer,
+        now: new Date('2026-10-03T00:00:00.000Z'),
+      }),
+      { workDir },
+    );
+    appendDecisionEvent(
+      makeSupersededEvent({
+        decisionId: 'DEC-0001',
+        supersededBy: 'DEC-0002',
+        reason: 'r',
+        now: new Date('2026-10-04T00:00:00.000Z'),
+      }),
+      { workDir },
+    );
+    return projectDecision('DEC-0001', { workDir })?.status.lifecycle;
+  }
+
+  it('AISDLC-1405: supersedes an unattributed, unreasoned fallback answer', () => {
+    expect(answerThenSupersede('opt-a', { chosenOptionId: 'opt-a' })).toBe('superseded');
+    expect(projectDecision('DEC-0001', { workDir })?.status.supersededBy).toBe('DEC-0002');
+  });
+
+  it.each([
+    ['names no fallback', undefined, { chosenOptionId: 'opt-a' }],
+    ['picks a non-fallback option', 'opt-b', { chosenOptionId: 'opt-a' }],
+    ['gives a rationale', 'opt-a', { chosenOptionId: 'opt-a', rationale: 'why' }],
+    ['names an author', 'opt-a', { chosenOptionId: 'opt-a', by: 'operator' }],
+  ])('AISDLC-1405: keeps an unattributed answer final when the decision %s', (_n, fb, ans) => {
+    expect(answerThenSupersede(fb, ans)).toBe('answered');
+  });
+
+  it('AISDLC-1405: isUnattributedFallbackAnswer ignores non-answered and auto-expired decisions', () => {
+    openDecision('DEC-0001', 'old', '2026-10-01T00:00:00.000Z', 'opt-a');
+    expect(isUnattributedFallbackAnswer(projectDecision('DEC-0001', { workDir })!)).toBe(false);
+    appendDecisionEvent(
+      makeAutoExpiredEvent({
+        decisionId: 'DEC-0001',
+        chosenOptionId: 'opt-a',
+        rationale: 'fallback',
+        expiredAt: '2026-10-03T00:00:00.000Z',
+        now: new Date('2026-10-03T00:00:00.000Z'),
+      }),
+      { workDir },
+    );
+    const d = projectDecision('DEC-0001', { workDir })!;
+    expect(isUnattributedFallbackAnswer({ ...d, status: { ...d.status, answeredBy: null } })).toBe(
+      false,
+    );
   });
 });
