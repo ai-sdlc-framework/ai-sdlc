@@ -25,7 +25,13 @@ import path from 'node:path';
 import { now as clockNow } from '../clock.js';
 import { buildCiRoundNote, writeCiRoundNote } from './ci-round.js';
 import { gateRunListArgs, parseGateRunId } from './gate-run.js';
-import { classifyPr, type PrCheck, type PrFacts, type PrState } from './pr-state.js';
+import {
+  classifyPr,
+  dropSupersededCancelled,
+  type PrCheck,
+  type PrFacts,
+  type PrState,
+} from './pr-state.js';
 import { collectVerdicts, readInflightManifest, readQueuedManifest } from '../dispatch/board.js';
 import { DECISIONS_SYNC_BRANCH } from '../decisions/remote-persist.js';
 import { completeLandedIterateNeeded } from '../dispatch/complete.js';
@@ -73,6 +79,11 @@ export const DOCS_ACTIONS: Record<PrState, string> = {
   'no-match': 'arm',
 };
 
+/** AISDLC-1385: note on a green approved draft someone converted back to draft. */
+export const DRAFT_HOLD_NOTE = 'converted to draft by hand: held, not flipped ready';
+/** AISDLC-1385: note when the convert-to-draft timeline could not be read; fail closed. */
+export const DRAFT_TIMELINE_UNREAD_NOTE = 'draft timeline unread: not flipped ready';
+
 /** Docs action used instead of `route-to-planner` when the failing check is the DoR gate. */
 export const DOCS_DOR_ACTION = 'rerun-dor';
 
@@ -110,6 +121,10 @@ export interface ReconcilePr extends PrFacts {
   mergeSha?: string;
   /** AISDLC-1386: the PR carries the hold label; nothing arms, flips or merges it. */
   held?: boolean;
+  /** AISDLC-1385: login of the last actor who converted this PR back to draft. */
+  convertedToDraftBy?: string;
+  /** AISDLC-1385: the timeline read for a convert-to-draft event failed; the draft is not flipped. */
+  draftTimelineUnread?: boolean;
 }
 
 export interface LandingEntry {
@@ -290,6 +305,20 @@ export function decide(
   if (ruled && c.state !== 'merged') {
     if (ruled.untilMerged) return { ...base, action: 'ready-to-requeue' };
     if (HELD_ACTIONS.has(action)) return { ...base, action: 'held', ruling: ruled.ruling.text };
+  }
+  // AISDLC-1385: converting to draft is the only stop GitHub gives a reviewer; never override it.
+  if (action === 'flip-ready-takeover') {
+    if (f.convertedToDraftBy !== undefined) {
+      return {
+        ...base,
+        action: 'route-to-planner',
+        failingLine: `converted to draft by ${f.convertedToDraftBy}: not flipped ready`,
+        note: DRAFT_HOLD_NOTE,
+      };
+    }
+    if (f.draftTimelineUnread === true) {
+      return { ...base, action: 'none', note: DRAFT_TIMELINE_UNREAD_NOTE };
+    }
   }
   if (action === 'reenter' && c.state === 'real-failure') {
     const bounded = guardCiRounds({ ...base, action }, f, record, maxCiRounds);
@@ -1695,6 +1724,43 @@ function fillSummaryFromAnnotations(run: CommandRunner, cwd: string, checks: PrC
   }
 }
 
+function allGreen(checks: readonly PrCheck[]): boolean {
+  const live = dropSupersededCancelled(checks);
+  return live.length > 0 && live.every((c) => c.conclusion === 'success');
+}
+
+const CONVERT_TO_DRAFT_PREFIX = 'convert_to_draft:';
+
+/**
+ * AISDLC-1385: the login of the last actor who converted the PR back to draft, `undefined`
+ * when the timeline has no such event (dispatch opened it as draft), `null` when the read
+ * failed. Read uncached: a stale "no event" answer would flip a PR a reviewer just stopped.
+ */
+export function convertedToDraftOf(
+  run: CommandRunner,
+  cwd: string,
+  pr: number,
+): string | undefined | null {
+  const r = run(
+    'gh',
+    [
+      'api',
+      '--paginate',
+      `repos/{owner}/{repo}/issues/${pr}/timeline`,
+      '--jq',
+      `.[] | select(.event == "convert_to_draft") | "${CONVERT_TO_DRAFT_PREFIX}" + (.actor.login // "unknown")`,
+    ],
+    { cwd },
+  );
+  if (r.status !== 0) return null;
+  const actors = r.stdout
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith(CONVERT_TO_DRAFT_PREFIX))
+    .map((l) => l.slice(CONVERT_TO_DRAFT_PREFIX.length) || 'unknown');
+  return actors.at(-1);
+}
+
 /** List open PRs and their checks. Returns undefined when GitHub cannot be read. */
 export function gatherFacts(
   run: CommandRunner,
@@ -1803,6 +1869,10 @@ export function gatherFacts(
         unownedReason = 'draft task PR with no live manifest on the board and no done verdict';
       }
     }
+    const draftHold =
+      executorDead && approvedVerdict && allGreen(checks)
+        ? convertedToDraftOf(run, cwd, p.number)
+        : undefined;
     const redCheck = checks.some((k) => k.conclusion === 'failure');
     const choreOnlySince =
       kind === 'task' && redCheck && !isDraft
@@ -1813,6 +1883,8 @@ export function gatherFacts(
       ...(reclaimable ? { reclaimable } : {}),
       ...(unownedReason === undefined ? {} : { unownedReason }),
       ...(executorDead ? { executorDead, approvedVerdict } : {}),
+      ...(draftHold === null ? { draftTimelineUnread: true } : {}),
+      ...(typeof draftHold === 'string' ? { convertedToDraftBy: draftHold } : {}),
       ...(inflightManifest?.workerId ? { executor: inflightManifest.workerId } : {}),
       ...(onBoard?.branch === undefined
         ? {}
