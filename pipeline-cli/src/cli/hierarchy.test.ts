@@ -302,11 +302,35 @@ describe('runHierarchyCli', () => {
     const slot = path.join(board, 'verify-slots', 'slot-0');
     fs.mkdirSync(slot, { recursive: true });
     fs.writeFileSync(path.join(slot, 'pid'), String(process.pid));
+    // AISDLC-1413: the exclusive marker too, with a pid now owned by a different process
+    const excl = path.join(board, 'verify-slots', 'exclusive');
+    fs.mkdirSync(excl, { recursive: true });
+    fs.writeFileSync(path.join(excl, 'pid'), String(process.pid));
+    const rec = {
+      pid: process.pid,
+      startTime: 'Sat Jan  1 00:00:00 2000',
+      command: 'next-step --task AISDLC-1392',
+      taskId: 'AISDLC-1392',
+      takenAt: Date.now() - 3_600_000,
+      heartbeatAt: Date.now(),
+    };
+    fs.writeFileSync(path.join(excl, 'holder.json'), JSON.stringify(rec));
     expect(await runHierarchyCli(['status'], overrides({ boardDir: board }))).toBe(0);
-    expect(logs).toContain(`verify slot 0: held by pid ${process.pid}`);
+    const lines = logs.filter((l) => l.startsWith('verify '));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(
+      new RegExp(
+        `^verify exclusive pid ${process.pid}, started Sat Jan {2}1 00:00:00 2000, command "next-step --task AISDLC-1392", task AISDLC-1392, held for 1h 0m at .* PID REUSED`,
+      ),
+    );
+    expect(lines[1]).toMatch(
+      new RegExp(`^verify slot-0 pid ${process.pid}, started unknown, .*held for \\d+s at `),
+    );
     logs.length = 0;
     expect(await runHierarchyCli(['status', '--json'], overrides({ boardDir: board }))).toBe(0);
-    expect(JSON.parse(logs[0] as string).verifySlots).toHaveLength(1);
+    const json = JSON.parse(logs[0] as string).verifySlots;
+    expect(json).toHaveLength(2);
+    expect(json[0]).toMatchObject({ name: 'exclusive', state: 'reused', taskId: 'AISDLC-1392' });
   });
 
   it('webhook status and usage errors', async () => {

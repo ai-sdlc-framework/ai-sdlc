@@ -17,6 +17,7 @@ import {
   acquireVerifySlot,
   type VerifySlot,
   type VerifySlotDeps,
+  VerifySlotWaitError,
 } from '../runtime/verify-slots.js';
 import { DEFAULT_VERIFY_COMMANDS } from './verify-defaults.js';
 import type { DeveloperReturn, VerificationStatus } from '../types.js';
@@ -413,8 +414,14 @@ export async function runVerifyCommands(opts: RunVerifyOptions): Promise<VerifyR
         slot = await acquireVerifySlot(opts.boardDir, opts.slotDeps, {
           exclusive: !affected && opts.commands.includes('pnpm test'),
         });
-      } catch {
-        // best effort: an unwritable board runs unlimited rather than blocking the gate
+      } catch (e) {
+        // best effort: an unwritable board or a refused wait (AISDLC-1413) runs unlimited rather
+        // than blocking the gate; a refusal names the holder so the operator can act on it
+        if (e instanceof VerifySlotWaitError) {
+          (opts.slotDeps?.log ?? ((l: string) => console.error(l)))(
+            `[verify-slots] ${e.message}; running this verify unslotted`,
+          );
+        }
       }
     }
     const run = await runAll({ ...opts, commands }, runner, timeout, verifications, base, slot);
@@ -445,6 +452,7 @@ async function runAll(
   const env = slot ? { AI_SDLC_VITEST_MAX_WORKERS: String(slot.workers) } : undefined;
   const results: VerifyCommandResult[] = [];
   for (const command of opts.commands) {
+    slot?.heartbeat(); // progress: a run stuck past the stale threshold is reported (AISDLC-1413)
     const started = now().getTime();
     const r = await runner('sh', ['-c', command], {
       cwd: opts.cwd,

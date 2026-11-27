@@ -15,6 +15,7 @@ import {
   GIT_REPO_ENV_VARS,
   reuseMismatch,
   COVERAGE_WINDOW_MS,
+  SLOT_WAIT_MS,
 } from './pre-push-patch-coverage.mjs';
 import { formatLineRanges } from './check-pr-patch-coverage.mjs';
 
@@ -288,23 +289,26 @@ describe('main verify slot (AISDLC-1186)', () => {
     assert.equal(code, 1);
     assert.equal(ran, 0);
   });
-  it('waits for a slot and never runs unslotted, even after a long wait', async () => {
+  it('waits for a slot within the bound, never runs unslotted, and heartbeats', async () => {
     let t = 0;
     let polls = 0;
     let ran = 0;
+    let beats = 0;
+    let seenMax;
     const logs = [];
     const code = await main({
       boardDir: '/b',
       reuseFacts: () => null,
       loadSlots: async () => ({
         acquireVerifySlot: async (_d, deps) => {
+          seenMax = deps.maxWaitMs;
           for (let i = 0; i < 5; i++) (polls++, await deps.sleep(500));
-          return { workers: 2, release() {} };
+          return { workers: 2, release() {}, heartbeat: () => beats++ };
         },
       }),
       now: () => t,
       sleep: async (ms) => {
-        t += ms * 1e6; // hours of waiting
+        t += ms * 100; // minutes of waiting, under the 30-minute bound
       },
       run: () => (ran++, ok),
       changed,
@@ -313,8 +317,31 @@ describe('main verify slot (AISDLC-1186)', () => {
     assert.equal(code, 0);
     assert.equal(polls, 5);
     assert.equal(ran, 2);
-    assert.equal(logs.filter((l) => /waiting for a verify slot/.test(l)).length, 1);
+    assert.equal(beats, 1);
+    assert.equal(seenMax, SLOT_WAIT_MS);
+    assert.ok(Number.isFinite(SLOT_WAIT_MS));
     assert.ok(!logs.some((l) => /unslotted/.test(l)));
+  });
+  it('refuses with the slot module refusal text naming the holder (AISDLC-1413)', async () => {
+    const logs = [];
+    let ran = 0;
+    const code = await main({
+      boardDir: '/b',
+      reuseFacts: () => null,
+      loadSlots: async () => ({
+        acquireVerifySlot: async () => {
+          const e = new Error('verify slot wait timed out after 30m 0s; held by: slot-1 pid 90586');
+          e.name = 'VerifySlotWaitError';
+          throw e;
+        },
+      }),
+      run: () => (ran++, ok),
+      changed,
+      log: (m) => logs.push(m),
+    });
+    assert.equal(code, 1);
+    assert.equal(ran, 0);
+    assert.ok(logs.some((l) => /slot-1 pid 90586; refusing to run the coverage suite/.test(l)));
   });
   it('sends the slot module long-wait line to stderr with the hook clock (AISDLC-1383)', async () => {
     const errs = [];
