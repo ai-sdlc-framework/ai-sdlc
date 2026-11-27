@@ -1,10 +1,10 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildContextCli } from '../cli/context.js';
 import { parseEntryFile } from './entry.js';
-import { INGEST_SOURCES, type IngestSource } from './ingest-sources.js';
+import { generatedAuthority, INGEST_SOURCES, type IngestSource } from './ingest-sources.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
@@ -42,7 +42,21 @@ async function ingest(kind: string, observed = '2026-10-26'): Promise<void> {
     dir,
     '--observed',
     observed,
+    ...(kind === 'generated' ? ['--file', join(dir, 'generated.json')] : []),
   ]).parseAsync();
+}
+
+const GEN = {
+  id: 'gen-billing-owner',
+  trunk: 'systems',
+  type: 'fact',
+  value: 'Billing is owned by the payments team',
+  source: 'generators/owners',
+  proof: 'path-exists:CODEOWNERS',
+};
+
+function generated(records: unknown[]): void {
+  put('generated.json', JSON.stringify(records));
 }
 
 const decisionEvent = (summary: string): string =>
@@ -91,6 +105,7 @@ const FIXTURES: Record<IngestSource, () => void> = {
       'backlog/tasks/AISDLC-1 - t.md',
       '---\nid: AISDLC-1\ntitle: Do thing\nstatus: To Do\n---\n\nbody\n',
     ),
+  generated: () => generated([GEN]),
 };
 
 beforeEach(() => {
@@ -159,5 +174,104 @@ describe('cli-context ingest', () => {
     expect(e).toHaveLength(1);
     expect(String(e[0].value)).toContain('Use npm');
     expect(e[0].supersedes).toBe(`decision-dec-0001@${String(oldHash)}`);
+  });
+});
+
+describe('cli-context ingest --source generated', () => {
+  const allowlist = (): void =>
+    put(
+      '.ai-sdlc/context.yaml',
+      'knowledge:\n  promotion:\n    commands:\n      ver: [node, --version]\n',
+    );
+
+  it('writes the records from --file', async () => {
+    generated([GEN, { ...GEN, id: 'gen-two', value: 'Second' }]);
+    await ingest('generated');
+    const e = entries();
+    expect(e).toHaveLength(2);
+    expect(e.find((x) => x.id === GEN.id)).toMatchObject({
+      trunk: 'systems',
+      source: 'generators/owners',
+      proof: 'path-exists:CODEOWNERS',
+      authority: 'inferred',
+    });
+  });
+
+  it('fails clearly without --file', async () => {
+    await expect(async () =>
+      buildContextCli(['ingest', '--source', 'generated', '--project-dir', dir]).parseAsync(),
+    ).rejects.toThrow(/--source generated requires --file/);
+  });
+
+  it('fails when the file is not a JSON array', async () => {
+    put('generated.json', '{}');
+    await expect(async () => ingest('generated')).rejects.toThrow(/expected a JSON array/);
+  });
+
+  it('re-ingest is unchanged; a changed value supersedes', async () => {
+    generated([GEN]);
+    await ingest('generated');
+    const before = snapshot();
+    const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    await ingest('generated', '2026-11-01');
+    expect(out.mock.calls.map((c) => String(c[0])).join('')).toContain('1 unchanged');
+    out.mockRestore();
+    expect(snapshot()).toEqual(before);
+    const oldHash = entries()[0].contentHash;
+    generated([{ ...GEN, value: 'Billing is owned by finance' }]);
+    await ingest('generated', '2026-11-02');
+    const e = entries();
+    expect(e).toHaveLength(1);
+    expect(e[0].value).toBe('Billing is owned by finance');
+    expect(e[0].supersedes).toBe(`${GEN.id}@${String(oldHash)}`);
+  });
+
+  it('allowlisted command proof is specialist; every other proof is inferred', async () => {
+    allowlist();
+    const proofs = {
+      'gen-cmd': 'allowlisted-command:ver::v2',
+      'gen-cmd-unknown': 'allowlisted-command:nope::v2',
+      'gen-cmd-no-expected': 'allowlisted-command:ver',
+      'gen-path': 'path-exists:README.md',
+      'gen-test': 'test-id:foo.test.ts::bar',
+      'gen-free': 'trust me',
+    };
+    generated(Object.entries(proofs).map(([id, proof]) => ({ ...GEN, id, proof })));
+    await ingest('generated');
+    const byId = Object.fromEntries(entries().map((e) => [e.id, e.authority]));
+    expect(byId).toEqual({
+      'gen-cmd': 'specialist',
+      'gen-cmd-unknown': 'inferred',
+      'gen-cmd-no-expected': 'inferred',
+      'gen-path': 'inferred',
+      'gen-test': 'inferred',
+      'gen-free': 'inferred',
+    });
+  });
+
+  it('reports and skips invalid records, still writing valid ones', async () => {
+    generated([
+      { ...GEN, id: 'gen-ok' },
+      { ...GEN, id: 'gen-no-proof', proof: undefined },
+      { ...GEN, id: 'gen-num', value: 42 },
+      { ...GEN, id: 'gen-bad-trunk', trunk: 'nowhere' },
+      { ...GEN, id: '../escape' },
+      'not an object',
+    ]);
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    await ingest('generated');
+    const lines = err.mock.calls.map((c) => String(c[0])).join('');
+    err.mockRestore();
+    expect(entries().map((e) => e.id)).toEqual(['gen-ok']);
+    expect(lines).toContain('skipped record 1: missing or non-string proof');
+    expect(lines).toContain('skipped record 2: missing or non-string value');
+    expect(lines).toMatch(/skipped record 3 \(gen-bad-trunk\): unknown trunk 'nowhere'/);
+    expect(lines).toContain("skipped record 4: id '../escape'");
+    expect(lines).toContain('skipped record 5: missing or non-string id');
+  });
+
+  it('generatedAuthority defaults to an empty allowlist', () => {
+    expect(generatedAuthority('allowlisted-command:ver::v2')).toBe('inferred');
+    expect(generatedAuthority('allowlisted-command:ver::v2', { ver: ['x'] })).toBe('specialist');
   });
 });
