@@ -36,6 +36,21 @@ Class (c) is never derived from the other questions; it is recognised by its sub
 
 **Away rule.** No session opens a blocking question prompt to the operator while the operator is away. Questions go to the planner, which decides (a) and (b) and collects (c).
 
+### The question gate (AISDLC-1443)
+
+A `PreToolUse` hook on `AskUserQuestion` (`ai-sdlc-plugin/hooks/question-gate.js`) enforces the three rules above at the tool call. It runs four checks in order; each falls through when it abstains:
+
+1. **Unattended session.** An executor or operator-dispatch session (role read from the hierarchy roster, like the other hierarchy hooks) is denied: there is no operator to answer. It records the question with `cli-decisions escalate --task-id ... --option ...` instead. The planner and sessions outside the hierarchy pass.
+2. **Already decided.** The question is shortlisted by edit distance against decisions answered on `origin/main`, and `decision.duplicate` confirms a match. The deny names the record, its chosen option and summary: proceed on it.
+3. **The session's own class.** `decision.reversibility` labels the question; class (a) or (b) is denied with "decide this yourself" (`cli-decisions add ... --file --pr`). A question carrying a class (c) marker (legal, money, credentials, operator-identity actions, dependency limits) is never denied here, whatever the judgment says.
+4. **Rubric framing.** The current turn (since the operator's last prompt; background-task notifications do not start a turn) must have run the `decision-rubric` or `rfc-oq-walkthrough` skill, or the question must be trivial (every option label five words or fewer and no option description).
+
+A question that resolves an RFC Open Question (an `OQ-N` marker or the phrase "open question" in its text, header or an option label, or asked in a turn that ran `rfc-oq-walkthrough`) skips checks 2 and 3 and is never sent to a judgment: only the operator resolves an Open Question.
+
+Checks 2 and 3 deny only when their judgment is in `enforce`; both are in `shadow` until a promotion record exists, so today they only log what they would have denied. Check 4 ships in `warn` (allow and log); the 30-day replay (`node scripts/question-gate-replay.mjs --dir <transcripts> --denied-out <file>`) measured its false-deny rate well above the 5% bar, so it does not deny yet. Every outcome is one line in `.ai-sdlc/artifacts/_question-gate/log-YYYY-MM-DD.jsonl` (question hash and first 200 characters, never the transcript).
+
+**Kill switch:** `AI_SDLC_QUESTION_GATE=off` allows every question and logs nothing.
+
 ### Examples
 
 | Decision                                                                                                                     | Class                                 | Why                                                                                                 |
