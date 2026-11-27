@@ -1,12 +1,1 @@
-{
-  "go": {
-    "resourceKinds": [
-      "CapabilitiesConfig",
-      "CompliancePosture",
-      "DesignIntentDocument",
-      "DesignSystemBinding",
-      "DorConfig",
-      "JudgmentConfig"
-    ]
-  }
-}
+{}

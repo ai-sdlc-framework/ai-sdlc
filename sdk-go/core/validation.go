@@ -15,11 +15,17 @@ var schemaFS embed.FS
 
 // SchemaFiles maps resource kinds to their schema file names.
 var SchemaFiles = map[ResourceKind]string{
-	KindPipeline:       "pipeline.schema.json",
-	KindAgentRole:      "agent-role.schema.json",
-	KindQualityGate:    "quality-gate.schema.json",
-	KindAutonomyPolicy: "autonomy-policy.schema.json",
-	KindAdapterBinding: "adapter-binding.schema.json",
+	KindPipeline:             "pipeline.schema.json",
+	KindAgentRole:            "agent-role.schema.json",
+	KindQualityGate:          "quality-gate.schema.json",
+	KindAutonomyPolicy:       "autonomy-policy.schema.json",
+	KindAdapterBinding:       "adapter-binding.schema.json",
+	KindDesignSystemBinding:  "design-system-binding.schema.json",
+	KindDesignIntentDocument: "design-intent-document.schema.json",
+	KindDorConfig:            "dor-config.v1.schema.json",
+	KindCompliancePosture:    "compliance-posture.v1.schema.json",
+	KindJudgmentConfig:       "judgment-config.v1.schema.json",
+	KindCapabilitiesConfig:   "capabilities-config.v1.schema.json",
 }
 
 // ValidationError represents a single validation error.

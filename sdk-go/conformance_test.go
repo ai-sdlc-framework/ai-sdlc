@@ -21,50 +21,97 @@ const fixtureDir = "../conformance/tests/v1alpha1"
 
 // ── Schema Conformance Tests ──────────────────────────────────────
 
+// resourceFixtureDirs lists every fixture directory under root except
+// behavioral, which holds behavioral tests rather than resource documents.
+func resourceFixtureDirs(root string) ([]string, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	var dirs []string
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() != "behavioral" {
+			dirs = append(dirs, entry.Name())
+		}
+	}
+	if len(dirs) == 0 {
+		return nil, fmt.Errorf("no resource fixture directories under %s", root)
+	}
+	return dirs, nil
+}
+
 func TestConformanceSchemaValidation(t *testing.T) {
-	categories := []string{"pipeline", "agent-role", "quality-gate", "autonomy-policy", "adapter"}
+	categories, err := resourceFixtureDirs(fixtureDir)
+	require.NoError(t, err)
 	for _, cat := range categories {
-		dir := filepath.Join(fixtureDir, cat)
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			t.Skipf("skipping %s: %v", cat, err)
-			continue
+		runSchemaFixtureDir(t, filepath.Join(fixtureDir, cat), cat)
+	}
+}
+
+func TestResourceFixtureDirsFailsOnUnreadableRoot(t *testing.T) {
+	_, err := resourceFixtureDirs(filepath.Join(t.TempDir(), "missing"))
+	require.Error(t, err)
+
+	empty := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(empty, "behavioral"), 0o755))
+	_, err = resourceFixtureDirs(empty)
+	require.Error(t, err)
+}
+
+func TestReadFixtureDirFailsOnUnreadableDir(t *testing.T) {
+	_, err := readFixtureDir(filepath.Join(t.TempDir(), "missing"))
+	require.Error(t, err)
+}
+
+func readFixtureDir(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".yaml") {
+			names = append(names, entry.Name())
 		}
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
-				continue
+	}
+	return names, nil
+}
+
+func runSchemaFixtureDir(t *testing.T, dir, cat string) {
+	t.Helper()
+	names, err := readFixtureDir(dir)
+	require.NoError(t, err, "fixture directory %s is unreadable", cat)
+	require.NotEmpty(t, names, "fixture directory %s has no fixtures", cat)
+	for _, name := range names {
+		expectValid := strings.HasPrefix(name, "valid-")
+		t.Run(fmt.Sprintf("%s/%s", cat, name), func(t *testing.T) {
+			data, err := os.ReadFile(filepath.Join(dir, name))
+			require.NoError(t, err)
+
+			// Parse YAML to generic map, round-trip through JSON to normalize types
+			var raw map[string]interface{}
+			err = yaml.Unmarshal(data, &raw)
+			require.NoError(t, err)
+
+			jsonData, err := json.Marshal(raw)
+			require.NoError(t, err)
+
+			// Re-unmarshal from JSON to get json-compatible types (float64 for numbers, etc.)
+			var normalized interface{}
+			err = json.Unmarshal(jsonData, &normalized)
+			require.NoError(t, err)
+
+			kind, _ := raw["kind"].(string)
+			result := core.Validate(core.ResourceKind(kind), normalized)
+
+			if expectValid {
+				assert.True(t, result.Valid,
+					"expected %s to be valid but got errors: %v", name, result.Errors)
+			} else {
+				assert.False(t, result.Valid,
+					"expected %s to be invalid but it passed validation", name)
 			}
-			name := entry.Name()
-			expectValid := strings.HasPrefix(name, "valid-")
-			t.Run(fmt.Sprintf("%s/%s", cat, name), func(t *testing.T) {
-				data, err := os.ReadFile(filepath.Join(dir, name))
-				require.NoError(t, err)
-
-				// Parse YAML to generic map, round-trip through JSON to normalize types
-				var raw map[string]interface{}
-				err = yaml.Unmarshal(data, &raw)
-				require.NoError(t, err)
-
-				jsonData, err := json.Marshal(raw)
-				require.NoError(t, err)
-
-				// Re-unmarshal from JSON to get json-compatible types (float64 for numbers, etc.)
-				var normalized interface{}
-				err = json.Unmarshal(jsonData, &normalized)
-				require.NoError(t, err)
-
-				kind, _ := raw["kind"].(string)
-				result := core.Validate(core.ResourceKind(kind), normalized)
-
-				if expectValid {
-					assert.True(t, result.Valid,
-						"expected %s to be valid but got errors: %v", name, result.Errors)
-				} else {
-					assert.False(t, result.Valid,
-						"expected %s to be invalid but it passed validation", name)
-				}
-			})
-		}
+		})
 	}
 }
 

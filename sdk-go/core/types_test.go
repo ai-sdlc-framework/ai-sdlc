@@ -2,6 +2,10 @@ package core
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -163,3 +167,37 @@ func TestGateRuleType(t *testing.T) {
 
 func intPtr(i int) *int       { return &i }
 func boolPtr(b bool) *bool    { return &b }
+
+// TestResourceKindsMatchReference asserts the kind constants equal the
+// members of ResourceKind in reference/src/core/types.ts.
+func TestResourceKindsMatchReference(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "reference", "src", "core", "types.ts"))
+	require.NoError(t, err)
+	decl := regexp.MustCompile(`(?s)export type ResourceKind =(.*?);`).FindSubmatch(src)
+	require.NotNil(t, decl, "ResourceKind declaration not found")
+	var want []string
+	for _, m := range regexp.MustCompile(`'([A-Za-z]+)'`).FindAllSubmatch(decl[1], -1) {
+		want = append(want, string(m[1]))
+	}
+	sort.Strings(want)
+
+	kinds := []ResourceKind{
+		KindPipeline, KindAgentRole, KindQualityGate, KindAutonomyPolicy, KindAdapterBinding,
+		KindDesignSystemBinding, KindDesignIntentDocument, KindDorConfig,
+		KindCompliancePosture, KindJudgmentConfig, KindCapabilitiesConfig,
+	}
+	var got []string
+	for _, k := range kinds {
+		got = append(got, string(k))
+	}
+	sort.Strings(got)
+	assert.Len(t, want, 11)
+	assert.Equal(t, want, got)
+
+	var schemaKinds []string
+	for k := range SchemaFiles {
+		schemaKinds = append(schemaKinds, string(k))
+	}
+	sort.Strings(schemaKinds)
+	assert.Equal(t, want, schemaKinds, "SchemaFiles must cover every kind")
+}

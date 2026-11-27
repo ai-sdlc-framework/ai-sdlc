@@ -9,18 +9,25 @@ import (
 // APIVersion is the current API version for all AI-SDLC resources.
 const APIVersion = "ai-sdlc.io/v1alpha1"
 
-// ResourceKind enumerates the five resource kinds.
+// ResourceKind enumerates the eleven resource kinds of the reference.
 type ResourceKind string
 
 const (
-	KindPipeline       ResourceKind = "Pipeline"
-	KindAgentRole      ResourceKind = "AgentRole"
-	KindQualityGate    ResourceKind = "QualityGate"
-	KindAutonomyPolicy ResourceKind = "AutonomyPolicy"
-	KindAdapterBinding ResourceKind = "AdapterBinding"
+	KindPipeline             ResourceKind = "Pipeline"
+	KindAgentRole            ResourceKind = "AgentRole"
+	KindQualityGate          ResourceKind = "QualityGate"
+	KindAutonomyPolicy       ResourceKind = "AutonomyPolicy"
+	KindAdapterBinding       ResourceKind = "AdapterBinding"
+	KindDesignSystemBinding  ResourceKind = "DesignSystemBinding"
+	KindDesignIntentDocument ResourceKind = "DesignIntentDocument"
+	KindDorConfig            ResourceKind = "DorConfig"
+	KindCompliancePosture    ResourceKind = "CompliancePosture"
+	KindJudgmentConfig       ResourceKind = "JudgmentConfig"
+	KindCapabilitiesConfig   ResourceKind = "CapabilitiesConfig"
 )
 
-// AnyResource is implemented by all five resource types.
+// AnyResource is implemented by the five resource types that have Go structs.
+// The other six kinds are validated against their schema only.
 type AnyResource interface {
 	GetKind() ResourceKind
 	GetMetadata() *Metadata
