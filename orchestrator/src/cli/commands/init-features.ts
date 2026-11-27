@@ -53,8 +53,11 @@ import { detectPackageManager, type PackageManager } from '@ai-sdlc/pipeline-cli
 import { migrateLegacyWorkflows } from './init-legacy-workflows.js';
 import {
   CLIENT_SIDE_ONLY_MESSAGE,
-  REQUIRED_APPROVING_REVIEW_COUNT,
   RECOMMENDED_BRANCH_PROTECTION_BODY,
+  readAllowMerge,
+  requiredApprovingReviewCount,
+  reviewCountReason,
+  type AllowMerge,
   buildBranchProtectionBody,
   postedContextsFromWorkflows,
   readWorkflowTextsFs,
@@ -790,6 +793,11 @@ export interface WizardFlags {
    * of skipping them. Only applies to the `workflows` feature (AISDLC-261).
    */
   force: boolean;
+  /**
+   * `--agent-merge yes|no` (AISDLC-1384, DEC-0424): may agents merge pull requests that
+   * pass every gate. Absent means no answer, which scaffolds `allowMerge: never`.
+   */
+  agentMerge?: 'yes' | 'no';
 }
 
 /**
@@ -2016,9 +2024,16 @@ export { RECOMMENDED_BRANCH_PROTECTION_BODY };
  * forks + renames + custom default branches consistently, and the user
  * needs `gh` on PATH for the PUT to work anyway.
  */
-/** One line for the setup summary: how many reviews are required and who supplies them. */
-function approvalSummary(): string {
-  return `Required approving reviews: ${REQUIRED_APPROVING_REVIEW_COUNT}. No scaffolded workflow posts an approval; a person approves (or an admin bypasses).`;
+/**
+ * One line for the setup summary: how many reviews are required, why, and who
+ * supplies them (DEC-0425). The count follows the resolved `allowMerge`.
+ */
+export function approvalSummary(allowMerge: AllowMerge): string {
+  const who =
+    allowMerge === 'onGreenClean'
+      ? 'No approval is needed; agents merge through cli-merge-if-eligible once every gate passes.'
+      : 'No scaffolded workflow posts an approval; a person approves (or an admin bypasses).';
+  return `Required approving reviews: ${reviewCountReason(allowMerge)}. ${who} A team may raise the count.`;
 }
 
 export async function applyBranchProtection(
@@ -2029,7 +2044,10 @@ export async function applyBranchProtection(
   const contexts = requiredContextsFor(
     postedContextsFromWorkflows(readWorkflowTextsFs(projectDir)),
   );
-  const bodyJson = JSON.stringify(buildBranchProtectionBody(contexts), null, 2);
+  // The count follows the merge setting init just wrote (or the existing one).
+  const allowMerge = readAllowMerge(projectDir);
+  const reviewCount = requiredApprovingReviewCount(allowMerge);
+  const bodyJson = JSON.stringify(buildBranchProtectionBody(contexts, reviewCount), null, 2);
 
   if (flags.dryRun) {
     adapters.log('');
@@ -2099,7 +2117,7 @@ export async function applyBranchProtection(
       '  installed: cli-merge-if-eligible refuses unless attestation verifies and checks are green;',
     );
     adapters.log('             the hook keeps blocking direct agent merges.');
-    adapters.log(`  ${approvalSummary()}`);
+    adapters.log(`  ${approvalSummary(allowMerge)}`);
     adapters.log(`  ${CLIENT_SIDE_ONLY_MESSAGE} (ai-sdlc doctor reports this as an error).`);
     adapters.log('  opt out with: --no-branch-protection');
     return { applied: false, bodyJson, contexts, mode: 'client-side' };
@@ -2115,9 +2133,9 @@ export async function applyBranchProtection(
 
   adapters.log(`  applied branch protection to ${slug}:${branch} (server-side enforcement)`);
   adapters.log(
-    `  installed: required checks ${contexts.join(', ')} + ${REQUIRED_APPROVING_REVIEW_COUNT} approving review(s) (DEC-0014).`,
+    `  installed: required checks ${contexts.join(', ')} + ${reviewCount} approving review(s) (DEC-0014, DEC-0425).`,
   );
-  adapters.log(`             ${approvalSummary()}`);
+  adapters.log(`             ${approvalSummary(allowMerge)}`);
   adapters.log('  opt out with: --no-branch-protection');
   return { applied: true, bodyJson, contexts, mode: 'server', branch };
 }

@@ -375,3 +375,65 @@ describe('ai-sdlc setup', () => {
     });
   });
 });
+
+describe('ai-sdlc setup --agent-merge (AISDLC-1384)', () => {
+  const role = (allowMerge: string, authors: string) =>
+    `spec:\n  governance:\n    allowMerge: ${allowMerge}\n    mergeAuthors: ${authors}\n    operational: []\n`;
+
+  it('passes the answer to init and prints both values with the reason', () => {
+    let passed: string | undefined;
+    const base = adapters();
+    const r = runSetup(
+      dir,
+      adapters({
+        runInit: (d, answer) => {
+          passed = answer;
+          base.runInit(d);
+          writeFileSync(join(d, '.ai-sdlc', 'agent-role.yaml'), role('onGreenClean', '[octo]'));
+          return { exitCode: 0, output: '' };
+        },
+      }),
+      'yes',
+    );
+    expect(passed).toBe('yes');
+    const text = renderSetupReport(r).join('\n');
+    expect(text).toContain('Merge settings (.ai-sdlc/agent-role.yaml):');
+    expect(text).toContain('allowMerge: onGreenClean (agents merge pull requests by octo');
+    expect(text).toContain('0: the verdict gate ai-sdlc/pr-ready is the review control');
+    expect(text).toContain('a team may raise it');
+  });
+
+  it('with no answer prints never and a count of 1 with the reason', () => {
+    const base = adapters();
+    const r = runSetup(
+      dir,
+      adapters({
+        runInit: (d) => {
+          base.runInit(d);
+          writeFileSync(join(d, '.ai-sdlc', 'agent-role.yaml'), role('never', '[]'));
+          return { exitCode: 0, output: '' };
+        },
+      }),
+    );
+    const text = renderSetupReport(r).join('\n');
+    expect(text).toContain('allowMerge: never');
+    expect(text).toContain(
+      '1: a human approval is required; you cannot approve your own pull requests',
+    );
+  });
+
+  it('a re-run with a flag leaves the existing merge block and says so', () => {
+    runSetup(dir, adapters());
+    writeFileSync(join(dir, '.ai-sdlc', 'agent-role.yaml'), role('never', '[]'));
+    const r = runSetup(dir, adapters(), 'yes');
+    expect(r.steps.find((s) => s.id === 'init')?.reason).toContain('--agent-merge yes not applied');
+    expect(readFileSync(join(dir, '.ai-sdlc', 'agent-role.yaml'), 'utf-8')).toBe(
+      role('never', '[]'),
+    );
+  });
+
+  it('says when agent-role.yaml is missing', () => {
+    const r = runSetup(dir, adapters());
+    expect(r.mergeSummary[0]).toContain('agent-role.yaml not found');
+  });
+});

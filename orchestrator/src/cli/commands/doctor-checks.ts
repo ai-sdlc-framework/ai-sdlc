@@ -705,6 +705,17 @@ export function fixManifestsAgree(ctx: DoctorRunContext): DoctorFixResult {
 export function checkAttestationGovernanceCheck(ctx: DoctorRunContext): DoctorCheckResult {
   const gov = checkAttestationGovernance(ctx.projectDir, ctx.adapters);
 
+  if (gov.reviewPairingError) {
+    return {
+      id: 'attestation-governance',
+      severity: 'fail',
+      title: gov.reviewPairingError,
+      remediation:
+        'Require 1 or more approving reviews on the protected branch, or set spec.governance.allowMerge: onGreenClean in .ai-sdlc/agent-role.yaml with ai-sdlc/pr-ready required',
+      anonymizableEvidence: { state: gov.state, allowMerge: gov.allowMerge, approvingReviews: 0 },
+    };
+  }
+
   if (
     gov.state === 'fully-configured' &&
     gov.branchProtection.requiresBacklogDrift === false &&
@@ -725,8 +736,9 @@ export function checkAttestationGovernanceCheck(ctx: DoctorRunContext): DoctorCh
     return {
       id: 'attestation-governance',
       severity: 'pass',
-      title:
-        'Attestation artifacts installed and branch protection enforces ai-sdlc/pr-ready + approving review',
+      title: gov.branchProtection.requiresApprovingReview
+        ? 'Attestation artifacts installed and branch protection enforces ai-sdlc/pr-ready + approving review'
+        : 'Attestation artifacts installed and branch protection enforces ai-sdlc/pr-ready as the review control (0 approving reviews with allowMerge: onGreenClean)',
     };
   }
 

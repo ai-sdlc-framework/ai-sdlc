@@ -123,24 +123,52 @@ export type AgentRoleTier = 'coding' | 'research' | 'meta';
 
 export const AGENT_ROLE_TIERS: readonly AgentRoleTier[] = ['coding', 'research', 'meta'] as const;
 
-/**
- * The merge settings every scaffolded agent-role.yaml states (AISDLC-1351). The values are
- * this one constant. They are `never` and empty until the operator decides what a new adopter
- * gets, so nothing is loosened; `up`, `status`, the landing note and doctor read the resolved
- * policy, not this constant, and say so when merging is off.
- */
-export const AGENT_ROLE_MERGE_DEFAULTS: {
+/** The merge settings a scaffolded agent-role.yaml states (AISDLC-1351). */
+export interface AgentRoleMergeSettings {
   allowMerge: 'never' | 'onGreenClean';
   mergeAuthors: readonly string[];
   operational: readonly string[];
-} = {
+}
+
+/**
+ * The merge settings a scaffolded agent-role.yaml states when the operator did not
+ * answer yes at setup (AISDLC-1351, DEC-0424): `never` and empty, so nothing is
+ * loosened; `up`, `status`, the landing note and doctor read the resolved policy, not
+ * this constant, and say so when merging is off.
+ */
+export const AGENT_ROLE_MERGE_DEFAULTS: AgentRoleMergeSettings = {
   allowMerge: 'never',
   mergeAuthors: [],
   operational: [],
 };
 
+/** The `operational` list a yes at setup writes: the landing pass runs only when it holds this. */
+export const AGENT_MERGE_YES_OPERATIONAL: readonly string[] = ['land-eligible-prs'];
+
+/**
+ * Merge settings from scaffold answers (AISDLC-1384). `allowMerge: onGreenClean` is
+ * rendered only with at least one merge author; anything else renders the defaults.
+ * Lists are comma separated.
+ */
+export function agentRoleMergeFromAnswers(
+  answers: Readonly<Record<string, string>>,
+): AgentRoleMergeSettings {
+  const list = (v: string | undefined): string[] =>
+    (v ?? '')
+      .split(',')
+      .map((x) => x.trim())
+      .filter((x) => x.length > 0);
+  const mergeAuthors = list(answers.mergeAuthors);
+  if (answers.allowMerge !== 'onGreenClean' || mergeAuthors.length === 0) {
+    return AGENT_ROLE_MERGE_DEFAULTS;
+  }
+  return { allowMerge: 'onGreenClean', mergeAuthors, operational: list(answers.operational) };
+}
+
 /** Governance block of every scaffolded agent-role.yaml: the merge keys, then the commented lease-push key. */
-export function renderAgentRoleGovernance(d = AGENT_ROLE_MERGE_DEFAULTS): string {
+export function renderAgentRoleGovernance(
+  d: AgentRoleMergeSettings = AGENT_ROLE_MERGE_DEFAULTS,
+): string {
   const list = (key: string, items: readonly string[]): string =>
     items.length === 0
       ? `    ${key}: []\n`
@@ -227,8 +255,11 @@ const AGENT_ROLE_TIER_BODY: Record<
   },
 };
 
-/** Render agent-role.yaml for a tier (default `coding`). */
-export function renderAgentRole(tier: AgentRoleTier = 'coding'): string {
+/** Render agent-role.yaml for a tier (default `coding`) and merge settings (default: merging off). */
+export function renderAgentRole(
+  tier: AgentRoleTier = 'coding',
+  merge: AgentRoleMergeSettings = AGENT_ROLE_MERGE_DEFAULTS,
+): string {
   const t = AGENT_ROLE_TIER_BODY[tier];
   return `apiVersion: ai-sdlc.io/v1alpha1
 kind: AgentRole
@@ -244,7 +275,7 @@ ${t.tools}${AGENT_ROLE_TOOLS_TAIL}  constraints:
     blockedPaths:
       - .github/workflows/**
       - .ai-sdlc/**
-${renderAgentRoleGovernance()}`;
+${renderAgentRoleGovernance(merge)}`;
 }
 
 function renderAgentRoleFromAnswers(answers: Readonly<Record<string, string>>): string {
@@ -252,7 +283,7 @@ function renderAgentRoleFromAnswers(answers: Readonly<Record<string, string>>): 
   if (!AGENT_ROLE_TIERS.includes(tier)) {
     throw new Error(`invalid tier: ${tier} (expected ${AGENT_ROLE_TIERS.join(', ')})`);
   }
-  return renderAgentRole(tier);
+  return renderAgentRole(tier, agentRoleMergeFromAnswers(answers));
 }
 
 function requireAnswer(answers: Readonly<Record<string, string>>, key: string): string {

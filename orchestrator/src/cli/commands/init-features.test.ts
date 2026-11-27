@@ -24,7 +24,7 @@ import {
 } from './init-templates.js';
 import { spawnSync } from 'node:child_process';
 import { buildWizardFlags } from './init.js';
-import { REQUIRED_APPROVING_REVIEW_COUNT } from './branch-protection-shared.js';
+import { requiredApprovingReviewCount } from './branch-protection-shared.js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -993,11 +993,12 @@ describe('applyBranchProtection', () => {
       expect(result.mode).toBe('server');
       const body = JSON.parse(result.bodyJson);
       expect(body.required_pull_request_reviews.required_approving_review_count).toBe(
-        REQUIRED_APPROVING_REVIEW_COUNT,
+        requiredApprovingReviewCount('never'),
       );
       expect(body.required_status_checks.contexts).toEqual(['ai-sdlc/pr-ready']);
       const out = state.log.join('\n');
-      expect(out).toContain(`Required approving reviews: ${REQUIRED_APPROVING_REVIEW_COUNT}.`);
+      expect(out).toContain('Required approving reviews: 1: a human approval is required');
+      expect(out).toContain('1 approving review(s)');
       expect(out).toContain('No scaffolded workflow posts an approval');
       expect(out).toContain('--no-branch-protection');
     } finally {

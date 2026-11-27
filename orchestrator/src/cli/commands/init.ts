@@ -29,7 +29,7 @@
  */
 
 import { Command } from 'commander';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { detectAgentsDetailed, installMcpServer } from './mcp-setup.js';
 import { detectWorkspace, generateWorkspaceYaml, type WorkspaceRepo } from './workspace-detect.js';
@@ -50,10 +50,20 @@ import {
 } from './init-features.js';
 import {
   AGENT_ROLE_TIERS,
+  AGENT_ROLE_MERGE_DEFAULTS,
   REQUIRED_CONFIG_MANIFEST,
   scaffoldConfig,
+  type AgentRoleMergeSettings,
   type AgentRoleTier,
 } from '@ai-sdlc/pipeline-cli/config-manifest';
+import {
+  agentMergeScaffoldDefaults,
+  agentMergeSummaryLines,
+  parseAgentMergeFlag,
+  resolveAgentMergeChoice,
+} from './init-agent-merge.js';
+import { allowMergeFromAgentRole } from './branch-protection-shared.js';
+import { parse as parseYaml } from 'yaml';
 import { scaffoldVerification } from '@ai-sdlc/pipeline-cli/verification';
 import { REVIEW_POLICY_INIT_LINE } from './doctor-checks.js';
 import {
@@ -293,15 +303,17 @@ function initProject(
  * Existing files are never overwritten. Under a custom `--dir` only the two
  * files init has always written are scaffolded, into that directory.
  */
-async function scaffoldManifestEntries(
+export async function scaffoldManifestEntries(
   projectDir: string,
   configDirName: string,
   dryRun: boolean,
   remote: RemoteInfo,
   tier: AgentRoleTier,
   prefix: string = '',
+  merge: AgentRoleMergeSettings = AGENT_ROLE_MERGE_DEFAULTS,
 ): Promise<void> {
   if (dryRun) return;
+  reportMergeBlock(projectDir, configDirName, merge, prefix);
   const custom = configDirName !== '.ai-sdlc';
   const manifest = custom
     ? REQUIRED_CONFIG_MANIFEST.filter((e) => e.id === 'agent-role' || e.id === 'pipeline').map(
@@ -311,7 +323,7 @@ async function scaffoldManifestEntries(
   const result = await scaffoldConfig({
     projectDir,
     manifest,
-    defaults: { org: remote.org, repo: remote.repo, tier },
+    defaults: { org: remote.org, repo: remote.repo, tier, ...agentMergeScaffoldDefaults(merge) },
     skipVersionStamp: custom,
   });
   for (const path of result.created) console.log(`${prefix}  created ${path}`);
@@ -320,6 +332,40 @@ async function scaffoldManifestEntries(
   if (custom) return;
   const verification = scaffoldVerification(projectDir);
   if (verification) console.log(`${prefix}  created ${verification}`);
+}
+
+/**
+ * Print the merge setting and review count this run leaves in agent-role.yaml
+ * (AISDLC-1384). An existing file is never rewritten: its current values are printed.
+ */
+function reportMergeBlock(
+  projectDir: string,
+  configDirName: string,
+  merge: AgentRoleMergeSettings,
+  prefix: string,
+): void {
+  const path = join(projectDir, configDirName, 'agent-role.yaml');
+  let allowMerge = merge.allowMerge;
+  let authors: readonly string[] = merge.mergeAuthors;
+  if (existsSync(path)) {
+    const text = readFileSync(path, 'utf-8');
+    allowMerge = allowMergeFromAgentRole(text);
+    authors = existingMergeAuthors(text);
+    console.log(`${prefix}  agent-role.yaml exists; its merge settings are left unchanged:`);
+  }
+  for (const line of agentMergeSummaryLines(allowMerge, authors)) {
+    console.log(`${prefix}  ${line}`);
+  }
+}
+
+function existingMergeAuthors(text: string): string[] {
+  try {
+    const doc = parseYaml(text) as { spec?: { governance?: { mergeAuthors?: unknown } } } | null;
+    const a = doc?.spec?.governance?.mergeAuthors;
+    return Array.isArray(a) ? a.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Initialize the workspace root with workspace.yaml. */
@@ -383,6 +429,7 @@ export function buildWizardFlags(opts: Record<string, unknown>): WizardFlags {
     dryRun: !!opts.dryRun,
     workspace: typeof opts.workspace === 'string' ? opts.workspace : undefined,
     force: !!opts.force,
+    agentMerge: opts.agentMerge === 'yes' || opts.agentMerge === 'no' ? opts.agentMerge : undefined,
   };
 }
 
@@ -424,6 +471,10 @@ export const initCommand = new Command('init')
   )
   // ── AISDLC-143 wizard flags ─────────────────────────────────────────
   .option('-y, --yes', 'Accept all defaults (non-interactive; CI/scripts)')
+  .option(
+    '--agent-merge <answer>',
+    'Let agents merge pull requests that pass every gate: yes | no (default: no). Yes writes allowMerge: onGreenClean with your gh login and requires 0 approving reviews; no writes never and requires 1',
+  )
   .option('--with-dor', 'Scaffold Definition-of-Ready gate config + workflow')
   .option('--with-attestation', 'Scaffold attestation infrastructure (audit-only)')
   .option('--with-classifier', 'Scaffold review classifier config stub')
@@ -511,6 +562,12 @@ export const initCommand = new Command('init')
     const addCheck = validateAddArg(opts.add);
     if (!addCheck.ok) {
       console.error(`Error: ${addCheck.error}`);
+      process.exitCode = 1;
+      return;
+    }
+    const agentMergeCheck = parseAgentMergeFlag(opts.agentMerge);
+    if (!agentMergeCheck.ok) {
+      console.error(`Error: ${agentMergeCheck.error}`);
       process.exitCode = 1;
       return;
     }
@@ -607,6 +664,11 @@ export const initCommand = new Command('init')
     }
     console.log('');
 
+    // ── Agent merging (AISDLC-1384, DEC-0424) ─────────────────────────
+    const mergeChoice = resolveAgentMergeChoice(agentMergeCheck.value, buildProductionAdapters());
+    console.log(mergeChoice.reason);
+    console.log('');
+
     // Detect workspace (multi-repo parent directory)
     const workspace = detectWorkspace(projectDir);
 
@@ -629,7 +691,15 @@ export const initCommand = new Command('init')
           console.log(`  detected remote: ${childRemote.org}/${childRemote.repo}`);
         }
         initProject(repo.absPath, configDirName, dryRun, '  ');
-        await scaffoldManifestEntries(repo.absPath, configDirName, dryRun, childRemote, tier, '  ');
+        await scaffoldManifestEntries(
+          repo.absPath,
+          configDirName,
+          dryRun,
+          childRemote,
+          tier,
+          '  ',
+          mergeChoice.merge,
+        );
       }
 
       // MCP setup at workspace root (serves all repos)
@@ -667,7 +737,15 @@ export const initCommand = new Command('init')
     } else {
       // Single-repo mode (original behavior)
       initProject(projectDir, configDirName, dryRun, '');
-      await scaffoldManifestEntries(projectDir, configDirName, dryRun, remote, tier);
+      await scaffoldManifestEntries(
+        projectDir,
+        configDirName,
+        dryRun,
+        remote,
+        tier,
+        '',
+        mergeChoice.merge,
+      );
 
       if (!opts.skipMcp) {
         const { detected, skipped } = detectAgentsDetailed(projectDir, {

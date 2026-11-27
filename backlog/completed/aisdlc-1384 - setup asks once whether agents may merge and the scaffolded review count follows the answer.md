@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1384
 title: 'Setup asks once whether agents may merge, and the scaffolded review count follows the answer'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-22'
 labels:
@@ -37,10 +37,10 @@ priority: high
 
 ## Acceptance Criteria
 
-- [ ] #1 A test: init with `--agent-merge yes` and a readable gh login writes `onGreenClean`, that login as the only merge author, `land-eligible-prs` in `operational`, and branch protection with a review count of 0.
-- [ ] #2 A test: init with `--agent-merge no`, or with no flag, writes `never`, empty lists, and a review count of 1.
-- [ ] #3 A test: `--agent-merge yes` with no readable gh login writes `never` and prints the reason.
-- [ ] #4 A test: doctor passes a count of 0 with `onGreenClean` and `ai-sdlc/pr-ready` required, and fails a count of 0 with `never`.
-- [ ] #5 A test: re-running init on a repository with an existing merge block leaves it unchanged without a flag.
-- [ ] #6 `setup.md` asks the question and passes the flag; the setup summary prints both values with the reason.
-- [ ] #7 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] #1 A test: init with `--agent-merge yes` and a readable gh login writes `onGreenClean`, that login as the only merge author, `land-eligible-prs` in `operational`, and branch protection with a review count of 0.
+- [x] #2 A test: init with `--agent-merge no`, or with no flag, writes `never`, empty lists, and a review count of 1.
+- [x] #3 A test: `--agent-merge yes` with no readable gh login writes `never` and prints the reason.
+- [x] #4 A test: doctor passes a count of 0 with `onGreenClean` and `ai-sdlc/pr-ready` required, and fails a count of 0 with `never`.
+- [x] #5 A test: re-running init on a repository with an existing merge block leaves it unchanged without a flag.
+- [x] #6 `setup.md` asks the question and passes the flag; the setup summary prints both values with the reason.
+- [x] #7 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
