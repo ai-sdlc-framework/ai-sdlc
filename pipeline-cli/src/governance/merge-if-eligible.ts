@@ -768,6 +768,25 @@ export async function fetchCommitLogins(
 }
 
 /**
+ * AISDLC-1387: fragments of the `evaluatePrTrust` refusals that waiting cannot fix: the PR
+ * author or head commit author is off the allow-list, or no single task id can be derived
+ * from the branch and title. Only a new head, a new title or a policy change on main does.
+ * The fail-closed read refusals are not here: they clear on their own.
+ */
+const STANDING_TRUST_REFUSALS = [
+  'is not on the spec.governance.mergeAuthors allow-list',
+  'is not linked to a GitHub account',
+  'could be derived from head branch',
+  'ambiguous task id:',
+  'fork PRs are never agent-merged',
+];
+
+/** The refusal is a trust fact that holds until the PR changes (AISDLC-1387). */
+export function isStandingTrustRefusal(text: string | undefined): boolean {
+  return typeof text === 'string' && STANDING_TRUST_REFUSALS.some((s) => text.includes(s));
+}
+
+/**
  * Evaluate the GitHub-derived trust facts. Returns a refusal reason, or `null`
  * when every fact holds:
  *   - same-repo PR (`isCrossRepository === false`) — fork PRs refused;
