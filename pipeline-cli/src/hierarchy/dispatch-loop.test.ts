@@ -1545,6 +1545,7 @@ describe('deterministic restarts (AISDLC-1110)', () => {
           rotated.push(name);
           return { ok: true };
         },
+        handoffProven: () => true,
       });
     health = [
       { name: 'planner', role: 'planner', state: 'busy', overThreshold: true },
@@ -1577,6 +1578,7 @@ describe('deterministic restarts (AISDLC-1110)', () => {
           return { ok: true };
         },
         requestRotate: async () => ({ ok: true }),
+        handoffProven: () => true,
       });
     health = [{ name: 'planner', role: 'planner', state: 'idle', overThreshold: true }];
     await runDispatchTick(d());
@@ -1591,6 +1593,81 @@ describe('deterministic restarts (AISDLC-1110)', () => {
     expect(restarted).toEqual([]);
     for (let i = 0; i < ROTATE_GRACE_TICKS; i++) await runDispatchTick(d());
     expect(restarted).toEqual(['planner']);
+  });
+
+  it('escalates once and never restarts when the grace lapses without handoff proof (AISDLC-1448)', async () => {
+    const escalated: string[] = [];
+    let proven = false;
+    const d = () =>
+      deps({
+        sessions: () => health,
+        restartSession: async (name) => {
+          restarted.push(name);
+          return { ok: true };
+        },
+        requestRotate: async () => ({ ok: true }),
+        handoffProven: () => proven,
+        escalateRotation: (name) => {
+          escalated.push(name);
+          return 'DEC-9001';
+        },
+      });
+    health = [{ name: 'planner', role: 'planner', state: 'idle', overThreshold: true }];
+    const reports = [];
+    for (let i = 0; i < ROTATE_GRACE_TICKS + 4; i++) reports.push(await runDispatchTick(d()));
+    expect(restarted).toEqual([]);
+    expect(escalated).toEqual(['planner']);
+    const esc = reports.flatMap((r) => r.restarts ?? []).filter((r) => r.status === 'escalated');
+    expect(esc).toHaveLength(1);
+    expect(esc[0]?.reason).toContain('escalated DEC-9001');
+    // the proof arrives later: the last-resort restart may run
+    proven = true;
+    await runDispatchTick(d());
+    expect(restarted).toEqual(['planner']);
+  });
+
+  it('reports a failed escalation without restarting (AISDLC-1448)', async () => {
+    const d = () =>
+      deps({
+        sessions: () => health,
+        restartSession: async (name) => {
+          restarted.push(name);
+          return { ok: true };
+        },
+        requestRotate: async () => ({ ok: true }),
+        escalateRotation: () => {
+          throw new Error('catalog locked');
+        },
+      });
+    health = [{ name: 'planner', role: 'planner', state: 'idle', overThreshold: true }];
+    const reports = [];
+    for (let i = 0; i < ROTATE_GRACE_TICKS + 2; i++) reports.push(await runDispatchTick(d()));
+    expect(restarted).toEqual([]);
+    const esc = reports.flatMap((r) => r.restarts ?? []).filter((r) => r.status === 'escalated');
+    expect(esc[0]?.reason).toContain('escalation failed: catalog locked');
+  });
+
+  it('replays 2026-11-26: a queued rotate and a pending AskUserQuestion past the grace never restart (AISDLC-1448)', async () => {
+    const escalated: string[] = [];
+    const d = () =>
+      deps({
+        sessions: () => health,
+        restartSession: async (name) => {
+          restarted.push(name);
+          return { ok: true };
+        },
+        requestRotate: async () => ({ ok: true }),
+        handoffProven: () => false,
+        escalateRotation: (name) => {
+          escalated.push(name);
+          return 'DEC-9002';
+        },
+      });
+    // the CLI reports a session with an unanswered AskUserQuestion as busy
+    health = [{ name: 'planner', role: 'planner', state: 'busy', overThreshold: true }];
+    for (let i = 0; i < ROTATE_GRACE_TICKS * 3; i++) await runDispatchTick(d());
+    expect(restarted).toEqual([]);
+    expect(escalated).toEqual([]);
   });
 
   it('reports a failed rotate request and leaves a marker for status (AISDLC-1150)', async () => {

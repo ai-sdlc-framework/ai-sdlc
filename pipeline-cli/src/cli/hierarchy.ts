@@ -40,6 +40,8 @@
  *     owns this roster's board; otherwise print why and exit 1.
  *   - `handoff write|read --role <planner|operator-dispatch|executor> [--name <n>]` — write
  *     (from board and catalog state) or read (regenerating when stale) a session's handoff file.
+ *     `handoff mark|verify --since <iso>|unproven` (AISDLC-1448): record a rotation's RESUME
+ *     baseline, prove the handoff was written since (exit 0 proven, 1 not), log an unproven one.
  *   - `send --to <name> --text <message>` — message a roster session; refused with the reason when
  *     `to` is not listed in this project's roster (AISDLC-1036).
  *   - `playbook --task <id> --action <step>` — run one named playbook step (AISDLC-918).
@@ -233,6 +235,13 @@ import {
   formatWebhookStatus,
   recallTranscript,
   resolveTranscriptSource,
+  appendRotationLog,
+  checkHandoffProof,
+  escalateUnprovenRotation,
+  markRotation,
+  pendingOperatorQuestion,
+  readRotateRequest,
+  recordDyingTranscript,
 } from '../hierarchy/index.js';
 import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
@@ -284,7 +293,8 @@ Commands:
   route-decision  Record that a decision was routed to a tier
   demo       Regenerate the terminal demo clip from a scenario: demo [run|cut|render]
   playbook   Run one named playbook step for one task (playbook --task <id> --action <step>)
-  handoff         Write or read a session's handoff file (handoff write|read --role <r>)
+  handoff         Write or read a session's handoff file (handoff write|read --role <r>);
+                  prove it before a clear (handoff mark|verify --role <r> --since <iso>, exit 1 = unproven)
   transcript      Digest of the turns before a /clear (transcript recall --role <r>)
   send            Message a session listed in this project's roster; refuses any other name
   pane-exited     Record the exit of a spawned executor's pane (run by the tmux hook; pane-exited <session>)
@@ -503,7 +513,40 @@ function sendRotate(
     sendSocket,
   );
   if (sent) void sent.catch(() => undefined);
-  writeRotateRequest(deps.boardDir, name, deps.now());
+  // AISDLC-1448: the request carries the RESUME baseline the handoff proof compares against.
+  const entry = roster.sessions.find((e) => e.name === name);
+  if (entry && entry.role !== 'operator-dispatch') {
+    markRotation(entry.role, name, { boardDir: deps.boardDir, now: deps.now });
+  } else writeRotateRequest(deps.boardDir, name, deps.now());
+}
+
+/** `handoffWrittenSince` for the session's current rotation request (AISDLC-1448). */
+function rotationProven(deps: HierarchyDeps, name: string): boolean {
+  const entry = readRosterChecked(deps.boardDir).roster.sessions.find((e) => e.name === name);
+  const request = readRotateRequest(deps.boardDir, name);
+  if (!entry || !request || entry.role === 'operator-dispatch') return false;
+  return checkHandoffProof(entry.role, name, request.at, { boardDir: deps.boardDir, now: deps.now })
+    .proven;
+}
+
+/** File the one escalation for an unproven rotation, log it and raise a desktop notification (AISDLC-1448). */
+function escalateRotation(deps: HierarchyDeps, repoRoot: string, name: string): string {
+  const request = readRotateRequest(deps.boardDir, name);
+  const entry = readRosterChecked(deps.boardDir).roster.sessions.find((e) => e.name === name);
+  const reason =
+    request && entry && entry.role !== 'operator-dispatch'
+      ? checkHandoffProof(entry.role, name, request.at, { boardDir: deps.boardDir, now: deps.now })
+          .reason
+      : 'no rotation request is recorded';
+  const id = escalateUnprovenRotation(repoRoot, name, reason, deps.now());
+  const line = `handoff unproven; not restarting ${name} (${reason}); escalated ${id}`;
+  appendRotationLog(deps.boardDir, deps.now(), line);
+  try {
+    desktopNotice(deps.run, `${name}: ${line}`);
+  } catch {
+    /* the notification is best effort; the escalation and the planner report carry it */
+  }
+  return id;
 }
 
 /**
@@ -1554,7 +1597,16 @@ export async function runHierarchyCli(
             hierarchyStatus(deps, { rosterOnly: true }).rows.map((r) => ({
               name: r.entry.name,
               role: r.entry.role,
-              state: r.state,
+              // AISDLC-1448: an unanswered AskUserQuestion is busy, never idle.
+              state:
+                r.overThreshold &&
+                r.state !== 'busy' &&
+                r.entry.role !== 'operator-dispatch' &&
+                pendingOperatorQuestion(
+                  resolveTranscriptSource(deps, r.entry.role, r.entry.name).file,
+                )
+                  ? 'busy'
+                  : r.state,
               ...(r.inflightTask ? { inflightTask: r.inflightTask } : {}),
               ...(r.overThreshold ? { overThreshold: true } : {}),
             })),
@@ -1575,6 +1627,8 @@ export async function runHierarchyCli(
               return { ok: false, reason: (err as Error).message };
             }
           },
+          handoffProven: (name) => rotationProven(deps, name),
+          escalateRotation: (name) => escalateRotation(deps, repoRoot, name),
           idleExecutors: () =>
             hierarchyStatus(deps, { rosterOnly: true })
               .rows.filter(
@@ -1856,9 +1910,10 @@ export async function runHierarchyCli(
       case 'handoff': {
         const action = firstPositional(argv);
         const role = parseRoleFlag(flags.role);
-        if ((action !== 'write' && action !== 'read' && action !== 'note') || !role) {
+        const actions = ['write', 'read', 'note', 'mark', 'verify', 'unproven', 'asking'];
+        if (!actions.includes(action ?? '') || !role) {
           process.stderr.write(
-            `cli-hierarchy handoff: use 'handoff write|read|note --role planner|operator-dispatch|executor'\n`,
+            `cli-hierarchy handoff: use 'handoff write|read|note|mark|verify|unproven|asking --role planner|operator-dispatch|executor'\n`,
           );
           return 2;
         }
@@ -1880,6 +1935,66 @@ export async function runHierarchyCli(
           ...(flags['no-archive'] === 'true' ? { archive: false } : {}),
           transcript: resolveTranscriptSource(deps, role, name),
         };
+        if (action === 'asking') {
+          // AISDLC-1448: an unanswered AskUserQuestion makes the session busy (exit 0 = pending).
+          const pending = pendingOperatorQuestion(opts.transcript.file);
+          deps.log(JSON.stringify({ pending }));
+          return pending ? 0 : 1;
+        }
+        if (action === 'mark' || action === 'verify' || action === 'unproven') {
+          // AISDLC-1448: the rotation baseline, the one proof predicate, and the unproven alert record.
+          const session = name ?? role;
+          const proofOpts = {
+            boardDir: deps.boardDir,
+            now: deps.now,
+            ...(flags.out && flags.out !== 'true' ? { file: flags.out } : {}),
+          };
+          if (action === 'mark') {
+            const r = markRotation(role, session, proofOpts);
+            deps.log(JSON.stringify({ ok: true, ...r }));
+            return 0;
+          }
+          if (action === 'unproven') {
+            const reason = flags.reason && flags.reason !== 'true' ? flags.reason : 'unknown';
+            const line = `handoff unproven; not clearing ${session} (${reason})`;
+            appendRotationLog(deps.boardDir, deps.now(), line);
+            try {
+              desktopNotice(deps.run, `${session}: ${line}`);
+            } catch {
+              /* best effort; the module also prints the line in the session pane */
+            }
+            if (role !== 'planner') {
+              try {
+                createPlannerNotifier(
+                  deps.boardDir,
+                  deps.run,
+                  extras.sendBrief,
+                  extras.sendSocket,
+                )(`${session}: ${line}`);
+              } catch {
+                /* no reachable planner: the log line and the notification stand */
+              }
+            }
+            deps.log(JSON.stringify({ ok: true, line }));
+            return 0;
+          }
+          const since = flags.since && flags.since !== 'true' ? flags.since : '';
+          if (!since) {
+            process.stderr.write('cli-hierarchy handoff verify: --since <iso> is required\n');
+            return 2;
+          }
+          const r = checkHandoffProof(role, session, since, proofOpts);
+          if (r.proven) {
+            // The session is about to be cleared: its transcript becomes the archived copy.
+            try {
+              recordDyingTranscript(deps.boardDir, session, opts.transcript, deps.now());
+            } catch {
+              /* a clear keeps the transcript file; the record only helps a restart */
+            }
+          }
+          deps.log(JSON.stringify(r));
+          return r.proven ? 0 : 1;
+        }
         if (action === 'note') {
           try {
             const r = noteLedger(opts, {

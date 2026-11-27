@@ -122,7 +122,9 @@ After every state change run
 The hierarchy hooks module rotates this session past 150k tokens (restart: `/ai-sdlc:planner`); after any clear run
 `handoff read --role planner` first and resume from it.
 
-**Handoff routine** (the hooks module runs it as a model turn at the end of the turn that crosses the rotation threshold, before the clear; the operator word "handoff" or the "Context is at N%" warning only triggers it earlier, at the next turn boundary):
+**Guarantee (AISDLC-1448):** this session is never cleared or restarted until its handoff is written. The hooks module submits the handoff routine below as a prompt when the rotation threshold is crossed (at the turn end; after the answer when an operator question is pending), and clears only once `handoff verify` proves ONE new `## RESUME HERE` block written after the rotation request. Without proof it asks once more, then does not clear: it prints `handoff unproven; not clearing`, writes `rotation.log` and raises a desktop notification; dispatch escalates `session-rotation:<name>` instead of restarting. Only the operator's `cli-hierarchy restart <name> --force` skips the proof.
+
+**Handoff routine** (the operator word "handoff" or the "Context is at N%" warning also triggers it, at the next turn boundary):
 run `handoff write`, edit the file outside the markers with ONE `## RESUME HERE` block at the end
 (open rulings, owed items, pending operator asks with the absolute path of every scratchpad draft, next free task and decision ids, scheduled jobs, what each peer waits on), check that `## Pending asks` matches what you still wait on (note any missing `asked` / `settled` first), then confirm `Handoff written: <path>. Safe to /clear.` Details and recall commands:
 `docs/operations/cli-hierarchy.md`.

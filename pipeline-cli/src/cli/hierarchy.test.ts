@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -1874,6 +1875,41 @@ describe('handoff and send subcommands (AISDLC-766, AISDLC-1036)', () => {
     expect(await runHierarchyCli(['handoff', 'write', '--role', 'bogus'], overrides())).toBe(2);
     expect(await runHierarchyCli(['handoff', 'write'], overrides())).toBe(2);
     expect(String(err.mock.calls.at(-1)?.[0])).toContain("use 'handoff write|read");
+  });
+
+  it('handoff mark, verify, asking and unproven gate a clear on proof (AISDLC-1448)', async () => {
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const out = path.join(tmp, 'h.md');
+    writeFileSync(out, '## RESUME HERE\nold\n');
+    const base = ['--role', 'executor', '--name', 'ex-1', '--out', out];
+    expect(await runHierarchyCli(['handoff', 'mark', ...base], overrides())).toBe(0);
+    const since = JSON.parse(logs.at(-1) as string).since as string;
+    expect(
+      await runHierarchyCli(['handoff', 'verify', ...base, '--since', since], overrides()),
+    ).toBe(1);
+    expect(JSON.parse(logs.at(-1) as string)).toMatchObject({ proven: false });
+    expect(await runHierarchyCli(['handoff', 'verify', ...base], overrides())).toBe(2);
+    writeFileSync(out, '## RESUME HERE\nnew\n');
+    const later = new Date(Date.parse(since) + 60_000);
+    utimesSync(out, later, later);
+    expect(
+      await runHierarchyCli(['handoff', 'verify', ...base, '--since', since], overrides()),
+    ).toBe(0);
+    expect(await runHierarchyCli(['handoff', 'asking', ...base], overrides())).toBe(1);
+    expect(JSON.parse(logs.at(-1) as string)).toEqual({ pending: false });
+    expect(
+      await runHierarchyCli(['handoff', 'unproven', ...base, '--reason', 'refused'], overrides()),
+    ).toBe(0);
+    expect(readFileSync(path.join(tmp, 'dispatch', 'rotation.log'), 'utf-8')).toContain(
+      'handoff unproven; not clearing ex-1 (refused)',
+    );
+    expect(
+      await runHierarchyCli(
+        ['handoff', 'unproven', '--role', 'planner', '--name', 'planner'],
+        overrides(),
+      ),
+    ).toBe(0);
+    expect(JSON.parse(logs.at(-1) as string).line).toContain('(unknown)');
   });
 
   it('handoff write then read round-trips through --out, accepting the dispatch alias', async () => {
