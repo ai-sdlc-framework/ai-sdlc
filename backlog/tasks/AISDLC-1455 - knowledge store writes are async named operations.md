@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1455
 title: Knowledge store writes are async named operations (write and create)
-status: To Do
+status: In Progress
 priority: high
 labels:
   - pipeline-cli

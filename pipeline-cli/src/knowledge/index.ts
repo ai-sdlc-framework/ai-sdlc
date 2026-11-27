@@ -12,6 +12,8 @@ export {
   KnowledgeBackendError,
   openKnowledgeStore,
   registerKnowledgeBackend,
+  WRITE_KINDS,
+  type CreateOptions,
   type GetOptions,
   type KnowledgeBackendContext,
   type KnowledgeBackendFactory,
@@ -26,4 +28,7 @@ export {
   type RawStoredEntry,
   type StoreScope,
   type StoredEntry,
+  type WriteKind,
+  type WriteOp,
+  type WriteResult,
 } from './knowledge-store.js';

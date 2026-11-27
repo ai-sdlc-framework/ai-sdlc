@@ -7,8 +7,9 @@
  * amendment of 2026-11-26 (DEC-0427) adds a registration seam: `knowledge.backend` names a
  * backend that an installed package (`knowledge.backendModule`) registers. Selection fails
  * closed, like `retrieval/registry.ts`: an unregistered backend throws `KnowledgeBackendError`
- * and never falls back to files. The interface is synchronous because every caller is.
- * Modelled on the `RetrievalIndex` contract (`retrieval/types.ts`).
+ * and never falls back to files. Reads (`get`, `list`, `listRaw`) are synchronous; the named
+ * writes `create` and `write` are async so a network backend can honour them (AISDLC-1455,
+ * DEC-0443). Modelled on the `RetrievalIndex` contract (`retrieval/types.ts`).
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -16,6 +17,7 @@ import { dirname, join, resolve } from 'node:path';
 import { dump } from '../util/yaml.js';
 import { DEFAULT_KNOWLEDGE_BACKEND, type KnowledgeConfig } from './config.js';
 import { parseEntryFile, toEntry, type KnowledgeEntry } from './entry.js';
+import { appendKnowledgeEvent, type KnowledgeEventKind } from './log.js';
 
 /** The two RFC-0053 roots: the git-tracked root and the git-ignored protected root. */
 export type StoreScope = 'tracked' | 'protected';
@@ -60,6 +62,63 @@ export interface PutResult {
   created: boolean;
 }
 
+/**
+ * The closed set of named write operations (AISDLC-1455, DEC-0443). A server backend
+ * authorizes and audits by kind, so adding a kind is an interface change.
+ *
+ * - `confirm`: a person confirms the entry; `fields` is the patch (confidence, observed).
+ * - `correct`: replace the value; `fields` is the patch (value, contentHash, observed).
+ * - `supersede`: ONE call. `fields` are the full fields of the new entry; the backend creates
+ *   it (linked by `supersedes`) and marks the old entry `status: superseded`.
+ * - `promote`: raise authority; `fields` must carry `authority` (the target) and `proof`.
+ * - `reobserve`: a fresh observation; `fields` is the patch (confidence, observed).
+ * - `refute`: drop authority; `fields` is the patch (normally `authority: inferred`).
+ * - `reingest`: a source re-ingest overwrites the entry; `fields` replace all fields.
+ * - `excise`: remove the entry outright. The files backend does not support it.
+ *
+ * `promote`, `supersede`, `confirm` and `excise` are never deferred offline: a backend
+ * applies, proposes or rejects them synchronously with the call.
+ */
+export const WRITE_KINDS = [
+  'confirm',
+  'correct',
+  'supersede',
+  'promote',
+  'reobserve',
+  'refute',
+  'reingest',
+  'excise',
+] as const;
+
+export type WriteKind = (typeof WRITE_KINDS)[number];
+
+export interface WriteOp {
+  kind: WriteKind;
+  fields: Record<string, unknown>;
+  /**
+   * Who acted. Recorded in the local knowledge log only; a server backend takes the principal
+   * from its own credential and never trusts this value.
+   */
+  principal: string;
+  /** Body of the entry that `supersede` creates or `reingest` writes. Default: kept / empty. */
+  body?: string;
+}
+
+export interface WriteResult {
+  /** The entry written: for `supersede`, the NEW entry. */
+  id: string;
+  /** Location inside its root; empty when rejected. */
+  path: string;
+  /** True when a new entry was created (`create`, `supersede`). */
+  created: boolean;
+  /** `proposed`: queued as a proposal. The files backend returns `applied` or `rejected`. */
+  status: 'applied' | 'proposed' | 'rejected';
+  /** Why the write was rejected or proposed. */
+  reason?: string;
+}
+
+export type CreateOptions = PutOptions & { principal: string };
+
 export interface KnowledgeStore {
   readonly kind: string;
   /** The entry with this id, or null when none is found (or the addressed file does not parse). */
@@ -86,6 +145,40 @@ export interface KnowledgeStore {
    * files backend declares none, because its roots are already checked.
    */
   localPaths?(): string[];
+  /** Create a new entry; rejected when its location already holds one. Logs `created`. */
+  create(
+    entry: { fields: Record<string, unknown>; body: string },
+    opts: CreateOptions,
+  ): Promise<WriteResult>;
+  /** Apply a named operation to the entry `id`; logs exactly one event when applied. */
+  write(id: string, op: WriteOp, opts?: { scope?: StoreScope }): Promise<WriteResult>;
+}
+
+const EVENT_OF: Record<WriteKind, KnowledgeEventKind> = {
+  confirm: 'confirmed',
+  correct: 'corrected',
+  supersede: 'superseded',
+  promote: 'promoted',
+  reobserve: 'reobserved',
+  refute: 'refuted',
+  reingest: 'reingested',
+  excise: 'excised',
+};
+
+/** The log `by` role from a principal: `human:<email>` is a human, anything else an agent. */
+function roleOf(principal: string): string {
+  return principal.startsWith('human:') ? 'human' : 'agent';
+}
+
+function isProtected(scope: StoreScope, fields: Record<string, unknown>): boolean {
+  const s = typeof fields.scope === 'string' ? fields.scope.trim().toLowerCase() : '';
+  return scope === 'protected' || s === 'protected';
+}
+
+/** Field names only: the log is committed, so no value (or hash of one) ever enters it. */
+function fieldNames(fields: Record<string, unknown>): string {
+  const names = Object.keys(fields).sort();
+  return names.length === 0 ? 'no fields changed' : `fields: ${names.join(', ')}`;
 }
 
 /**
@@ -164,7 +257,12 @@ export class FilesKnowledgeStore implements KnowledgeStore {
     return null;
   }
 
-  private write(scope: StoreScope, path: string, fields: Record<string, unknown>, body: string) {
+  private writeFile(
+    scope: StoreScope,
+    path: string,
+    fields: Record<string, unknown>,
+    body: string,
+  ): void {
     const file = join(this.root(scope), path);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, `---\n${dump(fields)}---\n${body}`);
@@ -187,7 +285,7 @@ export class FilesKnowledgeStore implements KnowledgeStore {
   put(entry: { fields: Record<string, unknown>; body: string }, opts: PutOptions): PutResult {
     const path = opts.path ?? join(String(entry.fields.trunk), `${String(entry.fields.id)}.md`);
     const created = !existsSync(join(this.root(opts.scope), path));
-    this.write(opts.scope, path, entry.fields, entry.body);
+    this.writeFile(opts.scope, path, entry.fields, entry.body);
     return { path, created };
   }
 
@@ -200,7 +298,7 @@ export class FilesKnowledgeStore implements KnowledgeStore {
     if (!e) return null;
     const before = { ...e.fields };
     edit(e.fields);
-    this.write(e.scope, e.path, e.fields, e.body);
+    this.writeFile(e.scope, e.path, e.fields, e.body);
     return before;
   }
 
@@ -232,6 +330,92 @@ export class FilesKnowledgeStore implements KnowledgeStore {
           parsed: parseEntryFile(readFileSync(join(this.root(s), path), 'utf-8')),
         })),
     );
+  }
+
+  /** The knowledge log sits next to the tracked root; every applied write needs it. */
+  private log(
+    kind: KnowledgeEventKind,
+    id: string,
+    principal: string,
+    extra: { from?: string; to?: string; proof?: string; detail?: string } = {},
+  ): void {
+    appendKnowledgeEvent(this.root('tracked'), {
+      event: kind,
+      id,
+      by: roleOf(principal),
+      principal,
+      ...extra,
+    });
+  }
+
+  async create(
+    entry: { fields: Record<string, unknown>; body: string },
+    opts: CreateOptions,
+  ): Promise<WriteResult> {
+    const id = String(entry.fields.id);
+    const path = opts.path ?? join(String(entry.fields.trunk), `${id}.md`);
+    if (existsSync(join(this.root(opts.scope), path))) {
+      return { id, path: '', created: false, status: 'rejected', reason: `'${path}' exists` };
+    }
+    this.writeFile(opts.scope, path, entry.fields, entry.body);
+    this.log('created', id, opts.principal, {
+      detail: isProtected(opts.scope, entry.fields) ? 'protected entry created' : undefined,
+    });
+    return { id, path, created: true, status: 'applied' };
+  }
+
+  async write(id: string, op: WriteOp, opts: { scope?: StoreScope } = {}): Promise<WriteResult> {
+    const reject = (reason: string): WriteResult => ({
+      id,
+      path: '',
+      created: false,
+      status: 'rejected',
+      reason,
+    });
+    if (!(WRITE_KINDS as readonly string[]).includes(op.kind)) {
+      return reject(`unknown write kind '${String(op.kind)}'`);
+    }
+    if (op.kind === 'excise') return reject('the files backend does not support excise');
+    if (op.kind === 'promote' && (!op.fields.authority || !op.fields.proof)) {
+      return reject('promote requires the target authority and the proof');
+    }
+    const e = this.get(id, { scope: opts.scope });
+    if (!e) return reject(`entry '${id}' not found`);
+    const prot = isProtected(e.scope, e.fields);
+
+    if (op.kind === 'supersede') {
+      const newId = String(op.fields.id ?? '');
+      if (newId === '') return reject('supersede requires the new entry id');
+      if (newId === id) return reject('an entry cannot supersede itself');
+      if (typeof op.fields.trunk !== 'string') return reject('supersede requires the new trunk');
+      const path = join(op.fields.trunk, `${newId}.md`);
+      if (existsSync(join(this.root(e.scope), path))) return reject(`'${path}' exists`);
+      const rels = Array.isArray(op.fields.relations)
+        ? [...(op.fields.relations as { type: string; target: string }[])]
+        : [];
+      if (!rels.some((r) => r.type === 'supersedes' && r.target === id)) {
+        rels.push({ type: 'supersedes', target: id });
+      }
+      const fields = { ...op.fields, supersedes: id, relations: rels };
+      this.writeFile(e.scope, path, fields, op.body ?? '');
+      this.writeFile(e.scope, e.path, { ...e.fields, status: 'superseded' }, e.body);
+      this.log('superseded', id, op.principal, { to: newId, detail: `${newId} supersedes ${id}` });
+      return { id: newId, path, created: true, status: 'applied' };
+    }
+
+    const before = e.fields;
+    const fields = op.kind === 'reingest' ? { ...op.fields } : { ...e.fields, ...op.fields };
+    this.writeFile(e.scope, e.path, fields, op.kind === 'reingest' ? (op.body ?? e.body) : e.body);
+    const extra: { from?: string; to?: string; proof?: string; detail?: string } = {
+      detail: `${fieldNames(op.fields)}${prot ? ' (protected; values not logged)' : ''}`,
+    };
+    if (op.kind === 'promote' || (op.kind === 'refute' && op.fields.authority !== undefined)) {
+      extra.from = String(before.authority);
+      extra.to = String(op.fields.authority);
+    }
+    if (op.kind === 'promote') extra.proof = String(op.fields.proof);
+    this.log(EVENT_OF[op.kind], id, op.principal, extra);
+    return { id, path: e.path, created: false, status: 'applied' };
   }
 }
 

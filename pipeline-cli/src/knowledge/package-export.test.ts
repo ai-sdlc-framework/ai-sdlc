@@ -15,7 +15,12 @@ const pkg = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf-8')) as 
   exports: Record<string, { types: string; import: string }>;
 };
 
-const RUNTIME_NAMES = ['KnowledgeBackendError', 'openKnowledgeStore', 'registerKnowledgeBackend'];
+const RUNTIME_NAMES = [
+  'KnowledgeBackendError',
+  'openKnowledgeStore',
+  'registerKnowledgeBackend',
+  'WRITE_KINDS',
+];
 const TYPE_NAMES = [
   'KnowledgeStore',
   'KnowledgeEntry',
@@ -32,6 +37,10 @@ const TYPE_NAMES = [
   'KnowledgeBackendRegistry',
   'KnowledgeBackendFactory',
   'KnowledgeStoreRoots',
+  'WriteKind',
+  'WriteOp',
+  'WriteResult',
+  'CreateOptions',
 ];
 const INTERNAL = /ingest|promot|retriev/i;
 
