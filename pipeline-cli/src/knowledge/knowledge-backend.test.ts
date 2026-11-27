@@ -24,7 +24,12 @@ import { ingestSource } from './ingest-sources.js';
 import { promoteEntry, refuteEntry, reobserveEntry } from './promote.js';
 import { confirmEntry, correctEntry, supersedeEntry } from './human.js';
 import { captureFactForProject } from './data-room.js';
-import { DEFAULT_ONTOLOGY } from './ontology.js';
+import { DEFAULT_ONTOLOGY, ONTOLOGY_FILE, type Ontology } from './ontology.js';
+import { hashValue } from './entry.js';
+import { validateKnowledge } from './store.js';
+import { ingestMemoryForProject } from './ingest-memory.js';
+import { serializeNote } from '../memory-dream/notes.js';
+import { buildContextCli } from '../cli/context.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let project: string;
@@ -288,6 +293,135 @@ describe('operations hand a registered backend the project root (AISDLC-1432)', 
         }),
       ),
     ).toEqual(once);
+  });
+});
+
+/**
+ * A registered backend that supplies the ontology (AISDLC-1435): its trunks come from the
+ * `knowledge.supplies-ontology.trunks` option, and every call and write is recorded.
+ */
+const supplied = { calls: 0, puts: [] as Record<string, unknown>[], tracked: [] as unknown[] };
+registerKnowledgeBackend('supplies-ontology', (_cfg, ctx) => {
+  const trunks = (ctx.options as { trunks: string[] }).trunks;
+  return {
+    kind: 'supplies-ontology',
+    get: () => null,
+    put: (e) => {
+      supplied.puts.push(e.fields);
+      return { path: 'x.md', created: true };
+    },
+    update: () => null,
+    create: () => Promise.resolve({ id: 'x', path: '', created: false, status: 'rejected' }),
+    write: () => Promise.resolve({ id: 'x', path: '', created: false, status: 'rejected' }),
+    list: () => [],
+    listRaw: (scope) =>
+      (scope === 'tracked' ? supplied.tracked : []) as ReturnType<KnowledgeStore['listRaw']>,
+    ontology: (): Ontology => {
+      supplied.calls++;
+      return { ...DEFAULT_ONTOLOGY, trunks };
+    },
+  };
+});
+
+describe('a backend may supply the ontology (AISDLC-1435)', () => {
+  let dir: string;
+  afterEach(() => {
+    removeFixtureDir(dir);
+    process.exitCode = 0;
+  });
+
+  /** A project on the supplying backend whose local ontology.yaml is malformed (unused). */
+  function project(trunks: string[]): string {
+    dir = writeContext(
+      mkdtempSync(join(tmpdir(), 'knowledge-ontology-')),
+      `  backend: supplies-ontology\n  supplies-ontology:\n    trunks: [${trunks.join(', ')}]\n`,
+    );
+    mkdirSync(join(dir, '.ai-sdlc/knowledge'), { recursive: true });
+    writeFileSync(join(dir, '.ai-sdlc/knowledge', ONTOLOGY_FILE), 'trunks: nope\n');
+    supplied.calls = 0;
+    supplied.puts = [];
+    supplied.tracked = [];
+    return dir;
+  }
+
+  it('validateKnowledge checks entries against the supplied ontology, not ontology.yaml', () => {
+    project(['shared']);
+    const value = 'a shared fact';
+    supplied.tracked = [
+      {
+        scope: 'tracked',
+        path: 'shared/a-shared-fact.md',
+        parsed: {
+          fields: {
+            id: 'a-shared-fact',
+            trunk: 'shared',
+            type: 'fact',
+            value,
+            confidence: 0.7,
+            authority: 'inferred',
+            scope: 'internal',
+            source: 'NOTES.md#a',
+            observed: '2026-11-27',
+            decay: 'durable',
+            relations: [],
+            contentHash: hashValue(value),
+          },
+          body: '\n',
+        },
+      },
+    ];
+    const report = validateKnowledge(dir);
+    expect(report.errors).toEqual([]);
+    expect(report.entries).toBe(1);
+    expect(supplied.calls).toBe(1);
+  });
+
+  it('ingest-memory validates notes against the supplied ontology', () => {
+    const mem = join(project(['systems']), 'mem');
+    mkdirSync(mem);
+    writeFileSync(
+      join(mem, 'user_role.md'),
+      serializeNote({ name: 'user_role', description: 'role', type: 'user', body: 'b' }),
+    );
+    expect(() => ingestMemoryForProject(dir, mem, '2026-11-27')).toThrow(
+      /unknown trunk 'memory' \(allowed: systems\)/,
+    );
+    project(['memory']);
+    const mem2 = join(dir, 'mem');
+    mkdirSync(mem2);
+    writeFileSync(
+      join(mem2, 'user_role.md'),
+      serializeNote({ name: 'user_role', description: 'role', type: 'user', body: 'b' }),
+    );
+    expect(ingestMemoryForProject(dir, mem2, '2026-11-27').created).toBe(1);
+    expect(supplied.puts.map((f) => f.trunk)).toEqual(['memory']);
+  });
+
+  it('cli-context ingest-sections, ingest and the verify context use the supplied ontology', async () => {
+    const cli = (args: string[]) =>
+      buildContextCli([...args, '--project-dir', dir])
+        .exitProcess(false)
+        .fail(false)
+        .parseAsync();
+    project(['shared']);
+    writeFileSync(join(dir, 'NOTES.md'), '# T\n\n## Why\n\nBecause.\n');
+    await expect(async () => cli(['ingest-sections', 'NOTES.md'])).rejects.toThrow(
+      /unknown trunk 'process' \(allowed: shared\)/,
+    );
+
+    project(['process']);
+    writeFileSync(join(dir, 'NOTES.md'), '# T\n\n## Why\n\nBecause.\n');
+    await cli(['ingest-sections', 'NOTES.md']);
+    expect(supplied.puts.map((f) => f.trunk)).toEqual(['process']);
+    expect(supplied.calls).toBe(1);
+
+    supplied.calls = 0;
+    await cli(['ingest', '--source', 'tasks']);
+    expect(supplied.calls).toBe(1);
+
+    supplied.calls = 0;
+    await cli(['synthesize']);
+    expect(supplied.calls).toBe(1);
   });
 });
 

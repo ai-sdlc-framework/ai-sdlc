@@ -13,11 +13,11 @@ import { readMemoryFolder, stemOf, type Note } from '../memory-dream/notes.js';
 import { now } from '../clock.js';
 import { loadKnowledgeConfig } from './config.js';
 import { DATA_ROOM_SOURCE_PREFIX } from './data-room.js';
-import { loadOntology } from './ontology.js';
 import { hashValue, validateEntryFields } from './entry.js';
 import {
   backendSelection,
   openKnowledgeStore,
+  storeOntology,
   type KnowledgeBackendSelection,
   type KnowledgeStore,
 } from './knowledge-store.js';
@@ -34,6 +34,8 @@ export interface MemoryIngestOptions extends KnowledgeBackendSelection {
   protectedRootAbs: string;
   ontology: Ontology;
   observed: string;
+  /** A store already open on this backend and protected root; default opens one. */
+  store?: KnowledgeStore;
 }
 
 export interface MemoryIngestResult {
@@ -114,15 +116,17 @@ export function ingestMemoryTrunk(o: MemoryIngestOptions): MemoryIngestResult {
     superseded: 0,
     skipped: 0,
   };
-  const store = openKnowledgeStore(
-    {
-      backend: o.backend,
-      backendModule: o.backendModule,
-      backendOptions: o.backendOptions,
-      protectedRoot: o.protectedRootAbs,
-    },
-    o.projectDir,
-  );
+  const store =
+    o.store ??
+    openKnowledgeStore(
+      {
+        backend: o.backend,
+        backendModule: o.backendModule,
+        backendOptions: o.backendOptions,
+        protectedRoot: o.protectedRootAbs,
+      },
+      o.projectDir,
+    );
   const live = new Set<string>();
   for (const n of readMemoryFolder(o.memoryDir).notes) {
     if (n.problems.length > 0) {
@@ -175,13 +179,22 @@ export function ingestMemoryForProject(
 ): MemoryIngestResult {
   const config = loadKnowledgeConfig(projectDir);
   const abs = (p: string): string => (isAbsolute(p) ? p : join(projectDir, p));
+  const store = openKnowledgeStore(
+    {
+      ...backendSelection(config),
+      trackedRoot: abs(config.trackedRoot),
+      protectedRoot: abs(config.protectedRoot),
+    },
+    projectDir,
+  );
   return ingestMemoryTrunk({
     ...backendSelection(config),
     projectDir,
     memoryDir,
     protectedRootAbs: abs(config.protectedRoot),
-    ontology: loadOntology(abs(config.trackedRoot)).ontology,
+    ontology: storeOntology(store, abs(config.trackedRoot)).ontology,
     observed,
+    store,
   });
 }
 

@@ -6,8 +6,12 @@ import { isAbsolute, join, relative } from 'node:path';
 import { loadKnowledgeConfig, type KnowledgeConfig } from './config.js';
 import { classifyEntry } from './classify.js';
 import { toEntry, validateEntryFields } from './entry.js';
-import { backendSelection, openKnowledgeStore, toEntries } from './knowledge-store.js';
-import { loadOntology } from './ontology.js';
+import {
+  backendSelection,
+  openKnowledgeStore,
+  storeOntology,
+  toEntries,
+} from './knowledge-store.js';
 
 export interface Finding {
   file: string;
@@ -31,14 +35,14 @@ export function validateKnowledge(
   const report: ValidationReport = { entries: 0, errors: [], warnings: [] };
   const trackedAbs = abs(projectRoot, config.trackedRoot);
   const protectedAbs = abs(projectRoot, config.protectedRoot);
-  const { ontology, errors: ontologyErrors } = loadOntology(trackedAbs);
+  const store = openKnowledgeStore(config, projectRoot);
+  const { ontology, errors: ontologyErrors } = storeOntology(store, trackedAbs);
   for (const message of ontologyErrors) {
     report.errors.push({ file: join(config.trackedRoot, 'ontology.yaml'), message });
   }
   if (ontologyErrors.length > 0) return report;
 
   const dirs = { tracked: trackedAbs, protected: protectedAbs };
-  const store = openKnowledgeStore(config, projectRoot);
   const seenIds = new Map<string, string>();
   for (const kind of ['tracked', 'protected'] as const) {
     for (const { path, parsed } of store.listRaw(kind)) {

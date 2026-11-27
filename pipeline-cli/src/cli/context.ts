@@ -38,7 +38,12 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { now } from '../clock.js';
 import { DEFAULT_KNOWLEDGE_BACKEND, loadKnowledgeConfig } from '../knowledge/config.js';
-import { backendSelection, openKnowledgeStore, toEntries } from '../knowledge/knowledge-store.js';
+import {
+  backendSelection,
+  openKnowledgeStore,
+  storeOntology,
+  toEntries,
+} from '../knowledge/knowledge-store.js';
 import { captureFactForProject, exportableEntries } from '../knowledge/data-room.js';
 import {
   checkKnowledgeBackend,
@@ -65,7 +70,6 @@ import {
   readSynthetic,
   writeSynthetic,
 } from '../knowledge/eval/quarantine.js';
-import { loadOntology } from '../knowledge/ontology.js';
 import {
   buildDashboard,
   confirmEntry,
@@ -96,9 +100,13 @@ function knowledgeCtx(projectDir: string) {
   const trackedAbs = isAbsolute(config.trackedRoot)
     ? config.trackedRoot
     : join(projectDir, config.trackedRoot);
+  const store = openKnowledgeStore(
+    { ...backendSelection(config), trackedRoot: trackedAbs },
+    projectDir,
+  );
   return {
     trackedAbs,
-    verify: { projectDir, config, ontology: loadOntology(trackedAbs).ontology },
+    verify: { projectDir, config, ontology: storeOntology(store, trackedAbs).ontology },
   };
 }
 
@@ -433,17 +441,17 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
         const trackedAbs = isAbsolute(config.trackedRoot)
           ? config.trackedRoot
           : join(projectDir, config.trackedRoot);
-        const { ontology } = loadOntology(trackedAbs);
+        const store = openKnowledgeStore(
+          { ...backendSelection(config), trackedRoot: trackedAbs },
+          projectDir,
+        );
+        const { ontology } = storeOntology(store, trackedAbs);
         const file = String(args.file);
         const entries = sectionsToEntries(readFileSync(join(projectDir, file), 'utf-8'), ontology, {
           source: file,
           observed: String(args.observed),
           headings: args.heading as string[] | undefined,
         });
-        const store = openKnowledgeStore(
-          { ...backendSelection(config), trackedRoot: trackedAbs },
-          projectDir,
-        );
         for (const e of entries) {
           store.put({ fields: e.fields, body: e.body }, { scope: 'tracked', path: e.path });
         }
@@ -469,11 +477,15 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
         const trackedRootAbs = isAbsolute(config.trackedRoot)
           ? config.trackedRoot
           : join(projectDir, config.trackedRoot);
+        const store = openKnowledgeStore(
+          { ...backendSelection(config), trackedRoot: trackedRootAbs },
+          projectDir,
+        );
         const r = ingestSource(args.source as IngestSource, {
           ...backendSelection(config),
           projectDir,
           trackedRootAbs,
-          ontology: loadOntology(trackedRootAbs).ontology,
+          ontology: storeOntology(store, trackedRootAbs).ontology,
           observed: String(args.observed),
           eventsFile: args['events-file'] as string | undefined,
           generatedFile: args.file as string | undefined,
