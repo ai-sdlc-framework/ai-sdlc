@@ -27,6 +27,9 @@ export const execClaude: ExecFn = (cmd, args, stdin, env) =>
     child.on('close', (code) =>
       code === 0 ? resolve(out) : reject(new Error(`${cmd} exited ${code}: ${err.slice(0, 300)}`)),
     );
+    // A child that exits before reading stdin raises EPIPE on the pipe; the
+    // `close` or `error` handler above already reports that failure.
+    child.stdin.on('error', () => undefined);
     child.stdin.end(stdin);
   });
 

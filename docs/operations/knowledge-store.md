@@ -114,6 +114,55 @@ fail when the module does not resolve, the factory does not open, or a path is n
 git-ignored; warn when a non-files backend declares zero paths; pass otherwise and for
 `files` ([doctor.md](doctor.md)). `localPaths()` changes no `put`/`update` signature.
 
+### Named writes (AISDLC-1455, DEC-0443)
+
+`KnowledgeStore` writes are two async named operations; reads (`get`, `list`, `listRaw`)
+stay synchronous. A server backend can then authorize and audit each write by its kind
+instead of receiving an opaque edit function.
+
+- `create({ fields, body }, { scope, path?, principal })` creates an entry. It is rejected
+  when the location already holds one; a source re-ingest uses `write(id, { kind: 'reingest' })`.
+- `write(id, { kind, fields, principal, body? }, { scope? })` applies one named operation.
+
+`WriteKind` is a closed union (`WRITE_KINDS`); adding a kind is an interface change:
+
+| Kind | `fields` | Log event |
+|---|---|---|
+| `confirm` | patch (confidence, observed); may be empty | `confirmed` |
+| `correct` | patch (value, contentHash, observed) | `corrected` |
+| `supersede` | the full fields of the NEW entry | `superseded` |
+| `promote` | must carry `authority` (the target) and `proof` | `promoted` |
+| `reobserve` | patch (confidence, observed) | `reobserved` |
+| `refute` | patch (normally `authority: inferred`) | `refuted` |
+| `reingest` | the full fields that replace the entry | `reingested` |
+| `excise` | none; removes the entry | `excised` |
+
+`supersede` is one call: `write(oldId, { kind: 'supersede', fields: <new entry fields> })`
+creates the new entry (with `supersedes: oldId` and a `supersedes` relation) and marks the
+old one `status: superseded`. The result names the new id and path.
+
+Every write returns `WriteResult` `{ id, path, created, status, reason? }`. `status` is
+`applied`, `proposed` (queued as a proposal for someone with authority to accept) or
+`rejected` (`reason` says why; nothing changed). The `files` backend returns `applied`, or
+`rejected` for a missing entry, a `promote` without authority or proof, or any `excise`,
+which it does not support.
+
+`promote`, `supersede`, `confirm` and `excise` are never deferred offline: a backend
+applies, proposes or rejects them synchronously with the call, never queues them for a later
+sync.
+
+Every applied `create` and `write` appends exactly one knowledge-log event naming its kind
+and principal, including kinds that change no field (`confirm`). A rejected write changes
+nothing and logs nothing. Events record field names, never values; a protected entry's event
+carries no value and no hash of one (AISDLC-1424).
+
+`principal` (`human:<email>`, `agent:<session>`, `agent:task:<id>`) is recorded in the
+local knowledge log only, and `by` derives from it (`human:` is a human, anything else an
+agent). A server backend takes the principal from its own credential and ignores the value
+passed in.
+
+`put` and `update` remain until their callers move to the named writes (AISDLC-1456).
+
 ## Scaffold
 
 `/ai-sdlc init` (and `ai-sdlc init`, `cli-init`, `doctor --fix`) writes two optional files

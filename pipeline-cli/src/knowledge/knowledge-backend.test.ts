@@ -163,6 +163,8 @@ registerKnowledgeBackend('recording', (_cfg, ctx) => {
     update: () => null,
     list: () => [],
     listRaw: () => [],
+    create: () => Promise.resolve({ id: 'x', path: '', created: false, status: 'rejected' }),
+    write: () => Promise.resolve({ id: 'x', path: '', created: false, status: 'rejected' }),
   };
 });
 

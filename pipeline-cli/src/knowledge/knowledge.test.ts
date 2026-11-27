@@ -394,6 +394,8 @@ describe('backend local paths (AISDLC-1433)', () => {
         update: () => null,
         list: () => [],
         listRaw: () => [],
+        create: () => Promise.reject(new Error('not used')),
+        write: () => Promise.reject(new Error('not used')),
       };
       if (withPaths) {
         store.localPaths = () => {

@@ -177,6 +177,8 @@ function memoryStore(entries: Map<string, StoredEntry>): KnowledgeStore {
     update: () => null,
     list: (scope) => (typeof scope === 'object' ? inTrunk(scope.trunk) : [...entries.values()]),
     listRaw: () => [],
+    create: () => Promise.reject(new Error('not used')),
+    write: () => Promise.reject(new Error('not used')),
   };
 }
 

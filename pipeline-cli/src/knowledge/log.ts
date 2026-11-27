@@ -14,7 +14,15 @@ export function knowledgeLogPath(trackedRootAbs: string): string {
 }
 
 export type KnowledgeEventKind =
-  'promoted' | 'superseded' | 'refuted' | 'reobserved' | 'confirmed' | 'corrected';
+  | 'promoted'
+  | 'superseded'
+  | 'refuted'
+  | 'reobserved'
+  | 'confirmed'
+  | 'corrected'
+  | 'created'
+  | 'reingested'
+  | 'excised';
 
 export interface KnowledgeEvent {
   ts: string;

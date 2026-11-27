@@ -405,6 +405,12 @@ describe('execClaude', () => {
       /could not start/,
     );
   });
+
+  it('reports the exit, not an EPIPE, when the child exits before reading stdin', async () => {
+    await expect(
+      execClaude(process.execPath, ['-e', 'process.exit(4)'], 'x'.repeat(8_000_000), process.env),
+    ).rejects.toThrow(/exited 4/);
+  });
 });
 
 describe('run', () => {
