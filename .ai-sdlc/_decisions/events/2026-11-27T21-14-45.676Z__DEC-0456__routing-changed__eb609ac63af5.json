@@ -1,0 +1,1 @@
+{"eventVersion":"v1","type":"routing-changed","ts":"2026-11-27T21:14:45.676Z","decisionId":"DEC-0456","fromTier":"operational","toTier":"design","reason":"operational timebox of 30 minutes lapsed unanswered","by":"framework"}
