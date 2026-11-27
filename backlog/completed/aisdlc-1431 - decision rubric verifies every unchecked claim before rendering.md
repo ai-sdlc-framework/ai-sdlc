@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1431
 title: Decision rubric verifies every unchecked claim with a research pass before rendering
-status: To Do
+status: Done
 priority: high
 labels:
   - ai-sdlc-plugin
