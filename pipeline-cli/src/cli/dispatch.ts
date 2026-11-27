@@ -231,6 +231,7 @@ import { acquireReconcileLock, releaseReconcileLock } from '../hierarchy/open-pr
 import { gatherPrFacts } from '../hierarchy/pr-facts.js';
 import { annotateSnapshot, appendReconcileLog, rowsForOpen } from '../hierarchy/pr-rows.js';
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
+import { useGhReadCacheDir } from '../hierarchy/gh-read-cache.js';
 import { reenter } from '../hierarchy/reenter.js';
 import { decideResumeReview } from '../next-step/resume-decision.js';
 import { defaultRunner } from '../runtime/exec.js';
@@ -544,6 +545,8 @@ export async function runDispatchCli(
         return 2;
       }
       const { maxSameHeadActions, maxCiRounds, reconcile: timers } = loadPrLifecycleConfig(cwd);
+      // AISDLC-1440: this pass runs in its own process; share cached reads through the board.
+      useGhReadCacheDir(boardDir);
       // AISDLC-1095: one log row per open PR, and the same fields on the snapshot.
       const logRows = (facts: readonly ReconcilePr[]): void => {
         try {

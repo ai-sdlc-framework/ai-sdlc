@@ -15,9 +15,13 @@
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   renameSync,
   writeFileSync,
 } from 'node:fs';
@@ -220,6 +224,29 @@ export function readGhCalls(logPath: string): GhCall[] {
   } catch {
     return [];
   }
+  return parseGhCallLines(text);
+}
+
+/** Calls in the last `bytes` of the log; the first, possibly torn, line is skipped (AISDLC-1440). */
+export function readGhCallsTail(logPath: string, bytes = 2 * 1024 * 1024): GhCall[] {
+  let fd: number | undefined;
+  try {
+    fd = openSync(logPath, 'r');
+    const size = fstatSync(fd).size;
+    const start = Math.max(0, size - bytes);
+    const buf = Buffer.alloc(size - start);
+    readSync(fd, buf, 0, buf.length, start);
+    let text = buf.toString('utf-8');
+    if (start > 0) text = text.slice(text.indexOf('\n') + 1);
+    return parseGhCallLines(text);
+  } catch {
+    return [];
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+function parseGhCallLines(text: string): GhCall[] {
   const calls: GhCall[] = [];
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
@@ -273,6 +300,72 @@ export function parseQuota(stdout: string): Quota | undefined {
     return undefined;
   }
 }
+
+/** `gh` subcommands served by the GraphQL API; other subcommands use REST (core). */
+const GRAPHQL_COMMANDS = new Set(['pr', 'issue', 'repo', 'project']);
+
+/**
+ * Which buckets a logged call spends: `api graphql` and the GraphQL-backed subcommands spend
+ * graphql, other `api` paths and REST subcommands spend core; the `rate_limit` read is free.
+ * A rate-limit refusal naming GraphQL is attributed to graphql whatever the argv.
+ */
+export function callBuckets(c: Pick<GhCall, 'argv' | 'error'>): (keyof Quota)[] {
+  const [cmd, sub] = c.argv;
+  if (/graphql/i.test(c.error ?? '')) return ['graphql'];
+  if (cmd === 'api') {
+    if (isRateLimitRead(c.argv)) return [];
+    return sub === 'graphql' ? ['graphql'] : ['core'];
+  }
+  if (cmd === undefined) return [];
+  return GRAPHQL_COMMANDS.has(cmd) ? ['graphql'] : ['core'];
+}
+
+/**
+ * AISDLC-1440: the local token's quota as the ledger last saw it, so nothing polls
+ * `gh api rate_limit` for it: the newest hourly snapshot per bucket, replaced by any newer
+ * `x-ratelimit-remaining` a `gh api -i` call printed, minus every call logged since that reading
+ * (the snapshot is hourly, so without this a busy hour would still look full). A newer rate-limit
+ * refusal reads as 0 for its bucket until the window resets. A bucket whose reset has passed, or
+ * with no reset and older than an hour, is unknown (the window refilled it). CI lines are ignored.
+ */
+export function ledgerQuota(calls: readonly GhCall[], now: Date): Quota | undefined {
+  const t = now.getTime();
+  const local = calls
+    .filter((c) => c.token === undefined || c.token === USER_TOKEN_NAME)
+    .map((c) => ({ c, at: Date.parse(c.at) }))
+    .filter(({ at }) => Number.isFinite(at) && at <= t);
+  const seen: Partial<Record<keyof Quota, { remaining: number; at: number; reset?: number }>> = {};
+  const set = (name: string, remaining: number, at: number, reset?: number): void => {
+    if (name !== 'core' && name !== 'graphql') return;
+    const prev = seen[name];
+    if (prev && prev.at > at) return;
+    // A newer reading without a reset stays in the earlier reading's window until it ends.
+    const keep =
+      reset ?? (prev?.reset !== undefined && prev.reset * 1000 > at ? prev.reset : undefined);
+    seen[name] = { remaining, at, ...(keep !== undefined ? { reset: keep } : {}) };
+  };
+  for (const { c, at } of local) {
+    for (const [name, b] of Object.entries(c.quota ?? {})) set(name, b.remaining, at, b.reset);
+    if (typeof c.remaining === 'number' && c.resource) set(c.resource, c.remaining, at);
+    if (c.rateLimited) for (const name of callBuckets(c)) set(name, 0, at);
+  }
+  const out: Quota = {};
+  for (const name of ['core', 'graphql'] as const) {
+    const b = seen[name];
+    if (!b) continue;
+    const live = b.reset !== undefined ? b.reset * 1000 > t : t - b.at < HOUR_MS;
+    if (!live) continue;
+    // Calls after the reading spend the bucket; the reading's own call is already in it.
+    const spent = local.filter(
+      ({ c, at }) => at > b.at && !c.rateLimited && callBuckets(c).includes(name),
+    ).length;
+    out[name] = Math.max(0, b.remaining - spent);
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** `token` value of the local user token, when a line names it at all. */
+const USER_TOKEN_NAME = 'user';
 
 /** The lower of the known buckets, or undefined when unknown. */
 export function lowestRemaining(q: Quota | undefined): number | undefined {

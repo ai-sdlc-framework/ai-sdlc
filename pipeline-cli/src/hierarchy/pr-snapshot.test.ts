@@ -10,6 +10,7 @@ import {
   prFingerprint,
   recordRefusal,
   refusalStillValid,
+  SNAPSHOT_FALLBACK_MS,
   SNAPSHOT_MAX_AGE_MS,
 } from './pr-snapshot.js';
 import type { CommandRunner } from './types.js';
@@ -88,6 +89,19 @@ describe('createSnapshotRunner', () => {
     calls.length = 0;
     wake(run, new Date(future.getTime() + SNAPSHOT_MAX_AGE_MS));
     expect(calls.filter((c) => c[1] === 'list')).toHaveLength(1);
+  });
+
+  it('a quiet snapshot is read again after the 5-minute fallback (AISDLC-1440)', () => {
+    const { run, calls } = fake();
+    mkdirSync(path.join(board, 'events'));
+    const t0 = new Date(Date.now() + 60_000);
+    wake(run, t0);
+    calls.length = 0;
+    wake(run, new Date(t0.getTime() + SNAPSHOT_FALLBACK_MS - 1));
+    expect(calls).toHaveLength(0);
+    wake(run, new Date(t0.getTime() + SNAPSHOT_FALLBACK_MS));
+    expect(calls.filter((c) => c[1] === 'list')).toHaveLength(1);
+    expect(SNAPSHOT_FALLBACK_MS).toBeLessThanOrEqual(5 * 60_000);
   });
 
   it('a no-PR check_run event does not invalidate the snapshot; a push does (AISDLC-1379)', () => {

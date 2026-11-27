@@ -22,6 +22,10 @@ import {
   redactArgv,
   pruneGhCalls,
   readGhCalls,
+  readGhCallsTail,
+  callBuckets,
+  ledgerQuota,
+  type GhCall,
 } from './gh-calls.js';
 
 const tmp = () => mkdtempSync(path.join(tmpdir(), 'gh-calls-'));
@@ -278,5 +282,109 @@ describe('gh call log (AISDLC-963)', () => {
     expect(
       redactArgv(['api', 'x', '-H', 'Authorization: tok', '-f', 'a=b', '--body=hi', '--jq', '.a']),
     ).toEqual(['api', 'x', '-H', '***', '-f', '***', '--body=***', '--jq', '.a']);
+  });
+});
+
+describe('ledgerQuota (AISDLC-1440)', () => {
+  const now = new Date('2026-11-26T12:00:00Z');
+  const at = (minAgo: number) => new Date(now.getTime() - minAgo * 60_000).toISOString();
+  const line = (c: Partial<GhCall>): GhCall => ({
+    at: at(10),
+    session: 's',
+    argv: ['pr', 'list'],
+    exit: 0,
+    ...c,
+  });
+  const reset = now.getTime() / 1000 + 600;
+
+  it('takes the newest snapshot, then newer -i readings in the same window', () => {
+    const calls = [
+      line({
+        at: at(50),
+        quota: { core: { remaining: 4000, reset }, graphql: { remaining: 4900 } },
+      }),
+      line({ at: at(30), remaining: 3500, resource: 'core' }),
+      line({ at: at(20), token: 'actions', quota: { core: { remaining: 10 } } }),
+      line({ at: at(25), remaining: 9, resource: 'search' }),
+    ];
+    // The two `pr list` lines after the graphql snapshot spend 2 of it.
+    expect(ledgerQuota(calls, now)).toEqual({ core: 3500, graphql: 4898 });
+  });
+
+  it('subtracts calls logged since the snapshot from the bucket they spend', () => {
+    const calls = [
+      line({
+        at: at(50),
+        argv: ['api', 'rate_limit'],
+        quota: { core: { remaining: 1500, reset } },
+      }),
+      ...Array.from({ length: 1200 }, () => line({ at: at(30), argv: ['run', 'list'] })),
+      line({ at: at(20), argv: ['api', 'repos/o/r/commits/main'], exit: 1, error: 'HTTP 404' }),
+      line({ at: at(20), argv: ['api', 'graphql', '-f', '***'] }),
+      line({ at: at(20), argv: ['api', 'rate_limit'] }),
+      line({ at: at(60), argv: ['run', 'list'] }),
+    ];
+    expect(ledgerQuota(calls, now)).toEqual({ core: 299 });
+    const spent = Array.from({ length: 2000 }, () => line({ at: at(5), argv: ['run', 'view'] }));
+    expect(ledgerQuota([calls[0]!, ...spent], now)).toEqual({ core: 0 });
+  });
+
+  it('reads a newer rate-limit refusal as 0 for its bucket until the window resets', () => {
+    const snap = line({
+      at: at(50),
+      argv: ['api', 'rate_limit'],
+      quota: { core: { remaining: 1500, reset }, graphql: { remaining: 4000, reset } },
+    });
+    const refused = line({
+      at: at(5),
+      argv: ['run', 'list'],
+      exit: 1,
+      error: 'API rate limit exceeded for user ID 1.',
+      rateLimited: true,
+    });
+    expect(ledgerQuota([snap, refused], now)).toEqual({ core: 0, graphql: 4000 });
+    const gql = { ...refused, argv: ['pr', 'list'], error: 'GraphQL: API rate limit exceeded' };
+    expect(ledgerQuota([snap, gql], now)).toEqual({ core: 1500, graphql: 0 });
+    // The refusal ends with the snapshot's window; with no known reset it holds an hour.
+    expect(ledgerQuota([snap, refused], new Date(reset * 1000 + 1))).toBeUndefined();
+    expect(ledgerQuota([refused], now)).toEqual({ core: 0 });
+  });
+
+  it('attributes calls to the bucket they spend', () => {
+    expect(callBuckets({ argv: ['api', 'rate_limit'] })).toEqual([]);
+    expect(callBuckets({ argv: [] })).toEqual([]);
+    expect(callBuckets({ argv: ['api', 'graphql'] })).toEqual(['graphql']);
+    expect(callBuckets({ argv: ['api', 'user'] })).toEqual(['core']);
+    expect(callBuckets({ argv: ['repo', 'view'] })).toEqual(['graphql']);
+    expect(callBuckets({ argv: ['run', 'view'] })).toEqual(['core']);
+    expect(callBuckets({ argv: ['api', 'x'], error: 'GraphQL: rate limit' })).toEqual(['graphql']);
+  });
+
+  it('forgets a bucket whose window has ended and ignores out-of-order or future lines', () => {
+    const calls = [
+      line({ at: at(5), remaining: 100, resource: 'core' }),
+      line({ at: at(90), quota: { core: { remaining: 1 }, graphql: { remaining: 2, reset: 1 } } }),
+      line({ at: 'bad', remaining: 1, resource: 'core' }),
+      line({
+        at: new Date(now.getTime() + 60_000).toISOString(),
+        quota: { graphql: { remaining: 7 } },
+      }),
+    ];
+    expect(ledgerQuota(calls, now)).toEqual({ core: 100 });
+    expect(ledgerQuota([], now)).toBeUndefined();
+    expect(
+      ledgerQuota([line({ at: at(90), remaining: 5, resource: 'core' })], now),
+    ).toBeUndefined();
+  });
+
+  it('reads only the tail of a long log', () => {
+    const log = path.join(tmp(), 'gh-calls.jsonl');
+    expect(readGhCallsTail(log)).toEqual([]);
+    for (let i = 0; i < 50; i++) appendGhCall(log, line({ argv: ['n', String(i)] }));
+    const tail = readGhCallsTail(log, 300);
+    expect(tail.length).toBeGreaterThan(0);
+    expect(tail.length).toBeLessThan(50);
+    expect(tail.at(-1)?.argv).toEqual(['n', '49']);
+    expect(readGhCallsTail(log)).toHaveLength(50);
   });
 });

@@ -1,6 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
-import { cachedGh } from './gh-read-cache.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import {
+  cachedGh,
+  GH_NEGATIVE_TTL_MS,
+  GH_READ_TTL_MS,
+  useGhReadCacheDir,
+} from './gh-read-cache.js';
 import { allowedAuthors, gatherDocsBump, gatherMainHealth } from './reconcile.js';
 import type { CommandRunner } from './types.js';
 
@@ -15,7 +24,7 @@ function fake(answer: (args: readonly string[]) => string) {
 const count = (calls: string[][], needle: string) => calls.filter((c) => c.includes(needle)).length;
 
 describe('cachedGh', () => {
-  it('reuses a success, refetches after the ttl, and never stores a failure', () => {
+  it('reuses a success until the ttl and a failure for the short negative ttl', () => {
     let t = 0;
     let status = 1;
     const calls: number[] = [];
@@ -23,16 +32,92 @@ describe('cachedGh', () => {
       calls.push(t);
       return { status, stdout: 'x', stderr: '' };
     };
-    cachedGh(run, 'k', ['a'], {}, 10, () => t);
-    cachedGh(run, 'k', ['a'], {}, 10, () => t);
-    expect(calls).toHaveLength(2);
+    const ttl = 10 * GH_NEGATIVE_TTL_MS;
+    cachedGh(run, 'k', ['a'], {}, ttl, () => t);
+    cachedGh(run, 'k', ['a'], {}, ttl, () => t);
+    expect(calls).toHaveLength(1);
+    t = GH_NEGATIVE_TTL_MS;
     status = 0;
-    cachedGh(run, 'k', ['a'], {}, 10, () => t);
-    cachedGh(run, 'k', ['a'], {}, 10, () => t);
+    cachedGh(run, 'k', ['a'], {}, ttl, () => t);
+    cachedGh(run, 'k', ['a'], {}, ttl, () => t);
+    expect(calls).toHaveLength(2);
+    t += ttl;
+    cachedGh(run, 'k', ['a'], {}, ttl, () => t);
     expect(calls).toHaveLength(3);
-    t = 11;
-    cachedGh(run, 'k', ['a'], {}, 10, () => t);
-    expect(calls).toHaveLength(4);
+  });
+
+  describe('across processes (AISDLC-1440)', () => {
+    let board: string;
+    beforeEach(() => {
+      board = mkdtempSync(path.join(tmpdir(), 'gh-read-cache-'));
+      useGhReadCacheDir(board);
+    });
+    afterEach(() => {
+      useGhReadCacheDir(undefined);
+      rmSync(board, { recursive: true, force: true });
+    });
+
+    it('a second process within the ttl makes no gh call', () => {
+      const first = fake(() => 'Me\n');
+      expect(allowedAuthors(first.run, '/r', {})).toEqual(new Set(['me']));
+      // A new runner has an empty memory, like a new process; only the disk is shared.
+      const second = fake(() => 'Other\n');
+      expect(allowedAuthors(second.run, '/r', {})).toEqual(new Set(['me']));
+      expect(second.calls).toHaveLength(0);
+    });
+
+    it('a 404 is cached negatively for the short ttl only', () => {
+      let t = 0;
+      const calls: string[][] = [];
+      const run: CommandRunner = (_f, args) => {
+        calls.push([...args]);
+        return { status: 1, stdout: '', stderr: 'HTTP 404: Not Found' };
+      };
+      const other: CommandRunner = (f, a, o) => run(f, a, o);
+      cachedGh(run, 'ref', ['api', 'x'], {}, GH_READ_TTL_MS, () => t);
+      t = GH_NEGATIVE_TTL_MS - 1;
+      expect(cachedGh(other, 'ref', ['api', 'x'], {}, GH_READ_TTL_MS, () => t).status).toBe(1);
+      expect(calls).toHaveLength(1);
+      t = GH_NEGATIVE_TTL_MS;
+      cachedGh(other, 'ref', ['api', 'x'], {}, GH_READ_TTL_MS, () => t);
+      expect(calls).toHaveLength(2);
+    });
+
+    it('an events read is refreshed by a newer webhook event record', () => {
+      const t = Date.now();
+      const { run, calls } = fake(() => '[]');
+      const events = path.join(board, 'events');
+      mkdirSync(events, { recursive: true });
+      const at = new Date(t - 60_000);
+      const old = path.join(events, `${encodeURIComponent('o/r#none@abc:workflow_run:1')}.json`);
+      writeFileSync(old, '{}');
+      utimesSync(old, at, at);
+      cachedGh(run, 'runs', ['run', 'list'], { events: true }, GH_READ_TTL_MS, () => t);
+      cachedGh(run, 'runs', ['run', 'list'], { events: true }, GH_READ_TTL_MS, () => t);
+      expect(calls).toHaveLength(1);
+      const fresh = path.join(events, `${encodeURIComponent('o/r#none@abc:workflow_run:2')}.json`);
+      writeFileSync(fresh, '{}');
+      const later = new Date(t + 1000);
+      utimesSync(fresh, later, later);
+      cachedGh(run, 'runs', ['run', 'list'], { events: true }, GH_READ_TTL_MS, () => t + 2000);
+      expect(calls).toHaveLength(2);
+      // Without the events option the record does not matter.
+      cachedGh(run, 'plain', ['api', 'y'], {}, GH_READ_TTL_MS, () => t);
+      cachedGh(run, 'plain', ['api', 'y'], {}, GH_READ_TTL_MS, () => t + 2000);
+      expect(calls).toHaveLength(3);
+    });
+
+    it('an unreadable cache file is a miss', () => {
+      const { run, calls } = fake(() => 'Me\n');
+      allowedAuthors(run, '/r', {});
+      const dir = path.join(board, 'gh-cache');
+      for (const f of readdirSync(dir)) writeFileSync(path.join(dir, f), 'not json');
+      allowedAuthors(fake(() => 'Me\n').run, '/r', {});
+      const third = fake(() => 'Me\n');
+      allowedAuthors(third.run, '/r', {});
+      expect(calls).toHaveLength(1);
+      expect(third.calls).toHaveLength(0);
+    });
   });
 });
 

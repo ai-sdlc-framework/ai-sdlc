@@ -7,7 +7,7 @@
  * union of their fields, and answers `gh pr view <n> --json statusCheckRollup` from the
  * same snapshot. The snapshot is stored under the board. While the webhook receiver is
  * up (its `events/` directory exists), a later wake reuses it when no event record is
- * newer than the snapshot and it is under `SNAPSHOT_MAX_AGE_MS` old; otherwise it is
+ * newer than the snapshot and it is under `SNAPSHOT_FALLBACK_MS` old; otherwise it is
  * refreshed. A lost delivery therefore costs latency, never correctness.
  *
  * A per-PR fingerprint (head sha, newest event id, check rollup digest) lets land-eligible
@@ -30,8 +30,14 @@ import path from 'node:path';
 import { now as clock } from '../clock.js';
 import type { CommandResult, CommandRunner } from './types.js';
 
-/** A snapshot, and a recorded refusal, older than this is read again. */
+/** A recorded refusal older than this is read again. */
 export const SNAPSHOT_MAX_AGE_MS = 15 * 60 * 1000;
+
+/**
+ * AISDLC-1440: while the webhook receiver is up, a quiet snapshot is still read again after
+ * this long (the fallback for a lost delivery); without the receiver every wake reads it.
+ */
+export const SNAPSHOT_FALLBACK_MS = 5 * 60 * 1000;
 
 /** Every field any consumer of the list reads. */
 export const SNAPSHOT_FIELDS = [
@@ -256,7 +262,7 @@ export function createSnapshotRunner(
       stored &&
       Array.isArray(stored.prs) &&
       Number.isFinite(fetched) &&
-      now().getTime() - fetched < SNAPSHOT_MAX_AGE_MS &&
+      now().getTime() - fetched < SNAPSHOT_FALLBACK_MS &&
       quietSince(opts.boardDir, fetched)
     ) {
       memo = stored;

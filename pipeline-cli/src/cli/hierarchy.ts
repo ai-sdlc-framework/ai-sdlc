@@ -63,7 +63,13 @@ import { fetchClosedUnmergedPrs } from '../kpi/closed-unmerged.js';
 import { executorCap, resolveExecutorsMax } from '../hierarchy/executor-cap.js';
 import { openPrState } from '../hierarchy/open-pr-limit.js';
 import { clearScaleCeiling, writeScaleCeiling } from '../hierarchy/scale.js';
-import { ghCallsPath, parseQuota, parseQuotaFloor } from '../hierarchy/gh-calls.js';
+import {
+  ghCallsPath,
+  ledgerQuota,
+  parseQuotaFloor,
+  readGhCallsTail,
+} from '../hierarchy/gh-calls.js';
+import { useGhReadCacheDir } from '../hierarchy/gh-read-cache.js';
 import {
   formatGhUsageReport,
   ghUsageReport,
@@ -1399,6 +1405,8 @@ export async function runHierarchyCli(
         const { operational, emit, playbookDeps } = playbookSetup(repoRoot, worker);
         // One PR snapshot per wake, shared by every consumer below (AISDLC-959).
         const wakeGh = createSnapshotRunner(extras.ghRun ?? deps.run, { boardDir: deps.boardDir });
+        // AISDLC-1440: cached reads are shared with the reconcile child and later ticks.
+        useGhReadCacheDir(deps.boardDir);
         const result = await runDispatchTick({
           boardDir: deps.boardDir,
           workerId: worker,
@@ -1592,10 +1600,8 @@ export async function runHierarchyCli(
                 skipSweep,
               });
             }),
-          quota: () => {
-            const r = (extras.ghRun ?? deps.run)('gh', ['api', 'rate_limit'], { cwd: repoRoot });
-            return r?.status === 0 ? parseQuota(r.stdout) : undefined;
-          },
+          // AISDLC-1440: the ledger's latest reading; the tick never polls `gh api rate_limit`.
+          quota: () => ledgerQuota(readGhCallsTail(ghCallsPath(deps.boardDir)), deps.now()),
           quotaFloor: parseQuotaFloor(process.env.AI_SDLC_GH_QUOTA_FLOOR),
           listPrs: () => fetchHumanAttentionPrs(wakeGh, repoRoot, deps.boardDir),
           listAllPrs: () => fetchClosedUnmergedPrs(wakeGh, repoRoot),
