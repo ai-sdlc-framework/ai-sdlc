@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1395
 title: 'Doctor warns when autoMemoryDirectory is not set'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-23'
 labels:
