@@ -235,13 +235,15 @@ describe('readAnsweredDecisionsAtRef', () => {
 });
 
 describe('cli-judgment question-gate', () => {
+  // A private directory per run: the judgment log lands under `<cwd>/.ai-sdlc`,
+  // and a shared `tmpdir()` would make every tmp path look like a framework repo.
   const run = async (stdin: string, withProvider: boolean, extra: string[] = []) => {
     let stdout = '';
     let stderr = '';
     const code = await runJudgmentCli(['question-gate', ...extra], {
       out: (t) => (stdout += t),
       err: (t) => (stderr += t),
-      cwd: tmpdir(),
+      cwd: mkdtempSync(join(tmpdir(), 'qgate-cli-')),
       env: {},
       readStdin: () => stdin,
       loadConfig: () => (withProvider ? config('enforce') : resolveJudgmentConfig({ spec: {} })),
