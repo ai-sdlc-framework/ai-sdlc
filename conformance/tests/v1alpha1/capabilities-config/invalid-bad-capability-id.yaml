@@ -1,0 +1,8 @@
+# Invalid: capability ids must match ^[a-z0-9][a-z0-9.-]*$ (no uppercase).
+apiVersion: ai-sdlc.io/v1alpha1
+kind: CapabilitiesConfig
+metadata:
+  name: capabilities
+spec:
+  required:
+    - Dor.Stage-B

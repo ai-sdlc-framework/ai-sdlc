@@ -22,6 +22,12 @@ ResourceKind = Literal[
     "QualityGate",
     "AutonomyPolicy",
     "AdapterBinding",
+    "DesignSystemBinding",
+    "DesignIntentDocument",
+    "DorConfig",
+    "CompliancePosture",
+    "JudgmentConfig",
+    "CapabilitiesConfig",
 ]
 
 Duration = str  # shorthand (60s, 5m, 2h, 1d, 2w) or ISO 8601

@@ -1,0 +1,14 @@
+# Valid: a DorConfig in enforce mode with staleness and an auto-pass rule.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: DorConfig
+metadata:
+  name: dor
+spec:
+  evaluationMode: enforce
+  staleness:
+    warnAfterDays: 14
+    closeAfterDays: 28
+    closedLabel: closed-as-stale-dor
+  autoPassRules:
+    - kind: signal-pipeline-generated
+      sources: [test-failure]

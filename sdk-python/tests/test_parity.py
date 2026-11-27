@@ -99,7 +99,11 @@ def test_extractors_cover_every_manifest_name() -> None:
 @pytest.mark.parametrize(
     "section,anchor,added",
     [
-        ("resourceKinds", '    "AdapterBinding",\n]', '    "AdapterBinding",\n    "Bogus",\n]'),
+        (
+            "resourceKinds",
+            '    "CapabilitiesConfig",\n]',
+            '    "CapabilitiesConfig",\n    "Bogus",\n]',
+        ),
         (
             "standardMetrics",
             '_md(\n        "approval-rate"',

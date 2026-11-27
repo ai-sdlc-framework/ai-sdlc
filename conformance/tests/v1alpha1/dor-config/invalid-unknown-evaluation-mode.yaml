@@ -1,0 +1,7 @@
+# Invalid: evaluationMode must be one of warn-only or enforce.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: DorConfig
+metadata:
+  name: dor
+spec:
+  evaluationMode: block-everything

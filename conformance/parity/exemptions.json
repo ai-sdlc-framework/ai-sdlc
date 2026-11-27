@@ -1,14 +1,4 @@
 {
-  "python": {
-    "resourceKinds": [
-      "CapabilitiesConfig",
-      "CompliancePosture",
-      "DesignIntentDocument",
-      "DesignSystemBinding",
-      "DorConfig",
-      "JudgmentConfig"
-    ]
-  },
   "go": {
     "resourceKinds": [
       "CapabilitiesConfig",

@@ -1,0 +1,7 @@
+# Invalid: spec.auditExports is required.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: CompliancePosture
+metadata:
+  name: posture
+spec:
+  regimes: []

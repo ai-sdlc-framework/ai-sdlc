@@ -1057,6 +1057,28 @@ autonomy_policy_schema: dict[str, Any] = {'$id': 'https://ai-sdlc.io/schemas/v1a
  'title': 'AI-SDLC AutonomyPolicy',
  'type': 'object'}
 
+capabilities_config_v1_schema: dict[str, Any] = {'$id': 'https://ai-sdlc.io/schemas/v1alpha1/capabilities-config.v1.schema.json',
+ '$schema': 'https://json-schema.org/draft/2020-12/schema',
+ 'additionalProperties': False,
+ 'description': 'Per-repository declaration of the optional capabilities that are expected to be live. A required '
+                'capability that is degraded or never observed makes the doctor capability-liveness check fail and '
+                'files a Decision; nothing is ever blocked. Lives at .ai-sdlc/capabilities.yaml and is read from the '
+                'trusted base branch only. The default is an empty list.',
+ 'properties': {'apiVersion': {'$ref': 'common.schema.json#/$defs/apiVersion'},
+                'kind': {'const': 'CapabilitiesConfig', 'type': 'string'},
+                'metadata': {'$ref': 'common.schema.json#/$defs/metadata'},
+                'spec': {'additionalProperties': False,
+                         'properties': {'required': {'default': [],
+                                                     'description': 'Capability ids this repository expects to be '
+                                                                    'live, for example dor.stage-b.',
+                                                     'items': {'pattern': '^[a-z0-9][a-z0-9.-]*$', 'type': 'string'},
+                                                     'type': 'array',
+                                                     'uniqueItems': True}},
+                         'type': 'object'}},
+ 'required': ['apiVersion', 'kind', 'spec'],
+ 'title': 'AI-SDLC CapabilitiesConfig',
+ 'type': 'object'}
+
 common_schema: dict[str, Any] = {'$defs': {'apiVersion': {'const': 'ai-sdlc.io/v1alpha1',
                           'description': 'The API version of the resource.',
                           'type': 'string'},
@@ -1140,6 +1162,2105 @@ common_schema: dict[str, Any] = {'$defs': {'apiVersion': {'const': 'ai-sdlc.io/v
  '$schema': 'https://json-schema.org/draft/2020-12/schema',
  'description': 'Shared type definitions for AI-SDLC Framework resources.',
  'title': 'AI-SDLC Common Definitions'}
+
+compliance_posture_v1_schema: dict[str, Any] = {'$defs': {'AuditExportSpec': {'additionalProperties': False,
+                               'description': 'Specification for a single evidence bundle included in '
+                                              '`cli-compliance-audit export`.',
+                               'properties': {'format': {'description': 'Output format for this evidence bundle.',
+                                                         'enum': ['json', 'jsonl', 'csv'],
+                                                         'type': 'string'},
+                                              'kind': {'description': 'Which kind of evidence to include in the export '
+                                                                      'bundle.',
+                                                       'enum': ['dsse-envelope',
+                                                                'dor-calibration',
+                                                                'trusted-reviewers',
+                                                                'enforcement-events',
+                                                                'access-control-changes'],
+                                                       'type': 'string'},
+                                              'retentionPolicy': {'additionalProperties': False,
+                                                                  'description': 'Retention policy for this evidence '
+                                                                                 'bundle.',
+                                                                  'properties': {'days': {'description': 'Retention '
+                                                                                                         'floor in '
+                                                                                                         'days. '
+                                                                                                         'Framework GC '
+                                                                                                         'removes '
+                                                                                                         'after days + '
+                                                                                                         'grace '
+                                                                                                         'period.',
+                                                                                          'minimum': 1,
+                                                                                          'type': 'integer'},
+                                                                                 'tier': {'description': 'hot = on '
+                                                                                                         'local disk; '
+                                                                                                         'cold = '
+                                                                                                         'expected to '
+                                                                                                         'be archived '
+                                                                                                         'externally.',
+                                                                                          'enum': ['hot', 'cold'],
+                                                                                          'type': 'string'}},
+                                                                  'required': ['days'],
+                                                                  'type': 'object'}},
+                               'required': ['kind', 'format', 'retentionPolicy'],
+                               'type': 'object'},
+           'DerivedGates': {'additionalProperties': False,
+                            'description': 'Gate values derived from declared regimes. When all regimes are resolved, '
+                                           'the tightest constraint wins per axis.',
+                            'properties': {'attestationRequired': {'description': 'Per AISDLC-74/146. When true, '
+                                                                                  'framework refuses to merge PRs '
+                                                                                  'without a valid DSSE attestation '
+                                                                                  'envelope at HEAD.',
+                                                                   'type': 'boolean'},
+                                           'auditRetentionDays': {'description': 'Floor for log retention in days. '
+                                                                                 'Framework keeps logs for at least '
+                                                                                 'this many days.',
+                                                                  'minimum': 1,
+                                                                  'type': 'integer'},
+                                           'databaseBranchPool': {'description': 'Per RFC-0009 OQ-11. '
+                                                                                 "'shared-with-rls' = single Postgres "
+                                                                                 'branch with row-level security. '
+                                                                                 "'per-shard' = one branch per "
+                                                                                 'shard/customer.',
+                                                                  'enum': ['shared-with-rls', 'per-shard'],
+                                                                  'type': 'string'},
+                                           'reviewerAuthorityModel': {'description': 'Per '
+                                                                                     'config/trusted-reviewers.yaml. '
+                                                                                     "'open' = any GitHub user. "
+                                                                                     "'allowlist' = explicit reviewer "
+                                                                                     "list. 'allowlist+role' = "
+                                                                                     'allowlist + per-role authority.',
+                                                                      'enum': ['open', 'allowlist', 'allowlist+role'],
+                                                                      'type': 'string'},
+                                           'secretScanStrictness': {'description': "Per AISDLC-128. 'minimal' = "
+                                                                                   'framework-default patterns only. '
+                                                                                   "'standard' = + common cloud "
+                                                                                   "provider keys. 'strict' = + "
+                                                                                   'entropy-based detection + '
+                                                                                   'adopter-supplied custom patterns.',
+                                                                    'enum': ['minimal', 'standard', 'strict'],
+                                                                    'type': 'string'}},
+                            'required': ['databaseBranchPool',
+                                         'secretScanStrictness',
+                                         'attestationRequired',
+                                         'auditRetentionDays',
+                                         'reviewerAuthorityModel'],
+                            'type': 'object'},
+           'PartialDerivedGates': {'additionalProperties': False,
+                                   'description': 'Operator-supplied partial overrides for DerivedGates. Each '
+                                                  'overridden field MUST have a corresponding non-empty entry in '
+                                                  '_notes (OQ-2). The loader rejects overrides missing notes.',
+                                   'properties': {'_notes': {'additionalProperties': {'type': 'string'},
+                                                             'description': 'Sibling map of field-name → rationale '
+                                                                            'string for each overridden gate field. '
+                                                                            'Loader rejects any override whose '
+                                                                            'corresponding _notes entry is missing or '
+                                                                            'empty (MissingDerivedGateOverrideNotes). '
+                                                                            'The emptiness check is enforced at load '
+                                                                            'time (not in schema) so the loader can '
+                                                                            'produce an actionable error with the '
+                                                                            'specific field name.',
+                                                             'type': 'object'},
+                                                  'attestationRequired': {'type': 'boolean'},
+                                                  'auditRetentionDays': {'minimum': 1, 'type': 'integer'},
+                                                  'databaseBranchPool': {'enum': ['shared-with-rls', 'per-shard'],
+                                                                         'type': 'string'},
+                                                  'reviewerAuthorityModel': {'enum': ['open',
+                                                                                      'allowlist',
+                                                                                      'allowlist+role'],
+                                                                             'type': 'string'},
+                                                  'secretScanStrictness': {'enum': ['minimal', 'standard', 'strict'],
+                                                                           'type': 'string'}},
+                                   'type': 'object'},
+           'Regime': {'additionalProperties': False,
+                      'description': 'A single regulatory regime declaration with attestation metadata. The '
+                                     "'attestedBy' and 'attestedAt' fields are REQUIRED at load time — the loader "
+                                     'throws MissingComplianceAttestation for any regime missing either field. They '
+                                     "are not in the JSON Schema 'required' array so the loader can produce a more "
+                                     'actionable error than the generic schema validation error.',
+                      'properties': {'attestedAt': {'description': 'ISO 8601 timestamp (date-only OR full date-time) '
+                                                                   'when the regime was attested. Examples: '
+                                                                   "'2026-05-16' or '2026-05-16T14:30:00Z'. Validated "
+                                                                   'by regex only — `format` is intentionally omitted '
+                                                                   "because neither 'date' nor 'date-time' covers both "
+                                                                   'shapes under strict ajv-formats (AISDLC-322 inline '
+                                                                   'code-review MAJOR fix).',
+                                                    'pattern': '^\\d{4}-\\d{2}-\\d{2}(T[\\d:.Z+-]+)?$',
+                                                    'type': 'string'},
+                                     'attestedBy': {'description': "Who declared this regime applies. E.g., 'Acme "
+                                                                   "Legal LLP' or a contributor name. REQUIRED — "
+                                                                   'compliance regimes are legal claims; the framework '
+                                                                   'refuses to load a posture with regimes lacking '
+                                                                   'this field.',
+                                                    'minLength': 1,
+                                                    'type': 'string'},
+                                     'attestedNotes': {'description': "Operator's rationale for declaring this regime. "
+                                                                      'Recommended for audit trail; not required by '
+                                                                      'schema but strongly encouraged.',
+                                                       'type': 'string'},
+                                     'auditFrequency': {'description': 'Audit cadence — drives default retention '
+                                                                       'windows and export pre-staging.',
+                                                        'enum': ['annual', 'continuous', 'on-demand'],
+                                                        'type': 'string'},
+                                     'controls': {'description': 'Optional explicit control list from the regime that '
+                                                                 'the adopter is claiming coverage for. Examples: '
+                                                                 "['CC6.6', 'CC8.1'] for SOC2; ['§164.308(a)(4)', "
+                                                                 "'§164.312(a)'] for HIPAA.",
+                                                  'items': {'minLength': 1, 'type': 'string'},
+                                                  'type': 'array'},
+                                     'id': {'description': 'Canonical regime identifier. Convention: '
+                                                           "'<framework>-<tier-or-version>'. Examples: 'SOC2-T2', "
+                                                           "'HIPAA', 'PCI-DSS-L1', 'GDPR', 'FedRAMP-Moderate', "
+                                                           "'ISO-27001:2022'.",
+                                            'minLength': 1,
+                                            'type': 'string'}},
+                      'required': ['id'],
+                      'type': 'object'}},
+ '$id': 'https://ai-sdlc.io/schemas/v1alpha1/compliance-posture.v1.schema.json',
+ '$schema': 'https://json-schema.org/draft/2020-12/schema',
+ 'additionalProperties': False,
+ 'description': 'Declares which regulatory regimes apply to a project and derives gate defaults from them. Lives at '
+                '.ai-sdlc/compliance.yaml. Phase 1 schema — RFC-0022 §5.',
+ 'properties': {'apiVersion': {'$ref': 'common.schema.json#/$defs/apiVersion'},
+                'kind': {'const': 'CompliancePosture', 'type': 'string'},
+                'metadata': {'$ref': 'common.schema.json#/$defs/metadata'},
+                'spec': {'additionalProperties': False,
+                         'properties': {'auditExports': {'default': [],
+                                                         'description': 'Evidence bundles to produce on '
+                                                                        '`cli-compliance-audit export`. Each entry '
+                                                                        'specifies a kind + format + retention policy.',
+                                                         'items': {'$ref': '#/$defs/AuditExportSpec'},
+                                                         'type': 'array'},
+                                        'derivedGates': {'allOf': [{'$ref': '#/$defs/PartialDerivedGates'}],
+                                                         'description': 'Operator overrides for derived gate values. '
+                                                                        'Each override field MUST have a corresponding '
+                                                                        'non-empty entry in _notes. The loader rejects '
+                                                                        'any override missing a notes entry (OQ-2 '
+                                                                        'enforcement).'},
+                                        'regimes': {'default': [],
+                                                    'description': 'Declared regulatory regimes. Empty array is valid '
+                                                                   "(means 'none declared' — baseline posture "
+                                                                   'applies).',
+                                                    'items': {'$ref': '#/$defs/Regime'},
+                                                    'type': 'array'}},
+                         'required': ['regimes', 'auditExports'],
+                         'type': 'object'}},
+ 'required': ['apiVersion', 'kind', 'metadata', 'spec'],
+ 'title': 'AI-SDLC CompliancePosture',
+ 'type': 'object'}
+
+design_intent_document_schema: dict[str, Any] = {'$defs': {'antiPattern': {'additionalProperties': False,
+                           'description': 'Explicit rejection of an approach the product does not take.',
+                           'properties': {'description': {'type': 'string'},
+                                          'detectionPatterns': {'description': 'Patterns compiled to term-matching '
+                                                                               'rules. Phase 2b gate requires ≥3 '
+                                                                               'patterns per global anti-pattern, ≥2 '
+                                                                               'per principle-level.',
+                                                                'items': {'type': 'string'},
+                                                                'minItems': 1,
+                                                                'type': 'array'},
+                                          'id': {'pattern': '^[a-z][a-z0-9-]*$', 'type': 'string'},
+                                          'identityClass': {'$ref': '#/$defs/identityClass'},
+                                          'label': {'type': 'string'}},
+                           'required': ['id', 'label'],
+                           'type': 'object'},
+           'brandIdentity': {'additionalProperties': False,
+                             'description': 'Brand voice and visual identity. Design-owned.',
+                             'properties': {'visualIdentity': {'additionalProperties': False,
+                                                               'properties': {'description': {'type': 'string'},
+                                                                              'tokenSchemaRef': {'description': 'Reference '
+                                                                                                                'to '
+                                                                                                                'the '
+                                                                                                                'token '
+                                                                                                                'source '
+                                                                                                                'in '
+                                                                                                                'the '
+                                                                                                                'linked '
+                                                                                                                'DesignSystemBinding '
+                                                                                                                '(e.g., '
+                                                                                                                'acme-design-system.spec.tokens).',
+                                                                                                 'type': 'string'},
+                                                                              'visualAntiPatterns': {'description': 'Visual '
+                                                                                                                    'anti-patterns. '
+                                                                                                                    'Phase '
+                                                                                                                    '2b '
+                                                                                                                    'gate '
+                                                                                                                    'requires '
+                                                                                                                    '≥2 '
+                                                                                                                    'visual '
+                                                                                                                    'anti-patterns.',
+                                                                                                     'items': {'$ref': '#/$defs/antiPattern'},
+                                                                                                     'type': 'array'},
+                                                                              'visualConstraints': {'description': 'Measurable '
+                                                                                                                   'visual '
+                                                                                                                   'constraints '
+                                                                                                                   'checked '
+                                                                                                                   'against '
+                                                                                                                   'Learn '
+                                                                                                                   'phase '
+                                                                                                                   'metrics.',
+                                                                                                    'items': {'$ref': '#/$defs/visualConstraint'},
+                                                                                                    'type': 'array'}},
+                                                               'type': 'object'},
+                                            'voiceAntiPatterns': {'description': 'Voice anti-patterns (Addendum B). '
+                                                                                 'Phase 2b gate requires ≥2 voice '
+                                                                                 'anti-patterns.',
+                                                                  'items': {'$ref': '#/$defs/antiPattern'},
+                                                                  'type': 'array'},
+                                            'voiceAttributes': {'items': {'type': 'string'}, 'type': 'array'}},
+                             'type': 'object'},
+           'constraint': {'additionalProperties': False,
+                          'description': 'Typed constraint declaration with dep-parse detection patterns.',
+                          'properties': {'concept': {'type': 'string'},
+                                         'detectionPatterns': {'description': 'Patterns compiled into dep-parse rules. '
+                                                                              'Phase 2b gate requires ≥3 patterns per '
+                                                                              'constraint.',
+                                                               'items': {'type': 'string'},
+                                                               'minItems': 1,
+                                                               'type': 'array'},
+                                         'id': {'pattern': '^[a-z][a-z0-9-]*$', 'type': 'string'},
+                                         'identityClass': {'$ref': '#/$defs/identityClass'},
+                                         'rationale': {'type': 'string'},
+                                         'relationship': {'enum': ['must-not-require',
+                                                                   'must-require',
+                                                                   'must-not-include',
+                                                                   'must-include'],
+                                                          'type': 'string'}},
+                          'required': ['id', 'concept', 'relationship'],
+                          'type': 'object'},
+           'designPrinciple': {'additionalProperties': False,
+                               'properties': {'antiPatterns': {'description': 'Principle-scoped anti-patterns.',
+                                                               'items': {'$ref': '#/$defs/antiPattern'},
+                                                               'type': 'array'},
+                                              'description': {'type': 'string'},
+                                              'id': {'pattern': '^[a-z][a-z0-9-]*$', 'type': 'string'},
+                                              'identityClass': {'$ref': '#/$defs/identityClass'},
+                                              'measurableSignals': {'description': 'Structured measurable signals '
+                                                                                   '(replaces free-text '
+                                                                                   'measurableSignal from v4).',
+                                                                    'items': {'$ref': '#/$defs/measurableSignal'},
+                                                                    'minItems': 1,
+                                                                    'type': 'array'},
+                                              'name': {'type': 'string'}},
+                               'required': ['id', 'name', 'description', 'measurableSignals'],
+                               'type': 'object'},
+           'designSystemRef': {'additionalProperties': False,
+                               'properties': {'bindingType': {'description': 'authoritative: DID governs DSB intent. '
+                                                                             'advisory: DID informs but does not '
+                                                                             'govern.',
+                                                              'enum': ['authoritative', 'advisory'],
+                                                              'type': 'string'},
+                                              'name': {'description': 'Reference to an existing DesignSystemBinding '
+                                                                      'resource. Unidirectional — DSB does not '
+                                                                      'back-reference the DID.',
+                                                       'type': 'string'},
+                                              'namespace': {'type': 'string'},
+                                              'syncFields': {'description': 'Field-level sync relationships between '
+                                                                            'DID and DSB (sharedAuthority).',
+                                                             'items': {'additionalProperties': False,
+                                                                       'properties': {'did': {'type': 'string'},
+                                                                                      'dsb': {'type': 'string'},
+                                                                                      'relationship': {'type': 'string'}},
+                                                                       'required': ['did', 'dsb', 'relationship'],
+                                                                       'type': 'object'},
+                                                             'type': 'array'}},
+                               'required': ['name'],
+                               'type': 'object'},
+           'experientialTarget': {'additionalProperties': True,
+                                  'properties': {'errorRecoveryRate': {'maximum': 1, 'minimum': 0, 'type': 'number'},
+                                                 'identityClass': {'$ref': '#/$defs/identityClass'},
+                                                 'interactionEfficiency': {'additionalProperties': True,
+                                                                           'properties': {'metric': {'type': 'string'},
+                                                                                          'targetReduction': {'type': 'string'}},
+                                                                           'type': 'object'},
+                                                 'maxActionsToRecover': {'minimum': 1, 'type': 'integer'},
+                                                 'maxStepsToFirstValue': {'minimum': 1, 'type': 'integer'},
+                                                 'targetEmotion': {'type': 'string'},
+                                                 'usabilityTarget': {'additionalProperties': True,
+                                                                     'properties': {'personaType': {'type': 'string'},
+                                                                                    'taskCompletion': {'maximum': 1,
+                                                                                                       'minimum': 0,
+                                                                                                       'type': 'number'}},
+                                                                     'type': 'object'}},
+                                  'type': 'object'},
+           'experientialTargets': {'additionalProperties': {'$ref': '#/$defs/experientialTarget'},
+                                   'description': 'Experiential targets for SA-1 BM25 corpus. Product-owned.',
+                                   'properties': {'dailyUse': {'$ref': '#/$defs/experientialTarget'},
+                                                  'errorRecovery': {'$ref': '#/$defs/experientialTarget'},
+                                                  'onboarding': {'$ref': '#/$defs/experientialTarget'}},
+                                   'type': 'object'},
+           'identityClass': {'description': 'Identity class per Addendum B. `core` fields trigger full-backlog '
+                                            're-score on change; `evolving` fields only re-score the admission queue. '
+                                            'Also weights BM25 corpus construction (core=2x, evolving=1x).',
+                             'enum': ['core', 'evolving'],
+                             'type': 'string'},
+           'measurableSignal': {'additionalProperties': False,
+                                'properties': {'id': {'pattern': '^[a-z][a-z0-9-]*$', 'type': 'string'},
+                                               'identityClass': {'$ref': '#/$defs/identityClass'},
+                                               'metric': {'type': 'string'},
+                                               'operator': {'enum': ['gte', 'lte', 'gt', 'lt', 'eq', 'neq'],
+                                                            'type': 'string'},
+                                               'scope': {'type': 'string'},
+                                               'threshold': {'type': 'number'}},
+                                'required': ['id', 'metric', 'threshold', 'operator'],
+                                'type': 'object'},
+           'missionField': {'additionalProperties': False,
+                            'properties': {'identityClass': {'$ref': '#/$defs/identityClass'},
+                                           'value': {'description': 'Natural-language mission statement. Literal input '
+                                                                    'to SA-1 (Problem Resonance).',
+                                                     'minLength': 1,
+                                                     'type': 'string'}},
+                            'required': ['value'],
+                            'type': 'object'},
+           'plannedChange': {'additionalProperties': False,
+                             'allOf': [{'if': {'properties': {'status': {'const': 'in-progress'}}},
+                                        'then': {'required': ['status', 'addedBy']}}],
+                             'properties': {'addedAt': {'format': 'date-time', 'type': 'string'},
+                                            'addedBy': {'type': 'string'},
+                                            'affectedTokenPaths': {'items': {'type': 'string'}, 'type': 'array'},
+                                            'changeType': {'enum': ['token-restructure',
+                                                                    'token-addition',
+                                                                    'token-removal',
+                                                                    'component-category-addition',
+                                                                    'brand-revision',
+                                                                    'theme-expansion'],
+                                                           'type': 'string'},
+                                            'description': {'type': 'string'},
+                                            'estimatedComponentImpact': {'minimum': 0, 'type': 'integer'},
+                                            'estimatedTimeline': {'type': 'string'},
+                                            'id': {'pattern': '^[a-z][a-z0-9-]*$', 'type': 'string'},
+                                            'status': {'enum': ['planned', 'in-progress', 'completed', 'cancelled'],
+                                                       'type': 'string'}},
+                             'required': ['id', 'changeType', 'status'],
+                             'type': 'object'},
+           'scopeBoundaries': {'additionalProperties': False,
+                               'description': 'In-scope and out-of-scope term lists with synonyms. Compiled to keyword '
+                                              'lists for scope gate.',
+                               'properties': {'inScope': {'items': {'$ref': '#/$defs/scopeTerm'}, 'type': 'array'},
+                                              'outOfScope': {'description': 'Out-of-scope terms. Match on core entry '
+                                                                            'triggers hard scope gate.',
+                                                             'items': {'$ref': '#/$defs/scopeTerm'},
+                                                             'type': 'array'}},
+                               'type': 'object'},
+           'scopeTerm': {'additionalProperties': False,
+                         'properties': {'identityClass': {'$ref': '#/$defs/identityClass'},
+                                        'label': {'type': 'string'},
+                                        'synonyms': {'description': 'Alternative terms. Phase 2b gate requires ≥2 '
+                                                                    'synonyms per outOfScope entry.',
+                                                     'items': {'type': 'string'},
+                                                     'type': 'array'}},
+                         'required': ['label'],
+                         'type': 'object'},
+           'soulPurpose': {'additionalProperties': False,
+                           'description': 'Strategic intent. mission is Product-owned; designPrinciples are '
+                                          'Design-owned.',
+                           'properties': {'antiPatterns': {'description': 'Product-level anti-patterns (Addendum B '
+                                                                          '§B.3.2). Product-owned.',
+                                                           'items': {'$ref': '#/$defs/antiPattern'},
+                                                           'type': 'array'},
+                                          'constraints': {'description': 'Typed constraint declarations (Addendum B '
+                                                                         '§B.3.2). Each compiles to a dep-parse '
+                                                                         'detection rule. Product-owned.',
+                                                          'items': {'$ref': '#/$defs/constraint'},
+                                                          'type': 'array'},
+                                          'designPrinciples': {'description': 'Design principles with structured '
+                                                                              'measurable signals and anti-patterns. '
+                                                                              'Design-owned.',
+                                                               'items': {'$ref': '#/$defs/designPrinciple'},
+                                                               'minItems': 1,
+                                                               'type': 'array'},
+                                          'mission': {'$ref': '#/$defs/missionField'},
+                                          'scopeBoundaries': {'$ref': '#/$defs/scopeBoundaries'}},
+                           'required': ['mission', 'designPrinciples'],
+                           'type': 'object'},
+           'status': {'additionalProperties': False,
+                      'properties': {'compiledArtifactsHash': {'description': 'sha256 of the compiled BM25 + rule '
+                                                                              'artifacts. Used by the reconciler to '
+                                                                              'detect changes.',
+                                                               'type': 'string'},
+                                     'conditions': {'items': {'$ref': 'common.schema.json#/$defs/condition'},
+                                                    'type': 'array'},
+                                     'designSystemAlignment': {'additionalProperties': False,
+                                                               'properties': {'complianceRulesReflectPrinciples': {'type': 'boolean'},
+                                                                              'lastAlignmentCheck': {'format': 'date-time',
+                                                                                                     'type': 'string'},
+                                                                              'tokenSchemaCoherent': {'type': 'boolean'}},
+                                                               'type': 'object'},
+                                     'lastReviewed': {'format': 'date-time', 'type': 'string'},
+                                     'nextReviewDue': {'format': 'date-time', 'type': 'string'},
+                                     'ppaBinding': {'additionalProperties': False,
+                                                    'properties': {'lastScoringRun': {'format': 'date-time',
+                                                                                      'type': 'string'},
+                                                                   'sAlpha1Source': {'type': 'string'},
+                                                                   'sAlpha2Source': {'type': 'string'}},
+                                                    'type': 'object'},
+                                     'reviewedBy': {'items': {'type': 'string'}, 'type': 'array'}},
+                      'type': 'object'},
+           'stewardshipSplit': {'additionalProperties': False,
+                                'description': 'Split-authority stewardship per §4.4. Replaces v3 single-owner model.',
+                                'properties': {'designAuthority': {'additionalProperties': False,
+                                                                   'description': 'Design-domain fields: Design owns, '
+                                                                                  'Product approves. Feeds SA-2 (Vibe '
+                                                                                  'Coherence).',
+                                                                   'properties': {'approvalRequired': {'items': {'type': 'string'},
+                                                                                                       'minItems': 1,
+                                                                                                       'type': 'array'},
+                                                                                  'owner': {'type': 'string'},
+                                                                                  'scope': {'items': {'type': 'string'},
+                                                                                            'minItems': 1,
+                                                                                            'type': 'array'}},
+                                                                   'required': ['owner', 'approvalRequired', 'scope'],
+                                                                   'type': 'object'},
+                                               'engineeringReview': {'additionalProperties': False,
+                                                                     'description': 'Engineering reviewer on all '
+                                                                                    'fields, blocker only on '
+                                                                                    'measurableSignal and '
+                                                                                    'detectionPattern feasibility.',
+                                                                     'properties': {'blockingScope': {'description': 'Dotted '
+                                                                                                                     'paths '
+                                                                                                                     'where '
+                                                                                                                     'Engineering '
+                                                                                                                     'can '
+                                                                                                                     'block '
+                                                                                                                     'on '
+                                                                                                                     'technical '
+                                                                                                                     'feasibility.',
+                                                                                                      'items': {'type': 'string'},
+                                                                                                      'type': 'array'},
+                                                                                    'rationale': {'type': 'string'},
+                                                                                    'role': {'enum': ['reviewer'],
+                                                                                             'type': 'string'}},
+                                                                     'required': ['role'],
+                                                                     'type': 'object'},
+                                               'productAuthority': {'additionalProperties': False,
+                                                                    'description': 'Product-domain fields: Product '
+                                                                                   'owns, Design approves. Feeds SA-1 '
+                                                                                   '(Problem Resonance).',
+                                                                    'properties': {'approvalRequired': {'items': {'type': 'string'},
+                                                                                                        'minItems': 1,
+                                                                                                        'type': 'array'},
+                                                                                   'owner': {'type': 'string'},
+                                                                                   'scope': {'items': {'type': 'string'},
+                                                                                             'minItems': 1,
+                                                                                             'type': 'array'}},
+                                                                    'required': ['owner', 'approvalRequired', 'scope'],
+                                                                    'type': 'object'},
+                                               'reviewCadence': {'description': 'Minimum review frequency. RFC-0008 '
+                                                                                '§4.4 mandates quarterly minimum.',
+                                                                 'enum': ['monthly', 'quarterly', 'biannual', 'annual'],
+                                                                 'type': 'string'},
+                                               'sharedAuthority': {'additionalProperties': False,
+                                                                   'description': 'Shared fields: either pillar can '
+                                                                                  'propose, both must approve.',
+                                                                   'properties': {'approvalRequired': {'items': {'type': 'string'},
+                                                                                                       'type': 'array'},
+                                                                                  'scope': {'items': {'type': 'string'},
+                                                                                            'type': 'array'}},
+                                                                   'type': 'object'}},
+                                'required': ['productAuthority', 'designAuthority'],
+                                'type': 'object'},
+           'tessellation': {'additionalProperties': False,
+                            'description': 'Present only on Tessellated DIDs (platform roots). Enumerates child Soul '
+                                           'DIDs and cross-soul governance rules (RFC-0009 §5.2).',
+                            'properties': {'crossSoulScoringRule': {'default': 'min',
+                                                                    'description': 'Aggregation rule when substrate '
+                                                                                   'work affects multiple souls. '
+                                                                                   'Default `min` per RFC-0009 OQ-2 '
+                                                                                   'resolution. `weighted-traffic` and '
+                                                                                   '`weighted-revenue` are advanced — '
+                                                                                   'they require a data source the '
+                                                                                   'adopter must provide.',
+                                                                    'enum': ['min',
+                                                                             'max',
+                                                                             'mean',
+                                                                             'weighted-traffic',
+                                                                             'weighted-revenue'],
+                                                                    'type': 'string'},
+                                           'souls': {'description': 'Child Soul DIDs that tile into this Tessellated '
+                                                                    'Platform.',
+                                                     'items': {'additionalProperties': False,
+                                                               'properties': {'didUri': {'description': 'URI reference '
+                                                                                                        'to the Soul '
+                                                                                                        'DID resource.',
+                                                                                         'type': 'string'},
+                                                                              'inheritsSubstrate': {'default': True,
+                                                                                                    'description': 'Whether '
+                                                                                                                   'this '
+                                                                                                                   'soul '
+                                                                                                                   'inherits '
+                                                                                                                   'the '
+                                                                                                                   'platform '
+                                                                                                                   'Tessellated '
+                                                                                                                   "DID's "
+                                                                                                                   'substrate '
+                                                                                                                   'invariants. '
+                                                                                                                   'Defaults '
+                                                                                                                   'to '
+                                                                                                                   'true.',
+                                                                                                    'type': 'boolean'},
+                                                                              'soulId': {'description': 'Slug '
+                                                                                                        'identifier '
+                                                                                                        'for this soul '
+                                                                                                        'within the '
+                                                                                                        'tessellation.',
+                                                                                         'pattern': '^[a-z0-9-]+$',
+                                                                                         'type': 'string'},
+                                                                              'status': {'description': 'Lifecycle '
+                                                                                                        'status of '
+                                                                                                        'this soul '
+                                                                                                        'within the '
+                                                                                                        'tessellation.',
+                                                                                         'enum': ['active',
+                                                                                                  'deprecated',
+                                                                                                  'draft'],
+                                                                                         'type': 'string'}},
+                                                               'required': ['soulId', 'didUri'],
+                                                               'type': 'object'},
+                                                     'minItems': 1,
+                                                     'type': 'array'},
+                                           'substrateInvariants': {'description': 'Named invariants ALL souls must '
+                                                                                  'honor. Violations trigger '
+                                                                                  'Eτ_tessellation_drift cross-soul '
+                                                                                  'drift detection (RFC-0009 §7.2).',
+                                                                   'items': {'type': 'string'},
+                                                                   'type': 'array'}},
+                            'required': ['souls'],
+                            'type': 'object'},
+           'triad': {'additionalProperties': False,
+                     'description': 'The Fractal Triad (RFC-0009 §5.1). Required on every DID — single-product, '
+                                    'Tessellated, and Soul. Carries the three pillar-authority declarations: design '
+                                    '(expression), engineering (coherence), product (identity). `init` scaffolds '
+                                    '${operator} as default for all three authorities on single-product DIDs.',
+                     'properties': {'design': {'additionalProperties': False,
+                                               'description': 'Design vertex — accountable for identity expression at '
+                                                              "this DID's scope.",
+                                               'properties': {'authority': {'description': 'Principal accountable for '
+                                                                                           'the design vertex at this '
+                                                                                           "DID's scope. Defaults to "
+                                                                                           '${operator} on init for '
+                                                                                           'single-product DIDs.',
+                                                                            'type': 'string'},
+                                                              'imperatives': {'description': 'Soul-specific design '
+                                                                                             'imperatives (voice '
+                                                                                             'register, visual '
+                                                                                             'identity specialization, '
+                                                                                             'experiential '
+                                                                                             'invariants).',
+                                                                              'items': {'type': 'string'},
+                                                                              'type': 'array'},
+                                                              'inheritsFrom': {'description': "Path to parent DID's "
+                                                                                              'design vertex. '
+                                                                                              'Null/absent for '
+                                                                                              'top-level Tessellated '
+                                                                                              'DIDs and single-product '
+                                                                                              'DIDs.',
+                                                                               'type': 'string'},
+                                                              'overrides': {'additionalProperties': True,
+                                                                            'description': 'Soul-specific overrides of '
+                                                                                           "parent Tessellated DID's "
+                                                                                           'design vertex '
+                                                                                           'declarations.',
+                                                                            'type': 'object'}},
+                                               'required': ['authority'],
+                                               'type': 'object'},
+                                    'engineering': {'additionalProperties': False,
+                                                    'description': 'Engineering vertex — accountable for coherence '
+                                                                   'between identity and expression at runtime.',
+                                                    'properties': {'authority': {'description': 'Principal accountable '
+                                                                                                'for the engineering '
+                                                                                                "vertex at this DID's "
+                                                                                                'scope. Defaults to '
+                                                                                                '${operator} on init '
+                                                                                                'for single-product '
+                                                                                                'DIDs.',
+                                                                                 'type': 'string'},
+                                                                   'complianceRegimes': {'description': 'Named '
+                                                                                                        'regulatory or '
+                                                                                                        'compliance '
+                                                                                                        'constraints '
+                                                                                                        'applied at '
+                                                                                                        'this scope. '
+                                                                                                        'Eρ₅ scope per '
+                                                                                                        'RFC-0009 '
+                                                                                                        '§7.1: HARD '
+                                                                                                        'regulatory '
+                                                                                                        'frameworks '
+                                                                                                        'ONLY (GDPR, '
+                                                                                                        'HIPAA, SOC2, '
+                                                                                                        'PCI-DSS, '
+                                                                                                        'FedRAMP, '
+                                                                                                        'regional '
+                                                                                                        'data-residency, '
+                                                                                                        'regulated-industry '
+                                                                                                        'rules).',
+                                                                                         'items': {'type': 'string'},
+                                                                                         'type': 'array'},
+                                                                   'dataRetention': {'additionalProperties': True,
+                                                                                     'description': 'Soul-specific '
+                                                                                                    'data retention '
+                                                                                                    'and isolation '
+                                                                                                    'requirements.',
+                                                                                     'type': 'object'},
+                                                                   'inheritsFrom': {'description': 'Path to parent '
+                                                                                                   "DID's engineering "
+                                                                                                   'vertex. Absent for '
+                                                                                                   'top-level DIDs.',
+                                                                                    'type': 'string'},
+                                                                   'performanceBudgets': {'additionalProperties': True,
+                                                                                          'description': 'Soul-specific '
+                                                                                                         'performance '
+                                                                                                         'budgets.',
+                                                                                          'type': 'object'},
+                                                                   'slaTier': {'description': 'SLA tier appropriate to '
+                                                                                              "this soul's workload.",
+                                                                               'type': 'string'},
+                                                                   'substrateInvariants': {'description': 'Named '
+                                                                                                          'invariants '
+                                                                                                          'the '
+                                                                                                          'substrate '
+                                                                                                          'must honor '
+                                                                                                          'for this '
+                                                                                                          'soul. '
+                                                                                                          'Violations '
+                                                                                                          'trigger '
+                                                                                                          'Eτ_tessellation_drift '
+                                                                                                          'per '
+                                                                                                          'RFC-0009 '
+                                                                                                          '§7.2.',
+                                                                                           'items': {'type': 'string'},
+                                                                                           'type': 'array'}},
+                                                    'required': ['authority'],
+                                                    'type': 'object'},
+                                    'product': {'additionalProperties': False,
+                                                'description': 'Product vertex — accountable for identity declaration '
+                                                               "at this DID's scope.",
+                                                'properties': {'authority': {'description': 'Principal accountable for '
+                                                                                            'the product vertex at '
+                                                                                            "this DID's scope. "
+                                                                                            'Defaults to ${operator} '
+                                                                                            'on init for '
+                                                                                            'single-product DIDs.',
+                                                                             'type': 'string'},
+                                                               'endgamePhase': {'description': 'Endgame phase mapping '
+                                                                                               'per platform lifecycle '
+                                                                                               'model.',
+                                                                                'type': 'string'},
+                                                               'inheritsFrom': {'description': "Path to parent DID's "
+                                                                                               'product vertex. Absent '
+                                                                                               'for top-level DIDs.',
+                                                                                'type': 'string'},
+                                                               'monetizationModel': {'description': 'Monetization '
+                                                                                                    'model per soul.',
+                                                                                     'type': 'string'},
+                                                               'problemResonance': {'description': 'Source-of-truth '
+                                                                                                   'for Sα₁ scoring at '
+                                                                                                   "this DID's scope.",
+                                                                                    'type': 'string'},
+                                                               'successMetrics': {'description': 'Success metrics for '
+                                                                                                 "this soul's work.",
+                                                                                  'items': {'type': 'string'},
+                                                                                  'type': 'array'},
+                                                               'targetAudience': {'description': 'Target audience and '
+                                                                                                 'persona for this '
+                                                                                                 'soul.',
+                                                                                  'type': 'string'}},
+                                                'required': ['authority'],
+                                                'type': 'object'}},
+                     'required': ['design', 'engineering', 'product'],
+                     'type': 'object'},
+           'variantAudienceProfile': {'additionalProperties': False,
+                                      'description': 'Variant-scoped audience characteristics. Mirrors Soul DID '
+                                                     'targetAudience structure. Feeds Sα₁ Problem/Audience Resonance '
+                                                     'when work items target this variant (RFC-0017 §5.4).',
+                                      'properties': {'segments': {'description': 'Named audience segments this variant '
+                                                                                 'targets.',
+                                                                  'items': {'type': 'string'},
+                                                                  'type': 'array'},
+                                                     'sizeRange': {'additionalProperties': False,
+                                                                   'description': 'Staff/user size range for this '
+                                                                                  'audience.',
+                                                                   'properties': {'maxStaff': {'minimum': 0,
+                                                                                               'type': 'integer'},
+                                                                                  'minStaff': {'minimum': 0,
+                                                                                               'type': 'integer'}},
+                                                                   'type': 'object'}},
+                                      'type': 'object'},
+           'variantDeclaration': {'additionalProperties': False,
+                                  'description': 'One variant declaration on a Soul DID per RFC-0017 §5.1. Carries '
+                                                 'distinct visual identity specializations and audience targeting '
+                                                 "while inheriting the parent Soul's compliance regime and substrate "
+                                                 'invariants (§5.3 bounded inheritance).',
+                                  'properties': {'cardinality': {'description': 'RESERVED: future lifecycle hint per '
+                                                                                'RFC-0017 §5.2. v1 ignores; documents '
+                                                                                'the experimental exit ramp (OQ-8).',
+                                                                 'enum': ['primary', 'secondary', 'experimental'],
+                                                                 'type': 'string'},
+                                                 'complianceFloor': {'const': 'inherit',
+                                                                     'description': "MUST be 'inherit'. Variants "
+                                                                                    'cannot diverge from soul '
+                                                                                    'compliance — schema validation '
+                                                                                    'rejects any other value (RFC-0017 '
+                                                                                    '§5.3 bounded inheritance).',
+                                                                     'type': 'string'},
+                                                 'designImperatives': {'description': 'Variant-scoped Sα₂ inputs '
+                                                                                      'layered on soul-level '
+                                                                                      'designImperatives. Variant wins '
+                                                                                      'on conflict per RFC-0017 §5.4 '
+                                                                                      '(most-specific declaration).',
+                                                                       'items': {'type': 'string'},
+                                                                       'type': 'array'},
+                                                 'designOverrides': {'$ref': '#/$defs/variantDesignOverrides'},
+                                                 'id': {'description': 'Kebab-case variant identifier. Must be unique '
+                                                                       'within the parent Soul DID.',
+                                                        'pattern': '^[a-z][a-z0-9-]*$',
+                                                        'type': 'string'},
+                                                 'journeys': {'description': 'Variant-scoped Journey declarations per '
+                                                                             'RFC-0018 §5.1. A journey scoped to this '
+                                                                             "variant (scope='variant:<id>') MUST "
+                                                                             "carry complianceFloor: 'inherit'. Count "
+                                                                             'limits apply as for soul-scoped journeys '
+                                                                             '(per-org configurable, defaults soft 10 '
+                                                                             '/ hard 50).',
+                                                              'items': {'$ref': 'journey.v1.schema.json'},
+                                                              'type': 'array'},
+                                                 'targetAudience': {'$ref': '#/$defs/variantAudienceProfile'}},
+                                  'required': ['id', 'targetAudience', 'complianceFloor'],
+                                  'type': 'object'},
+           'variantDesignOverrides': {'additionalProperties': False,
+                                      'description': 'Closed framework enum of visual-token surfaces the variant may '
+                                                     'specialize per RFC-0017 §6.1 + OQ-5 revisit (2026-05-26). '
+                                                     'voiceRegister cut per Design Authority editorial (6/6 leading '
+                                                     'design systems treat content register outside the visual token '
+                                                     'surface). Adopter extensions via vendor reverse-DNS prefix (e.g. '
+                                                     "'acme.com/accessibilityProfile') are accepted via "
+                                                     'patternProperties; non-prefixed unknown keys are rejected.',
+                                      'patternProperties': {'^[a-z][a-z0-9-]+(\\.[a-z][a-z0-9-]+)+\\/[a-zA-Z][a-zA-Z0-9-]*$': {'description': 'Vendor-prefixed '
+                                                                                                                                              'adopter '
+                                                                                                                                              'extension. '
+                                                                                                                                              'Key '
+                                                                                                                                              'MUST '
+                                                                                                                                              'follow '
+                                                                                                                                              'reverse-DNS '
+                                                                                                                                              'prefix '
+                                                                                                                                              'convention '
+                                                                                                                                              '(e.g. '
+                                                                                                                                              "'acme.com/accessibilityProfile')."}},
+                                      'properties': {'colorPaletteOverlay': {'description': 'Additive color palette '
+                                                                                            "overlay over the soul's "
+                                                                                            'base palette.',
+                                                                             'type': 'string'},
+                                                     'densityProfile': {'description': 'Layout density character for '
+                                                                                       'this variant.',
+                                                                        'enum': ['compact', 'comfortable', 'spacious'],
+                                                                        'type': 'string'},
+                                                     'motionProfile': {'description': 'Motion/animation character for '
+                                                                                      'this variant.',
+                                                                       'enum': ['full', 'reduced', 'none'],
+                                                                       'type': 'string'},
+                                                     'radiusProfile': {'description': 'Corner-rounding character for '
+                                                                                      'this variant (controls shape, '
+                                                                                      'not border stroke weight).',
+                                                                       'enum': ['sharp', 'default', 'rounded'],
+                                                                       'type': 'string'},
+                                                     'typographyScale': {'description': 'Typography scale character '
+                                                                                        'for this variant.',
+                                                                         'enum': ['default',
+                                                                                  'large-print',
+                                                                                  'data-dense'],
+                                                                         'type': 'string'}},
+                                      'type': 'object'},
+           'visualConstraint': {'additionalProperties': False,
+                                'properties': {'description': {'type': 'string'},
+                                               'id': {'pattern': '^[a-z][a-z0-9-]*$', 'type': 'string'},
+                                               'identityClass': {'$ref': '#/$defs/identityClass'},
+                                               'label': {'type': 'string'},
+                                               'rule': {'additionalProperties': False,
+                                                        'properties': {'metric': {'type': 'string'},
+                                                                       'operator': {'enum': ['gte',
+                                                                                             'lte',
+                                                                                             'gt',
+                                                                                             'lt',
+                                                                                             'eq',
+                                                                                             'neq'],
+                                                                                    'type': 'string'},
+                                                                       'threshold': {'type': 'number'}},
+                                                        'required': ['metric', 'threshold', 'operator'],
+                                                        'type': 'object'}},
+                                'required': ['id', 'label', 'rule'],
+                                'type': 'object'}},
+ '$id': 'https://ai-sdlc.io/schemas/v1alpha1/design-intent-document.schema.json',
+ '$schema': 'https://json-schema.org/draft/2020-12/schema',
+ 'additionalProperties': False,
+ 'description': "Authoritative artifact defining the product's design intent at the strategic level. Shared root of "
+                "the triad's design axis — both PPA and DesignSystemBinding reference it. Contains split-authority "
+                'stewardship (product + design + shared + engineering review), soulPurpose (mission, design '
+                'principles), structured Addendum B fields (constraints, scope boundaries, anti-patterns, measurable '
+                'signals) with identityClass markers, brandIdentity, experientialTargets, and planned changes for '
+                'Design→Engineering lookahead.',
+ 'properties': {'apiVersion': {'$ref': 'common.schema.json#/$defs/apiVersion'},
+                'kind': {'const': 'DesignIntentDocument', 'type': 'string'},
+                'metadata': {'$ref': 'common.schema.json#/$defs/metadata'},
+                'spec': {'additionalProperties': False,
+                         'properties': {'brandIdentity': {'$ref': '#/$defs/brandIdentity'},
+                                        'designSystemRef': {'$ref': '#/$defs/designSystemRef'},
+                                        'experientialTargets': {'$ref': '#/$defs/experientialTargets'},
+                                        'journeys': {'description': 'In-Soul Journey declarations per RFC-0018 §5.1 / '
+                                                                    '§6.1. Each journey is a temporally-ordered user '
+                                                                    'flow with named states, transitions, completion '
+                                                                    'criteria, accessibility requirements, and success '
+                                                                    'metrics. Journeys are scoring scopes (not a '
+                                                                    'runtime workflow engine). Schema-enforced flat: '
+                                                                    'journeys[] cannot contain nested journeys[] (OQ-3 '
+                                                                    'resolution). Per-org count limits enforced by the '
+                                                                    'inheritance validator: soft warn at 10+ journeys, '
+                                                                    'hard reject at 50+ (OQ-1 resolution, configurable '
+                                                                    'via .ai-sdlc/journey-config.yaml).',
+                                                     'items': {'$ref': 'journey.v1.schema.json'},
+                                                     'type': 'array'},
+                                        'parentTessellation': {'description': 'Present only on Soul DIDs. References '
+                                                                              "the parent Tessellated DID's URI "
+                                                                              '(RFC-0009 §5.3).',
+                                                               'type': 'string'},
+                                        'plannedChanges': {'description': 'Planned design changes surfaced to '
+                                                                          'engineering for lookahead (RFC-0008 §A.9).',
+                                                           'items': {'$ref': '#/$defs/plannedChange'},
+                                                           'type': 'array'},
+                                        'soulPurpose': {'$ref': '#/$defs/soulPurpose'},
+                                        'stewardship': {'$ref': '#/$defs/stewardshipSplit'},
+                                        'tessellation': {'$ref': '#/$defs/tessellation'},
+                                        'triad': {'$ref': '#/$defs/triad'},
+                                        'variants': {'description': 'In-Soul Variant declarations per RFC-0017 §5.1. '
+                                                                    'Each variant carries distinct visual identity '
+                                                                    'specializations and audience targeting while '
+                                                                    "inheriting the parent Soul DID's compliance "
+                                                                    'regime and substrate invariants.',
+                                                     'items': {'$ref': '#/$defs/variantDeclaration'},
+                                                     'maxItems': 19,
+                                                     'type': 'array'}},
+                         'required': ['stewardship', 'soulPurpose', 'designSystemRef', 'triad'],
+                         'type': 'object'},
+                'status': {'$ref': '#/$defs/status'}},
+ 'required': ['apiVersion', 'kind', 'metadata', 'spec'],
+ 'title': 'AI-SDLC DesignIntentDocument',
+ 'type': 'object'}
+
+design_system_binding_schema: dict[str, Any] = {'$id': 'https://ai-sdlc.io/schemas/v1alpha1/design-system-binding.schema.json',
+ '$schema': 'https://json-schema.org/draft/2020-12/schema',
+ 'additionalProperties': False,
+ 'description': "Declares a design system that a pipeline's frontend stages must conform to. Defines token sources, "
+                'component catalogs, visual regression configuration, compliance rules, stewardship authority, and '
+                'design review gates.',
+ 'properties': {'apiVersion': {'$ref': 'common.schema.json#/$defs/apiVersion'},
+                'kind': {'const': 'DesignSystemBinding', 'type': 'string'},
+                'metadata': {'$ref': 'common.schema.json#/$defs/metadata'},
+                'spec': {'additionalProperties': False,
+                         'allOf': [{'if': {'properties': {'tokens': {'properties': {'sync': {'properties': {'conflictResolution': {'const': 'manual'}},
+                                                                                             'required': ['conflictResolution']}}}}},
+                                    'then': {'properties': {'tokens': {'properties': {'sync': {'required': ['manualResolutionTimeout']}}}}}}],
+                         'properties': {'catalog': {'additionalProperties': False,
+                                                    'description': 'Component catalog configuration (e.g., Storybook '
+                                                                   'MCP).',
+                                                    'properties': {'discovery': {'additionalProperties': False,
+                                                                                 'description': 'MCP-based component '
+                                                                                                'discovery '
+                                                                                                'configuration.',
+                                                                                 'properties': {'mcpEndpoint': {'description': 'Storybook '
+                                                                                                                               'MCP '
+                                                                                                                               'server '
+                                                                                                                               'endpoint '
+                                                                                                                               'URL.',
+                                                                                                                'format': 'uri',
+                                                                                                                'type': 'string'},
+                                                                                                'refreshInterval': {'description': 'ISO '
+                                                                                                                                   '8601 '
+                                                                                                                                   'duration '
+                                                                                                                                   'for '
+                                                                                                                                   'manifest '
+                                                                                                                                   'cache '
+                                                                                                                                   'refresh.',
+                                                                                                                    'pattern': '^PT?(\\d+[YMDHMS])+$',
+                                                                                                                    'type': 'string'}},
+                                                                                 'type': 'object'},
+                                                                   'provider': {'description': 'The ComponentCatalog '
+                                                                                               'adapter name (e.g., '
+                                                                                               'storybook-mcp).',
+                                                                                'type': 'string'},
+                                                                   'source': {'additionalProperties': False,
+                                                                              'description': 'Location of the '
+                                                                                             'component catalog.',
+                                                                              'properties': {'manifestPath': {'default': '.storybook/component-manifest.json',
+                                                                                                              'description': 'Path '
+                                                                                                                             'to '
+                                                                                                                             'the '
+                                                                                                                             'component '
+                                                                                                                             'manifest '
+                                                                                                                             'file.',
+                                                                                                              'type': 'string'},
+                                                                                             'repository': {'description': 'Git '
+                                                                                                                           'repository '
+                                                                                                                           'reference '
+                                                                                                                           'for '
+                                                                                                                           'the '
+                                                                                                                           'component '
+                                                                                                                           'library.',
+                                                                                                            'type': 'string'},
+                                                                                             'storybookUrl': {'description': 'URL '
+                                                                                                                             'of '
+                                                                                                                             'the '
+                                                                                                                             'deployed '
+                                                                                                                             'Storybook '
+                                                                                                                             'instance.',
+                                                                                                              'format': 'uri',
+                                                                                                              'type': 'string'}},
+                                                                              'type': 'object'}},
+                                                    'required': ['provider'],
+                                                    'type': 'object'},
+                                        'compliance': {'additionalProperties': False,
+                                                       'description': 'Design token compliance rules.',
+                                                       'properties': {'coverage': {'additionalProperties': False,
+                                                                                   'description': 'Token coverage '
+                                                                                                  'thresholds.',
+                                                                                   'properties': {'minimum': {'description': 'Minimum '
+                                                                                                                             'acceptable '
+                                                                                                                             'token '
+                                                                                                                             'coverage '
+                                                                                                                             'percentage.',
+                                                                                                              'maximum': 100,
+                                                                                                              'minimum': 0,
+                                                                                                              'type': 'integer'},
+                                                                                                  'target': {'description': 'Target '
+                                                                                                                            'token '
+                                                                                                                            'coverage '
+                                                                                                                            'percentage.',
+                                                                                                             'maximum': 100,
+                                                                                                             'minimum': 0,
+                                                                                                             'type': 'integer'}},
+                                                                                   'required': ['minimum'],
+                                                                                   'type': 'object'},
+                                                                      'disallowHardcoded': {'description': 'Patterns '
+                                                                                                           'for '
+                                                                                                           'disallowed '
+                                                                                                           'hardcoded '
+                                                                                                           'values '
+                                                                                                           'that '
+                                                                                                           'should use '
+                                                                                                           'tokens '
+                                                                                                           'instead.',
+                                                                                            'items': {'additionalProperties': False,
+                                                                                                      'properties': {'category': {'description': 'Token '
+                                                                                                                                                 'category '
+                                                                                                                                                 '(e.g., '
+                                                                                                                                                 'color, '
+                                                                                                                                                 'spacing, '
+                                                                                                                                                 'typography).',
+                                                                                                                                  'type': 'string'},
+                                                                                                                     'exclude': {'description': 'Values '
+                                                                                                                                                'that '
+                                                                                                                                                'are '
+                                                                                                                                                'intentional '
+                                                                                                                                                'exceptions '
+                                                                                                                                                'to '
+                                                                                                                                                'this '
+                                                                                                                                                'rule.',
+                                                                                                                                 'items': {'type': 'string'},
+                                                                                                                                 'type': 'array'},
+                                                                                                                     'message': {'description': 'Human-readable '
+                                                                                                                                                'message '
+                                                                                                                                                'explaining '
+                                                                                                                                                'which '
+                                                                                                                                                'token '
+                                                                                                                                                'to '
+                                                                                                                                                'use '
+                                                                                                                                                'instead.',
+                                                                                                                                 'type': 'string'},
+                                                                                                                     'pattern': {'description': 'Regex '
+                                                                                                                                                'pattern '
+                                                                                                                                                'matching '
+                                                                                                                                                'hardcoded '
+                                                                                                                                                'values.',
+                                                                                                                                 'type': 'string'}},
+                                                                                                      'required': ['category',
+                                                                                                                   'pattern',
+                                                                                                                   'message'],
+                                                                                                      'type': 'object'},
+                                                                                            'type': 'array'}},
+                                                       'required': ['coverage'],
+                                                       'type': 'object'},
+                                        'designReview': {'additionalProperties': False,
+                                                         'description': 'Design review gate configuration.',
+                                                         'properties': {'required': {'default': False,
+                                                                                     'description': 'Whether design '
+                                                                                                    'review gates are '
+                                                                                                    'enabled.',
+                                                                                     'type': 'boolean'},
+                                                                        'reviewers': {'description': 'Principals '
+                                                                                                     'qualified to '
+                                                                                                     'perform design '
+                                                                                                     'review.',
+                                                                                      'items': {'type': 'string'},
+                                                                                      'type': 'array'},
+                                                                        'scope': {'description': 'Aspects evaluated '
+                                                                                                 'during design '
+                                                                                                 'review.',
+                                                                                  'items': {'enum': ['visual-quality',
+                                                                                                     'contextual-fit',
+                                                                                                     'interaction-design',
+                                                                                                     'accessibility-intent',
+                                                                                                     'design-language-consistency'],
+                                                                                            'type': 'string'},
+                                                                                  'type': 'array'},
+                                                                        'triggerConditions': {'additionalProperties': False,
+                                                                                              'description': 'Conditions '
+                                                                                                             'that '
+                                                                                                             'trigger '
+                                                                                                             'a design '
+                                                                                                             'review.',
+                                                                                              'properties': {'alwaysOn': {'description': 'Conditions '
+                                                                                                                                         'that '
+                                                                                                                                         'always '
+                                                                                                                                         'require '
+                                                                                                                                         'design '
+                                                                                                                                         'review.',
+                                                                                                                          'items': {'enum': ['new-component',
+                                                                                                                                             'token-schema-change'],
+                                                                                                                                    'type': 'string'},
+                                                                                                                          'type': 'array'},
+                                                                                                             'configurable': {'description': 'Conditions '
+                                                                                                                                             'with '
+                                                                                                                                             'configurable '
+                                                                                                                                             'thresholds.',
+                                                                                                                              'items': {'additionalProperties': False,
+                                                                                                                                        'properties': {'condition': {'description': 'The '
+                                                                                                                                                                                    'trigger '
+                                                                                                                                                                                    'condition '
+                                                                                                                                                                                    'type.',
+                                                                                                                                                                     'enum': ['semantic-token-cascade',
+                                                                                                                                                                              'visual-regression-diff',
+                                                                                                                                                                              'complexity-score'],
+                                                                                                                                                                     'type': 'string'},
+                                                                                                                                                       'threshold': {'description': 'Threshold '
+                                                                                                                                                                                    'value '
+                                                                                                                                                                                    'for '
+                                                                                                                                                                                    'the '
+                                                                                                                                                                                    'condition.',
+                                                                                                                                                                     'type': 'number'}},
+                                                                                                                                        'required': ['condition',
+                                                                                                                                                     'threshold'],
+                                                                                                                                        'type': 'object'},
+                                                                                                                              'type': 'array'}},
+                                                                                              'type': 'object'}},
+                                                         'type': 'object'},
+                                        'designToolAuthority': {'description': 'The authority level of the design '
+                                                                               'tool. This is a significant '
+                                                                               'organizational decision — teams MUST '
+                                                                               'configure this with both design and '
+                                                                               'engineering leadership.',
+                                                                'enum': ['exploration',
+                                                                         'specification',
+                                                                         'collaborative'],
+                                                                'type': 'string'},
+                                        'extends': {'description': 'Reference to a parent DesignSystemBinding by name '
+                                                                   'for multi-brand inheritance. Child thresholds must '
+                                                                   'be >= parent thresholds. Max two-level depth.',
+                                                    'type': 'string'},
+                                        'stewardship': {'additionalProperties': False,
+                                                        'description': 'Defines who has authority over which aspects '
+                                                                       'of this resource.',
+                                                        'properties': {'changeApproval': {'additionalProperties': False,
+                                                                                          'description': 'Controls for '
+                                                                                                         'change '
+                                                                                                         'approval '
+                                                                                                         'requirements.',
+                                                                                          'properties': {'auditAllChanges': {'default': True,
+                                                                                                                             'description': 'Whether '
+                                                                                                                                            'all '
+                                                                                                                                            'changes '
+                                                                                                                                            'to '
+                                                                                                                                            'this '
+                                                                                                                                            'resource '
+                                                                                                                                            'are '
+                                                                                                                                            'recorded '
+                                                                                                                                            'in '
+                                                                                                                                            'the '
+                                                                                                                                            'audit '
+                                                                                                                                            'log.',
+                                                                                                                             'type': 'boolean'},
+                                                                                                         'requireBothDisciplines': {'default': True,
+                                                                                                                                    'description': 'Whether '
+                                                                                                                                                   'changes '
+                                                                                                                                                   'to '
+                                                                                                                                                   'sharedAuthority '
+                                                                                                                                                   'fields '
+                                                                                                                                                   'require '
+                                                                                                                                                   'approval '
+                                                                                                                                                   'from '
+                                                                                                                                                   'both '
+                                                                                                                                                   'disciplines.',
+                                                                                                                                    'type': 'boolean'}},
+                                                                                          'type': 'object'},
+                                                                       'designAuthority': {'additionalProperties': False,
+                                                                                           'description': 'Principals '
+                                                                                                          'with '
+                                                                                                          'authority '
+                                                                                                          'over '
+                                                                                                          'design-scoped '
+                                                                                                          'fields.',
+                                                                                           'properties': {'principals': {'description': 'Identifiers '
+                                                                                                                                        'of '
+                                                                                                                                        'principals '
+                                                                                                                                        'with '
+                                                                                                                                        'design '
+                                                                                                                                        'authority.',
+                                                                                                                         'items': {'type': 'string'},
+                                                                                                                         'minItems': 1,
+                                                                                                                         'type': 'array'},
+                                                                                                          'scope': {'description': 'Fields '
+                                                                                                                                   'governed '
+                                                                                                                                   'by '
+                                                                                                                                   'design '
+                                                                                                                                   'authority '
+                                                                                                                                   '(e.g., '
+                                                                                                                                   'conflictResolution, '
+                                                                                                                                   'visualBaselines, '
+                                                                                                                                   'tokenSchema).',
+                                                                                                                    'items': {'type': 'string'},
+                                                                                                                    'type': 'array'}},
+                                                                                           'required': ['principals',
+                                                                                                        'scope'],
+                                                                                           'type': 'object'},
+                                                                       'engineeringAuthority': {'additionalProperties': False,
+                                                                                                'description': 'Principals '
+                                                                                                               'with '
+                                                                                                               'authority '
+                                                                                                               'over '
+                                                                                                               'engineering-scoped '
+                                                                                                               'fields.',
+                                                                                                'properties': {'principals': {'description': 'Identifiers '
+                                                                                                                                             'of '
+                                                                                                                                             'principals '
+                                                                                                                                             'with '
+                                                                                                                                             'engineering '
+                                                                                                                                             'authority.',
+                                                                                                                              'items': {'type': 'string'},
+                                                                                                                              'minItems': 1,
+                                                                                                                              'type': 'array'},
+                                                                                                               'scope': {'description': 'Fields '
+                                                                                                                                        'governed '
+                                                                                                                                        'by '
+                                                                                                                                        'engineering '
+                                                                                                                                        'authority '
+                                                                                                                                        '(e.g., '
+                                                                                                                                        'catalog, '
+                                                                                                                                        'visualRegression.config).',
+                                                                                                                         'items': {'type': 'string'},
+                                                                                                                         'type': 'array'}},
+                                                                                                'required': ['principals',
+                                                                                                             'scope'],
+                                                                                                'type': 'object'},
+                                                                       'sharedAuthority': {'additionalProperties': False,
+                                                                                           'description': 'Fields '
+                                                                                                          'requiring '
+                                                                                                          'approval '
+                                                                                                          'from both '
+                                                                                                          'disciplines.',
+                                                                                           'properties': {'principals': {'description': 'Principals '
+                                                                                                                                        'from '
+                                                                                                                                        'both '
+                                                                                                                                        'disciplines.',
+                                                                                                                         'items': {'type': 'string'},
+                                                                                                                         'type': 'array'},
+                                                                                                          'scope': {'description': 'Fields '
+                                                                                                                                   'requiring '
+                                                                                                                                   'cross-discipline '
+                                                                                                                                   'approval '
+                                                                                                                                   '(e.g., '
+                                                                                                                                   'sync.direction, '
+                                                                                                                                   'compliance.coverage.minimum).',
+                                                                                                                    'items': {'type': 'string'},
+                                                                                                                    'type': 'array'}},
+                                                                                           'type': 'object'}},
+                                                        'required': ['designAuthority', 'engineeringAuthority'],
+                                                        'type': 'object'},
+                                        'tokens': {'additionalProperties': False,
+                                                   'description': 'Design token source configuration.',
+                                                   'if': {'properties': {'versionPolicy': {'const': 'exact'}},
+                                                          'required': ['versionPolicy']},
+                                                   'properties': {'format': {'description': 'The token format. '
+                                                                                            'w3c-dtcg is the W3C '
+                                                                                            'Design Tokens Format '
+                                                                                            'Module v1.0.',
+                                                                             'enum': ['w3c-dtcg',
+                                                                                      'style-dictionary',
+                                                                                      'custom'],
+                                                                             'type': 'string'},
+                                                                  'pinnedVersion': {'description': 'Required when '
+                                                                                                   'versionPolicy is '
+                                                                                                   'exact. Must be a '
+                                                                                                   'valid semver '
+                                                                                                   'string.',
+                                                                                    'pattern': '^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$',
+                                                                                    'type': 'string'},
+                                                                  'platform': {'description': 'Platform-specific token '
+                                                                                              'expression format. Omit '
+                                                                                              'for platform-neutral '
+                                                                                              'canonical tokens.',
+                                                                               'enum': ['web', 'ios', 'android'],
+                                                                               'type': 'string'},
+                                                                  'provider': {'description': 'The DesignTokenProvider '
+                                                                                              'adapter name (e.g., '
+                                                                                              'figma-tokens-studio, '
+                                                                                              'figma-variables).',
+                                                                               'type': 'string'},
+                                                                  'source': {'additionalProperties': False,
+                                                                             'description': 'Location of the token '
+                                                                                            'source.',
+                                                                             'properties': {'branch': {'default': 'main',
+                                                                                                       'description': 'Branch '
+                                                                                                                      'to '
+                                                                                                                      'read '
+                                                                                                                      'tokens '
+                                                                                                                      'from.',
+                                                                                                       'type': 'string'},
+                                                                                            'path': {'default': 'tokens/',
+                                                                                                     'description': 'Path '
+                                                                                                                    'within '
+                                                                                                                    'the '
+                                                                                                                    'repository '
+                                                                                                                    'to '
+                                                                                                                    'the '
+                                                                                                                    'token '
+                                                                                                                    'files.',
+                                                                                                     'type': 'string'},
+                                                                                            'repository': {'description': 'Git '
+                                                                                                                          'repository '
+                                                                                                                          'reference '
+                                                                                                                          '(e.g., '
+                                                                                                                          'org/repo).',
+                                                                                                           'type': 'string'}},
+                                                                             'required': ['repository'],
+                                                                             'type': 'object'},
+                                                                  'sync': {'additionalProperties': False,
+                                                                           'description': 'Token synchronization '
+                                                                                          'configuration.',
+                                                                           'properties': {'conflictResolution': {'default': 'manual',
+                                                                                                                 'description': 'Strategy '
+                                                                                                                                'when '
+                                                                                                                                'bidirectional '
+                                                                                                                                'sync '
+                                                                                                                                'produces '
+                                                                                                                                'conflicts.',
+                                                                                                                 'enum': ['code-wins',
+                                                                                                                          'design-wins',
+                                                                                                                          'manual'],
+                                                                                                                 'type': 'string'},
+                                                                                          'direction': {'default': 'unidirectional',
+                                                                                                        'description': 'Whether '
+                                                                                                                       'changes '
+                                                                                                                       'flow '
+                                                                                                                       'one '
+                                                                                                                       'way '
+                                                                                                                       '(design→code) '
+                                                                                                                       'or '
+                                                                                                                       'both '
+                                                                                                                       'ways.',
+                                                                                                        'enum': ['unidirectional',
+                                                                                                                 'bidirectional'],
+                                                                                                        'type': 'string'},
+                                                                                          'escalateTo': {'description': 'Principals '
+                                                                                                                        'to '
+                                                                                                                        'notify '
+                                                                                                                        'on '
+                                                                                                                        'escalation.',
+                                                                                                         'items': {'type': 'string'},
+                                                                                                         'type': 'array'},
+                                                                                          'manualResolutionTimeout': {'description': 'ISO '
+                                                                                                                                     '8601 '
+                                                                                                                                     'duration '
+                                                                                                                                     '— '
+                                                                                                                                     'max '
+                                                                                                                                     'time '
+                                                                                                                                     'pipeline '
+                                                                                                                                     'may '
+                                                                                                                                     'remain '
+                                                                                                                                     'paused '
+                                                                                                                                     'for '
+                                                                                                                                     'manual '
+                                                                                                                                     'conflict '
+                                                                                                                                     'resolution. '
+                                                                                                                                     'Required '
+                                                                                                                                     'when '
+                                                                                                                                     'conflictResolution '
+                                                                                                                                     'is '
+                                                                                                                                     'manual.',
+                                                                                                                      'pattern': '^PT?(\\d+[YMDHMS])+$',
+                                                                                                                      'type': 'string'},
+                                                                                          'onTimeout': {'default': 'escalate',
+                                                                                                        'description': 'Behavior '
+                                                                                                                       'when '
+                                                                                                                       'manualResolutionTimeout '
+                                                                                                                       'expires.',
+                                                                                                        'enum': ['escalate',
+                                                                                                                 'fallback-design-wins',
+                                                                                                                 'fail'],
+                                                                                                        'type': 'string'},
+                                                                                          'prBranch': {'default': 'ai-sdlc/token-sync-{timestamp}',
+                                                                                                       'description': 'Branch '
+                                                                                                                      'naming '
+                                                                                                                      'template '
+                                                                                                                      'for '
+                                                                                                                      'token '
+                                                                                                                      'sync '
+                                                                                                                      'PRs. '
+                                                                                                                      'Supports '
+                                                                                                                      '{timestamp} '
+                                                                                                                      'placeholder.',
+                                                                                                       'type': 'string'},
+                                                                                          'schedule': {'description': 'ISO '
+                                                                                                                      '8601 '
+                                                                                                                      'duration '
+                                                                                                                      'for '
+                                                                                                                      'sync '
+                                                                                                                      'interval '
+                                                                                                                      '(e.g., '
+                                                                                                                      'PT15M, '
+                                                                                                                      'PT1H). '
+                                                                                                                      'Use '
+                                                                                                                      "'manual' "
+                                                                                                                      'for '
+                                                                                                                      'external '
+                                                                                                                      'scheduling.',
+                                                                                                       'pattern': '^(PT?(\\d+[YMDHMS])+|manual)$',
+                                                                                                       'type': 'string'}},
+                                                                           'type': 'object'},
+                                                                  'versionPolicy': {'description': 'Token schema '
+                                                                                                   'update policy. '
+                                                                                                   'exact: only pinned '
+                                                                                                   'version. minor: '
+                                                                                                   'minor+patch. '
+                                                                                                   'minor-and-major: '
+                                                                                                   'major+minor+patch. '
+                                                                                                   'latest: all '
+                                                                                                   'including '
+                                                                                                   'breaking.',
+                                                                                    'enum': ['exact',
+                                                                                             'minor',
+                                                                                             'minor-and-major',
+                                                                                             'latest'],
+                                                                                    'type': 'string'}},
+                                                   'required': ['provider', 'format', 'source', 'versionPolicy'],
+                                                   'then': {'required': ['provider',
+                                                                         'format',
+                                                                         'source',
+                                                                         'versionPolicy',
+                                                                         'pinnedVersion']},
+                                                   'type': 'object'},
+                                        'visualRegression': {'additionalProperties': False,
+                                                             'description': 'Visual regression testing configuration.',
+                                                             'properties': {'config': {'additionalProperties': True,
+                                                                                       'description': 'Provider-specific '
+                                                                                                      'configuration.',
+                                                                                       'properties': {'diffThreshold': {'default': 0.01,
+                                                                                                                        'description': 'Maximum '
+                                                                                                                                       'pixel '
+                                                                                                                                       'diff '
+                                                                                                                                       'percentage '
+                                                                                                                                       'before '
+                                                                                                                                       'a '
+                                                                                                                                       'story '
+                                                                                                                                       'is '
+                                                                                                                                       'flagged '
+                                                                                                                                       '(0.0-1.0).',
+                                                                                                                        'maximum': 1,
+                                                                                                                        'minimum': 0,
+                                                                                                                        'type': 'number'},
+                                                                                                      'projectToken': {'description': 'Project '
+                                                                                                                                      'authentication '
+                                                                                                                                      'token '
+                                                                                                                                      '(use '
+                                                                                                                                      '${SECRET_NAME} '
+                                                                                                                                      'for '
+                                                                                                                                      'secret '
+                                                                                                                                      'references).',
+                                                                                                                       'type': 'string'},
+                                                                                                      'viewports': {'default': [375,
+                                                                                                                                768,
+                                                                                                                                1280,
+                                                                                                                                1920],
+                                                                                                                    'description': 'Viewport '
+                                                                                                                                   'widths '
+                                                                                                                                   'to '
+                                                                                                                                   'test '
+                                                                                                                                   'at '
+                                                                                                                                   '(in '
+                                                                                                                                   'pixels).',
+                                                                                                                    'items': {'minimum': 1,
+                                                                                                                              'type': 'integer'},
+                                                                                                                    'type': 'array'}},
+                                                                                       'type': 'object'},
+                                                                            'provider': {'description': 'The '
+                                                                                                        'VisualRegressionRunner '
+                                                                                                        'adapter name '
+                                                                                                        '(e.g., '
+                                                                                                        'chromatic, '
+                                                                                                        'playwright-visual, '
+                                                                                                        'percy).',
+                                                                                         'type': 'string'}},
+                                                             'type': 'object'}},
+                         'required': ['stewardship', 'designToolAuthority', 'tokens', 'catalog', 'compliance'],
+                         'type': 'object'},
+                'status': {'additionalProperties': False,
+                           'description': 'Observed state of the design system binding.',
+                           'properties': {'catalogHealth': {'additionalProperties': False,
+                                                            'description': 'Component catalog health metrics.',
+                                                            'properties': {'coveragePercent': {'maximum': 100,
+                                                                                               'minimum': 0,
+                                                                                               'type': 'number'},
+                                                                           'documentedComponents': {'minimum': 0,
+                                                                                                    'type': 'integer'},
+                                                                           'totalComponents': {'minimum': 0,
+                                                                                               'type': 'integer'}},
+                                                            'type': 'object'},
+                                          'conditions': {'description': 'Structured status conditions.',
+                                                         'items': {'$ref': 'common.schema.json#/$defs/condition'},
+                                                         'type': 'array'},
+                                          'designReview': {'additionalProperties': False,
+                                                           'description': 'Design review status metrics.',
+                                                           'properties': {'approvalRate': {'maximum': 1,
+                                                                                           'minimum': 0,
+                                                                                           'type': 'number'},
+                                                                          'averageReviewTime': {'description': 'ISO '
+                                                                                                               '8601 '
+                                                                                                               'duration '
+                                                                                                               'of '
+                                                                                                               'average '
+                                                                                                               'review '
+                                                                                                               'time.',
+                                                                                                'type': 'string'},
+                                                                          'pendingReviews': {'minimum': 0,
+                                                                                             'type': 'integer'}},
+                                                           'type': 'object'},
+                                          'lastTokenSync': {'additionalProperties': False,
+                                                            'description': 'Result of the most recent token '
+                                                                           'synchronization.',
+                                                            'properties': {'result': {'enum': ['success',
+                                                                                               'failure',
+                                                                                               'conflict',
+                                                                                               'blocked'],
+                                                                                      'type': 'string'},
+                                                                           'timestamp': {'format': 'date-time',
+                                                                                         'type': 'string'},
+                                                                           'tokensChanged': {'minimum': 0,
+                                                                                             'type': 'integer'}},
+                                                            'type': 'object'},
+                                          'tokenCompliance': {'additionalProperties': False,
+                                                              'description': 'Current token compliance metrics.',
+                                                              'properties': {'currentCoverage': {'maximum': 100,
+                                                                                                 'minimum': 0,
+                                                                                                 'type': 'number'},
+                                                                             'trend': {'enum': ['improving',
+                                                                                                'stable',
+                                                                                                'declining'],
+                                                                                       'type': 'string'},
+                                                                             'violations': {'minimum': 0,
+                                                                                            'type': 'integer'}},
+                                                              'type': 'object'}},
+                           'type': 'object'}},
+ 'required': ['apiVersion', 'kind', 'metadata', 'spec'],
+ 'title': 'AI-SDLC DesignSystemBinding',
+ 'type': 'object'}
+
+dor_config_v1_schema: dict[str, Any] = {'$id': 'https://ai-sdlc.io/schemas/v1alpha1/dor-config.v1.schema.json',
+ '$schema': 'https://json-schema.org/draft/2020-12/schema',
+ 'additionalProperties': False,
+ 'description': 'Per-project configuration for the Definition-of-Ready (DoR) gate (RFC-0011). Lives on disk at '
+                '.ai-sdlc/dor-config.yaml. Phase 1 schema — consumed by future evaluator phases.',
+ 'properties': {'apiVersion': {'$ref': 'common.schema.json#/$defs/apiVersion'},
+                'kind': {'const': 'DorConfig', 'type': 'string'},
+                'metadata': {'$ref': 'common.schema.json#/$defs/metadata'},
+                'spec': {'additionalProperties': False,
+                         'properties': {'autoPassRules': {'default': [],
+                                                          'description': 'Auto-pass shortcuts for issue types where '
+                                                                         'the rubric does not apply (RFC §6.4). Per '
+                                                                         'Q-resolution: each rule MAY skip specific '
+                                                                         'gates while retaining others.',
+                                                          'items': {'additionalProperties': False,
+                                                                    'properties': {'gatesRetained': {'default': [],
+                                                                                                     'description': 'Gate '
+                                                                                                                    'IDs '
+                                                                                                                    '(1-7) '
+                                                                                                                    'still '
+                                                                                                                    'evaluated '
+                                                                                                                    'when '
+                                                                                                                    'this '
+                                                                                                                    'rule '
+                                                                                                                    'matches. '
+                                                                                                                    'Allows '
+                                                                                                                    'partial '
+                                                                                                                    'auto-pass '
+                                                                                                                    '(e.g. '
+                                                                                                                    'dependency '
+                                                                                                                    'bumps '
+                                                                                                                    'still '
+                                                                                                                    'get '
+                                                                                                                    'scope-bounded '
+                                                                                                                    'check).',
+                                                                                                     'items': {'maximum': 7,
+                                                                                                               'minimum': 1,
+                                                                                                               'type': 'integer'},
+                                                                                                     'type': 'array',
+                                                                                                     'uniqueItems': True},
+                                                                                   'gatesSkipped': {'default': [],
+                                                                                                    'description': 'Gate '
+                                                                                                                   'IDs '
+                                                                                                                   '(1-7) '
+                                                                                                                   'skipped '
+                                                                                                                   'by '
+                                                                                                                   'this '
+                                                                                                                   'rule. '
+                                                                                                                   'Empty '
+                                                                                                                   'array '
+                                                                                                                   '= '
+                                                                                                                   'full '
+                                                                                                                   'skip '
+                                                                                                                   '(legacy '
+                                                                                                                   'auto-pass '
+                                                                                                                   'shortcut).',
+                                                                                                    'items': {'maximum': 7,
+                                                                                                              'minimum': 1,
+                                                                                                              'type': 'integer'},
+                                                                                                    'type': 'array',
+                                                                                                    'uniqueItems': True},
+                                                                                   'kind': {'description': 'Stable '
+                                                                                                           'rule '
+                                                                                                           'identifier '
+                                                                                                           '(e.g. '
+                                                                                                           "'dependency-bump', "
+                                                                                                           "'doc-typo', "
+                                                                                                           "'generated-ci-failure'). "
+                                                                                                           'Matches '
+                                                                                                           'the '
+                                                                                                           "dispatcher's "
+                                                                                                           'rule '
+                                                                                                           'registry.',
+                                                                                            'minLength': 1,
+                                                                                            'type': 'string'},
+                                                                                   'maxBodyDiffLines': {'description': 'Optional '
+                                                                                                                       'cap '
+                                                                                                                       'on '
+                                                                                                                       'body '
+                                                                                                                       'diff '
+                                                                                                                       'size '
+                                                                                                                       'in '
+                                                                                                                       'lines '
+                                                                                                                       '(used '
+                                                                                                                       'by '
+                                                                                                                       'doc-typo).',
+                                                                                                        'minimum': 1,
+                                                                                                        'type': 'integer'},
+                                                                                   'sources': {'description': 'Author '
+                                                                                                              'identities '
+                                                                                                              'that '
+                                                                                                              'trigger '
+                                                                                                              'this '
+                                                                                                              'rule '
+                                                                                                              '(e.g. '
+                                                                                                              "'dependabot[bot]', "
+                                                                                                              "'renovate[bot]', "
+                                                                                                              "'github-actions[bot]').",
+                                                                                               'items': {'minLength': 1,
+                                                                                                         'type': 'string'},
+                                                                                               'minItems': 1,
+                                                                                               'type': 'array'},
+                                                                                   'titlePattern': {'description': 'Optional '
+                                                                                                                   'regex '
+                                                                                                                   '(JavaScript '
+                                                                                                                   'flavour) '
+                                                                                                                   'the '
+                                                                                                                   'issue '
+                                                                                                                   'title '
+                                                                                                                   'must '
+                                                                                                                   'match '
+                                                                                                                   'for '
+                                                                                                                   'this '
+                                                                                                                   'rule '
+                                                                                                                   'to '
+                                                                                                                   'fire.',
+                                                                                                    'minLength': 1,
+                                                                                                    'type': 'string'}},
+                                                                    'required': ['kind', 'sources'],
+                                                                    'type': 'object'},
+                                                          'type': 'array'},
+                                        'blastRadiusThreshold': {'default': 3,
+                                                                 'description': 'RFC-0014 §12 Q5 Phase 3 — '
+                                                                                'blast-radius count above which a '
+                                                                                'dor-bypass-admitted task triggers the '
+                                                                                'maintainer-tone FYI comment. Below '
+                                                                                'this, the bypass is treated as '
+                                                                                'routine (no FYI). Tunable per '
+                                                                                'project; the default 3 matches the '
+                                                                                'rolled-up-three-tasks-or-deeper bar '
+                                                                                'that empirically distinguishes '
+                                                                                "'dispatch leaf bypass' from "
+                                                                                "'foundation-task bypass that should "
+                                                                                "have been rubric-tuned instead'.",
+                                                                 'minimum': 1,
+                                                                 'type': 'integer'},
+                                        'bypassRequiresRole': {'default': 'maintainer',
+                                                               'description': 'Trusted-reviewer role required to apply '
+                                                                              'the dor-bypass label (RFC §7.4).',
+                                                               'type': 'string'},
+                                        'escalation': {'additionalProperties': False,
+                                                       'description': 'Escalation policy (RFC §6.3 + Phase 6 / '
+                                                                      'AISDLC-115.7). Fires on round-cap (author '
+                                                                      "hasn't responded after "
+                                                                      'maxRoundsBeforeHumanTriage clarification '
+                                                                      'rounds) OR on a low-confidence verdict (per Q4 '
+                                                                      '— never auto-act on low confidence). Routing '
+                                                                      'target is the free-form `triager` string OR the '
+                                                                      'structured `triageRouters` array.',
+                                                       'properties': {'maxRoundsBeforeHumanTriage': {'default': 3,
+                                                                                                     'description': 'Round '
+                                                                                                                    'count '
+                                                                                                                    'at '
+                                                                                                                    'which '
+                                                                                                                    'to '
+                                                                                                                    'escalate '
+                                                                                                                    '(RFC '
+                                                                                                                    '§6.3). '
+                                                                                                                    'One '
+                                                                                                                    'round '
+                                                                                                                    '= '
+                                                                                                                    'one '
+                                                                                                                    'clarification '
+                                                                                                                    'post '
+                                                                                                                    '+ '
+                                                                                                                    'one '
+                                                                                                                    'expected '
+                                                                                                                    'author '
+                                                                                                                    'edit.',
+                                                                                                     'minimum': 1,
+                                                                                                     'type': 'integer'},
+                                                                      'triageRouters': {'description': 'Structured '
+                                                                                                       'routing '
+                                                                                                       'targets '
+                                                                                                       '(legacy / '
+                                                                                                       'multi-channel). '
+                                                                                                       'Prefer the '
+                                                                                                       'simpler '
+                                                                                                       '`triager` '
+                                                                                                       'string for new '
+                                                                                                       'configs.',
+                                                                                        'items': {'additionalProperties': False,
+                                                                                                  'minProperties': 1,
+                                                                                                  'properties': {'github_team': {'minLength': 1,
+                                                                                                                                 'type': 'string'},
+                                                                                                                 'slack': {'minLength': 1,
+                                                                                                                           'type': 'string'}},
+                                                                                                  'type': 'object'},
+                                                                                        'type': 'array'},
+                                                                      'triager': {'description': 'Free-form routing '
+                                                                                                 'target — Slack '
+                                                                                                 'channel ID/#name, '
+                                                                                                 'GitHub team handle '
+                                                                                                 '(@org/team), or '
+                                                                                                 'plain user identity. '
+                                                                                                 'The orchestration '
+                                                                                                 'layer interprets the '
+                                                                                                 'string. When '
+                                                                                                 'omitted, escalations '
+                                                                                                 'are flagged as '
+                                                                                                 '`unrouted` rather '
+                                                                                                 'than throwing.',
+                                                                                  'minLength': 1,
+                                                                                  'type': 'string'}},
+                                                       'type': 'object'},
+                                        'evaluationMode': {'description': 'Per RFC §10 / §13 Q-resolution: warn-only '
+                                                                          'posts comments + flags but does NOT move '
+                                                                          'issues to Needs Clarification; enforce '
+                                                                          'moves issues to Needs Clarification on a '
+                                                                          'failing verdict.',
+                                                           'enum': ['warn-only', 'enforce'],
+                                                           'type': 'string'},
+                                        'notifications': {'additionalProperties': False,
+                                                          'description': 'Where clarification questions are posted '
+                                                                         '(RFC §13 Q5 dual-fanout).',
+                                                          'properties': {'authorChannel': {'default': True,
+                                                                                           'description': 'When true, '
+                                                                                                          'post '
+                                                                                                          'clarification '
+                                                                                                          'comment to '
+                                                                                                          'where the '
+                                                                                                          'issue was '
+                                                                                                          'authored '
+                                                                                                          '(GitHub '
+                                                                                                          'issue / '
+                                                                                                          'backlog '
+                                                                                                          'file / '
+                                                                                                          'Slack '
+                                                                                                          'thread).',
+                                                                                           'type': 'boolean'},
+                                                                         'dedicatedChannel': {'additionalProperties': False,
+                                                                                              'description': 'Optional '
+                                                                                                             'centralised '
+                                                                                                             'triage '
+                                                                                                             'channel(s). '
+                                                                                                             'If set, '
+                                                                                                             'clarification '
+                                                                                                             'posts go '
+                                                                                                             'to BOTH '
+                                                                                                             'the '
+                                                                                                             'author '
+                                                                                                             'channel '
+                                                                                                             'AND the '
+                                                                                                             'dedicated '
+                                                                                                             'channel.',
+                                                                                              'minProperties': 1,
+                                                                                              'properties': {'github_team': {'description': 'GitHub '
+                                                                                                                                            'team '
+                                                                                                                                            'handle '
+                                                                                                                                            '(e.g. '
+                                                                                                                                            "'@org/triage') "
+                                                                                                                                            'to '
+                                                                                                                                            'ping '
+                                                                                                                                            'on '
+                                                                                                                                            'clarification '
+                                                                                                                                            'posts.',
+                                                                                                                             'minLength': 1,
+                                                                                                                             'type': 'string'},
+                                                                                                             'slack': {'description': 'Slack '
+                                                                                                                                      'channel '
+                                                                                                                                      'ID '
+                                                                                                                                      'or '
+                                                                                                                                      '#name '
+                                                                                                                                      'to '
+                                                                                                                                      'mirror '
+                                                                                                                                      'clarification '
+                                                                                                                                      'comments '
+                                                                                                                                      'to.',
+                                                                                                                       'minLength': 1,
+                                                                                                                       'type': 'string'}},
+                                                                                              'type': 'object'}},
+                                                          'type': 'object'},
+                                        'rubricVersion': {'default': 'v1',
+                                                          'description': 'Pinned rubric version. v1 is the only '
+                                                                         'currently published rubric (RFC-0011 §4).',
+                                                          'enum': ['v1'],
+                                                          'type': 'string'},
+                                        'staleness': {'additionalProperties': False,
+                                                      'description': 'Two-stage warn-then-close staleness policy for '
+                                                                     'issues stuck in Needs Clarification (RFC §13 '
+                                                                     'Q6).',
+                                                      'properties': {'closeAfterDays': {'default': 28,
+                                                                                        'description': 'Days of '
+                                                                                                       'inactivity '
+                                                                                                       'before '
+                                                                                                       'auto-closing '
+                                                                                                       'the issue. '
+                                                                                                       'MUST be '
+                                                                                                       'greater than '
+                                                                                                       'warnAfterDays '
+                                                                                                       '(validated '
+                                                                                                       'externally — '
+                                                                                                       'JSON Schema '
+                                                                                                       'cannot express '
+                                                                                                       'cross-property '
+                                                                                                       'constraints '
+                                                                                                       'for integers '
+                                                                                                       'without '
+                                                                                                       'draft-2020 '
+                                                                                                       'unevaluatedProperties '
+                                                                                                       'tricks).',
+                                                                                        'minimum': 2,
+                                                                                        'type': 'integer'},
+                                                                     'closedLabel': {'default': 'closed-as-stale-dor',
+                                                                                     'description': 'Label applied '
+                                                                                                    'when the issue is '
+                                                                                                    'auto-closed (so '
+                                                                                                    'stale-DoR-closures '
+                                                                                                    'are queryable).',
+                                                                                     'minLength': 1,
+                                                                                     'type': 'string'},
+                                                                     'warnAfterDays': {'default': 14,
+                                                                                       'description': 'Days of '
+                                                                                                      'inactivity '
+                                                                                                      'before posting '
+                                                                                                      'the staleness '
+                                                                                                      'warning to the '
+                                                                                                      'same channels '
+                                                                                                      'as the original '
+                                                                                                      'clarification.',
+                                                                                       'minimum': 1,
+                                                                                       'type': 'integer'}},
+                                                      'required': ['warnAfterDays', 'closeAfterDays', 'closedLabel'],
+                                                      'type': 'object'}},
+                         'required': ['evaluationMode'],
+                         'type': 'object'}},
+ 'required': ['apiVersion', 'kind', 'spec'],
+ 'title': 'AI-SDLC DorConfig',
+ 'type': 'object'}
+
+journey_v1_schema: dict[str, Any] = {'$id': 'https://ai-sdlc.io/schemas/v1alpha1/journey.v1.schema.json',
+ '$schema': 'https://json-schema.org/draft/2020-12/schema',
+ 'additionalProperties': False,
+ 'description': 'Journey declaration schema per RFC-0018 In-Soul Journey Pattern. A journey is a temporally-ordered '
+                'user flow within a Soul DID or Variant with named states, transitions, completion criteria, '
+                'accessibility requirements, and success metrics. Journeys are scoring scopes — not a runtime workflow '
+                'engine. Schema-enforced flat: journeys[] cannot contain nested journeys[] (OQ-3 resolution). '
+                'Completion criteria closed enum: terminal-success-state | all-states-reached (OQ-4 resolution). '
+                "Compliance floor must be 'inherit' when scope=variant (§5.3 bounded inheritance).",
+ 'properties': {'accessibility': {'additionalProperties': False,
+                                  'description': 'WCAG level, version, and conformance target for this journey. May '
+                                                 'set a HIGHER wcagLevel than the parent Soul/Variant (RFC-0018 §5.3). '
+                                                 'MUST NOT lower below parent.',
+                                  'properties': {'auditCadence': {'description': 'Required audit frequency. Overdue '
+                                                                                 'audits trigger graduated Eρ₅ '
+                                                                                 'degradation per OQ-6 resolution: '
+                                                                                 '0-30d warn → 30-60d -25% → 60-90d '
+                                                                                 '-50% → 90d+ effective-block. '
+                                                                                 'Per-Soul config '
+                                                                                 '(accessibility.auditOverdueGracePolicy) '
+                                                                                 'can select stricter modes '
+                                                                                 '(binary-30d, hard-block) for '
+                                                                                 'SOC2/HIPAA shops.',
+                                                                  'enum': ['quarterly',
+                                                                           'annually',
+                                                                           'release-gated',
+                                                                           'continuous'],
+                                                                  'type': 'string'},
+                                                 'conformanceTarget': {'description': 'Percentage of WCAG criteria '
+                                                                                      'that must pass for this '
+                                                                                      'journey. Assumes binary '
+                                                                                      'conformance model (WCAG 2.x). '
+                                                                                      'WCAG 3.0 may require a '
+                                                                                      'scoringModel discriminant in a '
+                                                                                      'future RFC (OQ-7 forward-compat '
+                                                                                      'note).',
+                                                                       'maximum': 100,
+                                                                       'minimum': 0,
+                                                                       'type': 'number'},
+                                                 'wcagLevel': {'description': 'Minimum WCAG conformance level. Journey '
+                                                                              'may set higher than soul/variant '
+                                                                              'default (e.g. AAA for '
+                                                                              'regulatory-submission journey).',
+                                                               'enum': ['A', 'AA', 'AAA'],
+                                                               'type': 'string'},
+                                                 'wcagVersion': {'description': 'WCAG specification version. Additive '
+                                                                                'enum per OQ-7 resolution: existing '
+                                                                                'journeys keep their declared version; '
+                                                                                'new journeys can pick the latest. '
+                                                                                'Declaration of 2.0 emits Decision: '
+                                                                                'wcag-version-superseded (advisory, no '
+                                                                                'scoring impact).',
+                                                                 'enum': ['2.0', '2.1', '2.2', '3.0'],
+                                                                 'type': 'string'}},
+                                  'required': ['wcagLevel', 'wcagVersion', 'conformanceTarget'],
+                                  'type': 'object'},
+                'completionCriteria': {'additionalProperties': False,
+                                       'description': "How 'done' is defined for this journey. OQ-4 resolution: closed "
+                                                      'enum for v1 (terminal-success-state | all-states-reached). '
+                                                      'Future activation via Decision: '
+                                                      'journey-custom-predicate-activation-request (auto-promote at '
+                                                      '>=2 distinct adopter requests; future language: CEL).',
+                                       'if': {'properties': {'kind': {'const': 'terminal-success-state'}},
+                                              'required': ['kind']},
+                                       'properties': {'kind': {'description': 'Completion kind. '
+                                                                              "'terminal-success-state' = reaching a "
+                                                                              'state where terminal=true AND '
+                                                                              'successState=true constitutes '
+                                                                              "completion. 'all-states-reached' = all "
+                                                                              'declared states must be visited at '
+                                                                              'least once.',
+                                                               'enum': ['terminal-success-state', 'all-states-reached'],
+                                                               'type': 'string'},
+                                                      'target': {'description': 'Required when '
+                                                                                "kind='terminal-success-state'. The "
+                                                                                'state id of the success terminal '
+                                                                                'state.',
+                                                                 'maxLength': 64,
+                                                                 'type': 'string'}},
+                                       'required': ['kind'],
+                                       'then': {'required': ['target']},
+                                       'type': 'object'},
+                'complianceFloor': {'const': 'inherit',
+                                    'description': "Required when scope=variant. MUST be 'inherit' — journeys cannot "
+                                                   'diverge from parent compliance regime (RFC-0018 §5.3 bounded '
+                                                   'inheritance). Schema validation rejects any other value.',
+                                    'type': 'string'},
+                'designImperatives': {'description': 'Journey-scoped Sα₂ inputs layered on soul + variant level per '
+                                                     'most-specific-wins (journey > variant > soul). Feeds Vibe '
+                                                     'Coherence scoring at journey scope. Hard limit: 50 imperatives '
+                                                     'per journey.',
+                                      'items': {'maxLength': 512, 'type': 'string'},
+                                      'maxItems': 50,
+                                      'type': 'array'},
+                'id': {'description': 'Journey identifier. Kebab-case, unique within parent scope (Soul DID or '
+                                      'Variant). Used as the journey-id segment in targetedJourneys URI references.',
+                       'maxLength': 64,
+                       'minLength': 2,
+                       'pattern': '^[a-z][a-z0-9-]*$',
+                       'type': 'string'},
+                'scope': {'description': "Whether this journey applies to the whole Soul ('soul') or a specific "
+                                         "Variant ('variant:<id>'). Variant-scoped journeys MUST carry "
+                                         "complianceFloor: 'inherit'.",
+                          'pattern': '^(soul|variant:[a-z][a-z0-9-]*)$',
+                          'type': 'string'},
+                'states': {'contains': {'properties': {'successState': {'const': True}, 'terminal': {'const': True}},
+                                        'required': ['terminal', 'successState'],
+                                        'type': 'object'},
+                           'description': 'Named states for this journey. At least 2 states required; at least 1 MUST '
+                                          'have terminal: true AND successState: true. Hard limit: 100 states per '
+                                          'journey (sanity guard; regulatory-submission journeys with 25-40 states are '
+                                          'legitimate).',
+                           'items': {'additionalProperties': False,
+                                     'properties': {'id': {'description': 'State identifier, kebab-case, unique within '
+                                                                          'this journey. Referenced by substrate code '
+                                                                          "and transition 'from'/'to' fields.",
+                                                           'maxLength': 64,
+                                                           'minLength': 2,
+                                                           'pattern': '^[a-z][a-z0-9-]*$',
+                                                           'type': 'string'},
+                                                    'successState': {'description': 'Required when terminal=true. true '
+                                                                                    '= journey-success (the completion '
+                                                                                    'target); false = explicit '
+                                                                                    'failure-state (e.g. abandoned, '
+                                                                                    'error-timeout) — surfaces as an '
+                                                                                    'analytics signal.',
+                                                                     'type': 'boolean'},
+                                                    'terminal': {'description': 'Whether this state ends the journey '
+                                                                                'flow. Terminal states MUST specify '
+                                                                                'successState.',
+                                                                 'type': 'boolean'}},
+                                     'required': ['id', 'terminal'],
+                                     'type': 'object'},
+                           'maxItems': 100,
+                           'minItems': 2,
+                           'type': 'array'},
+                'successMetrics': {'description': 'Quantified success signals at journey scope. Feeds Sα₂ + Cκ scoring '
+                                                  '— Cκ boosts work that addresses this journey when completion-rate '
+                                                  'is below alertBelow threshold. Hard limit: 50 metrics per journey.',
+                                   'items': {'additionalProperties': False,
+                                             'properties': {'alertAbove': {'description': 'When the metric rises above '
+                                                                                          'this value (for time-based '
+                                                                                          'metrics), Cκ scoring is '
+                                                                                          'boosted.',
+                                                                           'type': 'number'},
+                                                            'alertBelow': {'description': 'When the metric falls below '
+                                                                                          'this value, Cκ scoring is '
+                                                                                          'boosted for work targeting '
+                                                                                          'this journey.',
+                                                                           'type': 'number'},
+                                                            'id': {'description': 'Metric identifier (e.g. '
+                                                                                  "'completion-rate', "
+                                                                                  "'median-time-to-first-task-done').",
+                                                                   'type': 'string'},
+                                                            'target': {'description': 'Target metric value (e.g. 0.65 '
+                                                                                      'for 65% completion rate).',
+                                                                       'type': 'number'},
+                                                            'targetSeconds': {'description': 'For time-based metrics: '
+                                                                                             'target duration in '
+                                                                                             'seconds.',
+                                                                              'minimum': 0,
+                                                                              'type': 'number'}},
+                                             'required': ['id'],
+                                             'type': 'object'},
+                                   'maxItems': 50,
+                                   'type': 'array'},
+                'transitions': {'description': "State-to-state transitions. 'from' may be a single state id or an "
+                                               "array (any-of). 'to' must be a single state id. Hard limit: 500 "
+                                               'transitions per journey.',
+                                'items': {'additionalProperties': False,
+                                          'properties': {'from': {'oneOf': [{'description': 'Single originating state '
+                                                                                            'id.',
+                                                                             'maxLength': 64,
+                                                                             'type': 'string'},
+                                                                            {'description': 'Any-of originating state '
+                                                                                            'ids (shorthand for '
+                                                                                            'multiple transitions '
+                                                                                            'sharing the same trigger '
+                                                                                            'and target).',
+                                                                             'items': {'maxLength': 64,
+                                                                                       'type': 'string'},
+                                                                             'minItems': 1,
+                                                                             'type': 'array'}]},
+                                                         'to': {'description': 'Destination state id.',
+                                                                'maxLength': 64,
+                                                                'type': 'string'},
+                                                         'trigger': {'description': 'Event or action that drives this '
+                                                                                    "transition (e.g. 'user-signup', "
+                                                                                    "'session-timeout-30d').",
+                                                                     'maxLength': 128,
+                                                                     'type': 'string'}},
+                                          'required': ['from', 'to', 'trigger'],
+                                          'type': 'object'},
+                                'maxItems': 500,
+                                'minItems': 1,
+                                'type': 'array'}},
+ 'required': ['id', 'scope', 'states', 'transitions', 'completionCriteria', 'accessibility'],
+ 'title': 'AI-SDLC Journey v1',
+ 'type': 'object'}
+
+judgment_config_v1_schema: dict[str, Any] = {'$defs': {'egressClass': {'enum': ['work-item-text', 'code-diff', 'agent-output'], 'type': 'string'},
+           'judgment': {'additionalProperties': False,
+                        'properties': {'mode': {'$ref': '#/$defs/mode'},
+                                       'promotion': {'additionalProperties': {'$ref': '#/$defs/promotionRecord'},
+                                                     'description': 'Promotion records keyed by provider@model.',
+                                                     'type': 'object'},
+                                       'thresholds': {'additionalProperties': {'additionalProperties': {'type': 'number'},
+                                                                               'type': 'object'},
+                                                      'description': 'Thresholds keyed by provider@model.',
+                                                      'type': 'object'}},
+                        'type': 'object'},
+           'mode': {'enum': ['off', 'shadow', 'enforce'], 'type': 'string'},
+           'promotionRecord': {'additionalProperties': False,
+                               'properties': {'actBandPrecision': {'maximum': 1, 'minimum': 0, 'type': 'number'},
+                                              'cacheHits': {'minimum': 0, 'type': 'integer'},
+                                              'evalReport': {'type': 'string'},
+                                              'evidence': {'type': 'string'},
+                                              'n': {'minimum': 0, 'type': 'integer'},
+                                              'path': {'enum': ['corpus', 'override'], 'type': 'string'}},
+                               'required': ['path'],
+                               'type': 'object'}},
+ '$id': 'https://ai-sdlc.io/schemas/v1alpha1/judgment-config.v1.schema.json',
+ '$schema': 'https://json-schema.org/draft/2020-12/schema',
+ 'additionalProperties': False,
+ 'description': 'Per-repository configuration for the judgment layer: which provider answers closed-set questions, '
+                'what data classes may leave the machine, and per-judgment mode, thresholds and promotion records. '
+                'Lives at .ai-sdlc/judgment-config.yaml and is read from the trusted base branch only.',
+ 'properties': {'apiVersion': {'$ref': 'common.schema.json#/$defs/apiVersion'},
+                'kind': {'const': 'JudgmentConfig', 'type': 'string'},
+                'metadata': {'$ref': 'common.schema.json#/$defs/metadata'},
+                'spec': {'additionalProperties': False,
+                         'properties': {'defaults': {'additionalProperties': False,
+                                                     'properties': {'cache': {'type': 'boolean'},
+                                                                    'mode': {'$ref': '#/$defs/mode'},
+                                                                    'timeoutMs': {'minimum': 1, 'type': 'integer'}},
+                                                     'type': 'object'},
+                                        'egress': {'additionalProperties': False,
+                                                   'properties': {'allow': {'description': 'Data classes that may be '
+                                                                                           'sent to the provider. '
+                                                                                           'Defaults to '
+                                                                                           '[work-item-text] when a '
+                                                                                           'provider is named.',
+                                                                            'items': {'$ref': '#/$defs/egressClass'},
+                                                                            'type': 'array',
+                                                                            'uniqueItems': True}},
+                                                   'type': 'object'},
+                                        'judgments': {'additionalProperties': {'$ref': '#/$defs/judgment'},
+                                                      'description': 'Per-judgment settings keyed by judgment id.',
+                                                      'type': 'object'},
+                                        'model': {'description': 'Model id. An exact version is required for any '
+                                                                 'judgment to run in enforce mode.',
+                                                  'minLength': 1,
+                                                  'type': 'string'},
+                                        'provider': {'description': 'Provider name. Omit to disable the judgment '
+                                                                    'layer.',
+                                                     'minLength': 1,
+                                                     'type': 'string'},
+                                        'providerOptions': {'additionalProperties': {'type': 'object'},
+                                                            'description': 'Free-form options keyed by provider name.',
+                                                            'type': 'object'}},
+                         'type': 'object'}},
+ 'required': ['apiVersion', 'kind', 'spec'],
+ 'title': 'AI-SDLC JudgmentConfig',
+ 'type': 'object'}
 
 pipeline_schema: dict[str, Any] = {'$defs': {'ApprovalPolicy': {'additionalProperties': False,
                               'description': 'Approval requirements before a stage executes.',
@@ -2535,7 +4656,14 @@ SCHEMAS: dict[str, dict[str, Any]] = {
     "adapter-binding.schema.json": adapter_binding_schema,
     "agent-role.schema.json": agent_role_schema,
     "autonomy-policy.schema.json": autonomy_policy_schema,
+    "capabilities-config.v1.schema.json": capabilities_config_v1_schema,
     "common.schema.json": common_schema,
+    "compliance-posture.v1.schema.json": compliance_posture_v1_schema,
+    "design-intent-document.schema.json": design_intent_document_schema,
+    "design-system-binding.schema.json": design_system_binding_schema,
+    "dor-config.v1.schema.json": dor_config_v1_schema,
+    "journey.v1.schema.json": journey_v1_schema,
+    "judgment-config.v1.schema.json": judgment_config_v1_schema,
     "pipeline.schema.json": pipeline_schema,
     "quality-gate.schema.json": quality_gate_schema,
 }
