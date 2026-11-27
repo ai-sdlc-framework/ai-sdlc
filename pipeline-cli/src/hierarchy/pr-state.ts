@@ -24,6 +24,10 @@ export interface PrCheck {
   skipped?: boolean;
   /** ISO time the job completed, when known (AISDLC-1232). */
   completedAt?: string;
+  /** Actions workflow run the check belongs to, parsed from `detailsUrl` (AISDLC-1462). */
+  runId?: number;
+  /** Workflow name of that run, when the rollup carries it (AISDLC-1462). */
+  workflowName?: string;
 }
 
 /** REST facts for one open (or just merged) task PR. */
@@ -176,7 +180,29 @@ export function dropSupersededCancelled(checks: readonly PrCheck[]): PrCheck[] {
   return checks.filter(
     (c) =>
       !(c.conclusion === 'cancelled' && passing.has(c.name)) &&
-      !(c.conclusion !== 'success' && c.conclusion !== 'pending' && running.has(c.name)),
+      !(c.conclusion !== 'success' && c.conclusion !== 'pending' && running.has(c.name)) &&
+      !(c.conclusion !== 'success' && supersededByNewerRun(c, checks)),
+  );
+}
+
+/**
+ * AISDLC-1462: a check from a workflow run that was cancelled (one of its jobs reads cancelled)
+ * when a newer run of the same workflow on this head reported the same check name. The cancelled
+ * run's red rollup is not a failure of the head: the newer run's row decides. A row from another
+ * workflow, or one without a run id (a commit status), is never dropped.
+ */
+function supersededByNewerRun(c: PrCheck, checks: readonly PrCheck[]): boolean {
+  if (c.runId === undefined) return false;
+  const runCancelled = checks.some((o) => o.runId === c.runId && o.conclusion === 'cancelled');
+  return (
+    runCancelled &&
+    checks.some(
+      (o) =>
+        o.name === c.name &&
+        o.workflowName === c.workflowName &&
+        o.runId !== undefined &&
+        o.runId > c.runId!,
+    )
   );
 }
 

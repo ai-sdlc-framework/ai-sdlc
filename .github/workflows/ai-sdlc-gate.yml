@@ -75,6 +75,12 @@ on:
 # `ready_for_review` event is the draft-to-ready flip on an UNCHANGED head SHA,
 # so it must not cancel the run already in flight (it queues behind it instead);
 # only head-changing events (opened, synchronize, reopened) cancel.
+# AISDLC-1462: a push immediately followed by the ready flip (Step 11) fires
+# `synchronize` and `ready_for_review` for ONE head, and GitHub does not create
+# the runs in event order; when the `synchronize` run is created second it
+# cancels the `ready_for_review` run. The duplicate stays (both events are needed
+# for the fire-once contract); consumers read the newest run per check name
+# (merge-if-eligible `supersededCancelledRows`, reconciler `dropSupersededCancelled`).
 concurrency:
   group: ai-sdlc-gate-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event.action != 'ready_for_review' }}

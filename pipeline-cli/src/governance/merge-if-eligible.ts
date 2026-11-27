@@ -1176,7 +1176,7 @@ export async function fetchShaChecks(
       `repos/${repoSlug}/commits/${sha}/check-runs?per_page=100`,
       '--paginate',
       '--jq',
-      '.check_runs[] | {name, status, conclusion}',
+      '.check_runs[] | {name, status, conclusion, app: .app.id, suite: .check_suite.id}',
     ],
     { cwd, allowFailure: true },
   );
@@ -1193,9 +1193,7 @@ export async function fetchShaChecks(
   );
   if (runsOut.code !== 0 || statusOut.code !== 0) return { checks: [], fetchFailed: true };
   try {
-    const runs = parseNdjson<{ name: string; status: string; conclusion: string | null }>(
-      runsOut.stdout,
-    );
+    const runs = parseNdjson<ShaCheckRun>(runsOut.stdout);
     const statuses = parseNdjson<{ context: string; state: string }>(statusOut.stdout);
     if (
       runs.some((c) => typeof c.name !== 'string' || typeof c.status !== 'string') ||
@@ -1203,8 +1201,9 @@ export async function fetchShaChecks(
     ) {
       return { checks: [], fetchFailed: true };
     }
+    const live = await dropSupersededRuns(runs, sha, repoSlug, runner, cwd);
     const checks: RequiredCheckStatus[] = [
-      ...runs.map((c) => ({
+      ...live.map((c) => ({
         name: c.name,
         state: c.status !== 'completed' ? 'PENDING' : (c.conclusion ?? 'UNKNOWN').toUpperCase(),
       })),
@@ -1213,6 +1212,93 @@ export async function fetchShaChecks(
     return { checks, fetchFailed: false };
   } catch {
     return { checks: [], fetchFailed: true };
+  }
+}
+
+interface ShaCheckRun {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  /** GitHub App that posted the check run. */
+  app?: number | null;
+  /** Check suite of the check run; for Actions, one suite per workflow run. */
+  suite?: number | null;
+}
+
+/** One Actions workflow run on the head commit (AISDLC-1462). */
+export interface ShaWorkflowRun {
+  id: number;
+  workflowId: number;
+  suite: number;
+  conclusion: string | null;
+}
+
+/**
+ * AISDLC-1462: drop the check runs of a CANCELLED workflow run when a newer run of the same
+ * workflow on the same commit reported a check of the same name from the same app. One push plus
+ * the draft-to-ready flip starts two gate runs; the concurrency group cancels the older one, and
+ * its rows (a cancelled job, a red rollup) would otherwise block the merge for good, though branch
+ * protection reads only the newest result per name. The newer run's row then decides (green,
+ * pending or red). A row from another app or another workflow, or one whose suite is not a known
+ * workflow run, is never dropped.
+ */
+export function supersededCancelledRows<T extends ShaCheckRun>(
+  rows: readonly T[],
+  workflowRuns: readonly ShaWorkflowRun[],
+): T[] {
+  const bySuite = new Map(workflowRuns.map((r) => [r.suite, r]));
+  const runOf = (c: ShaCheckRun) => (c.suite == null ? undefined : bySuite.get(c.suite));
+  return rows.filter((c) => {
+    const mine = runOf(c);
+    if (!mine || mine.conclusion !== 'cancelled') return false;
+    return rows.some((o) => {
+      const theirs = runOf(o);
+      return (
+        o.name === c.name &&
+        o.app === c.app &&
+        theirs !== undefined &&
+        theirs.workflowId === mine.workflowId &&
+        theirs.id > mine.id
+      );
+    });
+  });
+}
+
+/**
+ * Remove superseded cancelled-run rows. The workflow runs are read only when a check name has
+ * more than one row and one of them is not green, so the common case costs no extra call. A
+ * failed or unparseable read drops nothing: the stricter worst-state reading stands.
+ */
+async function dropSupersededRuns(
+  rows: ShaCheckRun[],
+  sha: string,
+  repoSlug: string,
+  runner: Runner,
+  cwd?: string,
+): Promise<ShaCheckRun[]> {
+  const seen = new Map<string, number>();
+  for (const c of rows) seen.set(c.name, (seen.get(c.name) ?? 0) + 1);
+  const suspect = rows.some(
+    (c) => (seen.get(c.name) ?? 0) > 1 && (c.status !== 'completed' || c.conclusion !== 'success'),
+  );
+  if (!suspect) return rows;
+  try {
+    const out = await runner(
+      'gh',
+      [
+        'api',
+        `repos/${repoSlug}/actions/runs?head_sha=${sha}&per_page=100`,
+        '--paginate',
+        '--jq',
+        '.workflow_runs[] | {id, workflowId: .workflow_id, suite: .check_suite_id, conclusion}',
+      ],
+      { cwd, allowFailure: true },
+    );
+    if (out.code !== 0) return rows;
+    const drop = new Set(supersededCancelledRows(rows, parseNdjson<ShaWorkflowRun>(out.stdout)));
+    return rows.filter((c) => !drop.has(c));
+  } catch {
+    return rows;
   }
 }
 
