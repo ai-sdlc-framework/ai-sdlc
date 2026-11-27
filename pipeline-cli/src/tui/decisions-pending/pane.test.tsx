@@ -201,9 +201,14 @@ describe('DecisionsPendingPane — AC#3 resolve from TUI', () => {
     await openPickerAndConfirm(stdin, lastFrame, 'DEC-0001');
 
     expect(appender).toHaveBeenCalledOnce();
-    const [event] = appender.mock.calls[0] as [{ type: string; chosenOptionId: string }];
+    const [event] = appender.mock.calls[0] as [
+      { type: string; chosenOptionId: string; by?: string; rationale?: string },
+    ];
     expect(event.type).toBe('operator-answered');
     expect(event.chosenOptionId).toBe('opt-a');
+    // AISDLC-1405: the TUI never writes an unattributed answer.
+    expect(event.by).toBe('operator');
+    expect(event.rationale).toBeTruthy();
   });
 });
 

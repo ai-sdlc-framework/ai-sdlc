@@ -353,12 +353,14 @@ describe('answer is scoped to the owning tier', () => {
     const id = await raise(h, 'design', 'AISDLC-910');
 
     h.caller = { name: 'operator-dispatch', role: 'operator-dispatch' };
-    await expect(run(h, 'answer', id, 'opt-a')).rejects.toThrow('process.exit(1)');
+    await expect(
+      run(h, 'answer', id, 'opt-a', '--by', 'op@test', '--rationale', 'r'),
+    ).rejects.toThrow('process.exit(1)');
     expect(stderrChunks.join('')).toMatch(/design decision is answered by planner/);
     expect(onBoard('blocked', 'AISDLC-910')).toBe(true);
 
     h.caller = { name: 'planner', role: 'planner' };
-    await run(h, 'answer', id, 'opt-a', '--format', 'json');
+    await run(h, 'answer', id, 'opt-a', '--by', 'op@test', '--rationale', 'r', '--format', 'json');
     const r = json<{ unblocked: boolean; notified: { sent: boolean; to: string } }>();
     expect(r.unblocked).toBe(true);
     expect(r.notified).toMatchObject({ sent: true, to: 'executor-alpha' });
@@ -375,7 +377,7 @@ describe('answer is scoped to the owning tier', () => {
     const h = harness();
     const id = await raise(h, 'operational', 'AISDLC-911');
     h.caller = { name: 'operator-dispatch', role: 'operator-dispatch' };
-    await run(h, 'answer', id, 'opt-b', '--format', 'json');
+    await run(h, 'answer', id, 'opt-b', '--by', 'op@test', '--rationale', 'r', '--format', 'json');
     expect(json<{ ok: boolean }>().ok).toBe(true);
     expect(onBoard('queue', 'AISDLC-911')).toBe(true);
   });
@@ -384,7 +386,9 @@ describe('answer is scoped to the owning tier', () => {
     const h = harness();
     const id = await raise(h, 'operational', 'AISDLC-912');
     h.caller = { name: 'executor-alpha', role: 'executor' };
-    await expect(run(h, 'answer', id, 'opt-a')).rejects.toThrow('process.exit(1)');
+    await expect(
+      run(h, 'answer', id, 'opt-a', '--by', 'op@test', '--rationale', 'r'),
+    ).rejects.toThrow('process.exit(1)');
     expect(onBoard('blocked', 'AISDLC-912')).toBe(true);
   });
 
@@ -394,7 +398,9 @@ describe('answer is scoped to the owning tier', () => {
     h.deps.identity.readSessions = () => {
       throw new Error('roster unreadable');
     };
-    await expect(run(h, 'answer', id, 'opt-a')).rejects.toThrow('process.exit(1)');
+    await expect(
+      run(h, 'answer', id, 'opt-a', '--by', 'op@test', '--rationale', 'r'),
+    ).rejects.toThrow('process.exit(1)');
     expect(stderrChunks.join('')).toMatch(/could not identify the calling session/);
     expect(onBoard('blocked', 'AISDLC-915')).toBe(true);
   });
@@ -404,12 +410,12 @@ describe('answer is scoped to the owning tier', () => {
     await run(h, ...escalateArgs('AISDLC-916'));
     const id = json<{ decisionId: string }>().decisionId;
     h.caller = { name: 'operator-dispatch', role: 'operator-dispatch' };
-    await run(h, 'answer', id, 'opt-a', '--format', 'json');
+    await run(h, 'answer', id, 'opt-a', '--by', 'op@test', '--rationale', 'r', '--format', 'json');
     expect(json<{ ok: boolean }>().ok).toBe(true);
     await run(h, ...escalateArgs('AISDLC-917'));
     const id2 = json<{ decisionId: string }>().decisionId;
     h.caller = { name: 'executor-alpha', role: 'executor' };
-    await run(h, 'answer', id2, 'opt-b', '--format', 'json');
+    await run(h, 'answer', id2, 'opt-b', '--by', 'op@test', '--rationale', 'r', '--format', 'json');
     expect(json<{ ok: boolean }>().ok).toBe(true);
   });
 
@@ -417,7 +423,7 @@ describe('answer is scoped to the owning tier', () => {
     const h = harness();
     const id = await raise(h, 'design', 'AISDLC-913');
     h.caller = null;
-    await run(h, 'answer', id, 'opt-a', '--format', 'json');
+    await run(h, 'answer', id, 'opt-a', '--by', 'op@test', '--rationale', 'r', '--format', 'json');
     expect(json<{ ok: boolean }>().ok).toBe(true);
   });
 
@@ -429,7 +435,7 @@ describe('answer is scoped to the owning tier', () => {
     m.blockedBy = 'DEC-9999';
     writeFileSync(file, JSON.stringify(m));
     h.caller = { name: 'planner', role: 'planner' };
-    await run(h, 'answer', id, 'opt-a', '--format', 'json');
+    await run(h, 'answer', id, 'opt-a', '--by', 'op@test', '--rationale', 'r', '--format', 'json');
     expect(json<{ unblocked: boolean }>().unblocked).toBe(false);
     expect(onBoard('blocked', 'AISDLC-914')).toBe(true);
   });
@@ -533,7 +539,7 @@ describe('promote-expired', () => {
     await run(h, ...escalateArgs('AISDLC-922', '--route', 'operational'));
     const id = json<{ decisionId: string }>().decisionId;
     h.caller = { name: 'operator-dispatch', role: 'operator-dispatch' };
-    await run(h, 'answer', id, 'opt-a');
+    await run(h, 'answer', id, 'opt-a', '--by', 'op@test', '--rationale', 'r');
     backdate(600);
     await run(h, 'promote-expired', '--format', 'json');
     expect(json<{ promoted: unknown[] }>().promoted).toEqual([]);

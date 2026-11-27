@@ -456,7 +456,30 @@ describe('superseded event (AISDLC-1162)', () => {
     expect(d?.status.answeredOptionId ?? null).toBeNull();
   });
 
-  it('does not supersede an already answered decision', () => {
+  it('does not supersede an attributed answered decision', () => {
+    openDecision('DEC-0001', 'old', '2026-10-01T00:00:00.000Z');
+    appendDecisionEvent(
+      makeOperatorAnsweredEvent({
+        decisionId: 'DEC-0001',
+        chosenOptionId: 'opt-a',
+        by: 'operator',
+        now: new Date('2026-10-03T00:00:00.000Z'),
+      }),
+      { workDir },
+    );
+    appendDecisionEvent(
+      makeSupersededEvent({
+        decisionId: 'DEC-0001',
+        supersededBy: 'DEC-0002',
+        reason: 'r',
+        now: new Date('2026-10-04T00:00:00.000Z'),
+      }),
+      { workDir },
+    );
+    expect(projectDecision('DEC-0001', { workDir })?.status.lifecycle).toBe('answered');
+  });
+
+  it('AISDLC-1405: supersedes an answer that names no author', () => {
     openDecision('DEC-0001', 'old', '2026-10-01T00:00:00.000Z');
     appendDecisionEvent(
       makeOperatorAnsweredEvent({
@@ -475,6 +498,8 @@ describe('superseded event (AISDLC-1162)', () => {
       }),
       { workDir },
     );
-    expect(projectDecision('DEC-0001', { workDir })?.status.lifecycle).toBe('answered');
+    const d = projectDecision('DEC-0001', { workDir });
+    expect(d?.status.lifecycle).toBe('superseded');
+    expect(d?.status.supersededBy).toBe('DEC-0002');
   });
 });

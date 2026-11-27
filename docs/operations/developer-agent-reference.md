@@ -115,7 +115,7 @@ node pipeline-cli/bin/cli-decisions.mjs escalate \
 
 Step B: return `prUrl: null` with `notes` naming the RFC, the OQ number, the decision id just created and the options.
 
-Never write `**Resolution:**`, `RESOLVED:` or a check-mark RESOLVED marker yourself; that is exclusively the operator's role after a walkthrough (AISDLC-271 / RFC-0031: an agent decided an entire RFC's OQs inline). A genuinely non-blocking OQ gets a documented assumption in the PR body and no `cli-decisions escalate` (the catalog is for blockers only). `cli-decisions show <id>` gives the operator full context and `cli-decisions answer <id> <optionId>` resolves it; see [RFC-0035](../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md) and [dispatched-session-decisions.md](./dispatched-session-decisions.md).
+Never write `**Resolution:**`, `RESOLVED:` or a check-mark RESOLVED marker yourself; that is exclusively the operator's role after a walkthrough (AISDLC-271 / RFC-0031: an agent decided an entire RFC's OQs inline). A genuinely non-blocking OQ gets a documented assumption in the PR body and no `cli-decisions escalate` (the catalog is for blockers only). `cli-decisions show <id>` gives the operator full context and `cli-decisions answer <id> <optionId> --by <who> --rationale "<why>"` resolves it; see [RFC-0035](../../spec/rfcs/RFC-0035-decision-catalog-operator-routing.md) and [dispatched-session-decisions.md](./dispatched-session-decisions.md).
 
 ## Pre-work flags (AISDLC-308)
 

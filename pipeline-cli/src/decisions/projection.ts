@@ -203,7 +203,10 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
   if (event.type === 'superseded') {
     // AISDLC-1162 — terminal: closed without choosing one of its own options.
     if (current === null) return null;
-    if (['answered', 'superseded', 'archived'].includes(current.status.lifecycle)) {
+    // AISDLC-1405: an answer with no `by` may still be superseded; an attributed one may not.
+    const lc = current.status.lifecycle;
+    const unattributedAnswer = lc === 'answered' && !current.status.answeredBy;
+    if ((lc === 'answered' && !unattributedAnswer) || lc === 'superseded' || lc === 'archived') {
       return { ...current, decisionLog: [...current.decisionLog, event] };
     }
     const sup = event as SupersededEvent;

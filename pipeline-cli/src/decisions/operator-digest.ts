@@ -288,7 +288,7 @@ export function buildOperatorDigest(
       flags: digestFlags(o, author ?? 'unknown', provenance),
       ...(provenance !== undefined ? { provenance } : {}),
       reverse:
-        `cli-decisions answer ${id} ${alt} --rationale "<why>" ` +
+        `cli-decisions answer ${id} ${alt} --by <who> --rationale "<why>" ` +
         `(then undo what the chosen option applied; ${
           o.reversible === false ? 'marked hard to reverse' : 'reversible'
         })`,
@@ -312,7 +312,7 @@ export function buildOperatorDigest(
       msRemaining: ms,
       flags: digestFlags(o, o.by ?? 'unknown', pendingProvenance),
       ...(pendingProvenance !== undefined ? { provenance: pendingProvenance } : {}),
-      extend: `cli-decisions answer ${id} <option> to override now, or cli-decisions extend ${id} --timebox <duration>`,
+      extend: `cli-decisions answer ${id} <option> --by <who> --rationale "<why>" to override now, or cli-decisions extend ${id} --timebox <duration>`,
     });
   }
   pending.sort((a, b) => a.msRemaining - b.msRemaining);

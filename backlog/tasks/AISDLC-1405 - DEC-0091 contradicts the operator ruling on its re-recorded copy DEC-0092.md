@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1405
 title: 'DEC-0091 contradicts the operator ruling on its re-recorded copy DEC-0092'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-24'
 labels:

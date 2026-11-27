@@ -637,7 +637,17 @@ describe('answer subcommand (RFC-0035 Phase 5 / AISDLC-289)', () => {
   });
 
   it('resolves the decision when given a valid option id', async () => {
-    setArgv('answer', 'DEC-0001', 'opt-b', '--by', 'op@test', '--format', 'json');
+    setArgv(
+      'answer',
+      'DEC-0001',
+      'opt-b',
+      '--by',
+      'op@test',
+      '--rationale',
+      'r',
+      '--format',
+      'json',
+    );
     await buildDecisionsCli().parseAsync();
     const r = stdoutJson<{ ok: boolean; chosenOptionId: string }>();
     expect(r.ok).toBe(true);
@@ -645,19 +655,81 @@ describe('answer subcommand (RFC-0035 Phase 5 / AISDLC-289)', () => {
   });
 
   it('refuses an option id that is not declared on the decision', async () => {
-    setArgv('answer', 'DEC-0001', 'opt-zzz', '--format', 'json');
+    setArgv(
+      'answer',
+      'DEC-0001',
+      'opt-zzz',
+      '--by',
+      'op@test',
+      '--rationale',
+      'r',
+      '--format',
+      'json',
+    );
     await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
     expect(stderrText()).toMatch(/not declared/);
   });
 
   it('refuses an unknown decision id', async () => {
-    setArgv('answer', 'DEC-9999', 'opt-a', '--format', 'json');
+    setArgv(
+      'answer',
+      'DEC-9999',
+      'opt-a',
+      '--by',
+      'op@test',
+      '--rationale',
+      'r',
+      '--format',
+      'json',
+    );
     await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+  });
+
+  it('AISDLC-1405: records by and rationale on the operator-answered event', async () => {
+    setArgv(
+      'answer',
+      'DEC-0001',
+      'opt-a',
+      '--by',
+      'op@test',
+      '--rationale',
+      'why',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const events = readEventLogText(tmp)
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    const evt = events.find((e) => e.type === 'operator-answered');
+    expect(evt?.by).toBe('op@test');
+    expect(evt?.rationale).toBe('why');
+  });
+
+  it.each([
+    ['--by', ['--rationale', 'why']],
+    ['--rationale', ['--by', 'op@test']],
+    ['--by', ['--by', ' ', '--rationale', 'why']],
+  ])('AISDLC-1405: refuses an answer without %s', async (flag, extra) => {
+    setArgv('answer', 'DEC-0001', 'opt-a', ...extra, '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toContain(`${flag} is required`);
   });
 
   it('refuses to mutate when the feature flag is opt-out', async () => {
     process.env.AI_SDLC_DECISION_CATALOG = 'off';
-    setArgv('answer', 'DEC-0001', 'opt-a', '--format', 'json');
+    setArgv(
+      'answer',
+      'DEC-0001',
+      'opt-a',
+      '--by',
+      'op@test',
+      '--rationale',
+      'r',
+      '--format',
+      'json',
+    );
     await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
     expect(stderrText()).toMatch(/refusing to mutate/);
   });
@@ -2707,11 +2779,38 @@ describe('supersede subcommand (AISDLC-1162)', () => {
   });
 
   it('refuses an already closed target', async () => {
-    setArgv('answer', 'DEC-0001', 'opt-a', '--format', 'json');
+    setArgv(
+      'answer',
+      'DEC-0001',
+      'opt-a',
+      '--by',
+      'op@test',
+      '--rationale',
+      'r',
+      '--format',
+      'json',
+    );
     await buildDecisionsCli().parseAsync();
     setArgv('supersede', 'DEC-0001', '--by', 'DEC-0002', '--reason', 'x', '--format', 'json');
     await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
     expect(stderrText()).toMatch(/already answered/);
+  });
+
+  it('AISDLC-1405: closes an answer that names no author (the DEC-0091 shape)', async () => {
+    const { appendDecisionEvent: append, makeOperatorAnsweredEvent: answered } =
+      await import('../decisions/event-log.js');
+    append(answered({ decisionId: 'DEC-0001', chosenOptionId: 'opt-a' }), { workDir: tmp });
+    setArgv('supersede', 'DEC-0001', '--by', 'DEC-0002', '--reason', 'x', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    expect(stdoutJson<{ ok: boolean }>().ok).toBe(true);
+    stdoutChunks = [];
+    setArgv('show', 'DEC-0001', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const shown = stdoutJson<{
+      decision: { status: { lifecycle: string; supersededBy?: string } };
+    }>().decision;
+    expect(shown.status.lifecycle).toBe('superseded');
+    expect(shown.status.supersededBy).toBe('DEC-0002');
   });
 
   it('refuses an unknown --by', async () => {
