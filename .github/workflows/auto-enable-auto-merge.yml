@@ -76,6 +76,14 @@ name: Auto-enable auto-merge on PR open
 # does disarm a PR after a push, so `synchronize` is back, as a cheap re-arm only
 # (no disable-then-arm); the reconciler re-arms any PR that stays unarmed. A
 # per-PR concurrency group cancels a superseded run for the same PR.
+#
+# AISDLC-1411 (author rule, 2026-11-25 incident): the guard arms a PR only when
+# its author is in `governance.mergeAuthors` of `.ai-sdlc/agent-role.yaml`, read
+# through the API from the PR's base branch (never from the PR head, never via
+# checkout). A PR from anyone else, a collaborator with write access included,
+# waits for a person to review and merge it. If the file cannot be read, or the
+# list is missing or empty, nothing is armed (fail closed). This is the same
+# list the merge-eligibility CLI checks, so every arming path checks the author.
 
 on:
   # AISDLC-381: migrated from `pull_request` to `pull_request_target` so
@@ -144,7 +152,7 @@ jobs:
         run: |
           echo "[auto-enable] no open PR for this event — nothing to arm."
 
-      - name: Skip drafts, fork PRs, and release-please PRs
+      - name: Skip drafts, fork PRs, release-please PRs, and non-merge-author PRs
         id: guard
         env:
           GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
@@ -157,11 +165,13 @@ jobs:
           # Use the full `owner/repo` of the PR head (NOT the bare repo name).
           # Forks always preserve the bare name, so a bare-name comparison would
           # accept fork PRs and contradict the same-repo intent below.
-          PR_INFO=$(gh pr view "$PR" --json isDraft,headRepositoryOwner,headRepository,headRefName \
-            -q '{isDraft: .isDraft, headRefName: .headRefName, headFull: (((.headRepositoryOwner.login // "") + "/" + (.headRepository.name // "")) // "")}')
+          PR_INFO=$(gh pr view "$PR" --json isDraft,headRepositoryOwner,headRepository,headRefName,baseRefName,author \
+            -q '{isDraft: .isDraft, headRefName: .headRefName, baseRefName: (.baseRefName // ""), author: (.author.login // ""), headFull: (((.headRepositoryOwner.login // "") + "/" + (.headRepository.name // "")) // "")}')
           IS_DRAFT=$(echo "$PR_INFO" | jq -r '.isDraft')
           HEAD_FULL=$(echo "$PR_INFO" | jq -r '.headFull')
           HEAD_REF=$(echo "$PR_INFO" | jq -r '.headRefName')
+          BASE_REF=$(echo "$PR_INFO" | jq -r '.baseRefName')
+          AUTHOR=$(echo "$PR_INFO" | jq -r '.author')
           if [ "$IS_DRAFT" = "true" ]; then
             echo "[auto-enable] PR #$PR is draft — skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -182,11 +192,34 @@ jobs:
             echo "[auto-enable] PR #$PR is a release-please PR ($HEAD_REF) — skipping. Arm manually when ready: gh pr merge --auto $PR"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            # AISDLC-1411: arm only PRs whose author is in governance.mergeAuthors,
+            # read from the BASE branch through the API (the PR head cannot add
+            # its own author). Any read or parse failure fails closed.
+            MERGE_AUTHORS=""
+            if [ -n "$BASE_REF" ] && ROLE_YAML=$(gh api -H "Accept: application/vnd.github.raw" \
+                "/repos/$REPO/contents/.ai-sdlc/agent-role.yaml?ref=$BASE_REF"); then
+              MERGE_AUTHORS=$(printf '%s\n' "$ROLE_YAML" | yq -o=json '.governance.mergeAuthors // []' \
+                | jq -r 'if type == "array" then .[] | strings else empty end') || MERGE_AUTHORS=""
+            else
+              echo "[auto-enable] PR #$PR: cannot read .ai-sdlc/agent-role.yaml on base branch '$BASE_REF' — skipping (no merge-author list, nothing is armed)."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            AUTHOR_LC=$(printf '%s' "$AUTHOR" | tr '[:upper:]' '[:lower:]')
+            if [ -z "$MERGE_AUTHORS" ]; then
+              echo "[auto-enable] PR #$PR: governance.mergeAuthors is missing or empty on base branch '$BASE_REF' — skipping (nothing is armed)."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            elif [ -z "$AUTHOR_LC" ] || ! printf '%s\n' "$MERGE_AUTHORS" | tr '[:upper:]' '[:lower:]' | grep -Fxq -- "$AUTHOR_LC"; then
+              echo "[auto-enable] PR #$PR: author '${AUTHOR:-<unknown>}' is not in governance.mergeAuthors — skipping. A person reviews and merges this PR."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "[auto-enable] PR #$PR: author '$AUTHOR' is in governance.mergeAuthors — arming."
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Refresh auto-merge (disable-then-arm to force re-evaluation)
-        if: steps.discover.outputs.pr != '' && steps.guard.outputs.skip != 'true'
+        if: steps.discover.outputs.pr != '' && steps.guard.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
           GH_REPO: ${{ github.repository }}

@@ -51,6 +51,7 @@ AISDLC-398 changed the content hash to be base-independent (`headBlobSha` only).
 2. /ai-sdlc execute: reviewers run, attestation signed, draft flipped → ready
    (the gate decides "draft" from the live pull request state read through the API at run start, never from the event payload, so a stale draft event cannot leave `ai-sdlc/pr-ready` skipped on a ready pull request; AISDLC-1301)
 3. auto-enable-auto-merge.yml fires on ready_for_review
+   → author in governance.mergeAuthors? (AISDLC-1411; otherwise not armed)
    → gh pr merge --auto --squash <PR>
 4. GitHub waits for required checks:
    → ai-sdlc-gate.yml: Backlog Drift passes (backlog references valid)
@@ -59,6 +60,25 @@ AISDLC-398 changed the content hash to be base-independent (`headBlobSha` only).
 6. Nothing rebases the other open PRs. A PR is rebased only when it conflicts,
    by its executor or the conflict-resolver agent (AISDLC-727 / DEC-0056).
 ```
+
+### Who the workflow arms (AISDLC-1411)
+
+`auto-enable-auto-merge.yml` fires on `pull_request_target` with the types `opened`, `reopened`, `ready_for_review` and `synchronize`. On every one of them it arms a PR only when all of these hold:
+
+- the PR is not a draft;
+- its head branch is in this repository (fork PRs are never armed);
+- its head branch does not start with `release-please--` (the operator arms the release PR);
+- its author is in `governance.mergeAuthors` of `.ai-sdlc/agent-role.yaml`, compared case-insensitively.
+
+The list is read through the API from the PR's base branch. The workflow has no `actions/checkout` step, so a PR cannot add its own author to the list. When the file cannot be read, or `mergeAuthors` is missing, empty or not a list, nothing is armed. Each skip writes one `[auto-enable]` log line naming the PR and, for the author rule, the author.
+
+A PR from anyone else, a collaborator with write access included, is not armed: a person reviews and merges it. `cli-merge-if-eligible` checks the same list, so the workflow, the dispatch landing pass and the reconciler lanes apply one author rule. The rule comes from 2026-11-25, when nine PRs from a collaborator (#2981 to #2988) were armed within seconds of opening and merged with no review.
+
+Consequences:
+
+- **Dependabot PRs** (author `dependabot[bot]`) are not armed by the workflow. A person merges them after review.
+- **MCP envelope PRs** opened by `release.yml` are authored by the owner of `AI_SDLC_PAT`. The workflow arms them only when that account is in `mergeAuthors`; otherwise the release workflow's own arm call through the release lane is the only arming path, and its refusal is a warning a person resolves.
+- **`docs-source-bump.yml` PRs** open in the docs site repository and follow that repository's rules.
 
 ### Two repository shapes for `--arm` (AISDLC-1009)
 
@@ -210,7 +230,7 @@ arms only when the predicate holds, then runs the normal eligibility checks (for
 base, task, head commit, required checks) and `--arm`. A push that changes the patch-id is
 refused and needs a fresh review and arm. `/ai-sdlc rebase`, `ci-conflict-resolver` and
 `rebase-resolver` all re-arm through this one command; no new direct merge call exists.
-`auto-enable-auto-merge.yml` stays on `opened`/`reopened`/`ready_for_review` (AISDLC-799).
+`auto-enable-auto-merge.yml` fires on `opened`/`reopened`/`ready_for_review` (AISDLC-799) and `synchronize` (AISDLC-1097), and arms only merge-author PRs (AISDLC-1411).
 
 **Operator decision: "Dismiss stale pull request approvals" (branch protection).** GitHub
 cannot tell a rebase-only push from a content change, so the setting is not changed from
