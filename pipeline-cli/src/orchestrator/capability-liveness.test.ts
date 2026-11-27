@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -38,6 +38,69 @@ describe('runCapabilityLiveness', () => {
       readRequired: () => required,
       readState: () => rows,
     });
+
+  it('reads a state.json missing a required capability: one Decision per day, none while open (AISDLC-1442)', () => {
+    mkdirSync(join(dir, '_capabilities'), { recursive: true });
+    writeFileSync(
+      join(dir, '_capabilities', 'state.json'),
+      JSON.stringify({
+        version: 1,
+        capabilities: {
+          'routing.table': {
+            counts: { live: 3, shadow: 0, degraded: 0 },
+            lastOutcome: 'live',
+            firstLiveAt: '2026-11-01T00:00:00Z',
+            lastLiveAt: '2026-11-07T00:00:00Z',
+          },
+        },
+      }),
+    );
+    let ids = 0;
+    let persisted = 0;
+    const tick = (now: string) =>
+      runCapabilityLiveness({
+        workDir: dir,
+        artifactsDir: dir,
+        emit: (e) => void events.push(e),
+        now: new Date(now),
+        env: {},
+        readRequired: () => ['dor.stage-b'],
+        nextId: () => `DEC-${String(900 + ++ids).padStart(4, '0')}`,
+        persist: () => void persisted++,
+      });
+    const first = tick('2026-11-07T10:00:00Z');
+    expect(first).toEqual({ degraded: ['dor.stage-b'], filed: ['DEC-0901'] });
+    expect(persisted).toBe(1);
+    expect(tick('2026-11-07T10:05:00Z').filed).toEqual([]);
+    // the next day the first one is still open: no duplicate
+    expect(tick('2026-11-08T10:00:00Z').filed).toEqual([]);
+    expect(persisted).toBe(1);
+    const { decisions } = listDecisions({ workDir: dir });
+    expect(decisions.map((d) => d.metadata.scope)).toEqual(['capability:dor.stage-b']);
+    expect(events).toEqual([
+      {
+        type: 'CapabilityDegraded',
+        capabilityId: 'dor.stage-b',
+        capabilityStatus: 'never-observed',
+      },
+    ]);
+  });
+
+  it('a throwing persist does not lose the filed Decision', () => {
+    const r = runCapabilityLiveness({
+      workDir: dir,
+      artifactsDir: dir,
+      emit: () => {},
+      now: new Date('2026-11-07T10:00:00Z'),
+      env: {},
+      readRequired: () => ['dor.stage-b'],
+      readState: () => [],
+      persist: () => {
+        throw new Error('offline');
+      },
+    });
+    expect(r.filed).toHaveLength(1);
+  });
 
   it('files nothing when no capability is required', () => {
     const r = run([], [row('dor.stage-b', 'degraded')], '2026-11-07T10:00:00Z');

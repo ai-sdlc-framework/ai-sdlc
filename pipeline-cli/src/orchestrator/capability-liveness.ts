@@ -1,5 +1,5 @@
 /**
- * Capability liveness for the orchestrator tick (RFC-0049 section 9.3).
+ * Capability liveness for the hierarchy dispatch tick (RFC-0049 section 9.3; AISDLC-1442).
  *
  * Each tick: read the capabilities this repository requires from the base ref, and for
  * each one that is degraded or never observed file one Decision and emit a
@@ -58,6 +58,10 @@ export interface CapabilityLivenessOpts {
   readRequired?: () => string[];
   /** Test injection: the capability state rows. Defaults to the artifacts state file. */
   readState?: () => CapabilityStateRow[];
+  /** Allocates the Decision id; defaults to the local catalog's next id. */
+  nextId?: () => string;
+  /** Called once after this call filed at least one Decision (persist the log); its failure is contained. */
+  persist?: () => void;
 }
 
 export interface CapabilityLivenessResult {
@@ -111,7 +115,7 @@ export function runCapabilityLiveness(opts: CapabilityLivenessOpts): CapabilityL
           ) {
             return undefined;
           }
-          const newId = nextDecisionId({ workDir: opts.workDir });
+          const newId = opts.nextId ? opts.nextId() : nextDecisionId({ workDir: opts.workDir });
           appendDecisionEvent(
             makeDecisionOpenedEvent({
               decisionId: newId,
@@ -140,6 +144,13 @@ export function runCapabilityLiveness(opts: CapabilityLivenessOpts): CapabilityL
         }
       } catch {
         // Decision filing is best effort; the next tick tries again.
+      }
+    }
+    if (result.filed.length > 0 && opts.persist) {
+      try {
+        opts.persist();
+      } catch {
+        // the Decisions are in the local log; the next persist carries them
       }
     }
   } catch {

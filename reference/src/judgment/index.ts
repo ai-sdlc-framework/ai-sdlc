@@ -3,6 +3,7 @@ export * from './errors.js';
 export * from './registry.js';
 export * from './fake-provider.js';
 export * from './jev-provider.js';
+export { readEnvFileKey } from './env-file-key.js';
 export * from './openai-compatible-provider.js';
 export * from './definition.js';
 export * from './catalog.js';

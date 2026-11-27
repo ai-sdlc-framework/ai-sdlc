@@ -44,9 +44,12 @@ nothing changes. `ai-sdlc init` scaffolds a starter at `.ai-sdlc/templates/capab
   every registered capability with its status and counts. The check is `fail` when a required
   capability is `degraded` or `never-observed`, `warn` when one is in `shadow`, and `pass`
   otherwise (including when no file is declared).
-- **Decision.** The orchestrator tick files one Decision per degraded required capability
+- **Decision.** The hierarchy dispatch tick (`cli-hierarchy tick`, the loop the host session
+  runs; AISDLC-1442) files one Decision per degraded or never-observed required capability
   (scope `capability:<id>`), at most once per UTC day, and none while an earlier Decision for
-  that capability is still open. It also emits a `CapabilityDegraded` event when it files.
+  that capability is still open, then persists the decision log. It also emits a
+  `CapabilityDegraded` event when it files. The retired `cli-orchestrator` tick runs the same
+  pass.
 - **Nothing is blocked.** No tick refuses to dispatch and no pull request check fails because
   a capability is degraded. If filing the Decision throws, the tick carries on.
 

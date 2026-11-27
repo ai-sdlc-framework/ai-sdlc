@@ -60,6 +60,7 @@ import {
   isModelAlias,
   judgmentEnforceDowngradeReason,
   loadJudgmentConfig,
+  readEnvFileKey,
   loadRequiredCapabilities,
   readCapabilityState,
   resolveJudgmentProvider,
@@ -2573,12 +2574,22 @@ export function checkJudgmentLayer(ctx: DoctorRunContext): DoctorCheckResult[] {
     ];
   }
 
-  if (provider.requires.envVar && !env[provider.requires.envVar]) {
+  // jev falls back to its one variable in the repo-root `.env` (AISDLC-1442); the value is never printed.
+  const keyInEnvFile = (name: string): boolean =>
+    provider.name === 'jev' && readEnvFileKey(name, { cwd: ctx.projectDir }) !== undefined;
+  if (
+    provider.requires.envVar &&
+    !env[provider.requires.envVar] &&
+    !keyInEnvFile(provider.requires.envVar)
+  ) {
     results.push({
       id: 'judgment-provider-key',
       severity: 'warn',
       title: `judgment provider '${cleanText(provider.name)}' is configured but ${provider.requires.envVar} is not set; every judgment abstains`,
-      remediation: `Export ${provider.requires.envVar} in the environment that runs the pipeline.`,
+      remediation:
+        provider.name === 'jev'
+          ? `Export ${provider.requires.envVar}, or put it in the repo-root .env, for the processes that run the pipeline.`
+          : `Export ${provider.requires.envVar} in the environment that runs the pipeline.`,
       anonymizableEvidence: { provider: provider.name, keyPresent: false },
     });
   }

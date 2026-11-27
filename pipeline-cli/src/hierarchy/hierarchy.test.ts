@@ -1354,6 +1354,7 @@ describe('hierarchy status', () => {
       expect.stringMatching(/^worktrees: \d+ \(\d+ removable\)$/),
       'last tick: never',
       'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
+      'judgment: DOWN since unknown (no judgment records)',
       'EXECUTOR CAP 3 (executors.max 3, board ceiling none, pacer allowance unlimited, load headroom 7; limited by executors.max)',
       'OPEN PRS 0 counted of limit 3, 0 total of ceiling 6',
       'unowned PRs: 0',

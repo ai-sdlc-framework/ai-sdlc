@@ -208,10 +208,10 @@ describe('configuration', () => {
 
   it('isAvailable and getAccountId depend on key presence', async () => {
     vi.stubEnv('TYPESAFE_API_KEY', '');
-    const none = createJevProvider({});
+    const none = createJevProvider({ projectRoot: '/nonexistent-aisdlc-1442' });
     expect(await none.isAvailable()).toEqual({
       available: false,
-      reason: 'TYPESAFE_API_KEY is not set',
+      reason: 'TYPESAFE_API_KEY is not set (exported env or repo-root .env)',
     });
     expect(await none.getAccountId()).toBeNull();
     const withKey = createJevProvider({ apiKey: KEY });
@@ -225,7 +225,10 @@ describe('configuration', () => {
   it('fails with auth and no fetch when there is no key', async () => {
     vi.stubEnv('TYPESAFE_API_KEY', '');
     const f = vi.fn();
-    const provider = createJevProvider({ fetchImpl: f as unknown as typeof fetch });
+    const provider = createJevProvider({
+      fetchImpl: f as unknown as typeof fetch,
+      projectRoot: '/nonexistent-aisdlc-1442',
+    });
     expect(await kindOf(provider.evaluate(noulReq))).toBe('auth');
     expect(f).not.toHaveBeenCalled();
   });

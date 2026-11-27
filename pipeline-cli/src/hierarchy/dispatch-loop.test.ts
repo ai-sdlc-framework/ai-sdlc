@@ -320,6 +320,21 @@ describe('auto-brief (AISDLC-930)', () => {
     ).resolves.toBeDefined();
   });
 
+  it('runs capability liveness once per tick and survives a throwing one (AISDLC-1442)', async () => {
+    let calls = 0;
+    await runDispatchTick(deps({ capabilityLiveness: () => void calls++ }));
+    expect(calls).toBe(1);
+    await expect(
+      runDispatchTick(
+        deps({
+          capabilityLiveness: () => {
+            throw new Error('boom');
+          },
+        }),
+      ),
+    ).resolves.toBeDefined();
+  });
+
   it('skips the parent upkeep for low quota and omits it when not wired (AISDLC-981)', async () => {
     let calls = 0;
     const low = await runDispatchTick(

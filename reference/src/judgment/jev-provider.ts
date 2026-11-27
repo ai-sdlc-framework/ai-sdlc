@@ -4,6 +4,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { readEnvFileKey } from './env-file-key.js';
 import { JudgmentProviderError } from './errors.js';
 import type {
   Entry,
@@ -35,6 +36,11 @@ export interface JevProviderOptions {
   fetchImpl?: typeof fetch;
   /** Injectable sleep used for backoff. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Directory holding the `.env` the key falls back to when the variable is not exported
+   * (AISDLC-1442). Defaults to the main checkout of `process.cwd()`.
+   */
+  projectRoot?: string;
 }
 
 const JEV_CAPABILITIES: JudgmentCapabilities = {
@@ -63,7 +69,15 @@ export function createJevProvider(opts: JevProviderOptions = {}): JudgmentProvid
   const sleep = opts.sleep ?? defaultSleep;
   const model = opts.model ?? JEV_DEFAULT_MODEL;
 
-  const getKey = (): string | undefined => opts.apiKey || process.env[API_KEY_ENV] || undefined;
+  // Exported value first, else that one variable from the repo-root `.env` (AISDLC-1442).
+  // Under Vitest the fallback needs an explicit projectRoot, so a suite run on a machine
+  // whose checkout holds a real key never spends it.
+  const envFileKey = (): string | undefined => {
+    if (opts.projectRoot) return readEnvFileKey(API_KEY_ENV, { projectRoot: opts.projectRoot });
+    return process.env.VITEST ? undefined : readEnvFileKey(API_KEY_ENV);
+  };
+  const getKey = (): string | undefined =>
+    opts.apiKey || process.env[API_KEY_ENV] || envFileKey() || undefined;
   const getBaseUrl = (): string => {
     // Strip trailing slashes with a linear scan (a `/\/+$/` regex is quadratic on long runs).
     let url = opts.baseUrl || process.env[BASE_URL_ENV] || JEV_DEFAULT_BASE_URL;
@@ -116,7 +130,7 @@ export function createJevProvider(opts: JevProviderOptions = {}): JudgmentProvid
     if (!key) {
       throw new JudgmentProviderError(
         'auth',
-        `No API key configured (set ${API_KEY_ENV} or pass apiKey)`,
+        `No API key configured (export ${API_KEY_ENV}, put it in the repo-root .env, or pass apiKey)`,
       );
     }
     const url = `${getBaseUrl()}${JEV_PATH}`;
@@ -166,7 +180,10 @@ export function createJevProvider(opts: JevProviderOptions = {}): JudgmentProvid
     async isAvailable() {
       return getKey()
         ? { available: true }
-        : { available: false, reason: `${API_KEY_ENV} is not set` };
+        : {
+            available: false,
+            reason: `${API_KEY_ENV} is not set (exported env or repo-root .env)`,
+          };
     },
     async getAccountId() {
       const key = getKey();

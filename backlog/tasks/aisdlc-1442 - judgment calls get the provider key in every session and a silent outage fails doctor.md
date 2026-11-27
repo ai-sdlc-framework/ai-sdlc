@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1442
 title: "The judgment provider finds its key in the repo .env, and capability liveness runs on the live dispatch path"
-status: To Do
+status: In Progress
 priority: high
 labels:
   - judgment

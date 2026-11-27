@@ -92,7 +92,8 @@ import process from 'node:process';
 
 import { promoteExpiredDecisions } from '../decisions/escalation-chain.js';
 import { isDecisionCatalogEnabled } from '../decisions/feature-flag.js';
-import { persistDecisionLog } from '../decisions/remote-persist.js';
+import { nextDecisionIdDurable, persistDecisionLog } from '../decisions/remote-persist.js';
+import { runCapabilityLiveness } from '../orchestrator/capability-liveness.js';
 import {
   archiveFailedVerdict,
   collectVerdicts,
@@ -139,6 +140,7 @@ import {
   noteLedger,
   createGitRunner,
   createStreamEmitter,
+  type HierarchyEvent,
   createSystemIdentity,
   executorStart,
   hierarchyPaneExited,
@@ -752,6 +754,8 @@ export async function runHierarchyCli(
     usageIngest?: () => void;
     /** Replaces the daily board backup the tick runs (tests). */
     boardBackup?: () => void;
+    /** Replaces the capability liveness pass the tick runs (tests). */
+    capabilityLiveness?: () => void;
     /** Replaces the landed-task read of `origin/main` (tests). */
     completedOnMain?: () => ReadonlyMap<string, string> | undefined;
     /** Replaces the usage endpoint and credential reads (tests). */
@@ -1610,6 +1614,18 @@ export async function runHierarchyCli(
             extras.boardBackup ??
             (() => {
               backupBoard(deps.boardDir, backupDirFor(repoRoot), deps.now());
+            }),
+          // AISDLC-1442: RFC-0049 section 9.3 runs on the live dispatch path, once per tick.
+          capabilityLiveness:
+            extras.capabilityLiveness ??
+            (() => {
+              runCapabilityLiveness({
+                workDir: repoRoot,
+                artifactsDir: resolveArtifactsDir(repoRoot),
+                emit: (event) => emit(event as HierarchyEvent),
+                nextId: () => nextDecisionIdDurable({ workDir: repoRoot }),
+                persist: () => persistDecisionLog({ workDir: repoRoot }),
+              });
             }),
           // AISDLC-1122: every tick ingests what is new; detached, so the tick never waits.
           usageIngest:
