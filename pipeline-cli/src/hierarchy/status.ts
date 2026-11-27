@@ -3,6 +3,12 @@
  * and the board's inflight view.
  */
 
+import { resolveArtifactsDir, resolveProjectRoot } from '../routing/artifacts-dir.js';
+import {
+  formatJudgmentLiveness,
+  judgmentLiveness,
+  type JudgmentLiveness,
+} from './judgment-liveness.js';
 import { collectVerdicts, listBoard, peekQueue } from '../dispatch/board.js';
 import { readHold, type Hold } from './hold.js';
 import { listHeld } from './held-triage.js';
@@ -176,6 +182,8 @@ export interface StatusResult {
   worktrees?: { count: number; removable: number; ceiling: number };
   /** AISDLC-1351: why this board will never merge, one line per cause; absent when merging is configured. */
   mergeOff?: string[];
+  /** AISDLC-1442: whether the judgment layer is calling its provider, from the judgment log. */
+  judgment?: JudgmentLiveness;
 }
 
 /** Count `.worktrees/*` directories and read the last sweep's unremoved-removable count. */
@@ -452,8 +460,15 @@ export function hierarchyStatus(
   } catch {
     /* an unreadable policy must not stop status */
   }
+  let judgment: JudgmentLiveness | undefined;
+  try {
+    judgment = judgmentLiveness(resolveArtifactsDir(resolveProjectRoot(deps.cwd)), deps.now());
+  } catch {
+    /* an unreadable judgment log must not break status */
+  }
   return {
     rows,
+    ...(judgment ? { judgment } : {}),
     ...(mergeOff.length > 0 ? { mergeOff } : {}),
     ...(routedToPlanner.length > 0 ? { routedToPlanner } : {}),
     ...(agedPrs.length > 0 ? { agedPrs } : {}),
@@ -518,6 +533,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
       ]
     : [];
   const budgetLine = [
+    ...(result.judgment ? [formatJudgmentLiveness(result.judgment, nowMs)] : []),
     ...(result.hold
       ? [
           `HOLD by ${result.hold.by || 'unknown'} since ${result.hold.since || 'unknown'}: ${result.hold.reason}`,

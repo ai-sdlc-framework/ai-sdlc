@@ -30,6 +30,12 @@ import { processStartOf, resolveSessionSocket } from '../hierarchy/send-resolve.
 import { collectVerdicts, writeVerdict } from '../dispatch/board.js';
 import { defaultHierarchyDeps, firstPositional, runHierarchyCli } from './hierarchy.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
+import { runCapabilityLiveness } from '../orchestrator/capability-liveness.js';
+
+// AISDLC-1442: a tick runs capability liveness; here it must never file into the real catalog.
+vi.mock('../orchestrator/capability-liveness.js', () => ({
+  runCapabilityLiveness: vi.fn(() => ({ degraded: [], filed: [] })),
+}));
 
 let tmp: string;
 let logs: string[];
@@ -66,6 +72,7 @@ beforeEach(() => {
 afterEach(() => {
   removeFixtureDir(tmp);
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe('runHierarchyCli', () => {
@@ -280,6 +287,8 @@ describe('runHierarchyCli', () => {
   });
 
   it('status prints an empty roster as text and json', async () => {
+    // AISDLC-1442: the judgment line reads the artifacts dir; keep it off the real repo's log.
+    vi.stubEnv('ARTIFACTS_DIR', path.join(tmp, 'artifacts'));
     expect(await runHierarchyCli(['status'], overrides())).toBe(0);
     expect(logs).toEqual([
       'no sessions in the roster',
@@ -288,6 +297,7 @@ describe('runHierarchyCli', () => {
       expect.stringMatching(/^worktrees: \d+ \(\d+ removable\)$/),
       'last tick: never',
       'context clear thresholds (tokens): planner 150000, operator-dispatch 120000, executor 120000',
+      'judgment: DOWN since unknown (no judgment records)',
       'EXECUTOR CAP 3 (executors.max 3, board ceiling none, pacer allowance unlimited, load headroom 4; limited by executors.max)',
       'OPEN PRS 0 counted of limit 3, 0 total of ceiling 6',
       'unowned PRs: 0',
@@ -1301,6 +1311,26 @@ describe('clear, tick and route-decision', () => {
       }),
     ).toBe(1);
     expect(String(err.mock.calls.at(-1)?.[0])).toContain('refused');
+  });
+
+  it('a tick runs capability liveness once for the repo root (AISDLC-1442)', async () => {
+    seedBoardWithBrief();
+    const live = vi.mocked(runCapabilityLiveness);
+    live.mockClear();
+    const code = await runHierarchyCli(
+      ['tick', '--worker', 'operator-dispatch', '--work-dir', tmp],
+      overrides({ env: {} }),
+      { ...dispatchCaller, lease, operational: new Set<string>() },
+    );
+    expect(code).toBe(0);
+    expect(live).toHaveBeenCalledTimes(1);
+    const opts = live.mock.calls[0]![0];
+    expect(opts.workDir).toBe(path.resolve(tmp));
+    expect(typeof opts.nextId).toBe('function');
+    expect(typeof opts.persist).toBe('function');
+    expect(() =>
+      opts.emit({ type: 'CapabilityDegraded', capabilityId: 'x', capabilityStatus: 'degraded' }),
+    ).not.toThrow();
   });
 
   it('tick warns once when no plugin scripts folder is found and continues (AISDLC-1328)', async () => {

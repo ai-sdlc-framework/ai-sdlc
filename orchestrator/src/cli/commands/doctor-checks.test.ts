@@ -1274,6 +1274,13 @@ describe('checkJudgmentLayer', () => {
     expect(rs.find((r) => r.id === 'judgment-provider-key')!.severity).toBe('warn');
   });
 
+  it('does not warn when the jev key is in the repo-root .env, and never prints it (AISDLC-1442)', () => {
+    writeFileSync(join(tmpDir, '.env'), 'TYPESAFE_API_KEY=doctor-envfile-secret\n');
+    const rs = checkJudgmentLayer(ctxWith(config('  provider: jev\n  model: jev-1.13.0\n')));
+    expect(ids(rs)).not.toContain('judgment-provider-key');
+    expect(JSON.stringify(rs)).not.toContain('doctor-envfile-secret');
+  });
+
   it('warns when the model is not pinned while a judgment is enforce', () => {
     const yaml = config(
       `  provider: jev\n  model: jev-latest\n  judgments:\n    ${ENFORCED}:\n      mode: enforce\n`,

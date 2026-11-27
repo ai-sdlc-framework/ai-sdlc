@@ -504,6 +504,11 @@ export interface LoopDeps {
   usageIngest?: () => void;
   /** Daily board backup (AISDLC-1130); best effort, must not block the tick. */
   boardBackup?: () => void;
+  /**
+   * RFC-0049 section 9.3 capability liveness (AISDLC-1442): files the one-per-day Decision for each
+   * degraded or never-observed required capability. Once per tick; its failure never fails the tick.
+   */
+  capabilityLiveness?: () => void;
   /** Landed task ids for retiring failed verdicts (AISDLC-1243); absent means no retire step. */
   completedOnMain?: () => ReadonlyMap<string, string> | undefined;
   /** Ephemeral executors (RFC-0059): down on verdict, sweep, spawn per claim; absent means standing executors only. */
@@ -1161,6 +1166,11 @@ export async function runDispatchTick(deps: LoopDeps): Promise<TickResult> {
     deps.boardBackup?.();
   } catch {
     /* a failed backup must never stop the dispatch loop */
+  }
+  try {
+    deps.capabilityLiveness?.();
+  } catch {
+    /* capability liveness is reporting only and must never stop the dispatch loop */
   }
   if (deps.completedOnMain) {
     try {

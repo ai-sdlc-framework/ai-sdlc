@@ -47,6 +47,25 @@ uncalibrated); promotion applies to a calibrated provider such as `jev`.
   node pipeline-cli/bin/cli-judgment.mjs list --config .ai-sdlc/judgment-config.yaml
   ```
 
+### Provider key and liveness
+
+The `jev` provider reads `TYPESAFE_API_KEY` from the exported environment first. When it is
+not exported, the provider reads that one variable, and nothing else, from the git-ignored
+`.env` at the repository root (the main checkout, so task worktrees find it too). The file is
+read once per process, nothing is copied into `process.env` or passed to child processes, and
+the value never appears in logs, the judgment log or error messages (AISDLC-1442). A missing
+or unreadable `.env` leaves the layer abstaining with reason `disabled`.
+
+Check the layer is really calling the provider with:
+
+```bash
+node pipeline-cli/bin/cli-hierarchy.mjs status | grep '^judgment:'
+```
+
+It prints `judgment: live (last provider call <age>)` or `judgment: DOWN since <timestamp>
+(<reason>)`. Config-decided records (`decidedBy: config:*`) never count as live, so a log full
+of reviewer-set `act` records still reads `DOWN`.
+
 ---
 
 ## Corpus path
