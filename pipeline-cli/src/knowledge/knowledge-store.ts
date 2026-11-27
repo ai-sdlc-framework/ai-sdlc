@@ -86,7 +86,7 @@ export interface KnowledgeStore {
  * end up on the files store while another backend is configured (DEC-0427, fail closed).
  */
 export type KnowledgeBackendSelection = Pick<KnowledgeConfig, 'backend'> &
-  Partial<Pick<KnowledgeConfig, 'backendModule'>>;
+  Partial<Pick<KnowledgeConfig, 'backendModule' | 'backendOptions'>>;
 
 /** The files roots a store is opened on. */
 export type KnowledgeRoots = Partial<Pick<KnowledgeConfig, 'trackedRoot' | 'protectedRoot'>>;
@@ -95,7 +95,11 @@ export type KnowledgeStoreRoots = KnowledgeRoots & KnowledgeBackendSelection;
 
 /** The backend fields of a loaded config, for callers that open a store on their own roots. */
 export function backendSelection(config: KnowledgeBackendSelection): KnowledgeBackendSelection {
-  return { backend: config.backend, backendModule: config.backendModule ?? null };
+  return {
+    backend: config.backend,
+    backendModule: config.backendModule ?? null,
+    backendOptions: config.backendOptions ?? null,
+  };
 }
 
 /** Entries as markdown files with YAML frontmatter under the tracked and protected roots. */
@@ -234,9 +238,20 @@ export class KnowledgeBackendError extends Error {
   override name = 'KnowledgeBackendError';
 }
 
+/** What a registered factory receives besides the roots (AISDLC-1432). */
+export interface KnowledgeBackendContext {
+  /** The project the store is opened for; relative roots resolve against it. */
+  projectRoot: string;
+  /**
+   * The raw `knowledge.<backend>` block of `.ai-sdlc/context.yaml`, unvalidated (the backend
+   * owns validation); `null` or undefined when the block is absent.
+   */
+  options: unknown;
+}
+
 export type KnowledgeBackendFactory = (
   cfg: KnowledgeStoreRoots,
-  projectRoot: string | undefined,
+  ctx: KnowledgeBackendContext,
 ) => KnowledgeStore;
 
 /** What a `knowledge.backendModule` package receives in `registerKnowledgeBackends(registry)`. */
@@ -318,12 +333,13 @@ function loadBackendModule(spec: string, backend: string, projectRoot: string): 
 /**
  * Open the knowledge store for a `KnowledgeConfig` (or the roots a caller writes to plus the
  * configured backend). `backend` is required: a missing one throws rather than picking files.
- * `files` gives `FilesKnowledgeStore`; relative roots resolve against
- * `projectRoot`, else the working directory. Any other backend must be registered, by
- * `backendModule` (resolved from `projectRoot`) or in process; otherwise this throws
- * `KnowledgeBackendError` naming the backend and the module (DEC-0427, fail closed).
+ * `files` gives `FilesKnowledgeStore` (no backend options); relative roots resolve against
+ * `projectRoot`. Any other backend must be registered, by `backendModule` (resolved from
+ * `projectRoot`) or in process, and its factory receives `{ projectRoot, options }`;
+ * otherwise this throws `KnowledgeBackendError` naming the backend and the module
+ * (DEC-0427, fail closed). `projectRoot` is required: no store opens without its project.
  */
-export function openKnowledgeStore(cfg: KnowledgeStoreRoots, projectRoot?: string): KnowledgeStore {
+export function openKnowledgeStore(cfg: KnowledgeStoreRoots, projectRoot: string): KnowledgeStore {
   const backend = (cfg as Partial<KnowledgeStoreRoots>).backend;
   if (typeof backend !== 'string' || backend === '') {
     throw new KnowledgeBackendError(
@@ -332,7 +348,7 @@ export function openKnowledgeStore(cfg: KnowledgeStoreRoots, projectRoot?: strin
   }
   if (backend === DEFAULT_KNOWLEDGE_BACKEND) return new FilesKnowledgeStore(cfg, projectRoot);
   const spec = cfg.backendModule ?? null;
-  if (spec !== null) loadBackendModule(spec, backend, projectRoot ?? process.cwd());
+  if (spec !== null) loadBackendModule(spec, backend, projectRoot);
   const factory = backends.get(backend);
   if (!factory) {
     throw new KnowledgeBackendError(
@@ -341,5 +357,5 @@ export function openKnowledgeStore(cfg: KnowledgeStoreRoots, projectRoot?: strin
       }); refusing to fall back to files`,
     );
   }
-  return factory(cfg, projectRoot);
+  return factory(cfg, { projectRoot, options: cfg.backendOptions ?? null });
 }

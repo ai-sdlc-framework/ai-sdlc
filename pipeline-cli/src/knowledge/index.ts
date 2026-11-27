@@ -13,6 +13,7 @@ export {
   openKnowledgeStore,
   registerKnowledgeBackend,
   type GetOptions,
+  type KnowledgeBackendContext,
   type KnowledgeBackendFactory,
   type KnowledgeBackendRegistry,
   type KnowledgeBackendSelection,

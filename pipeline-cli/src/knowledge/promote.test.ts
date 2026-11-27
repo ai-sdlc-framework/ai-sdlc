@@ -223,8 +223,8 @@ describe('promotion verifier', () => {
     );
     expect(r.ok).toBe(true);
     expect(authority()).toBe('specialist');
-    expect(refuteEntry({ backend: 'files' }, tracked(), 'k-1', 'wrong', HUMAN)).toBe(true);
-    expect(refuteEntry({ backend: 'files' }, tracked(), 'nope', 'wrong', HUMAN)).toBe(false);
+    expect(refuteEntry({ backend: 'files' }, tracked(), 'k-1', 'wrong', HUMAN, root)).toBe(true);
+    expect(refuteEntry({ backend: 'files' }, tracked(), 'nope', 'wrong', HUMAN, root)).toBe(false);
     const events = readKnowledgeLog(tracked());
     expect(events.map((e) => e.event)).toEqual(['promoted', 'refuted']);
     const lines = auditLines(events);
@@ -236,16 +236,20 @@ describe('promotion verifier', () => {
   it('re-observation moves confidence 30 percent toward the value, authority unchanged', () => {
     repo({}, { authority: 'specialist' });
     expect(
-      reobserveEntry({ backend: 'files' }, tracked(), 'k-1', 1, AGENT, '2026-10-28'),
+      reobserveEntry({ backend: 'files' }, tracked(), 'k-1', 1, AGENT, '2026-10-28', root),
     ).toBeCloseTo(0.65);
     expect(authority()).toBe('specialist');
-    expect(reobserveEntry({ backend: 'files' }, tracked(), 'nope', 1, AGENT)).toBeNull();
+    expect(
+      reobserveEntry({ backend: 'files' }, tracked(), 'nope', 1, AGENT, undefined, root),
+    ).toBeNull();
     expect(readKnowledgeLog(tracked()).map((e) => e.event)).toEqual(['reobserved']);
   });
 
   it('caps re-observed confidence for agent-written entries', () => {
     repo({}, { writtenBy: 'agent', reverify: 'x', confidence: 0.85 });
-    expect(reobserveEntry({ backend: 'files' }, tracked(), 'k-1', 1, AGENT)).toBe(0.85);
+    expect(reobserveEntry({ backend: 'files' }, tracked(), 'k-1', 1, AGENT, undefined, root)).toBe(
+      0.85,
+    );
   });
 });
 

@@ -111,10 +111,10 @@ describe('FilesKnowledgeStore roots', () => {
     store.put({ fields: fields('dup'), body: 'p' }, { scope: 'protected' });
     store.put({ fields: fields('dup'), body: 't' }, { scope: 'tracked' });
     expect(store.get('dup')?.scope).toBe('tracked');
-    const protectedOnly = openKnowledgeStore({
-      backend: 'files',
-      protectedRoot: join(root, ROOTS.protectedRoot),
-    });
+    const protectedOnly = openKnowledgeStore(
+      { backend: 'files', protectedRoot: join(root, ROOTS.protectedRoot) },
+      root,
+    );
     expect(protectedOnly.get('dup')?.scope).toBe('protected');
     expect(() => protectedOnly.get('dup', { scope: 'tracked' })).toThrow(/no tracked root/);
   });
@@ -148,7 +148,7 @@ describe('FilesKnowledgeStore list(scope) and listRaw(scope)', () => {
 
   it('all covers only the configured roots', () => {
     const tracked = join(root, ROOTS.trackedRoot);
-    const store = openKnowledgeStore({ backend: 'files', trackedRoot: tracked });
+    const store = openKnowledgeStore({ backend: 'files', trackedRoot: tracked }, root);
     store.put({ fields: fields('a'), body: '' }, { scope: 'tracked' });
     expect(store.list('all').map((e) => e.fields.id)).toEqual(['a']);
     expect(() => store.listRaw('protected')).toThrow(/no protected root/);

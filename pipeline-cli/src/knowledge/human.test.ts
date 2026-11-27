@@ -21,7 +21,7 @@ import { openKnowledgeStore, toEntries } from './knowledge-store.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 const entriesIn = (trackedRoot: string): KnowledgeEntry[] =>
-  toEntries(openKnowledgeStore({ backend: 'files', trackedRoot }).list('tracked'));
+  toEntries(openKnowledgeStore({ backend: 'files', trackedRoot }, root).list('tracked'));
 
 const HUMAN = { by: 'human', principal: 'human:op@example.com' } as const;
 
@@ -69,23 +69,25 @@ const entryOf = (tracked: string, id: string): KnowledgeEntry => {
 describe('human surface', () => {
   it('confirm moves confidence 30 percent toward the value and keeps authority', () => {
     const t = repo();
-    expect(confirmEntry({ backend: 'files' }, t, 'a', 1, HUMAN)).toBe(0.65);
+    expect(confirmEntry({ backend: 'files' }, t, 'a', 1, HUMAN, undefined, root)).toBe(0.65);
     expect(entryOf(t, 'a').authority).toBe('inferred');
-    expect(confirmEntry({ backend: 'files' }, t, 'zz', 1, HUMAN)).toBeNull();
+    expect(confirmEntry({ backend: 'files' }, t, 'zz', 1, HUMAN, undefined, root)).toBeNull();
   });
 
   it('correct replaces value and hash and logs', () => {
     const t = repo();
-    expect(correctEntry({ backend: 'files' }, t, 'a', 'new text', HUMAN)).toBe(true);
+    expect(correctEntry({ backend: 'files' }, t, 'a', 'new text', HUMAN, undefined, root)).toBe(
+      true,
+    );
     const e = entryOf(t, 'a');
     expect(e.value).toBe('new text');
     expect(e.contentHash).toBe(hashValue('new text'));
-    expect(correctEntry({ backend: 'files' }, t, 'zz', 'x', HUMAN)).toBe(false);
+    expect(correctEntry({ backend: 'files' }, t, 'zz', 'x', HUMAN, undefined, root)).toBe(false);
   });
 
   it('correct of a tracked entry logs the old value with id, by and principal', () => {
     const t = repo();
-    correctEntry({ backend: 'files' }, t, 'a', 'new text', HUMAN);
+    correctEntry({ backend: 'files' }, t, 'a', 'new text', HUMAN, undefined, root);
     const [ev] = readKnowledgeLog(t);
     expect(ev).toMatchObject({
       event: 'corrected',
@@ -167,22 +169,22 @@ describe('human surface', () => {
 
   it('supersede links, keeps the old entry and moves the chain head', () => {
     const t = repo();
-    expect(supersedeEntry({ backend: 'files' }, t, 'a', 'b', HUMAN).ok).toBe(true);
+    expect(supersedeEntry({ backend: 'files' }, t, 'a', 'b', HUMAN, root).ok).toBe(true);
     expect(entryOf(t, 'a').id).toBe('a');
     expect(entryOf(t, 'b').relations).toEqual([{ type: 'supersedes', target: 'a' }]);
     const all = entriesIn(t);
     expect(chainHead(all, 'a')).toBe('b');
     expect(liveEntries(all).map((e) => e.id)).toEqual(['b']);
-    expect(supersedeEntry({ backend: 'files' }, t, 'a', 'a', HUMAN).ok).toBe(false);
-    expect(supersedeEntry({ backend: 'files' }, t, 'a', 'nope', HUMAN).ok).toBe(false);
-    expect(supersedeEntry({ backend: 'files' }, t, 'nope', 'a', HUMAN).ok).toBe(false);
+    expect(supersedeEntry({ backend: 'files' }, t, 'a', 'a', HUMAN, root).ok).toBe(false);
+    expect(supersedeEntry({ backend: 'files' }, t, 'a', 'nope', HUMAN, root).ok).toBe(false);
+    expect(supersedeEntry({ backend: 'files' }, t, 'nope', 'a', HUMAN, root).ok).toBe(false);
   });
 
   it('every mutation writes a knowledge-log event, promote included', async () => {
     const t = repo(['a', 'b', 'c']);
-    confirmEntry({ backend: 'files' }, t, 'a', 1, HUMAN);
-    correctEntry({ backend: 'files' }, t, 'a', 'v', HUMAN);
-    supersedeEntry({ backend: 'files' }, t, 'a', 'b', HUMAN);
+    confirmEntry({ backend: 'files' }, t, 'a', 1, HUMAN, undefined, root);
+    correctEntry({ backend: 'files' }, t, 'a', 'v', HUMAN, undefined, root);
+    supersedeEntry({ backend: 'files' }, t, 'a', 'b', HUMAN, root);
     // agent caller: refused, no authority change; human path is covered in promote tests
     await buildContextCli([
       'promote',

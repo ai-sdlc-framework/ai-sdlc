@@ -242,11 +242,15 @@ export function candidateFields(c: Candidate, observed: string): Record<string, 
 
 export function ingestSource(kind: IngestSource, o: IngestOptions): IngestResult {
   const result: IngestResult = { created: 0, updated: 0, unchanged: 0 };
-  const store = openKnowledgeStore({
-    backend: o.backend,
-    backendModule: o.backendModule,
-    trackedRoot: o.trackedRootAbs,
-  });
+  const store = openKnowledgeStore(
+    {
+      backend: o.backend,
+      backendModule: o.backendModule,
+      backendOptions: o.backendOptions,
+      trackedRoot: o.trackedRootAbs,
+    },
+    o.projectDir,
+  );
   for (const c of collectCandidates(kind, o)) {
     const fields = candidateFields(c, o.observed);
     const errors = validateEntryFields(fields, o.ontology);

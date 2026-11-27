@@ -380,7 +380,10 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           observed: String(args.observed),
           headings: args.heading as string[] | undefined,
         });
-        const store = openKnowledgeStore({ ...backendSelection(config), trackedRoot: trackedAbs });
+        const store = openKnowledgeStore(
+          { ...backendSelection(config), trackedRoot: trackedAbs },
+          projectDir,
+        );
         for (const e of entries) {
           store.put({ fields: e.fields, body: e.body }, { scope: 'tracked', path: e.path });
         }
@@ -572,10 +575,10 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
         const ctx = knowledgeCtx(String(args['project-dir']));
         const d = buildDashboard(
           toEntries(
-            openKnowledgeStore({
-              ...backendSelection(ctx.verify.config),
-              trackedRoot: ctx.trackedAbs,
-            }).list('tracked'),
+            openKnowledgeStore(
+              { ...backendSelection(ctx.verify.config), trackedRoot: ctx.trackedAbs },
+              ctx.verify.projectDir,
+            ).list('tracked'),
           ),
           ctx.verify.ontology.trunks,
         );
@@ -607,6 +610,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           String(args.id),
           String(args.reason),
           resolveActor(String(args['project-dir'])),
+          ctx.verify.projectDir,
         );
         if (!ok) {
           process.stderr.write(`error: entry '${String(args.id)}' not found\n`);
@@ -631,6 +635,7 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           Number(args.confidence),
           resolveActor(String(args['project-dir'])),
           String(args.observed),
+          ctx.verify.projectDir,
         );
         if (next === null) {
           process.stderr.write(`error: entry '${String(args.id)}' not found\n`);

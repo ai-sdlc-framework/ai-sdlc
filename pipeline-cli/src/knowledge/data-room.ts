@@ -102,6 +102,7 @@ export function captureFact(
   sel: KnowledgeBackendSelection,
   protectedRootAbs: string,
   input: CaptureInput,
+  projectRoot: string,
 ): string {
   const fields = {
     id: input.id,
@@ -119,7 +120,7 @@ export function captureFact(
     writtenBy: 'agent',
     reverify: `Re-check against ${input.sourceDoc} in the data room`,
   };
-  const { path } = openKnowledgeStore({ ...sel, protectedRoot: protectedRootAbs }).put(
+  const { path } = openKnowledgeStore({ ...sel, protectedRoot: protectedRootAbs }, projectRoot).put(
     { fields, body: `Source: ${input.sourceDoc}\n` },
     { scope: 'protected' },
   );
@@ -132,7 +133,7 @@ export function captureFactForProject(projectDir: string, input: CaptureInput): 
   const protectedAbs = isAbsolute(config.protectedRoot)
     ? config.protectedRoot
     : join(projectDir, config.protectedRoot);
-  return captureFact(config, protectedAbs, input);
+  return captureFact(config, protectedAbs, input, projectDir);
 }
 
 /** Export and sharing paths: the protected partition is excluded by scope alone. */

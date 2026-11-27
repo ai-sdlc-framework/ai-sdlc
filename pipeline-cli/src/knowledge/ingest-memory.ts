@@ -118,6 +118,7 @@ export function ingestMemoryTrunk(o: MemoryIngestOptions): MemoryIngestResult {
     {
       backend: o.backend,
       backendModule: o.backendModule,
+      backendOptions: o.backendOptions,
       protectedRoot: o.protectedRootAbs,
     },
     o.projectDir,

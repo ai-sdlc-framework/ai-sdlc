@@ -17,8 +17,8 @@ export function confirmEntry(
   id: string,
   confidence: number,
   actor: Actor,
-  observed?: string,
-  projectRoot?: string,
+  observed: string | undefined,
+  projectRoot: string,
 ): number | null {
   let next = 0;
   const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
@@ -57,8 +57,8 @@ export function correctEntry(
   id: string,
   value: string,
   actor: Actor,
-  observed?: string,
-  projectRoot?: string,
+  observed: string | undefined,
+  projectRoot: string,
 ): boolean {
   const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
   const before = store.update(id, (f) => {
@@ -86,7 +86,7 @@ export function supersedeEntry(
   oldId: string,
   newId: string,
   actor: Actor,
-  projectRoot?: string,
+  projectRoot: string,
 ): { ok: boolean; reason: string } {
   const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
   const oldEntry = store.get(oldId, { scope: 'tracked' });
