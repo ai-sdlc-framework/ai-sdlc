@@ -11,6 +11,7 @@
  *   cli-judgment eval <judgment-id> --corpus <jsonl> [--sweep <name>=<from>:<to>:<step>]
  *   cli-judgment replay --since <date> [--judgment <id>]
  *   cli-judgment shadow --since <date> [--judgment <id>]
+ *   cli-judgment question-gate < question.json   (AISDLC-1443, called by the plugin hook)
  */
 
 import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
@@ -20,6 +21,7 @@ import { hideBin } from 'yargs/helpers';
 import {
   createBuiltInJudgmentProvider,
   createJudgmentCache,
+  createJudgmentLogSink,
   getJudgmentDefinition,
   isLoopbackUrl,
   isModelAlias,
@@ -59,6 +61,11 @@ import {
   type AnyDefinition,
   type Band,
 } from '../judgment/eval.js';
+import {
+  judgeOperatorQuestion,
+  readAnsweredDecisionsAtRef,
+  type OperatorQuestion,
+} from '../decisions/question-judgment.js';
 
 class UsageError extends Error {}
 
@@ -77,6 +84,10 @@ export interface JudgmentCliDeps {
   listDefinitions?: () => AnyDefinition[];
   fetchImpl?: typeof fetch;
   now?: () => Date;
+  /** Standard input (question-gate); defaults to fd 0. */
+  readStdin?: () => string;
+  /** Answered decisions on main (question-gate); defaults to `origin/main` via git. */
+  readAnswered?: typeof readAnsweredDecisionsAtRef;
 }
 
 interface Session {
@@ -653,6 +664,54 @@ async function runShadow(
   return 0;
 }
 
+/**
+ * Checks 2 and 3 of the operator-question gate (AISDLC-1443). Reads
+ * `{ summary, options, skipReversibility }` on stdin and prints the two
+ * results as JSON. With no provider it prints `{}` before touching git, so
+ * the hook costs one process start when the layer is off.
+ */
+async function runQuestionGate(args: CommonArgs, deps: JudgmentCliDeps) {
+  const out = deps.out ?? ((t) => process.stdout.write(t));
+  const raw = JSON.parse((deps.readStdin ?? (() => readFileSync(0, 'utf8')))()) as Partial<
+    OperatorQuestion & { skipReversibility: boolean }
+  >;
+  if (typeof raw.summary !== 'string' || raw.summary.trim() === '') {
+    throw new UsageError('question-gate: stdin must carry a non-empty "summary"');
+  }
+  const question: OperatorQuestion = {
+    summary: raw.summary,
+    options: Array.isArray(raw.options)
+      ? raw.options.filter(
+          (o): o is { id: string; description: string } =>
+            !!o && typeof o.id === 'string' && typeof o.description === 'string',
+        )
+      : [],
+  };
+  const s = openSession(args, deps);
+  if (!s.config.provider || !s.provider) {
+    out('{}\n');
+    return 0;
+  }
+  const provider = s.provider;
+  const answered = (deps.readAnswered ?? readAnsweredDecisionsAtRef)(s.workDir);
+  const result = await judgeOperatorQuestion(
+    question,
+    answered,
+    {
+      config: s.config,
+      getProvider: () => provider,
+      sinks: [createJudgmentLogSink({ artifactsDir: s.artifactsDir })],
+      consumerLabel: 'question-gate',
+    },
+    {
+      ...(args['source-kind'] ? { sourceKind: args['source-kind'] } : {}),
+      skipReversibility: raw.skipReversibility === true,
+    },
+  );
+  out(`${JSON.stringify(result)}\n`);
+  return 0;
+}
+
 // --- yargs wiring -------------------------------------------------------
 
 function commonOptions<T>(y: Argv<T>) {
@@ -770,9 +829,19 @@ export function buildJudgmentCli(
           .option('judgment', { type: 'string', describe: 'Only this judgment id.' }),
       (a) => run(() => runShadow(a as never, deps)),
     )
+    .command(
+      'question-gate',
+      'Operator-question gate checks 2 and 3 (already decided, own class); JSON on stdin and stdout.',
+      (y) =>
+        y.option('source-kind', {
+          type: 'string',
+          describe: 'Kind of the work item; only backlog may decide permissively.',
+        }),
+      (a) => run(() => runQuestionGate(a as never, deps)),
+    )
     .demandCommand(
       1,
-      'Choose a command: doctor, list, dor-corpus, ask, eval, export-corpus, replay or shadow.',
+      'Choose a command: doctor, list, dor-corpus, ask, eval, export-corpus, replay, shadow or question-gate.',
     )
     .strict()
     .exitProcess(false)

@@ -112,6 +112,17 @@
         ]
       },
       {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/question-gate.sh\"",
+            "timeout": 15,
+            "statusMessage": "Checking operator question..."
+          }
+        ]
+      },
+      {
         "matcher": "Read|Write|Edit|MultiEdit|Bash",
         "hooks": [
           {
