@@ -356,4 +356,55 @@ describe('CopilotRunner', () => {
       expect((opts as Record<string, unknown>).timeout).toBe(60000);
     });
   });
+
+  describe('child environment and output cap (AISDLC-1396)', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    function childEnv(): NodeJS.ProcessEnv {
+      const [, , opts] = spawnMock.mock.calls[0];
+      return (opts as { env: NodeJS.ProcessEnv }).env;
+    }
+
+    it('drops secrets not on the allow-list and keeps its own credential', async () => {
+      vi.stubEnv('ANTHROPIC_API_KEY', 'secret-not-for-the-agent');
+      vi.stubEnv('COPILOT_GITHUB_TOKEN', 'runner-credential');
+      setupSpawn({ stdout: 'done', stderr: '' });
+      setupGitExec(['f.ts']);
+
+      await new CopilotRunner().run(makeCtx());
+
+      const env = childEnv();
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(env.COPILOT_GITHUB_TOKEN).toBe('runner-credential');
+      expect(env.PATH).toBe(process.env.PATH);
+    });
+
+    it('passes names listed in AI_SDLC_RUNNER_ENV_PASSTHROUGH through', async () => {
+      vi.stubEnv('FOO', 'bar');
+      vi.stubEnv('AI_SDLC_RUNNER_ENV_PASSTHROUGH', 'FOO');
+      setupSpawn({ stdout: 'done', stderr: '' });
+      setupGitExec(['f.ts']);
+
+      await new CopilotRunner().run(makeCtx());
+
+      expect(childEnv().FOO).toBe('bar');
+    });
+
+    it('keeps the tail of output past the cap and says so in the result', async () => {
+      vi.stubEnv('AI_SDLC_RUNNER_OUTPUT_CAP_BYTES', '64');
+      const big = 'x'.repeat(1000) + 'TAIL-MARKER';
+      setupSpawn({ stdout: big, stderr: '' });
+      setupGitExec(['f.ts']);
+
+      const result = await new CopilotRunner().run(makeCtx());
+
+      expect(result.success).toBe(true);
+      expect(result.outputTruncatedBytes).toBe(big.length - 64);
+      expect(result.summary).toContain('[output truncated');
+      expect(result.summary).toContain('TAIL-MARKER');
+      expect(result.summary.length).toBeLessThan(200);
+    });
+  });
 });

@@ -86,6 +86,12 @@ export interface AgentResult {
   error?: string;
   /** Token usage parsed from the agent subprocess. */
   tokenUsage?: TokenUsage;
+  /**
+   * Bytes of the child's buffered output dropped because it exceeded the
+   * runner output cap (AISDLC-1396); the runner kept the tail. Absent when
+   * nothing was dropped.
+   */
+  outputTruncatedBytes?: number;
 }
 
 export interface AgentRunner {

@@ -228,6 +228,7 @@ const NON_INSTRUMENTED_PATTERNS = [
   /^orchestrator\/src\/deploy\/rollout-types\.ts$/,
   /^orchestrator\/src\/deploy\/types\.ts$/,
   /^orchestrator\/src\/harness\/types\.ts$/,
+  /^orchestrator\/src\/runners\/types\.ts$/,
 ];
 
 // ── Argv parsing ─────────────────────────────────────────────────────────────

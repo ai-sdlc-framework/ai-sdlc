@@ -14,6 +14,7 @@ import {
 } from '../defaults.js';
 import { buildPrompt } from './claude-code.js';
 import { cleanGitEnv } from '../runtime/git-env.js';
+import { buildRunnerEnv, RUNNER_CREDENTIAL_ENV, TailBuffer, truncationNote } from './runner-env.js';
 
 export { buildPrompt };
 
@@ -108,40 +109,51 @@ export class CodexRunner implements AgentRunner {
         args = codexArgs;
       }
 
-      const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>(
-        (resolve, reject) => {
-          const child = spawn(cmd, args, {
-            cwd: ctx.workDir,
-            stdio: ['pipe', 'pipe', 'pipe'],
-            env: { ...process.env },
-            timeout: timeoutMs,
-          });
+      const { stdout, stderr, droppedBytes, capBytes } = await new Promise<{
+        stdout: string;
+        stderr: string;
+        droppedBytes: number;
+        capBytes: number;
+      }>((resolve, reject) => {
+        const child = spawn(cmd, args, {
+          cwd: ctx.workDir,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: buildRunnerEnv(RUNNER_CREDENTIAL_ENV.codex),
+          timeout: timeoutMs,
+        });
 
-          const chunks: Buffer[] = [];
-          const errChunks: Buffer[] = [];
+        // Bounded buffers: keep the tail of each stream (AISDLC-1396).
+        const outBuf = new TailBuffer();
+        const errBuf = new TailBuffer(outBuf.capBytes);
 
-          child.stdout.on('data', (data: Buffer) => chunks.push(data));
-          child.stderr.on('data', (data: Buffer) => errChunks.push(data));
+        child.stdout.on('data', (data: Buffer) => outBuf.push(data));
+        child.stderr.on('data', (data: Buffer) => errBuf.push(data));
 
-          child.on('close', (code) => {
-            const out = Buffer.concat(chunks).toString('utf-8');
-            const err = Buffer.concat(errChunks).toString('utf-8');
-            if (code === 0) {
-              resolve({ stdout: out, stderr: err });
-            } else {
-              reject(new Error(`codex exited with code ${code}: ${err || out}`));
-            }
-          });
+        child.on('close', (code) => {
+          const out = outBuf.toString();
+          const err = errBuf.toString();
+          if (code === 0) {
+            resolve({
+              stdout: out,
+              stderr: err,
+              droppedBytes: outBuf.droppedBytes + errBuf.droppedBytes,
+              capBytes: outBuf.capBytes,
+            });
+          } else {
+            reject(new Error(`codex exited with code ${code}: ${err || out}`));
+          }
+        });
 
-          child.on('error', reject);
+        child.on('error', reject);
 
-          // Send prompt via stdin and close it
-          child.stdin.write(prompt);
-          child.stdin.end();
-        },
-      );
+        // Send prompt via stdin and close it
+        child.stdin.write(prompt);
+        child.stdin.end();
+      });
 
       const tokenUsage = parseTokenUsage(stderr, model);
+      const truncation = droppedBytes > 0 ? { outputTruncatedBytes: droppedBytes } : {};
+      const note = droppedBytes > 0 ? `${truncationNote(droppedBytes, capBytes)}\n` : '';
 
       // Collect changed files
       const diffOutput = await gitExec(ctx.workDir, ['diff', '--name-only']);
@@ -163,6 +175,7 @@ export class CodexRunner implements AgentRunner {
           summary: 'Agent made no changes',
           error: 'No files were modified',
           tokenUsage,
+          ...truncation,
         };
       }
 
@@ -178,8 +191,9 @@ export class CodexRunner implements AgentRunner {
       return {
         success: true,
         filesChanged,
-        summary: stdout.slice(0, 2000),
+        summary: (note + stdout).slice(0, 2000),
         tokenUsage,
+        ...truncation,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
