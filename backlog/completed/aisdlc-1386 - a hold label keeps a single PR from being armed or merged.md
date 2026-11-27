@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1386
 title: 'A hold label keeps a single PR from being armed or merged'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-22'
 labels:
