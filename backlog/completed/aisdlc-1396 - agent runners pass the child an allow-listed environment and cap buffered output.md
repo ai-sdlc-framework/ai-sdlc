@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1396
 title: 'Agent runners pass the child an allow-listed environment and cap buffered output'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-23'
 labels:
