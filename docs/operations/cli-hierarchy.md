@@ -459,7 +459,9 @@ The secret comes only from the `AI_SDLC_WEBHOOK_SECRET` environment variable, ne
 repository. Without it `webhook up` does nothing and dispatch stays poll-only (not an error). The
 receiver binds to `127.0.0.1` only, on `--port` or `AI_SDLC_WEBHOOK_PORT` (unset: the receiver scans upward from the recorded port or the configured default, 8765), at path
 `/webhooks/github`. `cli-hierarchy up` starts it when the secret is set (and always starts the reconcile scheduler that consumes its wake file, see `up`). Subscribed event kinds:
-`pull_request`, `check_suite`, `check_run`, `workflow_run`, `status`, `pull_request_review`.
+`pull_request`, `check_suite`, `check_run`, `workflow_run`, `status`, `pull_request_review`, `push`
+(a default-branch push wakes dispatch when main moves, AISDLC-1379). `webhook up` on a running receiver
+reinstalls a forwarder agent whose `--events` differ from this list (AISDLC-1399).
 
 Several projects on one host (AISDLC-1254): without `--port` or `AI_SDLC_WEBHOOK_PORT`, `webhook up` picks the
 port itself. It starts from the port recorded in the board dir's `webhook-port` file (else `spec.webhook.port`,
@@ -479,7 +481,7 @@ Prerequisites for the feed: the `gh webhook` extension (`gh extension install cl
 
 Reaching it from GitHub: `cli-hierarchy webhook up --feed gh-forward` (AISDLC-1207) installs and loads a
 launchd agent (`com.ai-sdlc.webhook.<project-slug>`, KeepAlive, plist in `~/Library/LaunchAgents`, mode 0600) that runs
-`gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review --url http://127.0.0.1:<port>/webhooks/github --secret $AI_SDLC_WEBHOOK_SECRET`,
+`gh webhook forward --repo <owner>/<repo> --events pull_request,check_suite,check_run,workflow_run,status,pull_request_review,push --url http://127.0.0.1:<port>/webhooks/github --secret $AI_SDLC_WEBHOOK_SECRET`,
 so the feed survives a closed terminal, sleep and a network drop. The hook secret must equal the receiver's, or
 every delivery is a 401; a missing `AI_SDLC_WEBHOOK_SECRET` is therefore an error. Before loading, `webhook up`
 deletes stale hooks named `cli` on the repository (a forwarder that died uncleanly leaves one, and the next start
