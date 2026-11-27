@@ -17,7 +17,12 @@ export default defineConfig({
       reporter: ['text', 'json-summary', 'json'],
       reportsDirectory: './coverage',
       // These modules export only types, so they have no runtime coverage data.
-      exclude: ['src/deploy/rollout-types.ts', 'src/deploy/types.ts', 'src/harness/types.ts'],
+      exclude: [
+        'src/deploy/rollout-types.ts',
+        'src/deploy/types.ts',
+        'src/harness/types.ts',
+        'src/runners/types.ts',
+      ],
       thresholds: {
         lines: 90,
         functions: 80,
