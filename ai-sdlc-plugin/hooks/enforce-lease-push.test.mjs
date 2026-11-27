@@ -1390,6 +1390,31 @@ describe('main-rooted hierarchy executor: lease push bound to the inflight claim
     reset();
   });
 
+  it('AISDLC-1454: a planner holding a routed conflicted PR is refused; the re-entry executor pushes', () => {
+    reset();
+    const planner = (over = {}) => ({
+      env: {
+        // A planner session carries no task binding (the dispatcher sets it for executors only).
+        AI_SDLC_ACTIVE_TASK_ID: '',
+        AI_SDLC_HIERARCHY_SESSION: 'proj-planner',
+        AI_SDLC_HIERARCHY_ROLE: 'planner',
+        ...over,
+      },
+    });
+    // The executor's claim was released: the planner rebased the task branch and tries to push it.
+    assert.ok(denied(push(planner())), 'planner, from the task worktree');
+    const fromMain = `git -C ${r.wt} push --force-with-lease origin HEAD:refs/heads/${OWN}`;
+    assert.ok(
+      denied(run(fromMain, { cwd: r.root, projectDir: r.root, ...planner() })),
+      'planner, git -C from the main checkout',
+    );
+    // The queued re-entry is claimed by an executor, which pushes from its own worktree.
+    claim('AISDLC-1', 'executor-alpha');
+    assert.ok(denied(push(planner())), 'planner still refused while an executor holds the claim');
+    assert.ok(!denied(push(exec())), 'executor with the claim is allowed');
+    reset();
+  });
+
   it('refused when the manifest path is tampered (symlinked manifest or symlinked inflight dir)', () => {
     reset();
     mkdirSync(inflightDir(), { recursive: true });

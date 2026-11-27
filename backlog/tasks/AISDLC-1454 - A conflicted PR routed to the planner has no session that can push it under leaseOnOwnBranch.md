@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1454
 title: "A conflicted PR routed to the planner has no session that can push it under leaseOnOwnBranch"
-status: To Do
+status: In Progress
 priority: high
 labels:
   - dispatch

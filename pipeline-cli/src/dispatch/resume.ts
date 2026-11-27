@@ -23,7 +23,13 @@ import {
   resolveCaller,
   type IdentityDeps,
 } from '../hierarchy/caller-identity.js';
-import { ensureBoardDirs, readInflightManifest, TASK_ID_RE, writeManifest } from './board.js';
+import {
+  ensureBoardDirs,
+  readInflightManifest,
+  TASK_ID_RE,
+  updateQueuedManifest,
+  writeManifest,
+} from './board.js';
 import { DEFAULT_VERIFY_COMMANDS } from './enqueue.js';
 import type { DispatchManifest, DispatchVerdict, ResumeFeedback } from './types.js';
 import { oneLine } from './verdict-fields.js';
@@ -183,6 +189,46 @@ export function correctManifestBranch(boardDir: string, taskId: string, branch: 
     n++;
   }
   return n;
+}
+
+/**
+ * AISDLC-1454: hand the planner's conflict resolution to a queued re-entry. The note rides
+ * on the queued manifest's resume block and orders a developer round, so the executor that
+ * claims the task applies it in the task worktree and pushes from there under the existing
+ * lease control. The planner pushes nothing. A later note replaces an earlier one.
+ * @throws, writing nothing, when the id is malformed, the note is empty, too long or reads
+ *   like a command, or the task has no queued re-entry (a queue manifest with a resume block).
+ */
+export function attachPlannerNote(
+  boardDir: string,
+  taskId: string,
+  raw: string,
+): { taskId: string; queuePath: string; resume: ResumeFeedback } {
+  assertId(taskId);
+  const note = stripControl(raw ?? '').trim();
+  if (note.length === 0) throw new Error('a planner note needs text');
+  if (note.length > MAX_NOTE_CHARS) {
+    throw new Error(`the planner note may have at most ${MAX_NOTE_CHARS} characters`);
+  }
+  assertProse('the planner note', note);
+  if (existsSync(path.join(boardDir, 'inflight', `${taskId}.dispatch.json`))) {
+    throw new Error(
+      `${taskId} is inflight: an executor already claimed the re-entry; the note can no longer reach it`,
+    );
+  }
+  const queuePath = path.join(boardDir, 'queue', `${taskId}.dispatch.json`);
+  const manifest = existsSync(queuePath) ? readJson<DispatchManifest>(queuePath) : undefined;
+  if (!manifest?.resume || manifest.taskId !== taskId) {
+    throw new Error(
+      `${taskId} has no queued re-entry to attach a note to; the reconciler queues one when land-prep is exhausted, or order one with reenter --executor-round`,
+    );
+  }
+  // A resolution needs the developer: a push-only mode is dropped.
+  const { resumeMode: _pushOnly, ...rest } = manifest.resume;
+  const resume: ResumeFeedback = { ...rest, plannerNote: note, developerRound: true };
+  // Same in-place rewrite as reprioritize: refused once the task is claimed (inflight).
+  updateQueuedManifest(boardDir, taskId, { resume });
+  return { taskId, queuePath, resume };
 }
 
 /** Strip control sequences, then require prose, so validation and rendering see the same text. */
@@ -435,6 +481,13 @@ export function formatResumeFeedback(resume: ResumeFeedback): string {
     '',
     stripControl(resume.note),
   ];
+  if (resume.plannerNote) {
+    lines.push(
+      '',
+      'Planner resolution: apply it in this worktree while resolving the rebase, then verify and push from this worktree through the pipeline push step:',
+      stripControl(resume.plannerNote),
+    );
+  }
   if (resume.failingChecks && resume.failingChecks.length > 0) {
     lines.push('', 'Failing checks:', ...resume.failingChecks.map((c) => `- ${stripControl(c)}`));
   }

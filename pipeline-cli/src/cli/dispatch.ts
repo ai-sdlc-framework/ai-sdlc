@@ -92,6 +92,11 @@
  *     refused unless `--note` orders a round. Re-entering the same `(action, headSha)` twice is
  *     refused by the loop guard (AISDLC-883). Notes are prose: a line starting with `cli-`,
  *     `git ` or `gh ` is rejected (AISDLC-800). Same caller check and `requeue` grant as `requeue`.
+ *     `--executor-round` (AISDLC-1454) sends a conflicted PR to an executor even when BEHIND;
+ *     the reconciler orders it when land-prep is exhausted and no live executor holds the claim.
+ *   - `reentry-note <task-id> --note <text>` (AISDLC-1454) puts the planner's conflict
+ *     resolution on the queued re-entry and orders a developer round; the executor applies it
+ *     in the task worktree and pushes from there. Same caller check and grant as `reenter`.
  *
  * Executor loop (RFC-0051 section 5):
  *
@@ -233,6 +238,7 @@ import { annotateSnapshot, appendReconcileLog, rowsForOpen } from '../hierarchy/
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
 import { useGhReadCacheDir } from '../hierarchy/gh-read-cache.js';
 import { reenter, type ReenterResult } from '../hierarchy/reenter.js';
+import { attachPlannerNote } from '../dispatch/resume.js';
 import { decideResumeReview } from '../next-step/resume-decision.js';
 import { defaultRunner } from '../runtime/exec.js';
 import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
@@ -1758,6 +1764,65 @@ export async function runDispatchCli(
       return 0;
     }
 
+    case 'reentry-note': {
+      // AISDLC-1454: the planner hands a conflict resolution to a queued re-entry; it pushes nothing.
+      const first = argv[1] !== undefined && !argv[1].startsWith('--') ? argv[1] : undefined;
+      const target = first ?? flags['task-id'] ?? '';
+      if (!target || target === 'true') {
+        process.stderr.write('cli-dispatch reentry-note: pass the task id\n');
+        return 2;
+      }
+      let note = flags['note'];
+      if (note === undefined && flags['note-file']) {
+        const read = readNoteFile(flags['note-file'], boardDir);
+        if ('error' in read) {
+          process.stderr.write(`cli-dispatch reentry-note: ${read.error}\n`);
+          return 2;
+        }
+        note = read.note;
+      }
+      if (note === undefined || note === 'true') {
+        process.stderr.write(
+          'cli-dispatch reentry-note: --note <text> (or --note-file <path>) is required\n',
+        );
+        return 2;
+      }
+      const cwd = deps.cwd ?? process.cwd();
+      const caller = checkDispatchCaller({
+        // The planner decides the conflict and hands the resolution over; it never pushes.
+        allowedRoles: ['operator-dispatch', 'planner'],
+        label: 'cli-dispatch reentry-note',
+        cwd,
+        boardDir,
+        workDir: flags['work-dir'],
+        worker: flags['worker'],
+        identity: deps.identity,
+        trustedBoard: deps.trustedBoard,
+        installDir: deps.installDir,
+      });
+      if (!caller.ok) {
+        process.stderr.write(`${caller.reason}\n`);
+        return 1;
+      }
+      const granted = deps.operational ?? loadOperational(cwd, cwd);
+      if (!granted.has('requeue')) {
+        process.stderr.write(
+          'cli-dispatch reentry-note: refused; the repository policy does not grant requeue to the dispatch session. ' +
+            'Raise it with `cli-decisions escalate` so the decision is recorded and routed\n',
+        );
+        return 1;
+      }
+      try {
+        out({ ok: true, ...attachPlannerNote(boardDir, target, note) });
+        return 0;
+      } catch (err) {
+        process.stderr.write(
+          `cli-dispatch reentry-note: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
+        return 1;
+      }
+    }
+
     case '':
     case 'help':
     case '--help':
@@ -1854,6 +1919,7 @@ function runReenter(
         ...(note === undefined ? {} : { note }),
         ...(developerRound ? { developerRound: true } : {}),
         ...(flags['push-only'] !== undefined ? { pushOnly: true } : {}),
+        ...(flags['executor-round'] !== undefined ? { executorRound: true } : {}),
         ...(flags['decision'] && flags['decision'] !== 'true'
           ? { decisionId: flags['decision'] }
           : {}),
@@ -2026,7 +2092,8 @@ Subcommands:
   close-superseded <pr>   (DEC-0266: close a CLI-opened PR whose every file is already on main via a landed PR; exit 3 otherwise)
   reap [--stale-ms <n>] [--retry-limit <n>] [--roster <path>]
   requeue --task-id <id> [--retry-limit <n>]   (PR-less failures; meant for the dispatch session; limit at most 2)
-  reenter <pr|task-id> [--note <text>] [--developer-round] [--decision <id>]   (re-enter a PR keyed on its state; replaces resume; a task with no PR needs --note, which requeues a fresh round)
+  reenter <pr|task-id> [--note <text>] [--developer-round] [--executor-round] [--decision <id>]   (re-enter a PR keyed on its state; replaces resume; a task with no PR needs --note, which requeues a fresh round; --executor-round sends a conflicted PR to an executor even when BEHIND)
+  reentry-note <task-id> --note <text> | --note-file <path>   (hand the planner's conflict resolution to a queued re-entry; the executor applies it and pushes from the task worktree)
   complete --task-id <id> --outcome <enum> --worker <name> [--pr <number>] [--pr-url <url>]
            [--follow-ups <ids>] [--decisions <ids>] [--notes <s>] [--cause <s>]
   next-subid <task-id> [--work-dir <path>]

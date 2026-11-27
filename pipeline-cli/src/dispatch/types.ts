@@ -155,6 +155,12 @@ export interface ResumeFeedback {
    * the developer round has run. Absent means the normal resume decision.
    */
   developerRound?: true;
+  /**
+   * AISDLC-1454: the planner's resolution of a semantic conflict, handed to a queued
+   * re-entry. The executor applies it in the task worktree and pushes from there; the
+   * planner never pushes the task branch.
+   */
+  plannerNote?: string;
 }
 
 /**

@@ -169,7 +169,35 @@ export interface LandingRecord {
   landedSha?: string;
   /** Set once the PR is confirmed closed without landing; the record is not re-checked. */
   closedUnlanded?: string;
+  /** AISDLC-1454: the executor re-entry queued when land-prep was exhausted with no live claim. */
+  reentry?: ReentryMark;
   history: LandingEntry[];
+}
+
+/** AISDLC-1454: one executor re-entry per head, queued when land-prep is exhausted. */
+export interface ReentryMark {
+  headSha: string;
+  at: string;
+  /** `queued`: one manifest is on the board; `failed`: the planner decides, then re-enters by hand. */
+  status: 'queued' | 'failed';
+  note?: string;
+}
+
+/** AISDLC-1454: the action that queues an executor re-entry for a conflicted PR. */
+export const QUEUE_REENTRY_ACTION = 'queue-reentry';
+
+/** The routing suffix that says how a conflicted PR will be pushed; never a dead end. */
+export function reentryLine(mark: ReentryMark, pr: number, taskId: string): string {
+  if (mark.status === 'queued') {
+    return (
+      `re-entry queued for an executor (it rebases and pushes from the task worktree); ` +
+      `hand a conflict resolution to it with cli-dispatch reentry-note ${taskId} --note <text>`
+    );
+  }
+  return (
+    `re-entry could not be queued${mark.note ? ` (${mark.note})` : ''}; ` +
+    `planner decision needed, then re-entry with cli-dispatch reenter ${pr} --executor-round`
+  );
 }
 
 /** Dependabot head branches (AISDLC-1091). */
@@ -533,6 +561,9 @@ export function actionCommands(
     }
     case 'push-only-reenter':
       return [dispatch('reenter', String(ctx.pr), '--push-only')];
+    case QUEUE_REENTRY_ACTION:
+      // AISDLC-1454: an executor rebases in its own worktree and pushes under the lease control.
+      return [dispatch('reenter', String(ctx.pr), '--executor-round')];
     case 'land-prep':
     case 'review-resume':
       return [reenter()];
@@ -1114,6 +1145,52 @@ export interface ReconcileOpts {
   completedOnMain?: () => ReadonlyMap<string, string> | undefined;
 }
 
+/**
+ * AISDLC-1454: land-prep is exhausted on a conflicted task PR. When no live executor holds
+ * the claim, queue ONE executor re-entry for the head (a resume, so it sorts at resume
+ * priority); the planner decides a semantic conflict but never pushes the task branch.
+ * Returns the record (with the mark) and the routing suffix, or no suffix when it left it.
+ */
+function conflictReentry(
+  f: ReconcilePr,
+  d: Decision,
+  rec: LandingRecord,
+  opts: ReconcileOpts,
+  ts: string,
+): { record: LandingRecord; suffix?: string } {
+  if (d.kind !== 'task' || d.action !== 'land-prep' || d.state !== 'behind-or-dirty') {
+    return { record: rec };
+  }
+  if (!f.taskId || (f.manifestState === 'inflight' && f.executorDead !== true)) {
+    return { record: rec };
+  }
+  const headSha = f.headSha ?? '';
+  if (rec.reentry && rec.reentry.headSha === headSha) {
+    return { record: rec, suffix: reentryLine(rec.reentry, f.prNumber, f.taskId) };
+  }
+  let mark: ReentryMark;
+  if (f.manifestState === 'queue') {
+    mark = { headSha, at: ts, status: 'queued', note: 'a manifest was already queued' };
+  } else {
+    const r = opts.execute({
+      pr: f.prNumber,
+      taskId: f.taskId,
+      kind: d.kind,
+      action: QUEUE_REENTRY_ACTION,
+      state: d.state,
+      ...(f.headSha === undefined ? {} : { headSha: f.headSha }),
+      boardDir: opts.boardDir,
+    });
+    mark =
+      r.ran && !r.failed
+        ? { headSha, at: ts, status: 'queued' }
+        : { headSha, at: ts, status: 'failed', ...(r.note ? { note: r.note } : {}) };
+  }
+  const record: LandingRecord = { ...rec, reentry: mark };
+  writeLanding(opts.boardDir, record);
+  return { record, suffix: reentryLine(mark, f.prNumber, f.taskId) };
+}
+
 /** Reconcile a set of PR facts: update the records and run the actions. Idempotent. */
 export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): ReconcileReport {
   const now = opts.now ?? clockNow;
@@ -1222,13 +1299,14 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
       // AISDLC-1125: a failed action is retried once on an unchanged head; a second failure routes
       // to the planner once and the head is terminal (a changed head writes a fresh record).
       const failures = existing.failedAttempts ?? 1;
-      const routeFailed = (n: number): void => {
-        if (routeOnce(f.prNumber, f.headSha, `${d.action} failed x${n}`)) {
+      const routeFailed = (n: number, suffix?: string): void => {
+        const tail = suffix ? `; ${suffix}` : '';
+        if (routeOnce(f.prNumber, f.headSha, `${d.action} failed x${n}${tail}`)) {
           report.acted.push({
             pr: f.prNumber,
             action: 'route-to-planner',
             ran: false,
-            note: `${d.action}@${f.headSha ?? ''} failed x${n}, no more retries`,
+            note: `${d.action}@${f.headSha ?? ''} failed x${n}, no more retries${tail}`,
           });
         }
       };
@@ -1239,8 +1317,9 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         Number.isFinite(lastAt) &&
         now().getTime() - lastAt >= AGING_WINDOW_MS;
       if (failures >= 2 || agedOut) {
-        routeFailed(Math.max(failures, 2));
-        report.records.push(existing);
+        const q = conflictReentry(f, d, existing, opts, ts);
+        routeFailed(Math.max(failures, 2), q.suffix);
+        report.records.push(q.record);
         continue;
       }
       const retry = opts.execute({
@@ -1254,18 +1333,22 @@ export function reconcile(facts: readonly ReconcilePr[], opts: ReconcileOpts): R
         boardDir: opts.boardDir,
       });
       const { actionFailed: _drop, failedAttempts: _n, ...rest } = existing;
-      const updated: LandingRecord = retry.failed
+      let updated: LandingRecord = retry.failed
         ? { ...rest, actionFailed: true, failedAttempts: failures + 1, lastActionAt: ts }
         : rest;
       writeLanding(opts.boardDir, updated);
-      report.records.push(updated);
       report.acted.push({
         pr: f.prNumber,
         action: d.action,
         ran: retry.ran,
         ...(retry.note ? { note: retry.note } : {}),
       });
-      if (retry.failed) routeFailed(failures + 1);
+      if (retry.failed) {
+        const q = conflictReentry(f, d, updated, opts, ts);
+        updated = q.record;
+        routeFailed(failures + 1, q.suffix);
+      }
+      report.records.push(updated);
       continue;
     }
     if (unchanged && d.action === 'wait-and-rerun') {
