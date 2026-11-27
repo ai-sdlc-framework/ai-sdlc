@@ -12,7 +12,9 @@ import {
   missingConfigEntries,
   newestConfigVersion,
   readConfigVersion,
+  AGENT_MERGE_YES_OPERATIONAL,
   AGENT_ROLE_MERGE_DEFAULTS,
+  agentRoleMergeFromAnswers,
   renderAgentRole,
   renderAgentRoleGovernance,
   scaffoldConfig,
@@ -250,5 +252,28 @@ describe('knowledge store scaffold (AISDLC-1408)', () => {
     const ids = missingConfigEntries(dir).map((m) => m.id);
     expect(ids).not.toContain('context');
     expect(ids).not.toContain('knowledge-readme');
+  });
+});
+
+describe('agent-role merge settings from scaffold answers (AISDLC-1384)', () => {
+  const role = REQUIRED_CONFIG_MANIFEST.find((e) => e.id === 'agent-role')!;
+
+  it('renders onGreenClean with the merge author and operational list', () => {
+    const text = role.render({
+      allowMerge: 'onGreenClean',
+      mergeAuthors: 'octo',
+      operational: AGENT_MERGE_YES_OPERATIONAL.join(','),
+    });
+    const p = parseOperationalPolicy(text);
+    expect(p.allowMerge).toBe('onGreenClean');
+    expect(p.mergeAuthors).toEqual(['octo']);
+    expect([...p.operational]).toEqual(['land-eligible-prs']);
+  });
+
+  it('never renders onGreenClean with an empty author list', () => {
+    expect(agentRoleMergeFromAnswers({ allowMerge: 'onGreenClean', mergeAuthors: ' , ' })).toBe(
+      AGENT_ROLE_MERGE_DEFAULTS,
+    );
+    expect(agentRoleMergeFromAnswers({})).toBe(AGENT_ROLE_MERGE_DEFAULTS);
   });
 });

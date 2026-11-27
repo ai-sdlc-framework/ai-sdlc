@@ -32,14 +32,18 @@
  * re-implementing the same detection logic.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { Command } from 'commander';
 import { formatOutput } from '../formatters/index.js';
 import {
   CLIENT_SIDE_ONLY_MESSAGE,
+  PR_READY_CONTEXT,
+  allowMergeFromAgentRole,
   fetchBranchProtectionStatus,
+  reviewControlSatisfied,
+  type AllowMerge,
 } from './branch-protection-shared.js';
 import { cleanGitEnv } from '../../runtime/git-env.js';
 import {
@@ -76,6 +80,8 @@ export interface BranchProtectionCheck {
   checked: boolean;
   /** `required_pull_request_reviews.required_approving_review_count >= 1`. */
   requiresApprovingReview: boolean;
+  /** The live `required_approving_review_count` (0 when absent); set when checked. */
+  approvingReviewCount?: number;
   /** `required_status_checks.contexts` includes `ai-sdlc/pr-ready`. */
   requiresPrReady: boolean;
   /**
@@ -101,6 +107,14 @@ export interface AttestationDoctorResult {
   artifactsPresent: boolean;
   branchProtection: BranchProtectionCheck;
   enforcementConfigured: boolean;
+  /** Resolved `allowMerge` from `.ai-sdlc/agent-role.yaml` (AISDLC-1384). */
+  allowMerge: AllowMerge;
+  /**
+   * The live review count is not an acceptable review control: 0 approving reviews
+   * without the `allowMerge: onGreenClean` + `ai-sdlc/pr-ready` pairing (DEC-0425).
+   * Present only when branch protection was read.
+   */
+  reviewPairingError?: string;
   /** Present whenever state !== 'fully-configured'; names the gap explicitly. */
   gap?: string;
   /** The command that closes the gap, when one exists. */
@@ -131,6 +145,8 @@ export interface DoctorAdapters {
     exitCode: number;
     stderr?: string;
   };
+  /** Read a file, null when absent. Production = `readFileSync`; optional for older stubs. */
+  readFile?: (path: string) => string | null;
 }
 
 /** Exit code reported when a command could not be run at all (see `runCommand`). */
@@ -139,6 +155,13 @@ export const SPAWN_FAILED_EXIT_CODE = 127;
 export function buildProductionDoctorAdapters(): DoctorAdapters {
   return {
     exists: existsSync,
+    readFile: (path) => {
+      try {
+        return readFileSync(path, 'utf-8');
+      } catch {
+        return null;
+      }
+    },
     runCommand: (cmd, args) => {
       // `execFileSync` (no shell): args pass through as a true argv
       // array, never word-split or shell-interpreted. Mirrors the
@@ -218,10 +241,15 @@ export function checkAttestationGovernance(
     artifacts.trustedReviewers || artifacts.attestationsDir || artifacts.verifyWorkflow;
 
   const branchProtection = checkBranchProtection(projectDir, adapters);
+  const roleText = adapters.readFile
+    ? adapters.readFile(join(projectDir, '.ai-sdlc', 'agent-role.yaml'))
+    : null;
+  const allowMerge = allowMergeFromAgentRole(roleText);
+  const count =
+    branchProtection.approvingReviewCount ?? (branchProtection.requiresApprovingReview ? 1 : 0);
+  const reviewOk = reviewControlSatisfied(count, allowMerge, branchProtection.requiresPrReady);
   const enforcementConfigured =
-    branchProtection.checked &&
-    branchProtection.requiresApprovingReview &&
-    branchProtection.requiresPrReady;
+    branchProtection.checked && reviewOk && branchProtection.requiresPrReady;
 
   let state: AttestationDoctorState;
   if (!artifactsPresent) {
@@ -238,7 +266,14 @@ export function checkAttestationGovernance(
     artifactsPresent,
     branchProtection,
     enforcementConfigured,
+    allowMerge,
   };
+  if (branchProtection.checked && !reviewOk) {
+    result.reviewPairingError =
+      `branch protection requires 0 approving reviews but allowMerge is ${allowMerge}` +
+      (allowMerge === 'onGreenClean' ? ` and ${PR_READY_CONTEXT} is not required` : '') +
+      `: 0 reviews is the review control only with allowMerge: onGreenClean and ${PR_READY_CONTEXT} required (DEC-0425)`;
+  }
 
   if (state === 'neither') {
     result.gap =
@@ -288,8 +323,9 @@ export function renderDoctorReport(result: AttestationDoctorResult): string[] {
   const bpBranch = result.branchProtection.branch ?? 'main';
   if (result.branchProtection.checked) {
     lines.push(
-      `  branch protection (${bpBranch}):    requires approving review = ${result.branchProtection.requiresApprovingReview}, requires ai-sdlc/pr-ready = ${result.branchProtection.requiresPrReady}`,
+      `  branch protection (${bpBranch}):    requires approving review = ${result.branchProtection.requiresApprovingReview}, requires ai-sdlc/pr-ready = ${result.branchProtection.requiresPrReady}, allowMerge = ${result.allowMerge}`,
     );
+    if (result.reviewPairingError) lines.push(`  ERROR ${result.reviewPairingError}`);
   } else if (result.branchProtection.apiUnavailable) {
     lines.push(`  branch protection (${bpBranch}):    unavailable (HTTP 403)`);
     lines.push(`  ERROR ${CLIENT_SIDE_ONLY_MESSAGE}`);

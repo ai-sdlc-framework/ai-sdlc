@@ -95,11 +95,68 @@ export const PR_READY_CONTEXT = 'ai-sdlc/pr-ready';
 /** Context the Codecov GitHub App posts after a coverage upload. */
 export const CODECOV_PATCH_CONTEXT = 'codecov/patch';
 
+/** The merge setting the scaffolded review count follows (DEC-0425). */
+export type AllowMerge = 'never' | 'onGreenClean';
+
 /**
- * Approving reviews branch protection requires (DEC-0014). One named value so the
- * setup summary and the protection body cannot drift. The operator owns the number.
+ * Approving reviews the scaffolded branch protection requires (DEC-0014, DEC-0425):
+ * 0 when agents may merge (`onGreenClean`), because the verdict gate `ai-sdlc/pr-ready`
+ * is then the review control; 1 otherwise. One function so the setup summary and the
+ * protection body cannot drift. A team may raise the number.
  */
-export const REQUIRED_APPROVING_REVIEW_COUNT = 1;
+export function requiredApprovingReviewCount(allowMerge: AllowMerge): number {
+  return allowMerge === 'onGreenClean' ? 0 : 1;
+}
+
+/** Why the scaffolded count is what it is, for the setup summary (AISDLC-1384). */
+export function reviewCountReason(allowMerge: AllowMerge): string {
+  return allowMerge === 'onGreenClean'
+    ? `0: the verdict gate ${PR_READY_CONTEXT} is the review control`
+    : '1: a human approval is required; you cannot approve your own pull requests';
+}
+
+/**
+ * The resolved `allowMerge` in agent-role.yaml text: `onGreenClean` only when stated
+ * (or implied by `preset: operator-trusted`, matching the dispatch resolver); anything
+ * else, including unreadable YAML, is `never`.
+ */
+export function allowMergeFromAgentRole(text: string | null): AllowMerge {
+  if (text === null) return 'never';
+  try {
+    const doc = parseYaml(text) as {
+      spec?: { governance?: { allowMerge?: unknown; preset?: unknown } };
+    } | null;
+    const gov = doc?.spec?.governance;
+    if (gov?.allowMerge === 'never' || gov?.allowMerge === 'onGreenClean') return gov.allowMerge;
+    return gov?.preset === 'operator-trusted' ? 'onGreenClean' : 'never';
+  } catch {
+    return 'never';
+  }
+}
+
+/** Read the resolved `allowMerge` from `<projectDir>/.ai-sdlc/agent-role.yaml`. Never throws. */
+export function readAllowMerge(projectDir: string): AllowMerge {
+  try {
+    return allowMergeFromAgentRole(
+      readFileSync(join(projectDir, '.ai-sdlc', 'agent-role.yaml'), 'utf-8'),
+    );
+  } catch {
+    return 'never';
+  }
+}
+
+/**
+ * Whether a live approving-review count is an acceptable review control (AISDLC-1384):
+ * 1 or more always is; 0 is only with `allowMerge: onGreenClean` and `ai-sdlc/pr-ready`
+ * required, the pairing DEC-0425 scaffolds.
+ */
+export function reviewControlSatisfied(
+  count: number,
+  allowMerge: AllowMerge,
+  requiresPrReady: boolean,
+): boolean {
+  return count >= 1 || (allowMerge === 'onGreenClean' && requiresPrReady);
+}
 
 /**
  * Build the recommended branch-protection ruleset for AI-SDLC adopters
@@ -111,7 +168,10 @@ export const REQUIRED_APPROVING_REVIEW_COUNT = 1;
  * The body conforms to the GitHub REST API
  * `PUT /repos/{owner}/{repo}/branches/{branch}/protection` schema.
  */
-export function buildBranchProtectionBody(contexts: readonly string[]) {
+export function buildBranchProtectionBody(
+  contexts: readonly string[],
+  reviewCount: number = requiredApprovingReviewCount('never'),
+) {
   return {
     required_status_checks: {
       strict: true,
@@ -121,7 +181,7 @@ export function buildBranchProtectionBody(contexts: readonly string[]) {
     required_pull_request_reviews: {
       dismiss_stale_reviews: true,
       require_code_owner_reviews: false,
-      required_approving_review_count: REQUIRED_APPROVING_REVIEW_COUNT,
+      required_approving_review_count: reviewCount,
     },
     restrictions: null,
     allow_force_pushes: false,
@@ -214,6 +274,8 @@ export interface BranchProtectionCheck {
   checked: boolean;
   /** `required_pull_request_reviews.required_approving_review_count >= 1`. */
   requiresApprovingReview: boolean;
+  /** `required_pull_request_reviews.required_approving_review_count` (0 when absent); set when checked. */
+  approvingReviewCount?: number;
   /** `required_status_checks.contexts` includes `ai-sdlc/pr-ready`. */
   requiresPrReady: boolean;
   /** `required_status_checks.contexts` includes `ai-sdlc/attestation` directly (AISDLC-388 misconfiguration). */
@@ -282,14 +344,16 @@ export function fetchBranchProtectionStatus(
       required_status_checks?: { contexts?: string[] };
     };
     const contexts = body.required_status_checks?.contexts ?? [];
-    const requiresApprovingReview =
-      (body.required_pull_request_reviews?.required_approving_review_count ?? 0) >= 1;
+    const approvingReviewCount =
+      body.required_pull_request_reviews?.required_approving_review_count ?? 0;
+    const requiresApprovingReview = approvingReviewCount >= 1;
     const requiresPrReady = contexts.includes('ai-sdlc/pr-ready');
     const requiresAttestationDirectly = contexts.includes('ai-sdlc/attestation');
     const requiresBacklogDrift = contexts.includes('Backlog Drift');
     return {
       checked: true,
       requiresApprovingReview,
+      approvingReviewCount,
       requiresPrReady,
       requiresAttestationDirectly,
       requiresBacklogDrift,

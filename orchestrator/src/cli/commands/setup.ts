@@ -11,12 +11,21 @@
  * signing keyring, so there is nothing to generate.
  */
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { basename, join } from 'node:path';
 import { Command } from 'commander';
 import { detectAgentsDetailed, installMcpServer } from './mcp-setup.js';
-import { fetchBranchProtectionStatus } from './branch-protection-shared.js';
+import {
+  allowMergeFromAgentRole,
+  fetchBranchProtectionStatus,
+} from './branch-protection-shared.js';
+import {
+  agentMergeSummaryLines,
+  parseAgentMergeFlag,
+  type AgentMergeAnswer,
+} from './init-agent-merge.js';
+import { parse as parseYaml } from 'yaml';
 import { writeRuntimeGitignore } from '../../runtime-gitignore.js';
 
 export type SetupStatus = 'done' | 'skipped' | 'not-possible';
@@ -42,8 +51,11 @@ export interface SetupStep {
 }
 
 export interface SetupAdapters {
-  /** Run `ai-sdlc init --yes --skip-mcp` in `projectDir`. */
-  runInit: (projectDir: string) => { exitCode: number; output: string };
+  /** Run `ai-sdlc init --yes --skip-mcp [--agent-merge <answer>]` in `projectDir`. */
+  runInit: (
+    projectDir: string,
+    agentMerge?: AgentMergeAnswer,
+  ) => { exitCode: number; output: string };
   /** Run `ai-sdlc init --add <feature> --yes --skip-mcp` in `projectDir`. */
   runInitAdd: (projectDir: string, feature: string) => { exitCode: number; output: string };
   /** Run `ai-sdlc doctor` in `projectDir`. */
@@ -72,6 +84,8 @@ export interface OperatorStep {
 
 export interface SetupResult {
   steps: SetupStep[];
+  /** The merge setting and review count in agent-role.yaml, each with its reason (AISDLC-1384). */
+  mergeSummary: string[];
   operatorSteps: OperatorStep[];
   /** True when no step wrote anything. */
   unchanged: boolean;
@@ -334,7 +348,30 @@ function checkOperatorSteps(adapters: SetupAdapters): OperatorStep[] {
   return out;
 }
 
-export function runSetup(projectDir: string, adapters: SetupAdapters): SetupResult {
+/** Merge setting and review count as agent-role.yaml states them now. */
+function mergeSummary(projectDir: string): string[] {
+  let text: string;
+  try {
+    text = readFileSync(join(projectDir, '.ai-sdlc', 'agent-role.yaml'), 'utf-8');
+  } catch {
+    return ['.ai-sdlc/agent-role.yaml not found, so no merge setting is stated'];
+  }
+  let authors: string[] = [];
+  try {
+    const doc = parseYaml(text) as { spec?: { governance?: { mergeAuthors?: unknown } } } | null;
+    const a = doc?.spec?.governance?.mergeAuthors;
+    if (Array.isArray(a)) authors = a.filter((x): x is string => typeof x === 'string');
+  } catch {
+    // unreadable YAML resolves to never below
+  }
+  return agentMergeSummaryLines(allowMergeFromAgentRole(text), authors);
+}
+
+export function runSetup(
+  projectDir: string,
+  adapters: SetupAdapters,
+  agentMerge?: AgentMergeAnswer,
+): SetupResult {
   const steps: SetupStep[] = [];
 
   steps.push({
@@ -348,12 +385,15 @@ export function runSetup(projectDir: string, adapters: SetupAdapters): SetupResu
     steps.push({
       id: 'init',
       status: 'skipped',
-      reason: '.ai-sdlc/pipeline.yaml already present',
+      reason:
+        agentMerge === undefined
+          ? '.ai-sdlc/pipeline.yaml already present'
+          : `.ai-sdlc/pipeline.yaml already present; --agent-merge ${agentMerge} not applied, the existing merge settings are left as is (edit spec.governance in .ai-sdlc/agent-role.yaml to change them)`,
       changed: false,
     });
     steps.push(...repairSteps(projectDir, adapters));
   } else {
-    const r = adapters.runInit(projectDir);
+    const r = adapters.runInit(projectDir, agentMerge);
     steps.push(
       r.exitCode === 0
         ? {
@@ -432,6 +472,7 @@ export function runSetup(projectDir: string, adapters: SetupAdapters): SetupResu
 
   return {
     steps,
+    mergeSummary: mergeSummary(projectDir),
     operatorSteps: checkOperatorSteps(adapters),
     unchanged: steps.every((s) => !s.changed),
     ok: steps.every((s) => s.status !== 'not-possible'),
@@ -445,6 +486,9 @@ export function renderSetupReport(result: SetupResult): string[] {
     for (const d of s.details ?? []) lines.push(`      ${d}`);
     if (s.nextAction) lines.push(`      next: ${s.nextAction}`);
   }
+  lines.push('');
+  lines.push('Merge settings (.ai-sdlc/agent-role.yaml):');
+  for (const m of result.mergeSummary) lines.push(`  ${m}`);
   lines.push('');
   lines.push('Steps only you can do (setup reads these and never changes them):');
   for (const o of result.operatorSteps) {
@@ -496,7 +540,11 @@ function runExternal(
 }
 
 export const productionSetupAdapters: SetupAdapters = {
-  runInit: (dir) => spawnSelf(['init', '--yes', '--skip-mcp'], dir),
+  runInit: (dir, agentMerge) =>
+    spawnSelf(
+      ['init', '--yes', '--skip-mcp', ...(agentMerge ? ['--agent-merge', agentMerge] : [])],
+      dir,
+    ),
   runInitAdd: (dir, feature) => spawnSelf(['init', '--add', feature, '--yes', '--skip-mcp'], dir),
   runCommand: runExternal,
   runDoctor: (dir) => spawnSelf(['doctor'], dir),
@@ -506,8 +554,18 @@ export const setupCommand = new Command('setup')
   .description(
     'First-run setup: init, MCP advisor registration and doctor in one idempotent command',
   )
-  .action(() => {
-    const result = runSetup(process.cwd(), productionSetupAdapters);
+  .option(
+    '--agent-merge <answer>',
+    'Let agents merge pull requests that pass every gate: yes | no (default: no, passed to init)',
+  )
+  .action((opts: { agentMerge?: string }) => {
+    const parsed = parseAgentMergeFlag(opts.agentMerge);
+    if (!parsed.ok) {
+      console.error(`Error: ${parsed.error}`);
+      process.exitCode = 1;
+      return;
+    }
+    const result = runSetup(process.cwd(), productionSetupAdapters, parsed.value);
     for (const line of renderSetupReport(result)) console.log(line);
     if (!result.ok) process.exitCode = 1;
   });
