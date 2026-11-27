@@ -1824,9 +1824,9 @@ describe('AISDLC-1336: scaffolded workflows and first-merge rule', () => {
     const guard = steps.find((s) => s.id === 'guard')!;
     expect(guard.run).toMatch(/--json [^\n]*\bauthor\b/);
     expect(guard.run).toContain('contents/.ai-sdlc/agent-role.yaml?ref=$BASE_REF');
-    expect(guard.run).toContain('.governance.mergeAuthors');
-    expect(guard.run).toContain('is not in governance.mergeAuthors');
-    expect(guard.run).toContain('mergeAuthors is missing or empty');
+    expect(guard.run).toContain("'.spec.governance.mergeAuthors // []'");
+    expect(guard.run).toContain('is not in spec.governance.mergeAuthors');
+    expect(guard.run).toContain('spec.governance.mergeAuthors is missing or empty');
     const arm = steps.find((s) => String(s.name).startsWith('Refresh auto-merge'))!;
     expect(arm.if).toContain("steps.guard.outputs.skip == 'false'");
     expect(steps.some((s) => String(s.uses ?? '').startsWith('actions/checkout'))).toBe(false);

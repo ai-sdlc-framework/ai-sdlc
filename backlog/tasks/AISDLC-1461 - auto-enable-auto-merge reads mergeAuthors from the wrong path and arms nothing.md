@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1461
 title: auto-enable-auto-merge reads mergeAuthors from the wrong path and arms nothing
-status: To Do
+status: In Progress
 priority: high
 labels:
   - ci

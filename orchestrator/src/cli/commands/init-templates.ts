@@ -605,7 +605,7 @@ export const AUTO_ENABLE_AUTO_MERGE_WORKFLOW = `name: Auto-enable auto-merge on 
 # the \`AI_SDLC_PAT\` repository secret (or swap for \`github.token\` if your
 # repo grants it write access).
 #
-# Only PRs whose author is in \`governance.mergeAuthors\` of
+# Only PRs whose author is in \`spec.governance.mergeAuthors\` of
 # \`.ai-sdlc/agent-role.yaml\` on the PR's base branch are armed (AISDLC-1411).
 # The list is read through the API, never from the PR head. A PR from anyone
 # else waits for a person to review and merge it. When the file cannot be read
@@ -689,13 +689,13 @@ jobs:
             echo "[auto-enable] PR #$PR is a release-please PR — skipping. Arm manually when ready."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
-            # AISDLC-1411: arm only PRs whose author is in governance.mergeAuthors,
+            # AISDLC-1411: arm only PRs whose author is in spec.governance.mergeAuthors,
             # read from the BASE branch through the API (the PR head cannot add
             # its own author). Any read or parse failure fails closed.
             MERGE_AUTHORS=""
             if [ -n "$BASE_REF" ] && ROLE_YAML=$(gh api -H "Accept: application/vnd.github.raw" \\
                 "/repos/$REPO/contents/.ai-sdlc/agent-role.yaml?ref=$BASE_REF"); then
-              MERGE_AUTHORS=$(printf '%s\\n' "$ROLE_YAML" | yq -o=json '.governance.mergeAuthors // []' \\
+              MERGE_AUTHORS=$(printf '%s\\n' "$ROLE_YAML" | yq -o=json '.spec.governance.mergeAuthors // []' \\
                 | jq -r 'if type == "array" then .[] | strings else empty end') || MERGE_AUTHORS=""
             else
               echo "[auto-enable] PR #$PR: cannot read .ai-sdlc/agent-role.yaml on base branch '$BASE_REF' — skipping (no merge-author list, nothing is armed)."
@@ -704,13 +704,13 @@ jobs:
             fi
             AUTHOR_LC=$(printf '%s' "$AUTHOR" | tr '[:upper:]' '[:lower:]')
             if [ -z "$MERGE_AUTHORS" ]; then
-              echo "[auto-enable] PR #$PR: governance.mergeAuthors is missing or empty on base branch '$BASE_REF' — skipping (nothing is armed)."
+              echo "[auto-enable] PR #$PR: spec.governance.mergeAuthors is missing or empty on base branch '$BASE_REF' — skipping (nothing is armed)."
               echo "skip=true" >> "$GITHUB_OUTPUT"
             elif [ -z "$AUTHOR_LC" ] || ! printf '%s\\n' "$MERGE_AUTHORS" | tr '[:upper:]' '[:lower:]' | grep -Fxq -- "$AUTHOR_LC"; then
-              echo "[auto-enable] PR #$PR: author '\${AUTHOR:-<unknown>}' is not in governance.mergeAuthors — skipping. A person reviews and merges this PR."
+              echo "[auto-enable] PR #$PR: author '\${AUTHOR:-<unknown>}' is not in spec.governance.mergeAuthors — skipping. A person reviews and merges this PR."
               echo "skip=true" >> "$GITHUB_OUTPUT"
             else
-              echo "[auto-enable] PR #$PR: author '$AUTHOR' is in governance.mergeAuthors — arming."
+              echo "[auto-enable] PR #$PR: author '$AUTHOR' is in spec.governance.mergeAuthors — arming."
               echo "skip=false" >> "$GITHUB_OUTPUT"
             fi
           fi
