@@ -130,6 +130,9 @@ async function takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log
   let waitLogged = false;
   try {
     const slot = await mod.acquireVerifySlot(boardDir, {
+      now,
+      // the module's long-wait line names the holder; it must reach the pushing terminal
+      log: (line) => console.error(line),
       ...slotDeps,
       sleep: async (ms) => {
         if (now() - started >= waitMs) throw new Error('slot wait timed out');

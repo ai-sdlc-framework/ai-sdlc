@@ -316,6 +316,34 @@ describe('main verify slot (AISDLC-1186)', () => {
     assert.equal(logs.filter((l) => /waiting for a verify slot/.test(l)).length, 1);
     assert.ok(!logs.some((l) => /unslotted/.test(l)));
   });
+  it('sends the slot module long-wait line to stderr with the hook clock (AISDLC-1383)', async () => {
+    const errs = [];
+    const orig = console.error;
+    console.error = (m) => errs.push(m);
+    let seenNow;
+    try {
+      const code = await main({
+        boardDir: '/b',
+        reuseFacts: () => null,
+        loadSlots: async () => ({
+          acquireVerifySlot: async (_d, deps) => {
+            seenNow = deps.now;
+            deps.log('[verify-slots] waited 60s+ for /b/verify-slots/exclusive (pid 7)');
+            return { workers: 2, release() {} };
+          },
+        }),
+        now: () => 42,
+        run: () => ok,
+        changed,
+        log: () => {},
+      });
+      assert.equal(code, 0);
+    } finally {
+      console.error = orig;
+    }
+    assert.equal(seenNow(), 42);
+    assert.deepEqual(errs, ['[verify-slots] waited 60s+ for /b/verify-slots/exclusive (pid 7)']);
+  });
   it('refuses (does not go unslotted) when a finite wait elapses', async () => {
     let t = 0;
     let ran = 0;
