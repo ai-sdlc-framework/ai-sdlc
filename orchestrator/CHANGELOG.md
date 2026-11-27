@@ -5,6 +5,21 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.46.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.45.0...orchestrator-v0.46.0) (2026-11-27)
+
+
+### Features
+
+* **orchestrator:** ask once whether agents may merge (AISDLC-1384) ([#3096](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3096)) ([ef248e0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ef248e00b2b50a59e056afdc2b8b1a58398f2503))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/pipeline-cli bumped to 0.46.0
+    * @ai-sdlc/reference bumped to 0.46.0
+
 ## [0.45.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.44.0...orchestrator-v0.45.0) (2026-11-26)
 
 

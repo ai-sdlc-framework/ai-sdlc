@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.46.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.45.0...pipeline-cli-v0.46.0) (2026-11-27)
+
+
+### Features
+
+* **orchestrator:** ask once whether agents may merge (AISDLC-1384) ([#3096](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3096)) ([ef248e0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ef248e00b2b50a59e056afdc2b8b1a58398f2503))
+* **pipeline-cli:** record GitHub quota and rate-limit errors per token (AISDLC-1439) ([#3075](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3075)) ([18d2683](https://github.com/ai-sdlc-framework/ai-sdlc/commit/18d2683357f147a1456e08ef7d48be4d49ac9845))
+* **plugin:** escalate dependency limits to the operator (AISDLC-1438) ([#3074](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3074)) ([62b7906](https://github.com/ai-sdlc-framework/ai-sdlc/commit/62b7906b3d2ec0256e48d522cd3a26d1e81f401e))
+
+
+### Bug Fixes
+
+* **pipeline-cli:** ask the store whether memory was ingested before a re-ingest (AISDLC-1426) ([#3063](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3063)) ([90b934d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/90b934db165c8eb2db63bc943c0f4201240b9dcc))
+* **pipeline-cli:** declare Node &gt;=22.12.0 for ES-module knowledge backends (AISDLC-1427) ([#3064](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3064)) ([9c0284d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9c0284d9924656e3c718731609477a017a22c591))
+* **pipeline-cli:** keep protected values out of the corrected log event (AISDLC-1424) ([#3059](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3059)) ([df959d1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/df959d1f94c08c23171e26c331bf3d60866d39f7))
+* **pipeline-cli:** keep the completed task file prettier-clean (AISDLC-1430) ([#3068](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3068)) ([d6d3631](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d6d3631f1a0134c1a6ddcd8a62ce9b7c45aad9eb))
+* **pipeline-cli:** never treat a filing commit or PR as the task landing (AISDLC-1428) ([#3065](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3065)) ([8447a8c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8447a8c92e20fc5c7425b3bec209c07e2b880483))
+* **pipeline-cli:** reclaim pid-less verify slots and name long-wait holders (AISDLC-1383) ([#3092](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3092)) ([89296d7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/89296d74970db4f87a11a7e50f9e7b1e83e47091))
+* **pipeline-cli:** stop a finished dynamic executor whatever the hold (AISDLC-1417) ([#3062](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3062)) ([0f798fa](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0f798fa3548995f75326587ad961a9d46cbd74c9))
+* **pipeline-cli:** write data-room captures under the memory trunk (AISDLC-1425) ([#3060](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3060)) ([4481ae0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4481ae0d43e6db03868fbacd3843d260e0f25f0c))
+
+
+### Performance Improvements
+
+* **pipeline-cli:** cut dispatch gh call volume with a shared read cache (AISDLC-1440) ([#3091](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3091)) ([abba52c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/abba52cc2f7d64284c70eacce4661c6be877a0e6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.46.0
+
 ## [0.45.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.44.0...pipeline-cli-v0.45.0) (2026-11-26)
 
 
