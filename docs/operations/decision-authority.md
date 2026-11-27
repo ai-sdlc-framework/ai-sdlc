@@ -51,6 +51,25 @@ Checks 2 and 3 deny only when their judgment is in `enforce`; both are in `shado
 
 **Kill switch:** `AI_SDLC_QUESTION_GATE=off` allows every question and logs nothing.
 
+### The evidence ledger (AISDLC-1451, DEC-0442)
+
+Unchecked facts and unverified dependencies were the two largest causes of reversed decisions (about 10 and 11 of about 37 in the AISDLC-1404 review). So every fact, assumption and dependency path a decision rests on is checked before the question is asked or answered, by an agent that is not its author:
+
+1. The author drafts the full question (problem, options, recommendation, counter-argument, trace).
+2. A research subagent on Sonnet gets the exact draft, pulls out every factual claim and dependency path, and checks each one at its source.
+3. It writes one ledger (schema `spec/schemas/decision-evidence-ledger.v1.schema.json`): `schemaVersion: 1`, `ref` (`DEC-NNNN`, `rfc:RFC-NNNN#OQ-N` or a slug), `draftSha256`, `researchedBy`, `researchedAt` and `entries[]`. Each entry has an `id`, a `claim`, `status: "checked"` and a `kind`:
+   - `fact` with a `source`: `{file, line, quote}`, `{command, output, ranAt}`, `{url, readAt, quote}` or `{record}` (a DEC, RFC or task id);
+   - `dependency` with `what` and either `exists: {path}` or `prerequisite: <task id>`;
+   - `assumption`, only for what no source can confirm (a forecast, an operator preference), with `restsOn` (passing fact ids) and `falsifiedBy`.
+4. `cli-decisions evidence check <ledger> [--draft <file>]` validates it and exits non-zero, listing each failing entry, on: a missing source, any status other than `checked` (`unchecked` and `unverifiable` included), a file quote not found within 5 lines of its `line`, a record, task or path that does not exist on the main checkout, an assumption with no passing `restsOn`, an empty ledger, or a `draftSha256` that does not match the draft. It re-verifies quotes, ids and paths itself, so a check cannot simply be claimed; command output and URL quotes are recorded, not re-run.
+5. Only then is the question asked (or, in autonomous mode, the decision recorded).
+
+`cli-decisions evidence hash <draft-file>` prints the `draftSha256`. Its normalization (CRLF to LF, `Evidence: <path>` lines dropped, trailing whitespace and outer blank lines trimmed) is the one `normalizeDraftText` in `pipeline-cli/src/decisions/evidence-ledger.ts`, which the AskUserQuestion gate (AISDLC-1452) uses too; any other edit to the draft invalidates the ledger.
+
+While a question is being prepared the draft and ledger live under `.ai-sdlc/artifacts/_evidence/<ref>/` (git-ignored). **When the decision is filed, the passing ledger is stored as `.ai-sdlc/decisions/evidence/DEC-NNNN.json`** in the same PR, and an RFC resolution cites it with an `Evidence:` line. The gates that require it (question, `cli-decisions add`/`answer`, RFC resolution markers) are AISDLC-1452. The rubric skill's step 3 has the subagent prompt and an example ledger.
+
+`ai-sdlc doctor` warns (`decision-rubric-shadow`) when a personal copy of the rubric in `~/.claude/skills/` would shadow the plugin skill and so skip this step.
+
 ### Examples
 
 | Decision                                                                                                                     | Class                                 | Why                                                                                                 |

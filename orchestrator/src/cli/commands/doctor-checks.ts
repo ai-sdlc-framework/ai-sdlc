@@ -77,6 +77,7 @@ import {
   interpretCheckIgnoreExit,
   missingRuntimeGitignorePaths,
 } from '../../runtime-gitignore.js';
+import { checkDecisionRubricShadow } from './doctor-check-skill-shadow.js';
 import { diagnoseLegacyWorkflows, migrateLegacyWorkflows } from './init-legacy-workflows.js';
 import {
   AI_SDLC_GATE_WORKFLOW,
@@ -3856,6 +3857,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     id: 'idle-sessions',
     description: 'A session polling empty (noop wakeups) for over 30 minutes (AISDLC-765).',
     run: checkIdleSessions,
+  },
+  {
+    id: 'decision-rubric-shadow',
+    description:
+      'A personal copy of the decision-rubric skill in ~/.claude/skills/ that shadows the plugin skill (AISDLC-1451).',
+    run: checkDecisionRubricShadow,
   },
   {
     id: 'orphaned-vitest-workers',

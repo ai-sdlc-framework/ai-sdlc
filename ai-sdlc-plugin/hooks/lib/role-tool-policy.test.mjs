@@ -277,6 +277,8 @@ describe('decision mutations in a command', () => {
     coverage: 'node cli-decisions.mjs coverage',
     research: 'node cli-decisions.mjs research DEC-0001',
     summary: 'node cli-decisions.mjs summary DEC-0001',
+    'evidence check': 'node cli-decisions.mjs evidence check l.json --draft d.md',
+    'evidence hash': 'node cli-decisions.mjs evidence hash d.md',
     'exemplars list': 'node cli-decisions.mjs exemplars list',
     'work-dir before a read': 'node cli-decisions.mjs --work-dir . list',
     'no subcommand': 'node cli-decisions.mjs --help',
@@ -406,6 +408,7 @@ describe('decision mutations in a command', () => {
       'coverage',
       'research',
       'summary',
+      'evidence',
     ]) {
       assert.ok(text.includes(`\`${sub}\``), sub);
     }

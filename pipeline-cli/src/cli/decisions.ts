@@ -5,6 +5,7 @@
  *   list                 — enumerate decisions projected from the event log
  *   show <id>            — render one decision with full event history
  *   add                  — author a new Decision (interactive or via flags)
+ *   evidence check|hash  — validate a decision evidence ledger / hash its draft (AISDLC-1451)
  *
  * Storage: `.ai-sdlc/_decisions/events/` (one file per event; legacy events.jsonl still read).
  *
@@ -114,6 +115,11 @@ import {
   type GovernanceChange,
 } from '../decisions/governance-fallback.js';
 import { migrateLegacyEventLog, resolveEventsDir } from '../decisions/event-log.js';
+import {
+  checkEvidenceLedger,
+  draftSha256,
+  formatEvidenceFailures,
+} from '../decisions/evidence-ledger.js';
 import {
   assertDecisionIdFree,
   nextDecisionIdDurable,
@@ -2969,6 +2975,76 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             },
           )
           .demandCommand(1, 'An exemplars subcommand is required.')
+          .strict(),
+    )
+    .command(
+      'evidence',
+      'AISDLC-1451 (DEC-0442) — the evidence ledger a research subagent writes before a decision question is asked: check it, or hash the draft it covers.',
+      (sub) =>
+        sub
+          .command(
+            'check <ledger>',
+            'Validate an evidence ledger and re-verify its file quotes, record and task ids and paths. Exits non-zero on any failure, listing each failing entry.',
+            (y) =>
+              y
+                .positional('ledger', { type: 'string', demandOption: true })
+                .option('draft', {
+                  type: 'string',
+                  describe:
+                    'The draft question the ledger covers; its hash must equal draftSha256.',
+                })
+                .option('format', {
+                  type: 'string',
+                  choices: ['json', 'text'] as const,
+                  default: 'text' as const,
+                }),
+            (argv) => {
+              const workDir = String(argv['work-dir']);
+              const ledgerPath = String(argv.ledger);
+              let ledger: unknown;
+              try {
+                ledger = JSON.parse(readFileSync(ledgerPath, 'utf8'));
+              } catch (e) {
+                return fail(`cannot read ledger ${ledgerPath}: ${(e as Error).message}`);
+              }
+              let draftText: string | undefined;
+              if (typeof argv.draft === 'string') {
+                try {
+                  draftText = readFileSync(argv.draft, 'utf8');
+                } catch (e) {
+                  return fail(`cannot read draft ${argv.draft}: ${(e as Error).message}`);
+                }
+              }
+              const result = checkEvidenceLedger(ledger, {
+                repoRoot: workDir,
+                ...(draftText !== undefined ? { draftText } : {}),
+              });
+              if (String(argv.format) === 'json') emit({ ledger: ledgerPath, ...result });
+              else if (result.ok) emitText(`evidence ledger passes: ${ledgerPath}`);
+              if (!result.ok) {
+                process.stderr.write(
+                  `[cli-decisions] evidence ledger fails: ${ledgerPath}\n${formatEvidenceFailures(result.failures)}\n`,
+                );
+                process.exit(1);
+              }
+            },
+          )
+          .command(
+            'hash <draft>',
+            'Print the draftSha256 of a draft question (the same normalization the AskUserQuestion gate uses; Evidence lines are left out).',
+            (y) => y.positional('draft', { type: 'string', demandOption: true }),
+            (argv) => {
+              const path = String(argv.draft);
+              let text: string;
+              try {
+                text = readFileSync(path, 'utf8');
+              } catch (e) {
+                return fail(`cannot read draft ${path}: ${(e as Error).message}`);
+              }
+              emitText(draftSha256(text));
+            },
+          )
+          .demandCommand(1, 'An evidence subcommand is required (check | hash).')
           .strict(),
     )
     .demandCommand(1, 'A subcommand is required. Run with --help for the list.')

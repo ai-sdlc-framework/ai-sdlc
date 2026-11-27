@@ -2677,8 +2677,8 @@ refused:
 - `SendMessage` to anyone but the dispatch session named in the roster;
 - any `cli-decisions` subcommand outside an allowlist: `escalate`, `add` (never with
   `--autonomous-fallback`, `--timebox` or `--timebox-hours`) and the read-only
-  `list`, `show`, `log-path`, `graph`, `coverage`, `research`, `summary` and
-  `exemplars list`; `answer`, `resolve`, `override`, `auto-expire`, `extend`,
+  `list`, `show`, `log-path`, `graph`, `coverage`, `research`, `summary`,
+  `evidence` (AISDLC-1451) and `exemplars list`; `answer`, `resolve`, `override`, `auto-expire`, `extend`,
   `fatigue`, `score-a`, `score-c` and any unknown subcommand are refused;
 - a `task_create` call that is not a sub-task of a task the session has claimed. The
   plugin's `task_create` must carry a sub-task id (`<task-id>.<n>`); any other

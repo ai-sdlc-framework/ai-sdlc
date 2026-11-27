@@ -29,7 +29,7 @@ The end-to-end shape is **eight phases**, in order. Skipping any of them ships a
 
 ## Phase 3 — Per-OQ walkthrough (decision-rubric)
 
-For each OQ, apply the [[decision-rubric]] skill's six steps: question the requirement → problem statement → evidence tagged checked or unverifiable → Verify (one batched research pass over every unchecked claim) → 3-4 options plus "what would reject all of these?" → recommendation, counter-argument and trace → domain review. Present each one decision first, with the one thing that could not be verified, then the AskUserQuestion. **One OQ per AskUserQuestion call** — never batch.
+For each OQ, apply the [[decision-rubric]] skill's six steps: question the requirement → problem statement → evidence (decision-rubric step 3: a separate Sonnet research subagent gets the exact draft of that OQ's question, checks every fact and dependency at its source and writes the ledger; `cli-decisions evidence check` must pass it before the question is asked) → 3-4 options plus "what would reject all of these?" → recommendation, counter-argument and trace → domain review. One ledger per OQ, `ref: rfc:RFC-NNNN#OQ-N`. Present each one decision first, with the weakest assumption and what would falsify it, then the AskUserQuestion. **One OQ per AskUserQuestion call** — never batch.
 
 The trace step matters most in a walkthrough: list every record, data source, emitter, schema field and config key the resolution reads or writes, marked exists (with its path) or undefined. Every undefined item is specified in the resolution or becomes a Phase 6 task that must land first. RFC-0018 v0.4 shipped resolutions that read audit records, a release definition and a declaration date nobody had defined, and needed the v0.4.1 amendment to supply them.
 
@@ -50,13 +50,13 @@ The Resolution block per OQ has a load-bearing shape:
 ```markdown
 **Resolution (YYYY-MM-DD, full rubric):** **<recommendation summary>.**
 Requirement: <who set it and why it still holds, or why deletion was
-rejected>. Evidence: <key claims, each marked checked (source + date, or
-the grep/query) or unverifiable (what was tried)>. **Substantive gaps in v0.X surfaced by
+rejected>. Evidence: <key claims and their sources, from the OQ's passing
+ledger (decision-rubric step 3)>. **Substantive gaps in v0.X surfaced by
 re-walkthrough:** <list>. **Refinement over v0.X:** <concrete spec
 change>. **Counter-argument:** "<steel-manned objection>" Rebuttal:
 <response>. **Selected over <other options> because <reason>.**
 **Depends on:** <each record/emitter/field: exists at <path> | undefined,
-defined by <task or this section>>. **Check:** <the one thing to check>.
+defined by <task or this section>>. **Check:** <the weakest assumption and what would falsify it>.
 **Provisional:** <domain owner who must review, if any>.
 ```
 
