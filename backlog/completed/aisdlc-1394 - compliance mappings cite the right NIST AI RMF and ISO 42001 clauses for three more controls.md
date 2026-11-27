@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1394
 title: 'Compliance mappings cite the right NIST AI RMF and ISO 42001 clauses for three more controls'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-23'
 labels:

@@ -18,6 +18,7 @@ SECTION_FILES = {
     "attributeKeys": "telemetry/semantic_conventions.py",
     "complianceControls": "compliance/mappings.py",
     "regulatoryFrameworks": "compliance/mappings.py",
+    "complianceMappings": "compliance/mappings.py",
 }
 
 MANIFEST = json.loads((PARITY / "manifest.json").read_text())
@@ -26,6 +27,8 @@ EXEMPT = json.loads((PARITY / "exemptions.json").read_text()).get("python", {})
 
 def defined(section: str, name: str) -> bool:
     text = (SRC / SECTION_FILES[section]).read_text()
+    if section == "complianceMappings":
+        return name in sdk_defined(section, text)
     return json.dumps(name) in text
 
 
@@ -60,6 +63,13 @@ def _class_body(text: str, cls: str) -> str:
     return m.group(0)
 
 
+def _mapping_rows(text: str) -> set[str]:
+    """Each ControlMapping as `framework|controlId|reference|description` (AISDLC-1394)."""
+    field = r'\s*"([^"]+)",'
+    rows = re.findall(rf"ControlMapping\({field}{field}{field}\s*\"([^\"]+)\",?\s*\)", text)
+    return {f"{fw}|{cid}|{ref}|{desc}" for cid, fw, ref, desc in rows}
+
+
 def _list_literal(text: str, opener: str) -> str:
     m = re.search(rf"{re.escape(opener)}.*?\n\]", text, re.S)
     assert m, f"{opener} not found"
@@ -74,6 +84,7 @@ EXTRACTORS = {
     "attributeKeys": lambda t: _literals(_class_body(t, "_AttributeKeys")),
     "complianceControls": lambda t: set(re.findall(r'ComplianceControl\(\s*"([^"]+)"', t)),
     "regulatoryFrameworks": lambda t: _literals(_list_literal(t, "REGULATORY_FRAMEWORKS:")),
+    "complianceMappings": _mapping_rows,
 }
 
 
@@ -126,6 +137,7 @@ def test_extractors_cover_every_manifest_name() -> None:
             'ComplianceControl(\n        "bogus-control", "B", "d"),\n    ComplianceControl(\n        "quality-gates"',  # noqa: E501
         ),
         ("regulatoryFrameworks", '"csa-atf",\n]', '"csa-atf", "bogus-framework",\n]'),
+        ("complianceMappings", '"Clause 9.2 - Internal Audit"', '"Clause 9.9 - Bogus"'),
     ],
 )
 def test_patched_sdk_only_name_is_detected(section: str, anchor: str, added: str) -> None:

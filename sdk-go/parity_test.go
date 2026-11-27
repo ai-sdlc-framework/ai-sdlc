@@ -22,6 +22,7 @@ var sectionFiles = map[string]string{
 	"attributeKeys":        "telemetry/conventions.go",
 	"complianceControls":   "compliance/mappings.go",
 	"regulatoryFrameworks": "compliance/mappings.go",
+	"complianceMappings":   "compliance/mappings.go",
 }
 
 func readParityJSON(t *testing.T, name string, out any) {
@@ -54,6 +55,9 @@ func TestParityWithReferenceManifest(t *testing.T) {
 		for _, name := range names {
 			inManifest[name] = true
 			isDefined := strings.Contains(text, strconv.Quote(name))
+			if section == "complianceMappings" {
+				isDefined = sdkDefinedNames(section, text)[name]
+			}
 			if exemptSet[name] {
 				if isDefined {
 					t.Errorf("%s/%s is defined; remove it from exemptions.json", section, name)
@@ -111,8 +115,27 @@ func sdkDefinedNames(section, text string) map[string]bool {
 		add(`\{ID: "([^"]+)"`, text)
 	case "regulatoryFrameworks":
 		add(`Framework\w+\s+Framework = "([^"]+)"`, text)
+	case "complianceMappings":
+		for row := range mappingRows(text) {
+			out[row] = true
+		}
 	}
 	return out
+}
+
+// mappingRows returns each ControlMapping literal as
+// `framework|controlId|frameworkReference|description` (AISDLC-1394).
+func mappingRows(text string) map[string]bool {
+	frameworks := map[string]string{}
+	for _, m := range regexp.MustCompile(`(Framework\w+)\s+Framework = "([^"]+)"`).FindAllStringSubmatch(text, -1) {
+		frameworks[m[1]] = m[2]
+	}
+	rows := map[string]bool{}
+	re := regexp.MustCompile(`\{ControlID: "([^"]+)", Framework: (\w+), FrameworkReference: "([^"]+)", Description: "([^"]+)"\}`)
+	for _, m := range re.FindAllStringSubmatch(text, -1) {
+		rows[strings.Join([]string{frameworks[m[2]], m[1], m[3], m[4]}, "|")] = true
+	}
+	return rows
 }
 
 // sdkOnlyNames lists defined names that the manifest section lacks.
@@ -152,6 +175,7 @@ func TestSDKOnlyNameIsDetected(t *testing.T) {
 		"attributeKeys":        {"\tRunId:  ", "\tBogus: \"ai_sdlc.bogus\",\n\tRunId:  "},
 		"complianceControls":   {"\t{ID: \"quality-gates\"", "\t{ID: \"bogus-control\"},\n\t{ID: \"quality-gates\""},
 		"regulatoryFrameworks": {"\tFrameworkEUAIAct ", "\tFrameworkBogus Framework = \"bogus-framework\"\n\tFrameworkEUAIAct "},
+		"complianceMappings":   {"\"Clause 9.2 - Internal Audit\"", "\"Clause 9.9 - Bogus\""},
 	}
 	var manifest map[string][]string
 	readParityJSON(t, "manifest.json", &manifest)

@@ -32,6 +32,21 @@ function collect(text, re, label) {
   return [...new Set(out)].sort();
 }
 
+/**
+ * Every control mapping row of the reference as `framework|controlId|frameworkReference|description`
+ * (AISDLC-1394), so an SDK citing a different clause or description fails its parity suite.
+ */
+export const MAPPING_ROW_RE =
+  /\bcontrolId:\s*'([^']+)',\s*framework:\s*'([^']+)',\s*frameworkReference:\s*'([^']+)',\s*description:\s*'([^']+)'/g;
+
+function mappingRows(text) {
+  const rows = [...text.matchAll(MAPPING_ROW_RE)].map(([, id, fw, ref, desc]) =>
+    [fw, id, ref, desc].join('|'),
+  );
+  if (rows.length === 0) throw new Error('parity: complianceMappings: no rows found');
+  return [...new Set(rows)].sort();
+}
+
 export function buildManifest(root) {
   const read = (p) => readFileSync(join(root, p), 'utf8');
   const types = read(SOURCES.types);
@@ -59,6 +74,7 @@ export function buildManifest(root) {
       /\bid:\s*'([^']+)'/g,
       'AI_SDLC_CONTROLS',
     ),
+    complianceMappings: mappingRows(maps),
     regulatoryFrameworks: collect(
       block(maps, 'export type RegulatoryFramework =', ';', 'RegulatoryFramework'),
       /'([^']+)'/g,
