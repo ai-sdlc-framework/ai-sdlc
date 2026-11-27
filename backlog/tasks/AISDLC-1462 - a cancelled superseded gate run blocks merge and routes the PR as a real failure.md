@@ -2,7 +2,7 @@
 id: AISDLC-1462
 title: >-
   A cancelled superseded gate run blocks merge and routes the PR as a real failure
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-27'
 labels:

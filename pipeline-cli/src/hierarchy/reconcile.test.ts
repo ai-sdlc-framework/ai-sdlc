@@ -556,6 +556,15 @@ describe('helpers', () => {
     });
     expect(normaliseCheck({ name: 'a', conclusion: 'CANCELLED' }).conclusion).toBe('cancelled');
     expect(normaliseCheck({ name: 'a', conclusion: 'TIMED_OUT' }).conclusion).toBe('infra');
+    // AISDLC-1462: the run id and workflow name let a superseded cancelled run be told apart.
+    expect(
+      normaliseCheck({
+        name: 'a',
+        conclusion: 'FAILURE',
+        workflowName: 'AI-SDLC PR Ready Gate',
+        detailsUrl: 'https://github.com/o/r/actions/runs/45950341394/job/7',
+      }),
+    ).toMatchObject({ runId: 45950341394, workflowName: 'AI-SDLC PR Ready Gate' });
   });
 
   it('builds commands for each action', () => {

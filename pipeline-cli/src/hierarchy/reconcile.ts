@@ -1757,6 +1757,7 @@ interface RollupItem {
   detailsUrl?: string;
   startedAt?: string;
   completedAt?: string;
+  workflowName?: string;
 }
 
 function parse<T>(text: string): T | undefined {
@@ -1784,6 +1785,7 @@ export function normaliseCheck(c: RollupItem): PrCheck {
   const summary = c.description ?? c.title;
   const t0 = Date.parse(c.startedAt ?? '');
   const t1 = Date.parse(c.completedAt ?? '');
+  const runId = /\/actions\/runs\/(\d+)/.exec(c.detailsUrl ?? '')?.[1];
   return {
     name: c.name ?? c.context ?? '',
     conclusion,
@@ -1794,6 +1796,8 @@ export function normaliseCheck(c: RollupItem): PrCheck {
     ...(summary ? { summary } : {}),
     ...(c.detailsUrl ? { detailsUrl: c.detailsUrl } : {}),
     ...(Number.isFinite(t1) ? { completedAt: new Date(t1).toISOString() } : {}),
+    ...(runId ? { runId: Number(runId) } : {}),
+    ...(c.workflowName ? { workflowName: c.workflowName } : {}),
   };
 }
 

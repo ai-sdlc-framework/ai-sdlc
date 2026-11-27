@@ -34,6 +34,7 @@ import {
   runMergeIfEligible,
   STRICT_DEFAULTS,
   stateForRequired,
+  supersededCancelledRows,
   taskFileOnMain,
   type GovernancePolicy,
   type PrSnapshot,
@@ -565,6 +566,157 @@ describe('stateForRequired', () => {
     expect(stateForRequired('nope', results)).toBe('MISSING');
     expect(stateForRequired('ci', results)).toBe('SUCCESS');
     expect(stateForRequired('dup', results)).toBe('FAILURE');
+  });
+});
+
+// AISDLC-1462: the #3126 shape. One push plus the ready flip started two gate runs on the head;
+// the concurrency group cancelled run A (suite 11), run B (suite 12) passed.
+const GATE_APP = 15368;
+const GATE_WF = 777;
+type SuiteRow = [
+  name: string,
+  status: string,
+  conclusion: string | null,
+  app: number,
+  suite: number,
+];
+function supersededShape(
+  rows: SuiteRow[],
+  workflowRuns: Array<[id: number, workflowId: number, suite: number, conclusion: string | null]>,
+): Record<string, Partial<ExecResult>> {
+  const lines = (xs: unknown[]) => xs.map((x) => JSON.stringify(x)).join('\n');
+  return {
+    [`commits/${HEAD_A}/check-runs`]: {
+      stdout: lines(
+        rows.map(([name, status, conclusion, app, suite]) => ({
+          name,
+          status,
+          conclusion,
+          app,
+          suite,
+        })),
+      ),
+    },
+    [`commits/${HEAD_A}/status`]: { stdout: '' },
+    [`actions/runs?head_sha=${HEAD_A}`]: {
+      stdout: lines(
+        workflowRuns.map(([id, workflowId, suite, conclusion]) => ({
+          id,
+          workflowId,
+          suite,
+          conclusion,
+        })),
+      ),
+    },
+  };
+}
+const RUN_A_CANCELLED: SuiteRow[] = [
+  ['Backlog Drift', 'completed', 'cancelled', GATE_APP, 11],
+  ['ai-sdlc/pr-ready', 'completed', 'failure', GATE_APP, 11],
+];
+const RUN_B_GREEN: SuiteRow[] = [
+  ['Backlog Drift', 'completed', 'success', GATE_APP, 12],
+  ['ai-sdlc/pr-ready', 'completed', 'success', GATE_APP, 12],
+];
+const TWO_GATE_RUNS: Array<[number, number, number, string | null]> = [
+  [45950341394, GATE_WF, 11, 'cancelled'],
+  [45950342401, GATE_WF, 12, 'success'],
+];
+
+describe('superseded cancelled gate run (AISDLC-1462)', () => {
+  it('reads a required check green when the newest run passed and the red row is a cancelled older run', async () => {
+    const { runner, calls } = makeFakeRunner(
+      supersededShape([...RUN_A_CANCELLED, ...RUN_B_GREEN], TWO_GATE_RUNS),
+    );
+    const res = await fetchShaChecks(HEAD_A, 'org/repo', runner);
+    expect(res.fetchFailed).toBe(false);
+    expect(stateForRequired('ai-sdlc/pr-ready', res.checks)).toBe('SUCCESS');
+    expect(stateForRequired('Backlog Drift', res.checks)).toBe('SUCCESS');
+    expect(calls.map((c) => c.args[1])).toContain(
+      `repos/org/repo/actions/runs?head_sha=${HEAD_A}&per_page=100`,
+    );
+  });
+
+  it('still blocks when the newest run is pending or red', async () => {
+    const pending: SuiteRow[] = [['ai-sdlc/pr-ready', 'in_progress', null, GATE_APP, 12]];
+    const red: SuiteRow[] = [['ai-sdlc/pr-ready', 'completed', 'failure', GATE_APP, 12]];
+    for (const [rows, want] of [
+      [pending, 'PENDING'],
+      [red, 'FAILURE'],
+    ] as const) {
+      const res = await fetchShaChecks(
+        HEAD_A,
+        'org/repo',
+        makeFakeRunner(supersededShape([...RUN_A_CANCELLED, ...rows], TWO_GATE_RUNS)).runner,
+      );
+      expect(stateForRequired('ai-sdlc/pr-ready', res.checks)).toBe(want);
+    }
+  });
+
+  it('AISDLC-663.5 regression: a failing same-name row from a different app or workflow still blocks', async () => {
+    // Different app: an impostor posting `ai-sdlc/pr-ready` from another App in the cancelled suite.
+    const otherApp = await fetchShaChecks(
+      HEAD_A,
+      'org/repo',
+      makeFakeRunner(
+        supersededShape(
+          [['ai-sdlc/pr-ready', 'completed', 'failure', 999, 11], ...RUN_B_GREEN],
+          TWO_GATE_RUNS,
+        ),
+      ).runner,
+    );
+    expect(stateForRequired('ai-sdlc/pr-ready', otherApp.checks)).toBe('FAILURE');
+    // Different workflow: the cancelled run belongs to another workflow file.
+    const otherWorkflow = await fetchShaChecks(
+      HEAD_A,
+      'org/repo',
+      makeFakeRunner(
+        supersededShape(
+          [...RUN_A_CANCELLED, ...RUN_B_GREEN],
+          [
+            [45950341394, 888, 11, 'cancelled'],
+            [45950342401, GATE_WF, 12, 'success'],
+          ],
+        ),
+      ).runner,
+    );
+    expect(stateForRequired('ai-sdlc/pr-ready', otherWorkflow.checks)).toBe('FAILURE');
+    // A red row whose run was NOT cancelled is never dropped.
+    expect(
+      supersededCancelledRows(
+        [
+          { name: 'x', status: 'completed', conclusion: 'failure', app: 1, suite: 11 },
+          { name: 'x', status: 'completed', conclusion: 'success', app: 1, suite: 12 },
+          { name: 'x', status: 'completed', conclusion: 'failure', app: 1, suite: null },
+        ],
+        [
+          { id: 1, workflowId: 1, suite: 11, conclusion: 'failure' },
+          { id: 2, workflowId: 1, suite: 12, conclusion: 'success' },
+        ],
+      ),
+    ).toEqual([]);
+  });
+
+  it('keeps the strict reading when the workflow-runs read fails, and skips it without duplicates', async () => {
+    for (const patch of [
+      { [`actions/runs?head_sha=${HEAD_A}`]: { code: 1 } },
+      { [`actions/runs?head_sha=${HEAD_A}`]: { stdout: 'not json' } },
+      { [`actions/runs?head_sha=${HEAD_A}`]: new Error('boom') },
+    ]) {
+      const res = await fetchShaChecks(
+        HEAD_A,
+        'org/repo',
+        makeFakeRunner({
+          ...supersededShape([...RUN_A_CANCELLED, ...RUN_B_GREEN], TWO_GATE_RUNS),
+          ...patch,
+        }).runner,
+      );
+      expect(res.fetchFailed).toBe(false);
+      expect(stateForRequired('ai-sdlc/pr-ready', res.checks)).toBe('FAILURE');
+    }
+    const { runner, calls } = makeFakeRunner(supersededShape(RUN_B_GREEN, TWO_GATE_RUNS));
+    await fetchShaChecks(HEAD_A, 'org/repo', runner);
+    expect(calls.some((c) => String(c.args[1]).includes('actions/runs'))).toBe(false);
   });
 });
 
@@ -1314,6 +1466,22 @@ describe('runMergeIfEligible — hardened trust + head pin', () => {
       'pr view',
       'pr merge',
     ]);
+  });
+
+  it('merges the #3126 shape: a superseded cancelled gate run does not block (AISDLC-1462)', async () => {
+    const { promise } = run({
+      ...ALL_OK,
+      'gh pr checks 42 --required': {
+        stdout: JSON.stringify([
+          { name: 'ai-sdlc/pr-ready', state: 'SUCCESS' },
+          { name: 'Backlog Drift', state: 'SUCCESS' },
+        ]),
+      },
+      ...supersededShape([...RUN_A_CANCELLED, ...RUN_B_GREEN], TWO_GATE_RUNS),
+    });
+    const r = await promise;
+    expect(r.eligibility.reason).not.toMatch(/not green/);
+    expect(r.merged).toBe(true);
   });
 
   it('refuses a fork PR, the wrong author, an empty allow-list, a non-main base and a missing task', async () => {

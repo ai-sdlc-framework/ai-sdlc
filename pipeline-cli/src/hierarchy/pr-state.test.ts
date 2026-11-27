@@ -294,6 +294,67 @@ describe('cancelled duplicate run with a newer run in progress (AISDLC-1382)', (
   });
 });
 
+describe('cancelled run superseded by a newer finished run (AISDLC-1462)', () => {
+  const GATE = 'AI-SDLC PR Ready Gate';
+  const row = (
+    name: string,
+    conclusion: PrCheck['conclusion'],
+    runId: number,
+    workflowName = GATE,
+  ): PrCheck => ({ name, conclusion, runId, workflowName });
+
+  it('reads the #3126 shape (cancelled run A red, newer run B green) as green, not real-failure', () => {
+    // One push plus the ready flip started two gate runs for head 49f320a3; the concurrency
+    // group cancelled run A (Backlog Drift cancelled, its pr-ready rollup failed), run B passed.
+    const c = classifyPr({
+      ...base,
+      mergeStateStatus: 'CLEAN',
+      autoMergeArmed: true,
+      checks: [
+        row('Backlog Drift', 'cancelled', 45950341394),
+        row('ai-sdlc/pr-ready', 'failure', 45950341394),
+        row('Backlog Drift', 'success', 45950342401),
+        row('ai-sdlc/pr-ready', 'success', 45950342401),
+      ],
+    });
+    expect(c.state).toBe('armed-clean');
+  });
+
+  it('still reads a failure of the NEWER run as real-failure', () => {
+    const c = classifyPr({
+      ...base,
+      checks: [
+        row('Backlog Drift', 'cancelled', 1),
+        row('ai-sdlc/pr-ready', 'failure', 1),
+        row('Backlog Drift', 'success', 2),
+        row('ai-sdlc/pr-ready', 'failure', 2),
+      ],
+    });
+    expect(c.state).toBe('real-failure');
+  });
+
+  it('keeps a failing row from a different workflow even when its run was cancelled', () => {
+    const c = classifyPr({
+      ...base,
+      checks: [
+        row('Build', 'cancelled', 1, 'Other'),
+        row('ai-sdlc/pr-ready', 'failure', 1, 'Other'),
+        row('ai-sdlc/pr-ready', 'success', 2),
+      ],
+    });
+    expect(c.state).toBe('real-failure');
+  });
+
+  it('keeps a failure whose run was not cancelled, and a status without a run id', () => {
+    const plain = dropSupersededCancelled([
+      row('ai-sdlc/pr-ready', 'failure', 1),
+      row('ai-sdlc/pr-ready', 'success', 2),
+      { name: 'ai-sdlc/pr-ready', conclusion: 'failure' },
+    ]);
+    expect(plain.filter((c) => c.conclusion === 'failure')).toHaveLength(2);
+  });
+});
+
 describe('stale-base Backlog Drift (AISDLC-1140)', () => {
   const drift = (changedFiles: string[]) =>
     classifyPr({
