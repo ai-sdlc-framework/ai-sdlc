@@ -5,6 +5,19 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.46.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.45.0...ai-sdlc-plugin-v0.46.0) (2026-11-27)
+
+
+### Features
+
+* **orchestrator:** ask once whether agents may merge (AISDLC-1384) ([#3096](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3096)) ([ef248e0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ef248e00b2b50a59e056afdc2b8b1a58398f2503))
+* **plugin:** escalate dependency limits to the operator (AISDLC-1438) ([#3074](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3074)) ([62b7906](https://github.com/ai-sdlc-framework/ai-sdlc/commit/62b7906b3d2ec0256e48d522cd3a26d1e81f401e))
+
+
+### Bug Fixes
+
+* **plugin:** take the install lock with noclobber, not mkdir (AISDLC-1423) ([#3049](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3049)) ([661781d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/661781db027298aa6838c4e8cefe8523474e70c5))
+
 ## [0.45.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.44.0...ai-sdlc-plugin-v0.45.0) (2026-11-26)
 
 
