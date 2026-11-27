@@ -477,6 +477,8 @@ async function acquireExclusive(
     for (;;) {
       const others = slotHolders(boardDir, ctx).filter((h) => blocks(h) && h.pid !== me.pid);
       if (others.length === 0) return slot;
+      // The marker is held while waiting; beat so acquirers queued on it see a live holder.
+      slot.heartbeat();
       await wait('running verifies to finish', others, 'any');
     }
   } catch (e) {

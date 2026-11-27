@@ -374,6 +374,50 @@ describe('bounded waits that name the holder (AISDLC-1413)', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('heartbeats the exclusive marker while waiting for running verifies, so queued callers wait', async () => {
+    const dir = board();
+    let t = 0;
+    const table = { 20: 'a', 21: 'b', 22: 'c' };
+    const shared = await acquireVerifySlot(dir, { pid: 20, ...procs(table), now: () => t });
+    const outcomes: string[] = [];
+    const full = await acquireVerifySlot(
+      dir,
+      {
+        pid: 21,
+        ...procs(table),
+        now: () => t,
+        log: () => {},
+        pollMs: 60_000,
+        sleep: async (ms) => {
+          t += ms;
+          shared.heartbeat(); // the running affected verify makes progress
+          if (t < VERIFY_SLOT_STALE_MS + 120_000) return;
+          // phase 2 has outlasted the stale threshold: the marker is still a live holder
+          const [excl] = inspectVerifySlots(dir, { ...procs(table), now: () => t });
+          expect(excl).toMatchObject({ name: 'exclusive', pid: 21, state: 'held' });
+          // a new acquirer is told to wait, not refused as blocked by a stale holder
+          const res = await acquireVerifySlot(dir, {
+            pid: 22,
+            ...procs(table),
+            now: () => t,
+            log: (l) => outcomes.push(l),
+            sleep: async () => {
+              throw new Error('told to wait');
+            },
+          }).catch((e: unknown) => e);
+          expect(res).not.toBeInstanceOf(VerifySlotWaitError);
+          expect((res as Error).message).toBe('told to wait');
+          shared.release();
+        },
+      },
+      { exclusive: true },
+    );
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toContain('exclusive pid 21');
+    full.release();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it('refuses at the wait limit naming slot, pid, command, task id and held-for', async () => {
     const dir = board();
     let t = 0;
