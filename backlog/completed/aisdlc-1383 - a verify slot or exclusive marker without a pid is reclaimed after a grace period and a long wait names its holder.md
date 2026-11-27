@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1383
 title: 'A verify slot or exclusive marker without a pid is reclaimed after a grace period, and a long wait names its holder'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-22'
 labels:
