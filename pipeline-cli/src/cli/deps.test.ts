@@ -3,7 +3,8 @@
  * stdout/stderr. Mirrors the pattern used by cli/index.test.ts.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildDepsCli } from './deps.js';
@@ -221,6 +222,42 @@ describe('cli-deps router', () => {
     const r = stdoutJson() as { ok: boolean; reason: string; blockers: Array<{ id: string }> };
     expect(r.ok).toBe(false);
     expect(r.blockers[0].id).toBe('AISDLC-A');
+  });
+
+  // AISDLC-1450 replay of case 1: ENT-13 dispatched, ENT-12 merged and its completed file on
+  // origin/main, the checkout (and the board's mark-landed) not caught up yet.
+  it('preflight passes when the open dependency is completed on origin/main', async () => {
+    const git = (...a: string[]) => execFileSync('git', a, { cwd: tmp, encoding: 'utf-8' });
+    const commit = (m: string) =>
+      git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', m, '--no-verify');
+    git('init', '-q');
+    const dep = writeTaskFile(tmp, { id: 'ENT-12', title: 'dependency' });
+    writeTaskFile(tmp, { id: 'ENT-13', title: 'dependent', dependencies: ['ENT-12'] });
+    git('add', '.');
+    commit('dispatch');
+    git('branch', '-q', '-M', 'local');
+    git('checkout', '-q', '-b', 'landed');
+    git('rm', '-q', dep);
+    writeTaskFile(tmp, { id: 'ENT-12', title: 'dependency', completed: true });
+    git('add', '.');
+    commit('ENT-12 merged (#18)');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    git('checkout', '-q', 'local');
+    expect(existsSync(dep)).toBe(true);
+    setArgv('preflight', 'ENT-13', '--work-dir', tmp);
+    await buildDepsCli().parseAsync();
+    expect(stdoutJson()).toEqual({ ok: true, reason: '', blockers: [], dangling: [] });
+  });
+
+  it('preflight keeps the refusal when origin/main cannot be read', async () => {
+    execFileSync('git', ['init', '-q'], { cwd: tmp });
+    writeTaskFile(tmp, { id: 'ENT-12', title: 'dependency' });
+    writeTaskFile(tmp, { id: 'ENT-13', title: 'dependent', dependencies: ['ENT-12'] });
+    setArgv('preflight', 'ENT-13', '--work-dir', tmp);
+    await expect(buildDepsCli().parseAsync()).rejects.toThrow(/process\.exit/);
+    const r = stdoutJson() as { ok: boolean; blockers: Array<{ id: string }> };
+    expect(r.ok).toBe(false);
+    expect(r.blockers.map((b) => b.id)).toEqual(['ENT-12']);
   });
 
   it('preflight exits non-zero on already-shipped task', async () => {

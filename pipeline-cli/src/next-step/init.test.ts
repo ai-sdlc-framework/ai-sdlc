@@ -119,6 +119,7 @@ describe('initTask', () => {
     const res = await initTask(h.ctx, 'AISDLC-900');
     expect(res).toEqual({
       ok: false,
+      cause: 'dependency-blocked',
       reason: expect.stringContaining('dependency preflight failed'),
     });
     if (!res.ok) expect(res.reason).toContain('cli-deps.mjs frontier --format table');

@@ -787,7 +787,34 @@ export interface PreflightResult {
  *  - Special case: if the target ID itself isn't in the graph (e.g. a typo),
  *    returns ok=false with reason 'unknown task'.
  */
-export function preflight(graph: DependencyGraph, taskId: string): PreflightResult {
+export function preflight(
+  graph: DependencyGraph,
+  taskId: string,
+  opts: PreflightOptions = {},
+): PreflightResult {
+  const local = preflightLocal(graph, taskId);
+  if (local.ok || local.blockers.length === 0 || !opts.completedOnMain) return local;
+  // AISDLC-1450: a blocker the checkout still holds open may already be completed on
+  // origin/main (its PR just merged). Read main only now; an unreadable main keeps the local result.
+  const onMain = opts.completedOnMain();
+  if (!onMain) return local;
+  const landed = local.blockers.filter((b) => onMain.has(b.id.toUpperCase()));
+  if (landed.length === 0) return local;
+  const nodes = new Map(graph.nodes);
+  for (const b of landed) nodes.set(b.id.toLowerCase(), { ...b, status: 'completed' });
+  return preflightLocal({ ...graph, nodes }, taskId);
+}
+
+/** Options for {@link preflight}. */
+export interface PreflightOptions {
+  /**
+   * Task ids (upper-case) completed on `origin/main`, read only when the local graph reports an
+   * open blocker; undefined when main cannot be read (AISDLC-1450).
+   */
+  completedOnMain?: () => ReadonlyMap<string, string> | undefined;
+}
+
+function preflightLocal(graph: DependencyGraph, taskId: string): PreflightResult {
   const target = graph.nodes.get(taskId.toLowerCase());
   if (!target) {
     return { ok: false, reason: `unknown task ${taskId}`, blockers: [], dangling: [] };

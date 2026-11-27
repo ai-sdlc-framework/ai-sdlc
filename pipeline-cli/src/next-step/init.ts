@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { computeBranchName } from '../steps/02-compute-branch.js';
 import { readInflightManifest } from '../dispatch/board.js';
+import { DEPENDENCY_BLOCKED_CAUSE } from '../dispatch/complete.js';
 import { formatResumeFeedback } from '../dispatch/resume.js';
 import { resolveResumeBranch } from './resume-branch.js';
 import { setupWorktree } from '../steps/03-setup-worktree.js';
@@ -128,6 +129,8 @@ export async function initTask(
   if (preflight.code !== 0) {
     return {
       ok: false,
+      // AISDLC-1450: the executor's `complete --cause` returns the task to the queue and escalates.
+      cause: DEPENDENCY_BLOCKED_CAUSE,
       reason:
         `dependency preflight failed for ${taskId}: ${(preflight.stderr || preflight.stdout).trim()}\n` +
         `To inspect the dispatch-ready frontier: node ${join(ctx.cliBinDir, 'cli-deps.mjs')} frontier --format table`,
