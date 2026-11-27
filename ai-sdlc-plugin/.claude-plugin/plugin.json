@@ -218,9 +218,9 @@
   },
   "mcpServers": {
     "ai-sdlc": {
-      "command": "node",
+      "command": "bash",
       "args": [
-        "${CLAUDE_PLUGIN_ROOT}/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js"
+        "${CLAUDE_PLUGIN_ROOT}/scripts/mcp-server-launcher.sh"
       ],
       "env": {
         "AI_SDLC_PROJECT_ROOT": "${CLAUDE_PLUGIN_DATA}"

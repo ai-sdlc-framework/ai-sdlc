@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1398
 title: 'The plugin MCP server starts on the first session through a launcher that waits for runtime dependencies'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-23'
 labels:
