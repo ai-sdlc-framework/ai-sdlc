@@ -2,6 +2,7 @@
 // Same constraints as executor.ts: `$` is only ever spelled `$.noun.verb(...)` at the call site, so each
 // handler builds a `Ports` object of closures and every function here takes the ports, never `$`.
 import {
+  CONTROL_WORD,
   DISPATCH_NAME,
   STATUS_NOISE,
   beginRotation,
@@ -9,6 +10,7 @@ import {
   log,
   operatorQuestionPending,
   readMeasure,
+  recognisedTokens,
   rotationTurnEnd,
   resumeAfterClear,
   safe,
@@ -155,7 +157,13 @@ export async function plannerSessionReceive(
     if (!state.enabled) return next(e);
     await resumeAfterClear(p, state);
     const raw = String(e?.text ?? '');
-    if (DISPATCH_NAME.test(senderOf(raw))) {
+    const sender = senderOf(raw);
+    // AISDLC-1464: a bare control word with no sender is framework text, never an operator answer.
+    if (!sender && CONTROL_WORD.test(innerText(raw))) {
+      await log(p, 'planner: a rotate with no dispatch sender was dropped, not shown to the model');
+      return { consumed: 'hierarchy:unsent-control' };
+    }
+    if (DISPATCH_NAME.test(sender)) {
       const text = innerText(raw);
       // `cli-hierarchy clear planner` (RFC-0058 phase 4): rotate now, or at the end of the turn.
       if (/^rotate\b/i.test(text)) {
@@ -260,6 +268,7 @@ export async function plannerSessionMeasure(
   };
   await resumeAfterClear(p, state);
   const tokens = await readMeasure(p, state.name, e);
+  if (recognisedTokens(e) !== null) state.lastTokens = tokens;
   if (tokens >= (state.rotateAt ?? PLANNER_ROTATE_AT_TOKENS)) {
     // Never mid-turn: a measure that lands while the main thread runs waits for its turn.complete.
     if (state.handoffTurnPending || state.rotationBlocked) {

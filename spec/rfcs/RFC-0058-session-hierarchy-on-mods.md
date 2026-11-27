@@ -280,6 +280,20 @@ RFC deletes.
   effective model per tool call from `turn.step` (relevant to RFC-0042 and RFC-0050).
 - No parsed Bash subcommands for hooks; the lease-push guard keeps its tokenizer.
 
+#### Interim keystroke exceptions (dated 2026-11-27, AISDLC-1464, DEC-0415, DEC-0455 a)
+
+A CLI process has no channel into a session: the harness publishes no socket wire format
+(a raw line written to a session socket was dropped while the CLI printed `ok`), so only
+`SendMessage` from a model session and `$.session.send` from a hooks module deliver. Upstream:
+ask in the Mods thread 91870 for a published delivery channel for out-of-session processes.
+Until it lands, these pane paths stay, each typing a full labelled sentence or a slash command,
+never a bare control word; each is removed when its Mods replacement is proven:
+
+- `brief-notify.ts` `createTmuxBriefSender`: `cli-hierarchy brief --notify` and expired-decision
+  promotion; `escalation-chain.ts` builds the same sender for escalation notices.
+- `tmux.ts` `sendExit` (`/exit`) and the exit-dialog answer, for `down` and `restart`.
+- `tmux.ts` `sendLine`: the dispatch-owned executor `/clear` (AISDLC-1107); removal is AISDLC-1465.
+
 ## Backward Compatibility
 
 - The board, brief and verdict file formats do not change; a mixed fleet (some

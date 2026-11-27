@@ -72,6 +72,13 @@ import { dynamicExecutors, finishedAt } from './ephemeral-tick.js';
 import { executorCap, formatExecutorCap, type ExecutorCap } from './executor-cap.js';
 import { formatOpenPrs, openPrState, type OpenPrState } from './open-pr-limit.js';
 import { readRotateRequests } from './rotate-request.js';
+import { SESSION_SOCKET_DIR } from './send-resolve.js';
+import {
+  deliveryState,
+  formatDelivery,
+  readLastRotations,
+  type DeliveryState,
+} from './delivery.js';
 import { resolveThresholds } from './thresholds.js';
 import type { HierarchyDeps, HierarchyRole, RosterEntry } from './types.js';
 
@@ -119,6 +126,8 @@ export interface StatusRow {
   rotatePending?: boolean;
   /** Pending rotate request dispatch made of this session and its age (AISDLC-1150). */
   rotateRequest?: { at: string; ageSec: number };
+  /** Last send to this session, its receipt and its last logged rotation (AISDLC-1464). */
+  delivery?: DeliveryState;
   /** Present with `launchEnv: 'missing'`: how to repair it. */
   nextStep?: string;
 }
@@ -293,6 +302,7 @@ export function hierarchyStatus(
     live: dynamicExecutors(deps.boardDir).length,
   });
   const rotateRequests = readRotateRequests(deps.boardDir);
+  const rotations = readLastRotations(deps.boardDir);
   const dynamicNames = new Set(dynamicExecutors(deps.boardDir).map((e) => e.name));
   let verdicts: ReturnType<typeof collectVerdicts> = [];
   try {
@@ -337,9 +347,20 @@ export function hierarchyStatus(
       ? readModuleMeasure(defaultStoreDirs(), entry.name)?.tokens
       : undefined;
     const rotatePending = alive && readModuleRotatePending(defaultStoreDirs(), entry.name);
+    const socketPath = live
+      ? (live.messagingSocketPath ?? `${SESSION_SOCKET_DIR}/${live.pid}.sock`)
+      : undefined;
+    const delivery = deliveryState(
+      deps.boardDir,
+      entry.name,
+      deps.now().getTime(),
+      socketPath,
+      rotations,
+    );
     return {
       entry,
       state,
+      ...(delivery.lastSend || delivery.lastRotation ? { delivery } : {}),
       ...(finishedNotStopped ? { finishedNotStopped: true as const } : {}),
       ...(rotatePending ? { rotatePending } : {}),
       ...(contextTokens !== undefined
@@ -666,6 +687,7 @@ export function formatStatus(result: StatusResult, nowMs: number = Number.NaN): 
           ]
         : [],
     ),
+    ...result.rows.flatMap((r) => formatDelivery(r.entry.name, r.delivery)),
   ];
   return [
     fmt(header),

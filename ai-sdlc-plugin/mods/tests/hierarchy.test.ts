@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  APPEND_SCRIPT,
   BUSY_SCRIPT,
   EXECUTOR_HANDOFF_PROMPT,
   LAST_REPLY_MAX_CHARS,
@@ -18,6 +19,7 @@ import {
   ROTATION_TTL_MS,
   ROTATION_KEY,
   VERSION_FLOOR,
+  WRITE_SCRIPT,
   atLeast,
   guard,
   innerText,
@@ -26,6 +28,7 @@ import {
   senderAddressOf,
   senderOf,
   UNPROVEN_LINE,
+  writeReceipt,
 } from '../../hooks/hierarchy/executor.ts';
 import {
   recordReceivedSender,
@@ -1285,5 +1288,161 @@ describe('received log script (AISDLC-1392)', () => {
         { address: 'uds:/tmp/cc-socks/4.sock' },
       ],
     );
+  });
+});
+
+describe('rotation log, receipts and unsent control words (AISDLC-1464)', () => {
+  const boardWrites = (s: ReturnType<typeof setup>, suffix: string) =>
+    s.$.process.run.mock.calls
+      .map((c: any[]) => c[0])
+      .filter((a: any) => Array.isArray(a) && a[1] === '-e' && String(a[3]).endsWith(suffix))
+      .map((a: any) => JSON.parse(String(a[4])));
+
+  // AISDLC-1448: a clear runs only once `handoff verify` proves the handoff turn's RESUME block.
+  const proveAndEnd = async (s: ReturnType<typeof setup>, tokens = 130_000) => {
+    await s.start();
+    await s.handlers.get('session.measure')(s.$, { tokens }, s.next);
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+  };
+
+  it('appends one rotation log line per attempt: clear, compact fallback, exit fallback', async () => {
+    const s = setup({ board: '/b', name: 'exec-1' });
+    cliFake(s, { proven: true });
+    await proveAndEnd(s);
+    expect(boardWrites(s, '/b/log/rotations.jsonl')).toEqual([
+      expect.objectContaining({
+        role: 'executor',
+        session: 'exec-1',
+        tokens: 130_000,
+        handoffOk: true,
+        clearOk: true,
+        fallback: 'none',
+      }),
+    ]);
+    const c = setup({ board: '/b', drop: ['clear'] });
+    cliFake(c, { proven: true });
+    await proveAndEnd(c);
+    expect(boardWrites(c, '/b/log/rotations.jsonl')).toEqual([
+      expect.objectContaining({ handoffOk: true, clearOk: false, fallback: 'compact' }),
+    ]);
+    const x = setup({ board: '/b', drop: ['clear', 'compact'] });
+    cliFake(x, { proven: true });
+    await proveAndEnd(x);
+    expect(boardWrites(x, '/b/log/rotations.jsonl')).toEqual([
+      expect.objectContaining({ clearOk: false, fallback: 'exit' }),
+    ]);
+  });
+
+  it('logs an unproven attempt as no handoff and no clear', async () => {
+    const s = setup({ board: '/b', name: 'exec-1' });
+    cliFake(s);
+    await proveAndEnd(s);
+    expect(boardWrites(s, '/b/log/rotations.jsonl')).toEqual([]);
+    await s.handlers.get('turn.start')(s.$, {}, s.next);
+    await s.handlers.get('turn.complete')(s.$, {}, s.next);
+    expect(ran(s)).not.toContain('clear');
+    expect(boardWrites(s, '/b/log/rotations.jsonl')).toEqual([
+      expect.objectContaining({ handoffOk: false, clearOk: false, fallback: 'none' }),
+    ]);
+  });
+
+  it('logs the planner rotation with its last measured tokens', async () => {
+    const s = setup({ role: 'planner', name: 'proj-planner', board: '/b' });
+    cliFake(s, { proven: true });
+    await proveAndEnd(s, PLANNER_ROTATE_AT_TOKENS);
+    expect(boardWrites(s, '/b/log/rotations.jsonl')).toEqual([
+      expect.objectContaining({
+        role: 'planner',
+        session: 'proj-planner',
+        tokens: PLANNER_ROTATE_AT_TOKENS,
+        clearOk: true,
+      }),
+    ]);
+  });
+
+  it('writes nothing when no absolute board directory resolves', async () => {
+    const s = setup({ board: 'relative/board' });
+    cliFake(s, { proven: true });
+    await proveAndEnd(s);
+    expect(ran(s)).toContain('clear');
+    expect(boardWrites(s, 'rotations.jsonl')).toEqual([]);
+  });
+
+  it('planner and executor consume a rotate from dispatch and write a consumed receipt', async () => {
+    for (const role of ['planner', 'executor']) {
+      const s = setup({ role, name: `proj-${role}`, board: '/b' });
+      await s.start();
+      s.next.mockClear();
+      const out = await s.handlers.get('session.receive')(
+        s.$,
+        { text: env('proj-operator-dispatch', 'rotate') },
+        s.next,
+      );
+      expect(out).toEqual({ consumed: 'hierarchy:rotate' });
+      expect(s.next).not.toHaveBeenCalled();
+      expect(boardWrites(s, `/b/handoff/receipt-proj-${role}.json`)).toEqual([
+        expect.objectContaining({
+          session: `proj-${role}`,
+          from: 'proj-operator-dispatch',
+          text: 'rotate',
+          outcome: 'consumed',
+          consumed: 'hierarchy:rotate',
+        }),
+      ]);
+    }
+  });
+
+  it('a dispatch message forwarded to the model gets a forwarded receipt; peer or unsent text gets none', async () => {
+    const s = setup({ role: 'planner', name: 'proj-planner', board: '/b' });
+    await s.start();
+    await s.handlers.get('session.receive')(
+      s.$,
+      { text: env('proj-operator-dispatch', 'executor-1 is idle') },
+      s.next,
+    );
+    expect(boardWrites(s, '/b/handoff/receipt-proj-planner.json')).toEqual([
+      expect.objectContaining({ from: 'proj-operator-dispatch', outcome: 'forwarded' }),
+    ]);
+    // a peer's message never overwrites the receipt of the dispatch send
+    await s.handlers.get('session.receive')(s.$, { text: env('proj-executor-1', 'hello') }, s.next);
+    await s.handlers.get('session.receive')(s.$, { text: 'plain text' }, s.next);
+    expect(boardWrites(s, '/b/handoff/receipt-proj-planner.json')).toHaveLength(1);
+  });
+
+  it('writes no receipt for a session name that is not a safe file name', async () => {
+    const run = vi.fn(async () => ({ exitCode: 0, stdout: '' }));
+    await writeReceipt(run, { boardDir: '/b' }, '../x', env('proj-operator-dispatch', 'rotate'), {
+      consumed: 'hierarchy:rotate',
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('a bare rotate with no dispatch sender never reaches the model as operator input', async () => {
+    for (const role of ['planner', 'executor']) {
+      const s = setup({ role, name: `proj-${role}` });
+      await s.start();
+      s.next.mockClear();
+      const out = await s.handlers.get('session.receive')(s.$, { text: 'rotate' }, s.next);
+      expect(out).toEqual({ consumed: 'hierarchy:unsent-control' });
+      expect(s.next).not.toHaveBeenCalled();
+      expect(ran(s)).not.toContain('clear');
+      expect(logOf(s.kv).some((l) => l.includes('no dispatch sender was dropped'))).toBe(true);
+      // ordinary operator-looking text still reaches the model
+      await s.handlers.get('session.receive')(s.$, { text: 'rotate the data keys' }, s.next);
+      expect(s.next).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('the board-file scripts write and append the named file', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'rotlog-'));
+    const log = path.join(dir, 'log', 'rotations.jsonl');
+    execFileSync('node', ['-e', APPEND_SCRIPT, log, '{"a":1}']);
+    execFileSync('node', ['-e', APPEND_SCRIPT, log, '{"a":2}']);
+    expect(readFileSync(log, 'utf8')).toBe('{"a":1}\n{"a":2}\n');
+    const receipt = path.join(dir, 'handoff', 'receipt-x.json');
+    execFileSync('node', ['-e', WRITE_SCRIPT, receipt, '{"b":1}']);
+    execFileSync('node', ['-e', WRITE_SCRIPT, receipt, '{"b":2}']);
+    expect(readFileSync(receipt, 'utf8')).toBe('{"b":2}');
   });
 });

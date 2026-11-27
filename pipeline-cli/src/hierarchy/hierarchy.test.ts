@@ -2882,6 +2882,79 @@ describe('hierarchy restart and register (AISDLC-713)', () => {
       expect(readRotateRequests(boardDir)[planner]).toBeTruthy();
     });
 
+    it('status shows the last send, its receipt and the last logged rotation; a socket with no receipt is unhealthy (AISDLC-1464)', async () => {
+      const handoff = path.join(boardDir, 'handoff');
+      mkdirSync(handoff, { recursive: true });
+      // the registry entry points at a socket path that exists: presence alone is not health
+      const sock = path.join(tmp, 'planner.sock');
+      writeFileSync(sock, '');
+      for (const f of readdirSync(registryDir)) {
+        const file = path.join(registryDir, f);
+        const rec = JSON.parse(readFileSync(file, 'utf8')) as { name: string };
+        if (rec.name === planner)
+          writeFileSync(file, JSON.stringify({ ...rec, messagingSocketPath: sock }));
+      }
+      const sentAt = new Date(NOW.getTime() - 5 * 60_000).toISOString();
+      writeFileSync(
+        path.join(handoff, `sent-${planner}.json`),
+        JSON.stringify({ to: planner, text: 'rotate', ok: true, at: sentAt }),
+      );
+      mkdirSync(path.join(boardDir, 'log'), { recursive: true });
+      writeFileSync(
+        path.join(boardDir, 'log', 'rotations.jsonl'),
+        [
+          JSON.stringify({
+            at: 'old',
+            role: 'planner',
+            session: planner,
+            tokens: 1,
+            handoffOk: true,
+            clearOk: true,
+            fallback: 'none',
+          }),
+          'torn{',
+          JSON.stringify({
+            at: '2026-09-30T11:00:00.000Z',
+            role: 'planner',
+            session: planner,
+            tokens: 151000,
+            handoffOk: true,
+            clearOk: false,
+            fallback: 'compact',
+          }),
+        ].join('\n') + '\n',
+      );
+      let row = hierarchyStatus(deps).rows.find((r) => r.entry.name === planner);
+      expect(row?.delivery).toMatchObject({
+        receiptState: 'missing',
+        socket: 'present',
+        healthy: false,
+      });
+      let text = formatStatus(hierarchyStatus(deps)).join('\n');
+      expect(text).toContain(
+        `delivery to ${planner}: last send "rotate" at ${sentAt}, receipt missing; UNHEALTHY: socket exists but returned no receipt`,
+      );
+      expect(text).toContain(
+        `last rotation of ${planner}: 2026-09-30T11:00:00.000Z tokens 151000, handoff ok, clear refused, fallback compact`,
+      );
+      writeFileSync(
+        path.join(handoff, `receipt-${planner}.json`),
+        JSON.stringify({
+          session: planner,
+          from: 'operator-dispatch',
+          text: 'rotate',
+          outcome: 'consumed',
+          consumed: 'hierarchy:rotate',
+          at: NOW.toISOString(),
+        }),
+      );
+      row = hierarchyStatus(deps).rows.find((r) => r.entry.name === planner);
+      expect(row?.delivery).toMatchObject({ receiptState: 'received', healthy: true });
+      text = formatStatus(hierarchyStatus(deps)).join('\n');
+      expect(text).toContain('receipt consumed (hierarchy:rotate)');
+      expect(text).not.toContain('UNHEALTHY');
+    });
+
     it('restarts an idle planner whose handoff is proven, and records the handoff path', async () => {
       proveHandoff(boardDir, planner, deps.now());
       const result = await hierarchyRestart({ session: planner }, deps);
