@@ -128,12 +128,12 @@ export function slowSpanMs(env: NodeJS.ProcessEnv = process.env): number {
 
 /** Append one sanitized span. Best effort: never throws. */
 export function appendSpan(
-  span: Record<string, unknown>,
+  span: Record<string, unknown> | TimingSpan,
   file: string | null = timingsFile(),
 ): void {
   if (!file) return;
   try {
-    const clean = sanitizeSpan(span);
+    const clean = sanitizeSpan(span as Record<string, unknown>);
     if (!clean) return;
     mkdirSync(path.dirname(file), { recursive: true });
     try {
