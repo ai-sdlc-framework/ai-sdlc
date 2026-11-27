@@ -8,6 +8,8 @@
  *   node pipeline-cli/bin/cli-embedding-bump.mjs dry-run --from <old> --to <new>
  *   node pipeline-cli/bin/cli-embedding-bump.mjs execute --from <old> --to <new>
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runEmbeddingBumpCli } from '../dist/cli/embedding-bump.js';
 
 runEmbeddingBumpCli().catch((err) => {

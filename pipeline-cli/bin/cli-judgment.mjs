@@ -4,6 +4,8 @@
  * judgment layer. Forwards to the compiled router in `dist/cli/judgment.js`
  * (built by `pnpm build`). See `pipeline-cli/README.md` for the contract.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runJudgmentCli } from '../dist/cli/judgment.js';
 
 runJudgmentCli()

@@ -345,6 +345,73 @@ describe('runHierarchyCli', () => {
     expect(json[0]).toMatchObject({ name: 'exclusive', state: 'reused', taskId: 'AISDLC-1392' });
   });
 
+  it('status lists slow spans of the last hour and timings reports them (AISDLC-1414)', async () => {
+    const file = path.join(tmp, 'timings.jsonl');
+    const prev = process.env.AI_SDLC_TIMINGS_FILE;
+    process.env.AI_SDLC_TIMINGS_FILE = file;
+    try {
+      const now = new Date('2026-11-25T12:00:00.000Z');
+      const at = (min: number) => new Date(now.getTime() - min * 60_000).toISOString();
+      const rows = [
+        {
+          v: 1,
+          kind: 'command',
+          name: 'cli-file',
+          sub: 'task',
+          startedAt: at(20),
+          durationMs: 898_000,
+          exitCode: 0,
+          pid: 1,
+        },
+        {
+          v: 1,
+          kind: 'gate',
+          name: 'typecheck',
+          startedAt: at(5),
+          durationMs: 30_000,
+          exitCode: 0,
+          pid: 2,
+        },
+      ];
+      writeFileSync(file, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+      expect(await runHierarchyCli(['status'], overrides({ now: () => now }))).toBe(0);
+      const i = logs.findIndex((l) => l.startsWith('slow spans in the last hour'));
+      expect(logs[i]).toBe('slow spans in the last hour (over 2m 0s): 1');
+      expect(logs[i + 1]).toContain('command cli-file task, 14m 58s, exit 0');
+      logs.length = 0;
+      expect(await runHierarchyCli(['status', '--json'], overrides({ now: () => now }))).toBe(0);
+      expect(JSON.parse(logs[0] as string).slowSpans).toHaveLength(1);
+
+      logs.length = 0;
+      expect(
+        await runHierarchyCli(['timings', '--json', '--top', '1'], overrides({ now: () => now })),
+      ).toBe(0);
+      const report = JSON.parse(logs[0] as string);
+      expect(report.groups.map((g: { key: string }) => g.key)).toEqual([
+        'command cli-file task',
+        'gate typecheck',
+      ]);
+      expect(report.slowest).toHaveLength(1);
+      const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        expect(
+          await runHierarchyCli(['timings', '--since', '1h'], overrides({ now: () => now })),
+        ).toBe(0);
+        expect(String(out.mock.calls[0]?.[0])).toContain('gate typecheck');
+        expect(await runHierarchyCli(['timings', '--since', 'soon'], overrides())).toBe(2);
+        expect(await runHierarchyCli(['timings', '--top', '0'], overrides())).toBe(2);
+        expect(String(err.mock.calls.at(-1)?.[0])).toContain('usage: timings');
+      } finally {
+        out.mockRestore();
+        err.mockRestore();
+      }
+    } finally {
+      if (prev === undefined) delete process.env.AI_SDLC_TIMINGS_FILE;
+      else process.env.AI_SDLC_TIMINGS_FILE = prev;
+    }
+  });
+
   it('webhook status and usage errors', async () => {
     expect(await runHierarchyCli(['webhook', 'status'], overrides())).toBe(0);
     expect(logs[0]).toMatch(/^webhook: off \(no secret\)\npersisted: no \(/);

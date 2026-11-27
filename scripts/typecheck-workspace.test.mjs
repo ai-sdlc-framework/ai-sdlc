@@ -193,7 +193,11 @@ describe('typecheck run', { skip: !hasTsc && 'typescript is not installed' }, ()
 describe('wiring', () => {
   it('the husky pre-push hook runs this runner once; pre-commit does not (AISDLC-838)', () => {
     const push = readFileSync(join(REPO, '.husky', 'pre-push'), 'utf-8');
-    assert.equal(push.match(/^node scripts\/typecheck-workspace\.mjs$/gm)?.length, 1);
+    // AISDLC-1414: the step runs through the `timed` gate-span wrapper.
+    assert.equal(
+      push.match(/^timed typecheck node scripts\/typecheck-workspace\.mjs$/gm)?.length,
+      1,
+    );
     assert.doesNotMatch(push, /^pnpm typecheck$/m);
     const commit = readFileSync(join(REPO, '.husky', 'pre-commit'), 'utf-8');
     assert.doesNotMatch(commit, /typecheck-workspace/);

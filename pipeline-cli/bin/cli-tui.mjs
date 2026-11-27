@@ -13,6 +13,8 @@
  * Phase 1 surface: Overview Mode with placeholder panes. Gated by
  * AI_SDLC_TUI=experimental (RFC-0023 §14).
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runTui } from '../dist/tui/index.js';
 
 runTui().catch((err) => {

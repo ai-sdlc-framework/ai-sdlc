@@ -60,29 +60,44 @@ fi
 # once, before anything else runs. (See docs/operations/incidents/.)
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 
+# AISDLC-1414: each gate below appends one `gate` span (name, duration, exit code) to the local
+# timings file (~/.ai-sdlc/timings.jsonl; `cli-hierarchy timings` reports them). The clock and the
+# recorder are `pipeline-cli/dist/cli/timing-span.js`; without a build, or on any recorder error,
+# the gate still runs and its exit code is kept, only the span is missing.
+TIMING_SPAN=pipeline-cli/dist/cli/timing-span.js
+timed() {
+  _gate="$1"
+  shift
+  _t0="$(node "$TIMING_SPAN" now 2>/dev/null || true)"
+  _rc=0
+  "$@" || _rc=$?
+  node "$TIMING_SPAN" gate "$_gate" "${_t0:-0}" "$_rc" >/dev/null 2>&1 || true
+  return "$_rc"
+}
+
 # Read git's pre-push stdin once so multiple gates can consume the range info.
 # (AISDLC-370: DoR gate uses the push range to walk touched task files.)
 PUSH_STDIN="$(cat || true)"
 
-node scripts/check-substrate-contract.mjs
+timed substrate-contract node scripts/check-substrate-contract.mjs
 # AISDLC-727: CI-skip magic-token gate (AISDLC-88). Was documented as enforced but never
 # called from any hook; it is a fast per-commit text scan of the push range, so it runs
 # first. Skip: AI_SDLC_SKIP_MARKER_GATE=1.
-printf '%s\n' "$PUSH_STDIN" | ./scripts/check-skip-ci-marker.sh
+printf '%s\n' "$PUSH_STDIN" | timed skip-ci-marker ./scripts/check-skip-ci-marker.sh
 # AISDLC-687: dark-code static scan (cheap). Skip:
 # AI_SDLC_SKIP_DARK_CODE_GATE=1.
-./scripts/check-dark-code-on-push.sh
+timed dark-code ./scripts/check-dark-code-on-push.sh
 # AISDLC-838: whole-workspace typecheck runs once, here, not on every commit.
-node scripts/typecheck-workspace.mjs
+timed typecheck node scripts/typecheck-workspace.mjs
 # AISDLC-773: protected knowledge stays out of the tracked root, and out of the PR body
 # when the pusher supplies it via AI_SDLC_PR_BODY_FILE (RFC-0053 OQ-1).
-printf '%s\n' "$PUSH_STDIN" | ./scripts/check-knowledge-scope.sh --push-stdin
+printf '%s\n' "$PUSH_STDIN" | timed knowledge-scope ./scripts/check-knowledge-scope.sh --push-stdin
 if [ -n "${AI_SDLC_PR_BODY_FILE:-}" ] && [ -f "$AI_SDLC_PR_BODY_FILE" ]; then
-  ./scripts/check-pr-body-protected.sh "$AI_SDLC_PR_BODY_FILE"
+  timed pr-body-protected ./scripts/check-pr-body-protected.sh "$AI_SDLC_PR_BODY_FILE"
 fi
 # AISDLC-1060: Claude plugin validator when a pushed commit touches ai-sdlc-plugin/.
 # CLI absent: one warning, CI is the gate. Skip: AI_SDLC_SKIP_PLUGIN_VALIDATE=1.
-if [ "${AI_SDLC_SKIP_PLUGIN_VALIDATE:-}" != "1" ]; then
+plugin_validate() {
   PLUGIN_TOUCHED=0
   while read -r _lref lsha _rref rsha; do
     [ -z "${lsha:-}" ] && continue
@@ -102,20 +117,23 @@ EOF_PUSH
       echo "warning: claude CLI not on PATH; skipping plugin validate (CI is the gate)" >&2
     fi
   fi
+}
+if [ "${AI_SDLC_SKIP_PLUGIN_VALIDATE:-}" != "1" ]; then
+  timed plugin-validate plugin_validate
 fi
 # Follow-up gate: completed task files added/modified in the push range must
 # track, decline, or say "(none)" for every follow-up. Runs before the fixup
 # orchestrator. Skip: AI_SDLC_SKIP_FOLLOWUP_GATE=1
-printf '%s\n' "$PUSH_STDIN" | ./scripts/check-followups-on-push.sh
+printf '%s\n' "$PUSH_STDIN" | timed followups ./scripts/check-followups-on-push.sh
 # AISDLC-386/837: the orchestrator handles squash, task-move and attestation-sign
 # in a single pass and exits 1 ONCE if a fixup commit was made. Skips:
 # AI_SDLC_SKIP_SQUASH_CHORES, AI_SDLC_SKIP_TASK_MOVE, AI_SDLC_SKIP_ATTESTATION_SIGN.
-printf '%s\n' "$PUSH_STDIN" | ./scripts/pre-push-fixups.sh
+printf '%s\n' "$PUSH_STDIN" | timed fixups ./scripts/pre-push-fixups.sh
 # AISDLC-1119: early copy of the CI patch-coverage gate. Runs test:coverage only in the
 # packages the diff touches, then scripts/check-pr-patch-coverage.mjs with the same threshold
 # file as CI (.ai-sdlc/patch-coverage.yaml). Skip: AI_SDLC_SKIP_PATCH_COVERAGE_GATE=1.
-node scripts/pre-push-patch-coverage.mjs
+timed patch-coverage node scripts/pre-push-patch-coverage.mjs
 
 # AISDLC-1123: deterministic CI governance checks over the push range. Skip:
 # AI_SDLC_SKIP_GOVERNANCE_GATE=1.
-printf '%s\n' "$PUSH_STDIN" | ./scripts/check-governance-on-push.sh
+printf '%s\n' "$PUSH_STDIN" | timed governance ./scripts/check-governance-on-push.sh

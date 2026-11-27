@@ -11,6 +11,8 @@
  *
  * Compiled entry lives in `dist/cli/reviews.js` after `pnpm build`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runReviewsCli } from '../dist/cli/reviews.js';
 
 runReviewsCli().catch((err) => {

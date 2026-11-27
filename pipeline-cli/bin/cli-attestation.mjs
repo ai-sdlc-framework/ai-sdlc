@@ -14,6 +14,8 @@
  * Compiled entry lives in `dist/cli/attestation.js` after `pnpm build`.
  * See docs/operations/transcript-management.md for retention + GC runbook.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runAttestationCli } from '../dist/cli/attestation.js';
 
 runAttestationCli().catch((err) => {

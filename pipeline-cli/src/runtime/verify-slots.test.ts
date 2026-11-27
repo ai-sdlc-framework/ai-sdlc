@@ -526,3 +526,82 @@ describe('bounded waits that name the holder (AISDLC-1413)', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('one wait span per acquisition (AISDLC-1414)', () => {
+  function recorder() {
+    const events: { detail: string[]; ended: (number | null)[] } = { detail: [], ended: [] };
+    return {
+      events,
+      startWaitSpan: () => ({
+        setDetail: (d: string) => events.detail.push(d),
+        end: (code: number | null) => events.ended.push(code),
+      }),
+    };
+  }
+
+  it('names what the wait was blocked on and ends with 0 once a slot is taken', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'verify-span-'));
+    const marker = join(dir, 'verify-slots', 'exclusive');
+    mkdirSync(marker, { recursive: true });
+    writeFileSync(join(marker, 'pid'), '77');
+    const r = recorder();
+    const slot = await acquireVerifySlot(dir, {
+      pid: 5,
+      isAlive: alive,
+      startTimeOf: () => null,
+      pollMs: 1,
+      log: () => {},
+      sleep: async () => rmSync(marker, { recursive: true, force: true }),
+      startWaitSpan: r.startWaitSpan,
+    });
+    expect(r.events.detail).toEqual(['the exclusive full-scope marker']);
+    expect(r.events.ended).toEqual([0]);
+    slot.release();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('ends with 1 when the wait is refused, and appends to the timings file by default', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'verify-span-'));
+    const file = join(dir, 'timings.jsonl');
+    const prev = process.env.AI_SDLC_TIMINGS_FILE;
+    process.env.AI_SDLC_TIMINGS_FILE = file;
+    try {
+      for (const n of [0, 1]) {
+        const s = join(dir, 'verify-slots', `slot-${n}`);
+        mkdirSync(s, { recursive: true });
+        writeFileSync(join(s, 'pid'), String(90 + n));
+      }
+      await expect(
+        acquireVerifySlot(dir, {
+          pid: 5,
+          isAlive: alive,
+          startTimeOf: () => null,
+          pollMs: 1,
+          log: () => {},
+          maxWaitMs: 0,
+        }),
+      ).rejects.toBeInstanceOf(VerifySlotWaitError);
+      const exclusive = await acquireVerifySlot(
+        mkdtempSync(join(dir, 'b-')),
+        { pid: 5, isAlive: alive, startTimeOf: () => null, log: () => {} },
+        { exclusive: true },
+      );
+      exclusive.release();
+      const spans = readFileSync(file, 'utf8')
+        .trim()
+        .split('\n')
+        .map((l) => JSON.parse(l));
+      expect(spans[0]).toMatchObject({
+        kind: 'wait',
+        name: 'verify-slot',
+        waitedOn: 'a free slot',
+        exitCode: 1,
+      });
+      expect(spans[1]).toMatchObject({ sub: 'exclusive', waitedOn: 'none', exitCode: 0 });
+    } finally {
+      if (prev === undefined) delete process.env.AI_SDLC_TIMINGS_FILE;
+      else process.env.AI_SDLC_TIMINGS_FILE = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

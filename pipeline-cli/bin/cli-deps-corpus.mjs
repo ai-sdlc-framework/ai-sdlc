@@ -11,6 +11,8 @@
  * the recommendation drives the AI_SDLC_DEPS_COMPOSITION default-on
  * promotion decision.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runDepsCorpusCli } from '../dist/cli/deps-corpus.js';
 
 runDepsCorpusCli().catch((err) => {

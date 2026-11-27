@@ -7,6 +7,8 @@
  *
  * See docs/operations/memory-dream.md.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runMemoryDreamCli } from '../dist/cli/memory-dream.js';
 
 runMemoryDreamCli().catch((err) => {

@@ -8,6 +8,8 @@
  * `.github/workflows/ai-sdlc-review.yml` can suppress noisy CHANGES_REQUESTED
  * when ALL three reviewers fail with credit-exhausted errors.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runClassifyBudgetCli } from '../dist/cli/classify-budget.js';
 
 runClassifyBudgetCli().catch((err) => {

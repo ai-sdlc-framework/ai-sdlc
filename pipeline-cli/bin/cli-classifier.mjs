@@ -15,6 +15,8 @@
  *                              level shared service for OQ-2 / OQ-3 / OQ-5 /
  *                              OQ-11 / RFC-0035 Stage C.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runClassifierCli } from '../dist/cli/classifier.js';
 
 runClassifierCli().catch((err) => {

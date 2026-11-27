@@ -10,6 +10,8 @@
  * the full contract and `docs/operations/dor-promotion.md` for how the
  * recommendation drives the AISDLC-115.9 promotion decision.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runDorCorpusCli } from '../dist/cli/dor-corpus.js';
 
 runDorCorpusCli().catch((err) => {

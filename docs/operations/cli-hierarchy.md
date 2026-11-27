@@ -1261,6 +1261,19 @@ cli-hierarchy gh-usage report --ledger /tmp/gh-quota
 
 The ledger feeds it: a failed call carries `error` (first stderr line, at most 300 characters) and `rateLimited` (`true` when the text says `rate limit exceeded`, `secondary rate limit` or `abuse detection`). At most once per hour per session the runner or the shim appends a `gh api rate_limit` line whose `quota` holds `remaining`, `limit` and `reset` for `core`, `graphql` and `search`; an explicit `gh api rate_limit` call counts as that hour's snapshot. The gate workflow's `pr-ready` job ends, on success and failure, with a step that writes the Actions token's core and graphql remaining, limit and reset plus the run id to the job summary and the `gh-quota-<run-id>-<attempt>` artifact, and names any failed job whose log contains `API rate limit exceeded` (`rateLimitedJobs`).
 
+### `timings`
+
+Where the time goes (AISDLC-1414). Every `pipeline-cli/bin/cli-*.mjs` command appends one `command` span when it exits (exit code, also on failure and on SIGINT or SIGTERM), each `.husky/pre-push` step appends one `gate` span, and each verify-slot acquisition appends one `wait` span naming what it waited on (`a free slot`, `the exclusive full-scope marker`, `running verifies to finish`, or `none`). All three share one record shape, one JSON line each in `~/.ai-sdlc/timings.jsonl`: `kind`, `name`, `sub` (the subcommand word only), `waitedOn`, `startedAt`, `durationMs`, `exitCode`, `signal`, `pid` and `taskId`. No argv beyond the subcommand word, environment value, credential or file contents is written; a label that is not a short plain phrase or looks like a secret is dropped. `AI_SDLC_TIMINGS_FILE` names another file (`off` disables recording); above 5 MB the file is renamed to `timings.jsonl.1` and a new one starts.
+
+`timings` prints, per command, gate and wait over the window, the count, failures, p50, p95 and max, then the slowest spans. `--since` takes `<n>d`, `<n>h` or `<n>m` (default `7d`); `--top` sets how many slowest spans are listed (default 10); `--json` prints the same as one JSON object.
+
+```bash
+cli-hierarchy timings
+cli-hierarchy timings --since 24h --top 20
+```
+
+A command still running after the slow threshold (`AI_SDLC_SLOW_SPAN_SECONDS`, default 120; `0` turns the notice off) prints `[ai-sdlc-timing] <command> still running after <elapsed>; current span: <span> (<elapsed>)` to stderr, then again every 60 seconds; the current span is the innermost one, such as a verify-slot wait. Commands that run until stopped by design (`cli-tui`, `cli-dispatch-supervisor`, `cli-hierarchy attach`, `executor-start` and `webhook`) get no notice. `status` lists the spans over the threshold that ended in the last hour (`slowSpans` in `--json`), and nothing when there are none.
+
 ### `hold`
 
 Pause the drain without silencing it (AISDLC-899). `hold` writes `<board>/.hold`

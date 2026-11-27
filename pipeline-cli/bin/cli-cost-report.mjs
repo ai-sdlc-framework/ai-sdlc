@@ -12,6 +12,8 @@
  *
  * See docs/operations/embedding-providers.md#unified-cost-report.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runCostReportCli } from '../dist/cli/cost-report.js';
 
 runCostReportCli().catch((err) => {

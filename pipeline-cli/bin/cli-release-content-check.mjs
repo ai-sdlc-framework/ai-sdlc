@@ -3,6 +3,8 @@
  * Bin shim for `cli-release-content-check` (AISDLC-717). Compiled entry lives in
  * `dist/cli/release-content-check.js` after `pnpm build`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runReleaseContentCheckCli } from '../dist/cli/release-content-check.js';
 
 runReleaseContentCheckCli()

@@ -4,6 +4,8 @@
  * Forwards to the compiled router. Compiled entry lives in
  * `dist/cli/merge-if-eligible.js` after `pnpm build`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runMergeIfEligibleCli } from '../dist/cli/merge-if-eligible.js';
 
 runMergeIfEligibleCli().catch((err) => {

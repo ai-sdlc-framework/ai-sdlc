@@ -2272,8 +2272,12 @@ export function checkParentCheckoutState(ctx: DoctorRunContext): DoctorCheckResu
 
 // ── Hook environment hygiene (AISDLC-1129) ─────────────────────────────
 
-/** A hook line at column 0 that starts a gate: a script, package runner, or piped script. */
-const HOOK_GATE_LINE = /^(\.\/|node\s|pnpm\s|npx\s|bash\s|sh\s|printf\s.*\|\s*\.\/)/;
+/**
+ * A hook line at column 0 that starts a gate: a script, package runner, or piped script, also
+ * when wrapped in the pre-push `timed <gate>` span recorder (AISDLC-1414).
+ */
+const HOOK_GATE_LINE =
+  /^(\.\/|node\s|pnpm\s|npx\s|bash\s|sh\s|timed\s|printf\s.*\|\s*(\.\/|timed\s))/;
 
 /** Lines of a hook up to (excluding) its first gate command. */
 export function hookPreamble(text: string): string {

@@ -9,6 +9,8 @@
  * decide on each push whether to skip / delta-only / full review. Composes
  * ON TOP of the AISDLC-141 classifier (cli-classify-pr).
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runIncrementalDecideCli } from '../dist/cli/incremental-decide.js';
 
 runIncrementalDecideCli().catch((err) => {

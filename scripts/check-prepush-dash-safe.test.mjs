@@ -106,3 +106,77 @@ test('pre-push option preamble runs clean under dash (POSIX sh) when available',
   }
   runPreambleUnder(dashPath);
 });
+
+/**
+ * AISDLC-1414: every pre-push step runs through `timed <gate> ...`, which records one gate span and
+ * keeps the step's exit code. The function is extracted and run under /bin/sh with a stub
+ * recorder, so the test needs no pipeline-cli build.
+ */
+function runTimed(body) {
+  const start = lines.findIndex((l) => /^TIMING_SPAN=/.test(l));
+  const end = lines.findIndex((l, i) => i > start && /^}\s*$/.test(l));
+  assert.ok(start >= 0 && end > start, 'timed() block not found in .husky/pre-push');
+  const dir = mkdtempSync(join(tmpdir(), 'prepush-timed-'));
+  try {
+    const log = join(dir, 'spans.log');
+    const stub = join(dir, 'stub.mjs');
+    writeFileSync(
+      stub,
+      `import { appendFileSync } from 'node:fs';\nconst a = process.argv.slice(2);\nif (a[0] === 'now') console.log('1000');\nelse appendFileSync(${JSON.stringify(log)}, a.join(' ') + '\\n');\n`,
+    );
+    const script = join(dir, 'run.sh');
+    writeFileSync(
+      script,
+      `set -eu\n${lines.slice(start, end + 1).join('\n')}\nTIMING_SPAN=${stub}\n${body}\n`,
+    );
+    let status = 0;
+    let stdout = '';
+    try {
+      stdout = execFileSync('/bin/sh', [script], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (e) {
+      status = e.status;
+      stdout = e.stdout;
+    }
+    let spans = '';
+    try {
+      spans = readFileSync(log, 'utf-8');
+    } catch {
+      spans = '';
+    }
+    return { status, stdout, spans: spans.trim().split('\n').filter(Boolean) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('timed records one gate span per step and keeps the exit code (AISDLC-1414)', () => {
+  const r = runTimed(
+    "printf 'x\\n' | timed piped cat\ntimed ok true\ntimed failing sh -c 'exit 4' || echo rc=$?\ntimed stop false\necho NOT_REACHED",
+  );
+  assert.equal(r.status, 1, 'a failing gate still fails the hook');
+  assert.match(r.stdout, /^x$/m, 'stdin reaches the piped gate');
+  assert.match(r.stdout, /rc=4/);
+  assert.doesNotMatch(r.stdout, /NOT_REACHED/);
+  assert.deepEqual(
+    r.spans.map((s) =>
+      s
+        .split(' ')
+        .filter((_, i) => i !== 2)
+        .join(' '),
+    ),
+    ['gate piped 0', 'gate ok 0', 'gate failing 4', 'gate stop 1'],
+  );
+});
+
+test('every pre-push gate step is timed (AISDLC-1414)', () => {
+  const untimed = lines.filter((l) => {
+    const s = l.trim();
+    if (s.startsWith('#') || !/scripts\/[\w.-]+\.(sh|mjs)/.test(s)) return false;
+    return !/\btimed [a-z-]+ /.test(s);
+  });
+  assert.deepEqual(untimed, [], `untimed pre-push steps: ${untimed.join('\n')}`);
+  assert.match(hookSource, /timed plugin-validate plugin_validate/);
+});

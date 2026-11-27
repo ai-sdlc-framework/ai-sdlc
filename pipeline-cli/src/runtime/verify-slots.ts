@@ -33,6 +33,8 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 
+import { formatDuration, startSpan, type SpanHandle } from '../telemetry/timings.js';
+
 export const VERIFY_SLOT_COUNT = 2;
 export const VERIFY_WORKERS_ALONE = 4;
 export const VERIFY_WORKERS_SHARED = 2;
@@ -110,6 +112,11 @@ export interface VerifySlotDeps {
   command?: string;
   /** Task id recorded for this holder (default: from the environment). */
   taskId?: string;
+  /**
+   * Opens the `wait` span of this acquisition (AISDLC-1414); default appends to the timings
+   * file. Its detail names what the wait is blocked on.
+   */
+  startWaitSpan?: () => Pick<SpanHandle, 'setDetail' | 'end'>;
 }
 
 /** Refusal of a slot wait: the limit elapsed, or only a stale holder blocks it. */
@@ -312,17 +319,7 @@ export function inspectVerifySlots(
   return [...(excl ? [excl] : []), ...slotHolders(boardDir, ctx)];
 }
 
-/** `2d 3h`, `1h 5m`, `4m 10s`, `12s`. */
-export function formatDuration(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const d = Math.floor(s / 86_400);
-  const h = Math.floor((s % 86_400) / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s % 60}s`;
-  return `${s}s`;
-}
+export { formatDuration };
 
 /** One-line identity of a holder: slot, pid, start time, command, task id, held-for, state. */
 export function describeHolder(h: SlotHolder, now: number): string {
@@ -379,7 +376,7 @@ function handle(dir: string, me: Me, ctx: Ctx, index: number, workers: number): 
 }
 
 /** Bounded wait with a periodic log naming what blocks it. */
-function waiter(ctx: Ctx, deps: VerifySlotDeps) {
+function waiter(ctx: Ctx, deps: VerifySlotDeps, span: Pick<SpanHandle, 'setDetail'>) {
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const poll = deps.pollMs ?? VERIFY_SLOT_POLL_MS;
   const log = deps.log ?? ((line: string) => console.error(line));
@@ -393,6 +390,7 @@ function waiter(ctx: Ctx, deps: VerifySlotDeps) {
    * once one is (the caller needs all of them gone).
    */
   return async (what: string, blockers: SlotHolder[], stuckWhen: 'all' | 'any') => {
+    span.setDetail(what);
     const t = ctx.now();
     const who = blockers.map((h) => describeHolder(h, t)).join('; ') || 'none';
     const stale = blockers.filter((h) => h.state === 'stale');
@@ -439,8 +437,33 @@ export async function acquireVerifySlot(
     heartbeatAt: 0,
   };
   mkdirSync(slotsDir(boardDir), { recursive: true });
-  const wait = waiter(ctx, deps);
-  if (options.exclusive) return acquireExclusive(boardDir, me, ctx, wait);
+  // One `wait` span per acquisition, naming what it waited on (`none` when a slot was free).
+  const span = deps.startWaitSpan
+    ? deps.startWaitSpan()
+    : startSpan('wait', 'verify-slot', {
+        now: ctx.now,
+        ...(options.exclusive ? { sub: 'exclusive' } : {}),
+      });
+  const wait = waiter(ctx, deps, span);
+  try {
+    const slot = options.exclusive
+      ? await acquireExclusive(boardDir, me, ctx, wait)
+      : await acquireShared(boardDir, me, ctx, wait, pid);
+    span.end(0);
+    return slot;
+  } catch (e) {
+    span.end(1);
+    throw e;
+  }
+}
+
+async function acquireShared(
+  boardDir: string,
+  me: Me,
+  ctx: Ctx,
+  wait: (what: string, blockers: SlotHolder[], stuckWhen: 'all' | 'any') => Promise<void>,
+  pid: number,
+): Promise<VerifySlot> {
   for (;;) {
     const excl = inspect(exclusiveDir(boardDir), 'exclusive', ctx);
     if (blocks(excl)) {

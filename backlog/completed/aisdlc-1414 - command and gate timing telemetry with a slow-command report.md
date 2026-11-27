@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1414
 title: 'Command and gate timing telemetry with a slow-command report'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-25'
 labels:
