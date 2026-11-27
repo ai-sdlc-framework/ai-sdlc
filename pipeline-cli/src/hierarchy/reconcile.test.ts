@@ -10,8 +10,11 @@ import { PR_STATES, type PrState } from './pr-state.js';
 import {
   actionCommands,
   commandExecutor,
+  convertedToDraftOf,
   decide,
   detectKind,
+  DRAFT_HOLD_NOTE,
+  DRAFT_TIMELINE_UNREAD_NOTE,
   DOCS_ACTIONS,
   allowedAuthors,
   gatherFacts,
@@ -1971,5 +1974,145 @@ describe('hold label (AISDLC-1386)', () => {
     expect(calls.find((a) => a[1] === 'list')!.join(' ')).toMatch(/,labels\b/);
     expect(facts.find((f) => f.prNumber === 5)?.held).toBe(true);
     expect(facts.find((f) => f.prNumber === 6)?.held).toBeUndefined();
+  });
+});
+
+describe('a PR converted back to draft is not flipped ready (AISDLC-1385)', () => {
+  const listed = [
+    {
+      number: 205,
+      title: 'feat: legal pages (AISDLC-9)',
+      headRefName: 'ai-sdlc/aisdlc-9-legal',
+      headRefOid: 'head205a',
+      isDraft: true,
+      isCrossRepository: false,
+      author: { login: 'me' },
+      mergeStateStatus: 'CLEAN',
+    },
+  ];
+  const timelineCalls: string[][] = [];
+  const runner =
+    (timeline: { status: number; stdout: string }): CommandRunner =>
+    (_f, args) => {
+      if (args[0] === 'api' && String(args[2] ?? '').endsWith('/timeline')) {
+        timelineCalls.push([...args]);
+        return { ...timeline, stderr: '' };
+      }
+      if (args[0] === 'api') return { status: 0, stdout: 'me', stderr: '' };
+      if (args[1] === 'list') return { status: 0, stdout: JSON.stringify(listed), stderr: '' };
+      if (args[1] === 'view') {
+        const rollup = [{ name: 'ai-sdlc/pr-ready', status: 'COMPLETED', conclusion: 'SUCCESS' }];
+        return { status: 0, stdout: JSON.stringify({ statusCheckRollup: rollup }), stderr: '' };
+      }
+      return { status: 0, stdout: '{}', stderr: '' };
+    };
+  beforeEach(() => {
+    timelineCalls.length = 0;
+    writeVerdict(board, {
+      schemaVersion: 'v1',
+      taskId: 'AISDLC-9',
+      outcome: 'success',
+      prNumber: 205,
+      completedAt: '2026-10-14T00:00:00.000Z',
+    } as never);
+  });
+  const tick = (run: CommandRunner, notifyPlanner?: (t: string) => void) => {
+    const executed: string[] = [];
+    const report = reconcile(gatherFacts(run, '/', board)!, {
+      boardDir: board,
+      execute: (ctx) => {
+        executed.push(ctx.action);
+        return { ran: true };
+      },
+      now: fixedNow,
+      ...(notifyPlanner ? { notifyPlanner } : {}),
+    });
+    return { report, executed };
+  };
+  const converted = {
+    status: 0,
+    stdout: 'convert_to_draft:someone-else\nconvert_to_draft:planner-bot\n',
+  };
+
+  it('AC1: holds a green approved draft a human converted back and routes the actor', () => {
+    const notify = vi.fn();
+    const { report, executed } = tick(runner(converted), notify);
+    expect(executed).not.toContain('flip-ready-takeover');
+    expect(report.acted).toEqual([
+      expect.objectContaining({ pr: 205, action: 'route-to-planner', note: DRAFT_HOLD_NOTE }),
+    ]);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0]![0]).toContain('converted to draft by planner-bot');
+    expect(readLanding(board, 205)).toMatchObject({
+      action: 'route-to-planner',
+      failingLine: 'converted to draft by planner-bot: not flipped ready',
+    });
+  });
+
+  it('AC2: the same draft with no convert-to-draft event is still flipped', () => {
+    const { executed } = tick(runner({ status: 0, stdout: '' }));
+    expect(executed).toEqual(['flip-ready-takeover']);
+    expect(timelineCalls).toHaveLength(1);
+    expect(timelineCalls[0]).toContain('--paginate');
+  });
+
+  it('AC3: a failed timeline read does not flip', () => {
+    const facts = gatherFacts(runner({ status: 1, stdout: '' }), '/', board)!;
+    expect(facts[0]).toMatchObject({ draftTimelineUnread: true });
+    expect(decide(facts[0]!)).toMatchObject({
+      action: 'none',
+      note: DRAFT_TIMELINE_UNREAD_NOTE,
+    });
+    const { executed, report } = tick(runner({ status: 1, stdout: '' }));
+    expect(executed).toEqual([]);
+    expect(report.acted).toEqual([]);
+  });
+
+  it('AC4: routes once per head sha, not every tick', () => {
+    const notify = vi.fn();
+    tick(runner(converted), notify);
+    const second = tick(runner(converted), notify);
+    tick(runner(converted), notify);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(second.report.acted.filter((a) => a.action === 'route-to-planner')).toEqual([]);
+    expect(second.executed).toEqual([]);
+    listed[0]!.headRefOid = 'head205b';
+    try {
+      tick(runner(converted), notify);
+    } finally {
+      listed[0]!.headRefOid = 'head205a';
+    }
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads no timeline for a draft that is not green', () => {
+    const red: CommandRunner = (f, args, o) =>
+      args[1] === 'view'
+        ? {
+            status: 0,
+            stdout: JSON.stringify({
+              statusCheckRollup: [
+                { name: 'ai-sdlc/pr-ready', status: 'IN_PROGRESS', conclusion: '' },
+              ],
+            }),
+            stderr: '',
+          }
+        : runner(converted)(f, args, o);
+    gatherFacts(red, '/', board);
+    expect(timelineCalls).toEqual([]);
+  });
+
+  it('convertedToDraftOf names the last actor, undefined with none, null on a failed read', () => {
+    const r =
+      (status: number, stdout: string): CommandRunner =>
+      () => ({
+        status,
+        stdout,
+        stderr: '',
+      });
+    expect(convertedToDraftOf(r(0, 'convert_to_draft:a\nconvert_to_draft:b\n'), '/', 1)).toBe('b');
+    expect(convertedToDraftOf(r(0, 'convert_to_draft:\n'), '/', 1)).toBe('unknown');
+    expect(convertedToDraftOf(r(0, 'me\n'), '/', 1)).toBeUndefined();
+    expect(convertedToDraftOf(r(1, ''), '/', 1)).toBeNull();
   });
 });
