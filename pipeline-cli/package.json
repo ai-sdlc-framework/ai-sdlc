@@ -147,6 +147,10 @@
     "./knowledge": {
       "types": "./dist/knowledge/index.d.ts",
       "import": "./dist/knowledge/index.js"
+    },
+    "./memory-dir": {
+      "types": "./dist/memory-dream/resolve-dir.d.ts",
+      "import": "./dist/memory-dream/resolve-dir.js"
     }
   },
   "publishConfig": {

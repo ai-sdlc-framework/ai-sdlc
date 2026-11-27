@@ -64,6 +64,8 @@ import {
   checkSchedulerAlive,
   checkNodeVersion,
   checkReviewConfig,
+  checkMemoryDirectory,
+  MEMORY_DIR_FIX_LINE,
   checkLeasePushPreflight,
   checkCiQueue,
   checkWorktreeHooks,
@@ -3352,5 +3354,34 @@ describe('prerequisite checks (AISDLC-1356)', () => {
     expect(ids.length).toBeGreaterThan(0);
     for (const n of named) expect(ids, n).toContain(n);
     expect(md).not.toContain('reviewer set');
+  });
+});
+
+describe('checkMemoryDirectory (AISDLC-1395)', () => {
+  it('warns, naming the resolved default folder and the fix line, when .claude/memory has no setting', () => {
+    mkdirSync(join(tmpDir, '.claude', 'memory'), { recursive: true });
+    const home = join(tmpDir, '__home__');
+    const r = checkMemoryDirectory(makeCtx(makeAdapters({ homeDir: () => home })));
+    expect(r.severity).toBe('warn');
+    expect(r.title).toContain(join(home, '.claude', 'projects'));
+    expect(r.remediation).toContain(MEMORY_DIR_FIX_LINE);
+    expect(r.remediation).toContain('.claude/settings.local.json');
+    expect(JSON.stringify(r.anonymizableEvidence)).not.toContain(tmpDir);
+  });
+
+  it('passes when settings.local.json sets autoMemoryDirectory to .claude/memory', () => {
+    mkdirSync(join(tmpDir, '.claude', 'memory'), { recursive: true });
+    writeFileSync(
+      join(tmpDir, '.claude', 'settings.local.json'),
+      JSON.stringify({ autoMemoryDirectory: '.claude/memory' }),
+    );
+    const r = checkMemoryDirectory(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('pass');
+  });
+
+  it('passes when there is no .claude/memory folder and no setting', () => {
+    const r = checkMemoryDirectory(makeCtx(makeAdapters()));
+    expect(r.severity).toBe('pass');
+    expect(DOCTOR_CHECKS.map((c) => c.id)).toContain('memory-directory');
   });
 });

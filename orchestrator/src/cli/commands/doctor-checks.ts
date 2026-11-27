@@ -66,6 +66,7 @@ import {
   resolveJudgmentProvider,
   SCHEMAS,
 } from '@ai-sdlc/reference';
+import { resolveMemoryDir } from '@ai-sdlc/pipeline-cli/memory-dir';
 import { now as clockNow } from '../../clock.js';
 import {
   RUNTIME_GITIGNORE_PATHS,
@@ -3764,6 +3765,41 @@ export function checkReviewConfig(ctx: DoctorRunContext): DoctorCheckResult {
   };
 }
 
+/** The line that keeps session memory in the project's `.claude/memory` (AISDLC-1395). */
+export const MEMORY_DIR_FIX_LINE = '"autoMemoryDirectory": ".claude/memory"';
+
+/**
+ * A project that keeps memory in `.claude/memory` must point sessions there
+ * through `autoMemoryDirectory`; without it they silently write to the
+ * harness default under the home folder (AISDLC-1395). Resolution reuses the
+ * rule sessions follow (`resolveMemoryDir`, AISDLC-729).
+ */
+export function checkMemoryDirectory(ctx: DoctorRunContext): DoctorCheckResult {
+  const id = 'memory-directory';
+  const projectMemory = resolve(ctx.projectDir, '.claude', 'memory');
+  if (!ctx.adapters.exists(projectMemory)) {
+    return {
+      id,
+      severity: 'pass',
+      title: 'no .claude/memory folder: nothing to point sessions at',
+    };
+  }
+  const resolved = resolveMemoryDir({
+    projectDir: ctx.projectDir,
+    home: ctx.adapters.homeDir(),
+  });
+  if (resolve(resolved) === projectMemory) {
+    return { id, severity: 'pass', title: 'sessions resolve memory to .claude/memory' };
+  }
+  return {
+    id,
+    severity: 'warn',
+    title: `.claude/memory exists but sessions resolve memory to ${resolved} (autoMemoryDirectory is not set to it)`,
+    remediation: `Add \`${MEMORY_DIR_FIX_LINE}\` to .claude/settings.local.json.`,
+    anonymizableEvidence: { projectMemoryPresent: true, resolvesToProject: false },
+  };
+}
+
 // ── Registry ──────────────────────────────────────────────────────────────
 
 /**
@@ -4056,6 +4092,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       'Whether review-config.yaml is present or the built-in default applies (AISDLC-1356).',
     run: checkReviewConfig,
+  },
+  {
+    id: 'memory-directory',
+    description:
+      'A project with .claude/memory sets autoMemoryDirectory so sessions write there (AISDLC-1395).',
+    run: checkMemoryDirectory,
   },
 ];
 
