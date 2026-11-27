@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1464
 title: "Rotation and cross-session delivery stop typing into panes and stop reporting false success (DEC-0455 a)"
-status: In Progress
+status: Done
 priority: high
 labels:
   - pipeline-cli
@@ -51,10 +51,60 @@ Under "a relayed chat message alone is never authority", a session must be able 
 Open question for the implementer to answer from the code, not decide: whether a `rotate` typed while an AskUserQuestion dialog is open can filter or select an option. Report the finding in the PR body; no evidence it happened.
 
 ## Acceptance Criteria
-- [ ] #1 `cli-hierarchy send` never writes a raw line to a harness socket; with no real delivery path it exits non-zero naming SendMessage and `$.session.send`; no pane fallback. Vitest covers both.
-- [ ] #2 `sendRotate` never types a bare control word into a pane; a vitest case with a roster entry lacking a socket address asserts zero `send-keys` calls and that the rotate request is still recorded.
-- [ ] #3 Planner and executor receive handlers consume a rotate request from dispatch via `$.session.send` and return `{ consumed: 'hierarchy:rotate' }`; a rotate with no `DISPATCH_NAME` sender never reaches the model as operator input. Tests cover both.
-- [ ] #4 Every module rotation attempt appends one line to the rotation log (role, session, tokens, handoff ok, clear ok, fallback); tested.
-- [ ] #5 `cli-hierarchy status` shows per session the last delivery receipt and the last logged rotation; a session whose socket exists but returns no receipt is shown unhealthy. Tested.
-- [ ] #6 `docs/operations/cli-hierarchy.md` and `ai-sdlc-plugin/commands/planner.md` describe the delivery channels and what a session does with a rotate request; PR body lists every remaining `send-keys` site and its owner (AISDLC-1465 or an RFC-0058 dated exception), and reports whether a pane-typed word can affect an open AskUserQuestion dialog.
-- [ ] #7 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] #1 `cli-hierarchy send` never writes a raw line to a harness socket; with no real delivery path it exits non-zero naming SendMessage and `$.session.send`; no pane fallback. Vitest covers both.
+- [x] #2 `sendRotate` never types a bare control word into a pane; a vitest case with a roster entry lacking a socket address asserts zero `send-keys` calls and that the rotate request is still recorded.
+- [x] #3 Planner and executor receive handlers consume a rotate request from dispatch via `$.session.send` and return `{ consumed: 'hierarchy:rotate' }`; a rotate with no `DISPATCH_NAME` sender never reaches the model as operator input. Tests cover both.
+- [x] #4 Every module rotation attempt appends one line to the rotation log (role, session, tokens, handoff ok, clear ok, fallback); tested.
+- [x] #5 `cli-hierarchy status` shows per session the last delivery receipt and the last logged rotation; a session whose socket exists but returns no receipt is shown unhealthy. Tested.
+- [x] #6 `docs/operations/cli-hierarchy.md` and `ai-sdlc-plugin/commands/planner.md` describe the delivery channels and what a session does with a rotate request; PR body lists every remaining `send-keys` site and its owner (AISDLC-1465 or an RFC-0058 dated exception), and reports whether a pane-typed word can affect an open AskUserQuestion dialog.
+- [x] #7 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+
+## Final Summary
+
+## Summary
+
+Rebased the existing AISDLC-1464 work onto main, which now includes the AISDLC-1448 change that clears a session only after its handoff is proven. The work: `cli-hierarchy send` exits 1 and names SendMessage and $.session.send, with no socket write and no pane fallback; a rotate request is only recorded and dispatch delivers it through $.session.send; a bare `rotate` with no sender never reaches the model; every module rotation attempt, proven or unproven, appends to log/rotations.jsonl; receiving modules write receipts and status reports delivery health from them. Also fixed the minor review findings and added RFC-0058 interim exceptions, dated 2026-11-27, for the pane paths that remain.
+
+## Changes
+
+- ai-sdlc-plugin/commands/planner.md
+- ai-sdlc-plugin/hooks/hierarchy/dispatch.ts
+- ai-sdlc-plugin/hooks/hierarchy/executor.ts
+- ai-sdlc-plugin/hooks/hierarchy/planner.ts
+- ai-sdlc-plugin/hooks/hierarchy/register.tsx
+- ai-sdlc-plugin/mods/tests/hierarchy-dispatch.test.ts
+- ai-sdlc-plugin/mods/tests/hierarchy.test.ts
+- docs/operations/cli-hierarchy.md
+- pipeline-cli/src/cli/hierarchy.test.ts
+- pipeline-cli/src/cli/hierarchy.ts
+- pipeline-cli/src/hierarchy/delivery.test.ts
+- pipeline-cli/src/hierarchy/delivery.ts
+- pipeline-cli/src/hierarchy/hierarchy.test.ts
+- pipeline-cli/src/hierarchy/index.ts
+- pipeline-cli/src/hierarchy/send-resolve.ts
+- pipeline-cli/src/hierarchy/status.ts
+- spec/rfcs/RFC-0058-session-hierarchy-on-mods.md
+
+## Design decisions
+
+This was a second round. PR #3161 already existed and showed DIRTY against main, so I rebased onto e6f8f3b60. The conflicts were with the AISDLC-1448 handoff-proof rotation, in executor.ts rotate(), planner.ts imports, sendRotate/requestRotate in cli/hierarchy.ts, the cli-hierarchy.md over-context section and one hierarchy.test.ts block. I resolved them by keeping main's proof flow throughout. rotate() no longer writes the handoff itself, so its log line records handoffOk:true; alertUnproven now also logs a line with handoffOk:false and clearOk:false; requestRotate keeps the roster guard and calls main's markRotation. The plugin rotation-log tests were rewritten to run through the cliFake proof flow. Please re-check those resolutions, because the earlier review approvals were for the old commit 49da961bc.
+
+Review findings fixed: a receipt counts as received only when its sender matches the send; receipts are written only for dispatch-sent messages and never by dispatch itself; status replaces control characters in board text before printing; a comment explains why rotateSent is kept in memory; and there are new tests for the dispatch self-skip, unsafe names, and clear followed by tick.
+
+AC6 needs each kept send-keys site to have an owner. AISDLC-1465 covers only rotation, so I added a dated 2026-11-27 interim-exception subsection to the Signed Off RFC-0058 (under 'Upstream gaps') for brief-notify, escalation-chain, tmux sendExit and the exit-dialog answer; tmux sendLine stays with AISDLC-1465. The operator should confirm that RFC edit.
+
+One gap is open: planner-notify.ts (createSocketSender) still writes a raw line to the planner's socket and can report success when nothing arrived. It is outside AC1. The docs now say so, and no task was filed (AISDLC-308). The PR body records the AskUserQuestion finding: the old pane sender typed text and then Enter without checking pane state, so it could have submitted a highlighted option; there is no evidence it did.
+
+## Verification
+
+- `pnpm build` — passed (dashboard build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (240 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+
+- 3 reviews approved (harness: code-reviewer=claude-code, test-reviewer=claude-code, security-reviewer=claude-code; harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+
+- AISDLC-1465
+- declined: planner-notify raw socket writer needs a new task, which the operator must authorize per AISDLC-308
