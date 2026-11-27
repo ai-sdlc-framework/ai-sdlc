@@ -311,6 +311,8 @@ registerKnowledgeBackend('supplies-ontology', (_cfg, ctx) => {
       return { path: 'x.md', created: true };
     },
     update: () => null,
+    create: () => Promise.resolve({ id: 'x', path: '', created: false, status: 'rejected' }),
+    write: () => Promise.resolve({ id: 'x', path: '', created: false, status: 'rejected' }),
     list: () => [],
     listRaw: (scope) =>
       (scope === 'tracked' ? supplied.tracked : []) as ReturnType<KnowledgeStore['listRaw']>,
