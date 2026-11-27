@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1389
 title: 'resolve-pipeline-cli.sh never exits 1 without saying why'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-22'
 labels:
