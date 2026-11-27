@@ -446,6 +446,24 @@ describe('cli-file', () => {
     const file = (events: Array<Record<string, unknown>>, id = 'DEC-0001') =>
       fileDecision(repo, id, { taskId: 'X-1', pr: false, events }, deps);
 
+    it('AISDLC-1452: commits the evidence ledger in the same filing branch', () => {
+      commitMain(EVENT_LOG_REL, opened({ options: [{ id: 'a' }] }));
+      const rel = '.ai-sdlc/decisions/evidence/DEC-0001.json';
+      const r = fileDecision(
+        repo,
+        'DEC-0001',
+        {
+          taskId: 'X-1',
+          pr: false,
+          events: [answered('DEC-0001', 'a')],
+          files: [{ rel, content: '{"ledger":1}' }],
+        },
+        deps,
+      );
+      expect(sh(remote, 'show', `${r.branch}:${rel}`)).toBe('{"ledger":1}');
+      expect(sh(remote, 'show', `${r.branch}:${EVENT_LOG_REL}`)).toContain('"operator-answered"');
+    });
+
     it('files an answer for a decision-opened only on origin/main; parent store untouched', () => {
       commitMain(EVENT_LOG_REL, opened({ options: [{ id: 'a' }] }));
       const r = file([answered('DEC-0001', 'a')]);

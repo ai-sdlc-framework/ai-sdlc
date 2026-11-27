@@ -15,6 +15,7 @@ import { readEventLogText, resolveEventLogPath } from '../decisions/event-log.js
 import type { Decision } from '../decisions/decision-record.js';
 import type { ChainDeps } from '../decisions/escalation-chain.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
+import { withEvidence } from '../__test-helpers/evidence-ledger-fixture.js';
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
 
@@ -66,7 +67,7 @@ afterEach(() => {
 });
 
 function setArgv(...args: string[]): void {
-  process.argv = ['node', 'cli-decisions', '--work-dir', tmp, ...args];
+  process.argv = ['node', 'cli-decisions', '--work-dir', tmp, ...withEvidence(tmp, args)];
 }
 
 function stdoutJson<T = unknown>(): T {

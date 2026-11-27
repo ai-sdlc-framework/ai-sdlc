@@ -146,6 +146,14 @@ describe('scenario loader (AISDLC-1079)', () => {
     expect(() => parseScenario('{')).toThrow('not valid JSON');
     expect(() => loadScenario('/no/such/file.json')).toThrow('not found');
   });
+
+  it('rejects a blank evidence path (AISDLC-1452)', () => {
+    const raw = JSON.parse(readFileSync(SCENARIO, 'utf-8')) as {
+      decisions: { evidence?: string }[];
+    };
+    raw.decisions[0]!.evidence = ' ';
+    expect(() => parseScenario(JSON.stringify(raw))).toThrow('decisions[0].evidence');
+  });
 });
 
 describe('demo run (AISDLC-1079)', () => {
@@ -175,6 +183,20 @@ describe('demo run (AISDLC-1079)', () => {
     expect(await runDemo('run', { scenario: '/missing.json', out: tmp() }, h.deps)).toBe(2);
     expect(await runDemo('bogus', {}, h.deps)).toBe(2);
     expect(await runDemo(undefined, {}, h.deps)).toBe(2);
+  });
+
+  it('passes a scenario ledger to add as --evidence (AISDLC-1452)', async () => {
+    const raw = JSON.parse(readFileSync(SCENARIO, 'utf-8')) as {
+      decisions: { evidence?: string }[];
+    };
+    raw.decisions[0]!.evidence = 'ledger.json';
+    const dir = tmp();
+    const file = path.join(dir, 'scenario.json');
+    writeFileSync(file, JSON.stringify(raw));
+    const h = harness();
+    expect(await runDemo('run', { scenario: file, out: tmp(), inner: 'true' }, h.deps)).toBe(0);
+    expect(h.calls[0]!.slice(-2)).toEqual(['--evidence', 'ledger.json']);
+    expect(h.calls[1]).not.toContain('--evidence');
   });
 
   it('executes the commands in order and writes six beats', async () => {

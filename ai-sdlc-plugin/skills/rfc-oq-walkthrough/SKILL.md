@@ -45,13 +45,14 @@ Edits to make in a single batched pass:
 4. **§Configuration Schema** (if the RFC has one): add any new config fields the resolutions introduced. Mark them as `# NEW (re-walkthrough)` so future readers can see what came from this pass.
 5. **§Revision History**: add a new row capturing every refinement, with bullet-per-OQ rationale. This is the audit trail that survives forever.
 
-The Resolution block per OQ has a load-bearing shape:
+The Resolution block per OQ has a load-bearing shape. The `Evidence:` path sits on the marker line or the line right after it, and the ledger is in the same PR or already on main: the governance gate fails the marker otherwise (AISDLC-1452).
 
 ```markdown
 **Resolution (YYYY-MM-DD, full rubric):** **<recommendation summary>.**
+Evidence: `.ai-sdlc/decisions/evidence/<DEC-NNNN or ref>.json` (<key claims
+and their sources, from the OQ's passing ledger, decision-rubric step 3>).
 Requirement: <who set it and why it still holds, or why deletion was
-rejected>. Evidence: <key claims and their sources, from the OQ's passing
-ledger (decision-rubric step 3)>. **Substantive gaps in v0.X surfaced by
+rejected>. **Substantive gaps in v0.X surfaced by
 re-walkthrough:** <list>. **Refinement over v0.X:** <concrete spec
 change>. **Counter-argument:** "<steel-manned objection>" Rebuttal:
 <response>. **Selected over <other options> because <reason>.**

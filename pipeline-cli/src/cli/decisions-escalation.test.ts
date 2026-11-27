@@ -26,6 +26,7 @@ import type { DispatchManifest } from '../dispatch/types.js';
 import type { HierarchyEvent } from '../hierarchy/emit.js';
 import type { RosterEntry } from '../hierarchy/types.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
+import { withEvidence } from '../__test-helpers/evidence-ledger-fixture.js';
 
 let tmp: string;
 let boardDir: string;
@@ -164,7 +165,7 @@ afterEach(() => {
 });
 
 async function run(h: Harness, ...args: string[]): Promise<void> {
-  process.argv = ['node', 'cli-decisions', '--work-dir', tmp, ...args];
+  process.argv = ['node', 'cli-decisions', '--work-dir', tmp, ...withEvidence(tmp, args)];
   await buildDecisionsCli({ chain: () => h.deps }).parseAsync();
 }
 

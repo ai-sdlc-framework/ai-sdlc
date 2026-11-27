@@ -22,8 +22,8 @@
 import type { DecisionEvent } from '../decisions/decision-record.js';
 import { fileDecision } from './file.js';
 import { resolveCatalogRoot, resolveWriteRoot } from '../decisions/catalog-root.js';
-import { existsSync, readFileSync } from 'node:fs';
-import { join as joinPath } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join as joinPath } from 'node:path';
 import { createInterface, type Interface as ReadlineInterface } from 'node:readline';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -116,9 +116,11 @@ import {
 } from '../decisions/governance-fallback.js';
 import { migrateLegacyEventLog, resolveEventsDir } from '../decisions/event-log.js';
 import {
+  DECISION_EVIDENCE_DIR,
   checkEvidenceLedger,
   draftSha256,
-  formatEvidenceFailures,
+  formatEvidenceRefusal,
+  loadAndCheckLedger,
 } from '../decisions/evidence-ledger.js';
 import {
   assertDecisionIdFree,
@@ -185,6 +187,33 @@ function requireAnswerAttribution(by: unknown, rationale: unknown): void {
   if (typeof rationale !== 'string' || rationale.trim() === '') {
     fail('--rationale is required: say why this option was chosen');
   }
+}
+
+/** Repo-relative path of a decision's filed evidence ledger (AISDLC-1452). */
+function decisionLedgerRel(decisionId: string): string {
+  return `${DECISION_EVIDENCE_DIR}/${decisionId}.json`;
+}
+
+/**
+ * AISDLC-1452 decision gate: the ledger at `ledgerPath` must pass the
+ * AISDLC-1451 checker, or the command refuses, naming the failing entries and
+ * the re-check command. Returns the ledger text to store with the decision.
+ */
+function requirePassingLedger(what: string, ledgerPath: string, repoRoot: string): string {
+  const r = loadAndCheckLedger(ledgerPath, { repoRoot });
+  if (!r.ok || r.text === null) {
+    fail(
+      `${what}: refused, no passing evidence ledger. ${formatEvidenceRefusal(ledgerPath, r.failures)}`,
+    );
+  }
+  return r.text;
+}
+
+/** Store a ledger as the decision's local copy (not --file: the next answer reads it there). */
+function storeLedgerLocally(workDir: string, decisionId: string, text: string): void {
+  const dest = joinPath(workDir, decisionLedgerRel(decisionId));
+  mkdirSync(dirname(dest), { recursive: true });
+  writeFileSync(dest, text);
 }
 
 // ── Interactive prompt helper ────────────────────────────────────────────────
@@ -639,6 +668,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
     decisionId: string,
     events: DecisionEvent[],
     persist = false,
+    files: Array<{ rel: string; content: string }> = [],
   ): { path: string; filed: boolean } => {
     if (argv.file) {
       const taskId =
@@ -650,6 +680,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           taskId,
           pr: Boolean(argv.pr),
           events: events as unknown as Array<Record<string, unknown>>,
+          ...(files.length > 0 ? { files } : {}),
         });
         return { path: r.prUrl ?? r.branch, filed: true };
       } catch (e) {
@@ -930,6 +961,11 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             describe:
               'AISDLC-873 — one-line standing rule; once answered and on main it renders into the dispatch and executor prompts.',
           })
+          .option('evidence', {
+            type: 'string',
+            describe:
+              'AISDLC-1452 — path of the passing evidence ledger (cli-decisions evidence check) behind this decision. Required unless --source subagent-escalation; stored as .ai-sdlc/decisions/evidence/DEC-NNNN.json (in the filing PR with --file).',
+          })
           .option('format', {
             type: 'string',
             choices: ['json', 'text'] as const,
@@ -978,6 +1014,18 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           }
         } catch (err) {
           fail((err as Error).message);
+        }
+
+        // AISDLC-1452 decision gate: a decision rests on a passing evidence ledger. An
+        // escalation is the question, not the answer, so it is the one exemption.
+        let ledgerText: string | null = null;
+        if (inputs.source !== 'subagent-escalation') {
+          if (typeof argv.evidence !== 'string' || argv.evidence.trim() === '') {
+            fail(
+              'add: refused, --evidence <ledger> is required (a passing evidence ledger from the decision-rubric research step; only --source subagent-escalation is exempt). Check one with: node pipeline-cli/bin/cli-decisions.mjs evidence check <ledger>',
+            );
+          }
+          ledgerText = requirePassingLedger('add', argv.evidence, String(argv['work-dir']));
         }
 
         const decisionId =
@@ -1036,7 +1084,12 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           now: eventNow,
         });
 
-        const filed = recordEvents(argv, workDir, decisionId, [event], true);
+        const ledgerFiles =
+          ledgerText !== null && argv.file
+            ? [{ rel: decisionLedgerRel(decisionId), content: ledgerText }]
+            : [];
+        const filed = recordEvents(argv, workDir, decisionId, [event], true, ledgerFiles);
+        if (ledgerText !== null && !argv.file) storeLedgerLocally(workDir, decisionId, ledgerText);
         const path = filed.path;
         const decision = filed.filed ? null : projectDecision(decisionId, { workDir });
 
@@ -1940,6 +1993,11 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             type: 'string',
             describe: 'Who answered: operator identifier or session name (required; AISDLC-1405).',
           })
+          .option('evidence', {
+            type: 'string',
+            describe:
+              'AISDLC-1452 — passing evidence ledger for this decision, when none is stored at .ai-sdlc/decisions/evidence/DEC-NNNN.json yet; it is stored there (in the filing PR with --file).',
+          })
           .option('format', {
             type: 'string',
             choices: ['json', 'text'] as const,
@@ -1976,13 +2034,32 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           const refusal = answerRefusal(tier, who.caller, who.error);
           if (refusal) fail(`cannot answer ${id}: ${refusal}`);
         }
+        // AISDLC-1452 decision gate: no answer without a passing ledger, for every
+        // decision (opened before this gate too), operator and autonomous answers alike.
+        const catalogRoot = String(argv['work-dir']);
+        const supplied = typeof argv.evidence === 'string' && argv.evidence.trim() !== '';
+        // `add` stores the ledger under the write root (the active task's worktree
+        // from a Pattern C parent), so read it there first, then the catalog root.
+        const stored = [workDir, catalogRoot].map((d) => joinPath(d, decisionLedgerRel(id)));
+        const ledgerPath = supplied
+          ? String(argv.evidence)
+          : (stored.find((p) => existsSync(p)) ?? stored[stored.length - 1]!);
+        const ledgerText = requirePassingLedger(`answer ${id}`, ledgerPath, catalogRoot);
         const evt = makeOperatorAnsweredEvent({
           decisionId: id,
           chosenOptionId: optionId,
           ...(typeof argv.rationale === 'string' ? { rationale: String(argv.rationale) } : {}),
           ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
         });
-        recordEvents(argv, workDir, id, [evt], true);
+        recordEvents(
+          argv,
+          workDir,
+          id,
+          [evt],
+          true,
+          supplied && argv.file ? [{ rel: decisionLedgerRel(id), content: ledgerText }] : [],
+        );
+        if (supplied && !argv.file) storeLedgerLocally(workDir, id, ledgerText);
         const after = chain && decision ? afterAnswer(chain, decision) : undefined;
 
         if (String(argv.format) === 'json') {
@@ -3023,7 +3100,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
               else if (result.ok) emitText(`evidence ledger passes: ${ledgerPath}`);
               if (!result.ok) {
                 process.stderr.write(
-                  `[cli-decisions] evidence ledger fails: ${ledgerPath}\n${formatEvidenceFailures(result.failures)}\n`,
+                  `[cli-decisions] ${formatEvidenceRefusal(ledgerPath, result.failures)}\n`,
                 );
                 process.exit(1);
               }

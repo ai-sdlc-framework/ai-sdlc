@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildDecisionsCli } from './decisions.js';
 import { makeDecisionOpenedEvent, appendDecisionEvent } from '../decisions/event-log.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
+import { withEvidence } from '../__test-helpers/evidence-ledger-fixture.js';
 
 const T = 60_000;
 const git = (cwd: string, ...args: string[]): string =>
@@ -101,7 +102,7 @@ afterEach(() => {
 });
 
 async function run(...args: string[]): Promise<void> {
-  process.argv = ['node', 'cli-decisions', '--work-dir', parent, ...args];
+  process.argv = ['node', 'cli-decisions', '--work-dir', parent, ...withEvidence(parent, args)];
   await buildDecisionsCli().parseAsync();
 }
 

@@ -1040,7 +1040,9 @@ jobs:
   #   - a new RFC Open Questions resolution marker fails unless an APPROVED
   #     review on the head SHA from a lifecycle-approvers.yaml login (read from
   #     the BASE ref) other than the PR author exists (AISDLC-298); reviews are
-  #     fetched here with GITHUB_TOKEN, never taken from PR-controlled text
+  #     fetched here with GITHUB_TOKEN, never taken from PR-controlled text;
+  #     the marker must also cite a passing evidence ledger (AISDLC-1452,
+  #     checked by pipeline-cli/attestation-core, part of the trusted copy)
   #   (the reviewer-set check moved to the verdict-check job, RFC-0061 Phase 2)
   # Deterministic, no install, no LLM. The checker scripts run from the BASE
   # commit against the head tree so a PR cannot weaken its own checks; while

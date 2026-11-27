@@ -640,12 +640,27 @@ process.stdout.write(JSON.stringify({ status: r.status, stdout: r.stdout }));
     );
   });
 
-  it('allows in the planner and outside the hierarchy', () => {
+  it('allows a Preference question in the planner and outside the hierarchy', () => {
     for (const role of ['planner', 'none']) {
-      const r = hook(role, PLAIN);
+      const r = hook(role, ask('Which name reads better?', { header: 'Preference' }));
       assert.equal(r.stdout, '');
       assert.equal(r.log[0].outcome, 'allow');
+      assert.deepEqual(
+        r.log.filter((x) => x.check === 'evidence').map((x) => [x.outcome, x.questionText]),
+        [['preference', 'Which name reads better?']],
+      );
     }
+  });
+
+  it('refuses a question with no evidence ledger (AISDLC-1452)', () => {
+    const r = hook('planner', PLAIN);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(
+      out.hookSpecificOutput.permissionDecisionReason,
+      /no question goes out on an unchecked fact[\s\S]*Evidence: <ledger path>/,
+    );
+    assert.equal(r.log.at(-1).outcome, 'deny');
   });
 
   it('the kill switch allows an executor and writes no log', () => {
