@@ -2139,6 +2139,8 @@ describe('AISDLC-463 — resolve subcommand', () => {
     return id;
   }
 
+  const ATTRIBUTION = ['--by', 'op@example.com', '--rationale', 'r'];
+
   it('AC#3 + AC#7 — resolves and writes a full audit event (resolver + option + rationale + context)', async () => {
     const id = await seed('--context-ref', 'pr:42');
     setArgv(
@@ -2172,7 +2174,7 @@ describe('AISDLC-463 — resolve subcommand', () => {
 
   it('AC#7 — falls back to the decision spec contextRef when --context-ref is omitted', async () => {
     const id = await seed('--context-ref', 'AISDLC-463');
-    setArgv('resolve', id, '--option', 'opt-a', '--format', 'json');
+    setArgv('resolve', id, '--option', 'opt-a', ...ATTRIBUTION, '--format', 'json');
     await buildDecisionsCli().parseAsync();
     const lines = readEventLogText(tmp).trim().split('\n');
     const evt = JSON.parse(lines.at(-1) as string);
@@ -2181,19 +2183,33 @@ describe('AISDLC-463 — resolve subcommand', () => {
 
   it('AC#3 — rejects an option not declared on the decision', async () => {
     const id = await seed();
-    setArgv('resolve', id, '--option', 'opt-zzz', '--format', 'json');
+    setArgv('resolve', id, '--option', 'opt-zzz', ...ATTRIBUTION, '--format', 'json');
     await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
     expect(stderrText()).toMatch(/is not declared on/);
   });
 
   it('AC#3 — refuses to resolve an already-resolved decision', async () => {
     const id = await seed();
-    setArgv('resolve', id, '--option', 'opt-a', '--format', 'json');
+    setArgv('resolve', id, '--option', 'opt-a', ...ATTRIBUTION, '--format', 'json');
     await buildDecisionsCli().parseAsync();
     stdoutChunks = [];
-    setArgv('resolve', id, '--option', 'opt-b', '--format', 'json');
+    setArgv('resolve', id, '--option', 'opt-b', ...ATTRIBUTION, '--format', 'json');
     await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
     expect(stderrText()).toMatch(/already answered/);
+  });
+
+  it.each([
+    ['--by', ['--rationale', 'r']],
+    ['--rationale', ['--by', 'op@example.com']],
+    ['a blank --by', ['--by', ' ', '--rationale', 'r']],
+    ['a blank --rationale', ['--by', 'op@example.com', '--rationale', '']],
+  ])('AISDLC-1405: refuses a resolve without %s and writes nothing', async (_n, extra) => {
+    const id = await seed();
+    const before = readEventLogText(tmp);
+    setArgv('resolve', id, '--option', 'opt-a', ...extra, '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/is required/);
+    expect(readEventLogText(tmp)).toBe(before);
   });
 });
 
@@ -2796,21 +2812,52 @@ describe('supersede subcommand (AISDLC-1162)', () => {
     expect(stderrText()).toMatch(/already answered/);
   });
 
-  it('AISDLC-1405: closes an answer that names no author (the DEC-0091 shape)', async () => {
-    const { appendDecisionEvent: append, makeOperatorAnsweredEvent: answered } =
-      await import('../decisions/event-log.js');
-    append(answered({ decisionId: 'DEC-0001', chosenOptionId: 'opt-a' }), { workDir: tmp });
-    setArgv('supersede', 'DEC-0001', '--by', 'DEC-0002', '--reason', 'x', '--format', 'json');
+  // AISDLC-1405 — the DEC-0091 shape: a decision with an autonomous fallback,
+  // answered with that fallback by an event naming no author and no rationale.
+  async function seedBareAnswer(chosenOptionId: string): Promise<void> {
+    const ev = await import('../decisions/event-log.js');
+    ev.appendDecisionEvent(
+      ev.makeDecisionOpenedEvent({
+        decisionId: 'DEC-0003',
+        source: 'ad-hoc',
+        scope: 'workspace',
+        summary: 'guard',
+        options: [
+          { id: 'opt-a', description: 'A' },
+          { id: 'opt-b', description: 'B' },
+        ],
+        autonomousFallbackOptionId: 'opt-a',
+      }),
+      { workDir: tmp },
+    );
+    ev.appendDecisionEvent(
+      ev.makeOperatorAnsweredEvent({ decisionId: 'DEC-0003', chosenOptionId }),
+      {
+        workDir: tmp,
+      },
+    );
+  }
+
+  it('AISDLC-1405: closes an unattributed fallback answer (the DEC-0091 shape)', async () => {
+    await seedBareAnswer('opt-a');
+    setArgv('supersede', 'DEC-0003', '--by', 'DEC-0002', '--reason', 'x', '--format', 'json');
     await buildDecisionsCli().parseAsync();
     expect(stdoutJson<{ ok: boolean }>().ok).toBe(true);
     stdoutChunks = [];
-    setArgv('show', 'DEC-0001', '--format', 'json');
+    setArgv('show', 'DEC-0003', '--format', 'json');
     await buildDecisionsCli().parseAsync();
     const shown = stdoutJson<{
       decision: { status: { lifecycle: string; supersededBy?: string } };
     }>().decision;
     expect(shown.status.lifecycle).toBe('superseded');
     expect(shown.status.supersededBy).toBe('DEC-0002');
+  });
+
+  it('AISDLC-1405: refuses an unattributed answer that is not the fallback', async () => {
+    await seedBareAnswer('opt-b');
+    setArgv('supersede', 'DEC-0003', '--by', 'DEC-0002', '--reason', 'x', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/already answered/);
   });
 
   it('refuses an unknown --by', async () => {

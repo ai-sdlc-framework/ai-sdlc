@@ -203,10 +203,13 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
   if (event.type === 'superseded') {
     // AISDLC-1162 — terminal: closed without choosing one of its own options.
     if (current === null) return null;
-    // AISDLC-1405: an answer with no `by` may still be superseded; an attributed one may not.
+    // AISDLC-1405: only the DEC-0091 shape of answer may still be superseded.
     const lc = current.status.lifecycle;
-    const unattributedAnswer = lc === 'answered' && !current.status.answeredBy;
-    if ((lc === 'answered' && !unattributedAnswer) || lc === 'superseded' || lc === 'archived') {
+    if (
+      (lc === 'answered' && !isUnattributedFallbackAnswer(current)) ||
+      lc === 'superseded' ||
+      lc === 'archived'
+    ) {
       return { ...current, decisionLog: [...current.decisionLog, event] };
     }
     const sup = event as SupersededEvent;
@@ -271,6 +274,27 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
     metadata: { ...current.metadata, updated: event.ts },
     decisionLog: [...current.decisionLog, event],
   };
+}
+
+/**
+ * AISDLC-1405 — the DEC-0091 shape: the decision was answered by an
+ * `operator-answered` event that names no author (`by`), gives no rationale,
+ * and picks exactly the decision's autonomous fallback. Nobody can be shown to
+ * have made that ruling, so a later decision may supersede it. Every other
+ * answer (attributed, reasoned, or a non-fallback choice) stays final.
+ */
+export function isUnattributedFallbackAnswer(decision: Decision): boolean {
+  if (decision.status.lifecycle !== 'answered' || decision.status.answeredBy) return false;
+  const fallback = decision.spec.autonomousFallbackOptionId;
+  if (fallback === undefined || decision.status.answeredOptionId !== fallback) return false;
+  const answer = [...decision.decisionLog]
+    .reverse()
+    .find(
+      (e) => e.type === 'operator-answered' || e.type === 'overridden' || e.type === 'auto-expired',
+    );
+  if (answer?.type !== 'operator-answered') return false;
+  const rationale = (answer as OperatorAnsweredEvent).rationale;
+  return typeof rationale !== 'string' || rationale.trim() === '';
 }
 
 /**

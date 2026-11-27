@@ -65,6 +65,7 @@ import {
   notebookSummariesDisabledMessage,
   parseTimebox,
   projectDecision,
+  isUnattributedFallbackAnswer,
   promoteAllDisposedPendingExemplars,
   rankDecisions,
   readDecisionExemplars,
@@ -163,6 +164,21 @@ function effectiveExitCode(requested: unknown, park: boolean): number {
 function fail(reason: string, code = 1): never {
   process.stderr.write(`[cli-decisions] error: ${reason}\n`);
   process.exit(code);
+}
+
+/**
+ * AISDLC-1405 — every operator-answered write (`answer`, `resolve`) names who
+ * answered and why. An answer with no author and no reason reads like a ruling
+ * nobody made: DEC-0091 was answered with its fallback that way, against the
+ * operator's answer on its re-recorded copy DEC-0092.
+ */
+function requireAnswerAttribution(by: unknown, rationale: unknown): void {
+  if (typeof by !== 'string' || by.trim() === '') {
+    fail('--by is required: name who answered (operator login or session name)');
+  }
+  if (typeof rationale !== 'string' || rationale.trim() === '') {
+    fail('--rationale is required: say why this option was chosen');
+  }
 }
 
 // ── Interactive prompt helper ────────────────────────────────────────────────
@@ -1930,15 +1946,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
         if (!/^DEC-\d{4,}$/.test(id)) {
           fail(`invalid decision id: ${id} — expected DEC-NNNN`);
         }
-        // AISDLC-1405: an answer with no author and no reason reads like a ruling
-        // nobody made (DEC-0091 was answered with its fallback that way, against
-        // the operator's answer on its re-recorded copy DEC-0092).
-        if (typeof argv.by !== 'string' || argv.by.trim() === '') {
-          fail('--by is required: name who answered (operator login or session name)');
-        }
-        if (typeof argv.rationale !== 'string' || argv.rationale.trim() === '') {
-          fail('--rationale is required: say why this option was chosen');
-        }
+        requireAnswerAttribution(argv.by, argv.rationale);
         if (!isDecisionCatalogEnabled()) {
           fail(
             decisionCatalogDisabledMessage() +
@@ -2045,11 +2053,12 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
           })
           .option('rationale', {
             type: 'string',
-            describe: 'Optional free-text rationale for the choice (audited).',
+            describe: 'Why this option was chosen (required, audited; AISDLC-1405).',
           })
           .option('by', {
             type: 'string',
-            describe: 'Resolver identifier (operator email / login). Recorded as the audit actor.',
+            describe:
+              'Resolver identifier (operator email / login or session name). Recorded as the audit actor (required; AISDLC-1405).',
           })
           .option('context-ref', {
             type: 'string',
@@ -2073,6 +2082,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
         if (!/^DEC-\d{4,}$/.test(id)) {
           fail(`invalid decision id: ${id} — expected DEC-NNNN`);
         }
+        requireAnswerAttribution(argv.by, argv.rationale);
         if (!isDecisionCatalogEnabled()) {
           fail(
             decisionCatalogDisabledMessage() +
@@ -2185,11 +2195,10 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
         const decision = projectDecision(id, { workDir });
         if (decision === null) fail(`decision not found: ${id}`);
         const lc = decision!.status.lifecycle;
-        // AISDLC-1405: an answer that names no author is not a ruling anyone made,
-        // so a later decision may close it; an attributed answer stays final.
-        const unattributedAnswer = lc === 'answered' && !decision!.status.answeredBy;
+        // AISDLC-1405: only an unattributed, unreasoned fallback answer (the
+        // DEC-0091 shape) may be closed by a later decision; any other answer stays final.
         if (
-          (lc === 'answered' && !unattributedAnswer) ||
+          (lc === 'answered' && !isUnattributedFallbackAnswer(decision!)) ||
           lc === 'archived' ||
           lc === 'superseded'
         ) {

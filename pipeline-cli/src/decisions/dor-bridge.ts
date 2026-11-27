@@ -234,8 +234,10 @@ export function emitDorDecisions(
 // ── Resolve (operator-answer write path, AC#3) ───────────────────────────────
 
 export interface ResolveDorDecisionOpts extends ReadEventsOpts {
-  /** Actor email / login identifier of who resolved the question. */
-  by?: string;
+  /** Actor email / login identifier of who resolved the question (required; AISDLC-1405). */
+  by: string;
+  /** Why this option was chosen (required; AISDLC-1405). */
+  rationale: string;
   now?: Date;
   env?: NodeJS.ProcessEnv;
 }
@@ -262,8 +264,13 @@ export interface ResolveDorDecisionResult {
 export function resolveDorDecision(
   decisionId: string,
   chosenOptionId: string,
-  opts: ResolveDorDecisionOpts = {},
+  opts: ResolveDorDecisionOpts,
 ): ResolveDorDecisionResult {
+  // AISDLC-1405: an answer with no author and no reason reads like a ruling
+  // nobody made (the DEC-0091 shape); refuse it before touching the log.
+  if (opts.by.trim() === '' || opts.rationale.trim() === '') {
+    throw new Error('resolveDorDecision: by and rationale are required (AISDLC-1405)');
+  }
   if (!isDecisionCatalogEnabled(opts.env ?? process.env)) {
     return {
       enabled: false,
@@ -274,8 +281,12 @@ export function resolveDorDecision(
     };
   }
 
-  const input: AnswerDecisionInput = { decisionId, chosenOptionId };
-  if (opts.by !== undefined) input.by = opts.by;
+  const input: AnswerDecisionInput = {
+    decisionId,
+    chosenOptionId,
+    by: opts.by,
+    rationale: opts.rationale,
+  };
   if (opts.now !== undefined) input.now = opts.now;
 
   const event = makeOperatorAnsweredEvent(input);
