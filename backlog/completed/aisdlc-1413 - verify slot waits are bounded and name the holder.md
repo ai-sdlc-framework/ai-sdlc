@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1413
 title: 'Verify slot waits are bounded and name the holder'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-25'
 labels:

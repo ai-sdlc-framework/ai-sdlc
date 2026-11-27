@@ -260,6 +260,54 @@ describe('verify slots (AISDLC-1087)', () => {
     expect(listVerifySlots(board, () => true).map((s) => s.index)).toEqual([1]);
     rmSync(board, { recursive: true, force: true });
   });
+
+  it('heartbeats before each command and logs a refused wait naming the holder (AISDLC-1413)', async () => {
+    const board = mkdtempSync(join(tmpdir(), 'verify-slots-'));
+    let t = 1_000;
+    const beats: number[] = [];
+    const runner = async (c: string) => {
+      if (c === 'sh') {
+        const rec = JSON.parse(
+          readFileSync(join(board, 'verify-slots', 'slot-0', 'holder.json'), 'utf8'),
+        ) as { heartbeatAt: number; taskId: string };
+        beats.push(rec.heartbeatAt);
+        expect(rec.taskId).toBe('AISDLC-1');
+        t += 100;
+      }
+      return { stdout: 'ok', stderr: '', code: 0 };
+    };
+    const run = await runVerifyCommands({
+      commands: ['pnpm lint', 'pnpm format:check'],
+      cwd: '/x',
+      runner,
+      boardDir: board,
+      slotDeps: { now: () => t, taskId: 'AISDLC-1' },
+    });
+    expect(run.ok).toBe(true);
+    expect(beats).toEqual([1_000, 1_100]);
+
+    // a held exclusive marker past the wait limit: refused, logged, run goes unslotted
+    const held = await acquireVerifySlot(
+      board,
+      { pid: 444, isAlive: () => true, startTimeOf: () => null, taskId: 'AISDLC-9' },
+      { exclusive: true },
+    );
+    const logs: string[] = [];
+    const refused = await runVerifyCommands({
+      commands: ['pnpm lint'],
+      cwd: '/x',
+      runner: async () => ({ stdout: 'ok', stderr: '', code: 0 }),
+      boardDir: board,
+      slotDeps: { maxWaitMs: 0, log: (l) => logs.push(l), isAlive: () => true },
+    });
+    expect(refused.ok).toBe(true);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatch(
+      /timed out .*exclusive pid 444.*task AISDLC-9.*running this verify unslotted/,
+    );
+    held.release();
+    rmSync(board, { recursive: true, force: true });
+  });
 });
 
 describe('verify with coverage (AISDLC-1185)', () => {

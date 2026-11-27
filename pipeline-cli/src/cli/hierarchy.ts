@@ -58,7 +58,7 @@
  * not authentication; a session running as the same user can defeat it.
  */
 
-import { listVerifySlots } from '../runtime/verify-slots.js';
+import { describeHolder, inspectVerifySlots } from '../runtime/verify-slots.js';
 import { fetchClosedUnmergedPrs } from '../kpi/closed-unmerged.js';
 import { executorCap, resolveExecutorsMax } from '../hierarchy/executor-cap.js';
 import { prHold } from '../hierarchy/pr-hold.js';
@@ -948,12 +948,14 @@ export async function runHierarchyCli(
       }
       case 'status': {
         const result = hierarchyStatus(deps);
-        const slots = listVerifySlots(deps.boardDir).filter((s) => s.alive);
+        // AISDLC-1413: every slot and the exclusive marker, flagging stale and reused pids
+        const slots = inspectVerifySlots(deps.boardDir, { now: () => deps.now().getTime() });
         if (flags.json === 'true') {
           deps.log(JSON.stringify(slots.length > 0 ? { ...result, verifySlots: slots } : result));
         } else {
           for (const line of formatStatus(result, deps.now().getTime())) deps.log(line);
-          for (const s of slots) deps.log(`verify slot ${s.index}: held by pid ${s.pid ?? '?'}`);
+          const at = deps.now().getTime();
+          for (const s of slots) deps.log(`verify ${describeHolder(s, at)}`);
           const held = heldPlannerRouteCount(deps.boardDir);
           const addr = plannerSocketAddress(deps.boardDir);
           if (held > 0 && !(addr && socketExists(addr))) {

@@ -247,6 +247,7 @@ export async function runVerifyGate(
     runner: ctx.runner,
     developerClaimed: developer.verifications,
     boardDir: join(state.workDir, '.ai-sdlc', 'dispatch'),
+    slotDeps: { taskId: state.taskId },
   });
   state.verifyRan = true;
   writeVerifyRunState(artifactsDir, state.taskId, run);

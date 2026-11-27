@@ -90,10 +90,11 @@ export function sessionScrubbedEnv(env = process.env) {
 }
 
 /**
- * How long the hook waits for a verify slot (AISDLC-1378). Unbounded by default: with a board
- * directory the coverage run never goes unslotted, it waits its turn.
+ * How long the hook waits for a verify slot (AISDLC-1378, AISDLC-1413). Bounded: with a board
+ * directory the coverage run never goes unslotted; it waits its turn, with the slot module
+ * naming the holder every 30 s, and past this limit the push is refused with the holder named.
  */
-export const SLOT_WAIT_MS = Infinity;
+export const SLOT_WAIT_MS = 30 * 60 * 1000;
 const SLOTS_MODULE = join(ROOT, 'pipeline-cli', 'dist', 'runtime', 'verify-slots.js');
 
 /** Board directory for the verify slots, or null when there is none. */
@@ -127,27 +128,26 @@ async function takeSlot({ boardDir, loadSlots, slotDeps, now, sleep, waitMs, log
   }
   const started = now();
   const wait = sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
-  let waitLogged = false;
   try {
     const slot = await mod.acquireVerifySlot(boardDir, {
       now,
-      // the module's long-wait line names the holder; it must reach the pushing terminal
+      maxWaitMs: waitMs,
+      // the module's wait lines name the holder; they must reach the pushing terminal
       log: (line) => console.error(line),
       ...slotDeps,
       sleep: async (ms) => {
+        // backstop for a module without its own bound
         if (now() - started >= waitMs) throw new Error('slot wait timed out');
-        if (!waitLogged) {
-          waitLogged = true;
-          log('[patch-coverage] waiting for a verify slot');
-        }
         await wait(ms);
       },
     });
     return {
       env: { AI_SDLC_VITEST_MAX_WORKERS: String(slot.workers) },
       release: () => slot.release(),
+      heartbeat: () => slot.heartbeat?.(),
     };
   } catch (e) {
+    if (e instanceof Error && e.name === 'VerifySlotWaitError') return { refused: e.message };
     const timedOut = e instanceof Error && e.message === 'slot wait timed out';
     return { refused: timedOut ? 'no verify slot within the wait' : 'verify slot unavailable' };
   }
@@ -335,15 +335,16 @@ export async function main({
   const handlers = ['SIGINT', 'SIGTERM'].map((sig) => [sig, onSignal(sig)]);
   if (slot) for (const [sig, h] of handlers) process.on(sig, h);
   try {
-    return runCoverage({ run, packages, env, base, head, log, related });
+    return runCoverage({ run, packages, env, base, head, log, related, beat: slot?.heartbeat });
   } finally {
     release();
     for (const [sig, h] of handlers) process.off(sig, h);
   }
 }
 
-function runCoverage({ run, packages, env, base, head, log, related = {} }) {
+function runCoverage({ run, packages, env, base, head, log, related = {}, beat }) {
   for (const pkg of packages) {
+    beat?.(); // progress for the slot holder record (AISDLC-1413)
     log(`[patch-coverage] running test:coverage in ${pkg}`);
     const r = run('pnpm', coverageArgs(pkg, related[pkg]), {
       cwd: ROOT,
