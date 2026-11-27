@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1460
 title: Session start runs a background knowledge sync when the backend supports it
-status: To Do
+status: In Progress
 priority: medium
 labels:
   - ai-sdlc-plugin

@@ -3,7 +3,7 @@
  * Always exits 0; emits hook JSON only when the slice is non-empty.
  */
 const { readStdinSync } = require('./lib/read-stdin.js');
-const { surface, MOMENTS } = require('./lib/context-surface.js');
+const { surface, sessionStart, MOMENTS } = require('./lib/context-surface.js');
 
 try {
   const moment = process.argv[2];
@@ -15,7 +15,10 @@ try {
       // keep {}
     }
     const projectDir = process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
-    const out = surface(moment, input, process.env, projectDir);
+    const out =
+      moment === 'sessionStart'
+        ? sessionStart(input, process.env, projectDir)
+        : surface(moment, input, process.env, projectDir);
     if (out) process.stdout.write(JSON.stringify(out) + '\n');
   }
 } catch {

@@ -44,7 +44,7 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/context-surface.sh\" sessionStart",
-            "timeout": 5
+            "timeout": 10
           },
           {
             "type": "command",

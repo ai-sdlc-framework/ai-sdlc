@@ -21,6 +21,7 @@ const {
   validateConfig,
   resolveProfile,
 } = require('./context-profiles.js');
+const { knowledgeSessionSync } = require('./knowledge-sync.js');
 const HOOK_EVENT = {
   sessionStart: 'SessionStart',
   taskClaim: 'SubagentStart',
@@ -179,4 +180,29 @@ function surface(moment, input, env, projectDir, spawn = spawnSync) {
   }
 }
 
-module.exports = { surface, parseProfiles, loadProfile, resolveRole, render, MOMENTS };
+/**
+ * Session start (AISDLC-1460): the retrieval slice plus, for a non-files knowledge backend,
+ * a detached `cli-context sync` and one status line shown as the hook's `systemMessage`.
+ * @returns {object|null} hook output JSON, or null when there is nothing to emit.
+ */
+function sessionStart(input, env, projectDir, deps = {}) {
+  const out = surface('sessionStart', input, env, projectDir, deps.spawnSync || spawnSync);
+  let line = null;
+  try {
+    line = knowledgeSessionSync(projectDir, resolveCli(projectDir, env), deps);
+  } catch {
+    line = null;
+  }
+  if (!line) return out;
+  return { ...(out || {}), systemMessage: line };
+}
+
+module.exports = {
+  surface,
+  sessionStart,
+  parseProfiles,
+  loadProfile,
+  resolveRole,
+  render,
+  MOMENTS,
+};
