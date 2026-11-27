@@ -14,3 +14,8 @@ for (const k of [
 ]) {
   delete process.env[k];
 }
+
+// AISDLC-1414: tests never append to the operator's timings file (~/.ai-sdlc/timings.jsonl).
+// Spawned bins and verify-slot waits inherit `off`; a test that checks recording sets
+// AI_SDLC_TIMINGS_FILE to a temporary file itself.
+process.env.AI_SDLC_TIMINGS_FILE = 'off';

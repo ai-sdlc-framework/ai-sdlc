@@ -8,6 +8,8 @@
  *   node pipeline-cli/bin/cli-embedding-gc.mjs run --artifacts-dir <dir>
  *   node pipeline-cli/bin/cli-embedding-gc.mjs stats --artifacts-dir <dir>
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runEmbeddingGcCli } from '../dist/cli/embedding-gc.js';
 
 runEmbeddingGcCli().catch((err) => {

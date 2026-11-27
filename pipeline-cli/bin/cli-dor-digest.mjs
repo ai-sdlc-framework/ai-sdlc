@@ -4,6 +4,8 @@
  * Forwards to the compiled router. Compiled entry lives in
  * `dist/cli/dor-digest.js` after `pnpm build`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runDorDigestCli } from '../dist/cli/dor-digest.js';
 
 runDorDigestCli().catch((err) => {

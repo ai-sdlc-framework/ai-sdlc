@@ -2967,6 +2967,15 @@ describe('hook-env-hygiene check', () => {
     );
   });
 
+  it('treats a timed gate line as the first gate (AISDLC-1414)', () => {
+    expect(hookPreamble('unset GIT_DIR\ntimed() {\n  "$@"\n}\ntimed x node scripts/a.mjs\n')).toBe(
+      'unset GIT_DIR\ntimed() {\n  "$@"\n}',
+    );
+    expect(hookPreamble("unset GIT_DIR\nprintf '%s' x | timed y ./scripts/b.sh\n")).toBe(
+      'unset GIT_DIR',
+    );
+  });
+
   it('passes when every hook unsets the variables before its first gate', () => {
     const r = checkHookEnvHygiene(
       makeCtx(

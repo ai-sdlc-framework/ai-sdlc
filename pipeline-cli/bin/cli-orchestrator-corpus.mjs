@@ -11,6 +11,8 @@
  * the recommendation drives the AI_SDLC_AUTONOMOUS_ORCHESTRATOR
  * default-on promotion decision.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runOrchestratorCorpusCli } from '../dist/cli/orchestrator-corpus.js';
 
 runOrchestratorCorpusCli().catch((err) => {

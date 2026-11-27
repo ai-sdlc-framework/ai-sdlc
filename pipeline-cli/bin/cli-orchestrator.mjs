@@ -8,6 +8,8 @@
  * — never via `pnpm exec` (AISDLC-156 — `pnpm exec` does not resolve a
  * workspace package's own bin entries).
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runOrchestratorCli } from '../dist/cli/orchestrator.js';
 
 runOrchestratorCli().catch((err) => {

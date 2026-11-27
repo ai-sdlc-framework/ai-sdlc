@@ -12,6 +12,8 @@
  *   node pipeline-cli/bin/cli-tui-corpus.mjs aggregate $ARTIFACTS_DIR/_tui/events.jsonl
  *   node pipeline-cli/bin/cli-tui-corpus.mjs aggregate ./tui-corpus --format table
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runTuiCorpusCli } from '../dist/tui/corpus/aggregate.js';
 
 runTuiCorpusCli().catch((err) => {

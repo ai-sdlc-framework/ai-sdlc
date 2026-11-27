@@ -3,6 +3,8 @@
  * Bin shim for `cli-estimate` (AISDLC-279, RFC-0016 Phase 1).
  * Forwards to the compiled estimate CLI router in `dist/cli/estimate.js`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runEstimateCli } from '../dist/cli/estimate.js';
 
 runEstimateCli().catch((err) => {

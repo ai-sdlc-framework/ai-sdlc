@@ -8,6 +8,8 @@
  * can decide which subset of the 3 reviewers to spawn instead of always firing
  * the full fan-out.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runClassifyPrCli } from '../dist/cli/classify-pr.js';
 
 runClassifyPrCli().catch((err) => {

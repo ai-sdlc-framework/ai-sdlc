@@ -14,6 +14,8 @@
  *
  * Compiled entry lives in `dist/cli/dispatch.js` after `pnpm build`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runDispatchCli } from '../dist/cli/dispatch.js';
 
 runDispatchCli().then(

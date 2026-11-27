@@ -45,6 +45,8 @@
  *   - `playbook --task <id> --action <step>` — run one named playbook step (AISDLC-918).
  *   - `gh-usage report [--since 7d] [--ledger <file-or-dir,...>] [--json]` — per-token GitHub
  *     usage from the gh call ledger and CI quota snapshots (AISDLC-1439).
+ *   - `timings [--since 7d] [--top <n>] [--json]` — p50, p95 and max per command, gate and wait,
+ *     and the slowest spans, from the local timings file (AISDLC-1414).
  *   - `route-decision --decision-id <id> --route operational|design --to <name>`
  *     — record that a decision was routed to a tier.
  *
@@ -59,6 +61,15 @@
  */
 
 import { describeHolder, inspectVerifySlots } from '../runtime/verify-slots.js';
+import {
+  formatSlowSpans,
+  formatTimingsReport,
+  readSpans,
+  recentSlowSpans,
+  slowSpanMs,
+  timingsFiles,
+  timingsReport,
+} from '../telemetry/timings.js';
 import { fetchClosedUnmergedPrs } from '../kpi/closed-unmerged.js';
 import { executorCap, resolveExecutorsMax } from '../hierarchy/executor-cap.js';
 import { prHold } from '../hierarchy/pr-hold.js';
@@ -277,6 +288,7 @@ Commands:
   canary     Drive a synthetic task through claim, verdict, clear and re-claim: canary run --no-pr
   usage      Sample the account usage windows into usage.json (never prints the token)
   gh-usage   Per-token GitHub calls/h, lowest quota and rate-limit errors (gh-usage report [--since 7d] [--ledger <paths>] [--json])
+  timings    p50, p95 and max per command, pre-push gate and wait, plus the slowest spans (timings [--since 7d] [--top <n>] [--json])
   tick       One wake-up of the dispatch loop (ingest, verdict watch, playbook, reports)
   escalation-file  Write a board file for the planner: failure record, log tail, PR check summary
   route-decision  Record that a decision was routed to a tier
@@ -950,12 +962,22 @@ export async function runHierarchyCli(
         const result = hierarchyStatus(deps);
         // AISDLC-1413: every slot and the exclusive marker, flagging stale and reused pids
         const slots = inspectVerifySlots(deps.boardDir, { now: () => deps.now().getTime() });
+        // AISDLC-1414: commands, gates and waits over the slow threshold in the last hour
+        const threshold = slowSpanMs();
+        const slow = recentSlowSpans(readSpans(timingsFiles()), deps.now(), threshold);
         if (flags.json === 'true') {
-          deps.log(JSON.stringify(slots.length > 0 ? { ...result, verifySlots: slots } : result));
+          deps.log(
+            JSON.stringify({
+              ...result,
+              ...(slots.length > 0 ? { verifySlots: slots } : {}),
+              ...(slow.length > 0 ? { slowSpans: slow } : {}),
+            }),
+          );
         } else {
           for (const line of formatStatus(result, deps.now().getTime())) deps.log(line);
           const at = deps.now().getTime();
           for (const s of slots) deps.log(`verify ${describeHolder(s, at)}`);
+          for (const line of formatSlowSpans(slow, threshold)) deps.log(line);
           const held = heldPlannerRouteCount(deps.boardDir);
           const addr = plannerSocketAddress(deps.boardDir);
           if (held > 0 && !(addr && socketExists(addr))) {
@@ -1350,6 +1372,20 @@ export async function runHierarchyCli(
         );
         if (flags.json === 'true') deps.log(JSON.stringify(report));
         else process.stdout.write(formatGhUsageReport(report));
+        return 0;
+      }
+      case 'timings': {
+        const sinceMs = parseSince(flags.since === 'true' ? undefined : flags.since);
+        const top = flags.top === undefined ? 10 : Number(flags.top);
+        if (sinceMs === undefined || !Number.isInteger(top) || top < 1) {
+          process.stderr.write(
+            'cli-hierarchy timings: usage: timings [--since <n>d|<n>h|<n>m] [--top <n>] [--json]\n',
+          );
+          return 2;
+        }
+        const report = timingsReport(readSpans(timingsFiles()), deps.now(), sinceMs, top);
+        if (flags.json === 'true') deps.log(JSON.stringify(report));
+        else process.stdout.write(formatTimingsReport(report));
         return 0;
       }
       case 'escalation-file': {

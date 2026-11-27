@@ -13,6 +13,8 @@
  *
  * Compiled entry lives in `dist/cli/hierarchy.js` after `pnpm build`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runHierarchyCli } from '../dist/cli/hierarchy.js';
 
 runHierarchyCli().then(

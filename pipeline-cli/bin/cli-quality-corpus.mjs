@@ -15,6 +15,8 @@
  * `spec/rfcs/RFC-0025-framework-quality-monitoring.md` for the §8 metric
  * definitions.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runQualityCorpusCli } from '../dist/cli/quality-corpus.js';
 
 runQualityCorpusCli().catch((err) => {

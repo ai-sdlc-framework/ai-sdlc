@@ -4,6 +4,8 @@
  * Pre-push DoR gate. Forwards to the compiled router at
  * `dist/cli/dor-check.js` after `pnpm build`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runDorCheckCli } from '../dist/cli/dor-check.js';
 
 runDorCheckCli()

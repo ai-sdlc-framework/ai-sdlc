@@ -4,6 +4,8 @@
  * compiled capture CLI router. The router lives in `dist/cli/capture.js`
  * after `pnpm build`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runCaptureCli } from '../dist/cli/capture.js';
 
 runCaptureCli().catch((err) => {

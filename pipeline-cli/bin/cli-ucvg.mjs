@@ -5,6 +5,8 @@
  * Subcommands: classify, ast-gate, sandbox-run, review-degraded, clean-room-sign, local-review
  * See pipeline-cli/src/cli/ucvg.ts for the full implementation.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runUcvgCli } from '../dist/cli/ucvg.js';
 
 runUcvgCli().catch((err) => {

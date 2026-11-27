@@ -9,6 +9,8 @@
  *
  * Compiled entry lives in `dist/cli/complete-task.js` after `pnpm build`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runCompleteTaskCli } from '../dist/cli/complete-task.js';
 
 runCompleteTaskCli().catch((err) => {

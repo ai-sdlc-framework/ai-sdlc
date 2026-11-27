@@ -7,6 +7,8 @@
  * NEVER via: pnpm --filter @ai-sdlc/pipeline-cli exec cli-compliance-audit
  *   (pnpm exec does not resolve workspace own-bins — AISDLC-156)
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runComplianceAuditCli } from '../dist/cli/compliance-audit.js';
 
 runComplianceAuditCli().catch((err) => {

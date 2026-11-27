@@ -4,6 +4,8 @@
  * Forwards to the compiled estimate-classes CLI router in
  * `dist/cli/estimate-classes.js`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runEstimateClassesCli } from '../dist/cli/estimate-classes.js';
 
 runEstimateClassesCli().catch((err) => {

@@ -16,6 +16,8 @@
  * `spec/rfcs/RFC-0025-framework-quality-monitoring.md` §13 OQ-5 for the
  * resolution rationale.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runQualityCli } from '../dist/cli/quality.js';
 
 runQualityCli().catch((err) => {

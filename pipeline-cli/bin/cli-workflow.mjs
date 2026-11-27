@@ -2,6 +2,8 @@
 /**
  * Bin shim for `cli-workflow` (RFC-0056 phase 1). Forwards to `dist/cli/workflow.js`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runWorkflowCli } from '../dist/cli/workflow.js';
 
 runWorkflowCli().catch((err) => {

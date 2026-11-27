@@ -7,6 +7,8 @@
  *
  * Compiled entry lives in `dist/cli/staged-review.js` after `pnpm build`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runStagedReviewCli } from '../dist/cli/staged-review.js';
 
 runStagedReviewCli().catch((err) => {

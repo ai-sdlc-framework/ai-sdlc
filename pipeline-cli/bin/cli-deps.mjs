@@ -3,6 +3,8 @@
  * Bin shim for `cli-deps` (AISDLC-117). Forwards to the compiled deps CLI
  * router. The router lives in `dist/cli/deps.js` after `pnpm build`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runDepsCli } from '../dist/cli/deps.js';
 
 runDepsCli().catch((err) => {

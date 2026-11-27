@@ -2,6 +2,8 @@
 /**
  * Bin shim for `cli-file` (AISDLC-801). Forwards to `dist/cli/file.js`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runFileCli } from '../dist/cli/file.js';
 
 runFileCli()

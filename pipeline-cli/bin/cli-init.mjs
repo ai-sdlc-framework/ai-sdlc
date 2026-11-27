@@ -3,6 +3,8 @@
  * Bin shim for `cli-init` (AISDLC-910): scaffold the required consumer
  * configuration from the manifest. Forwards to `dist/cli/init.js`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runInitCli } from '../dist/cli/init.js';
 
 runInitCli()

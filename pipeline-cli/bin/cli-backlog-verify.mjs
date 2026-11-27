@@ -10,6 +10,8 @@
  *
  * Compiled entry lives in `dist/cli/backlog-verify.js` after `pnpm build`.
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runBacklogVerifyCli } from '../dist/cli/backlog-verify.js';
 
 runBacklogVerifyCli().catch((err) => {

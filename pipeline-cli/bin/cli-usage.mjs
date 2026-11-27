@@ -6,6 +6,8 @@
  * Invoke via:
  *   node pipeline-cli/bin/cli-usage.mjs ingest [--backfill] [--json]
  */
+// AISDLC-1414: time this command (first import, so it runs before the CLI loads).
+import '../dist/cli/command-span.js';
 import { runUsageCli } from '../dist/cli/usage.js';
 
 runUsageCli().catch((err) => {
