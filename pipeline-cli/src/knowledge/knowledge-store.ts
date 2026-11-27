@@ -152,6 +152,19 @@ export interface KnowledgeStore {
   ): Promise<WriteResult>;
   /** Apply a named operation to the entry `id`; logs exactly one event when applied. */
   write(id: string, op: WriteOp, opts?: { scope?: StoreScope }): Promise<WriteResult>;
+  /**
+   * Refresh the local replica that `list()` reads from the backend's remote source and send
+   * queued local writes (AISDLC-1459, DEC-0444). `cli-context sync` calls it, then
+   * `rebuildIndex` (the sync contract, DEC-0430). Optional: the files backend has no remote,
+   * so it omits it and `cli-context sync` reports `supported: false`.
+   */
+  sync?(): Promise<{ pulled: number; pushed: number }>;
+  /**
+   * Writes waiting to reach the remote (`queued`), writes it refused (`rejected`), and the
+   * backend's own record of its last sync. `cli-context status` prints it merged with the
+   * stamp of the last `cli-context sync`. Optional, like `sync`; the files backend omits it.
+   */
+  status?(): Promise<{ queued: number; rejected: number; lastSyncAt?: string; lastError?: string }>;
 }
 
 const EVENT_OF: Record<WriteKind, KnowledgeEventKind> = {

@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContextCli, resolveRole } from './context.js';
+import { SYNC_STAMP_PATH } from '../knowledge/sync.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let dir: string;
@@ -136,6 +137,124 @@ describe('cli-context check-backend (AISDLC-1433)', () => {
     const json = JSON.parse((await run('json')).out) as { backend: string; opened: boolean };
     expect(json).toMatchObject({ backend: 'files', opened: true, localPaths: [] });
     expect(process.exitCode ?? 0).toBe(0);
+  });
+});
+
+describe('cli-context sync and status (AISDLC-1459)', () => {
+  const run = async (cmd: string) => {
+    const out: string[] = [];
+    const o = vi.spyOn(process.stdout, 'write').mockImplementation((c) => !!out.push(String(c)));
+    try {
+      await buildContextCli([cmd, '--project-dir', dir]).parseAsync();
+    } finally {
+      o.mockRestore();
+    }
+    return JSON.parse(out.join('')) as Record<string, unknown>;
+  };
+
+  it('reports supported:false and exits 0 on the files backend', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cli-context-'));
+    expect(await run('sync')).toEqual({ ok: true, supported: false });
+    expect(await run('status')).toEqual({ ok: true, supported: false });
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(existsSync(join(dir, SYNC_STAMP_PATH))).toBe(false);
+  });
+
+  it('syncs a backend, records the outcome, and exits non-zero on a sync error', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cli-context-'));
+    mkdirSync(join(dir, '.ai-sdlc'));
+    writeFileSync(join(dir, 'package.json'), '{"name":"adopter","private":true}');
+    const pkgDir = join(dir, 'node_modules', 'ai-sdlc-fixture-syncing');
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(
+      join(pkgDir, 'package.json'),
+      '{"name":"ai-sdlc-fixture-syncing","main":"index.js"}',
+    );
+    writeFileSync(
+      join(pkgDir, 'index.js'),
+      `exports.registerKnowledgeBackends = (r) =>
+  r.registerKnowledgeBackend('syncing', () => ({
+    kind: 'syncing',
+    get: () => null,
+    put: () => ({ path: 'x.md', created: true }),
+    update: () => null,
+    list: () => [],
+    listRaw: () => [],
+    sync: async () => {
+      if (globalThis.__syncFail) throw new Error('remote unreachable');
+      return { pulled: 2, pushed: 1 };
+    },
+    status: async () => ({ queued: 4, rejected: 1 }),
+  }));
+`,
+    );
+    writeFileSync(
+      join(dir, '.ai-sdlc/context.yaml'),
+      'knowledge:\n  backend: syncing\n  backendModule: ai-sdlc-fixture-syncing\n',
+    );
+    const g = globalThis as { __syncFail?: boolean };
+
+    expect(await run('sync')).toMatchObject({
+      supported: true,
+      ok: true,
+      pulled: 2,
+      pushed: 1,
+      indexed: 0,
+    });
+    expect(process.exitCode ?? 0).toBe(0);
+    const ok = JSON.parse(readFileSync(join(dir, SYNC_STAMP_PATH), 'utf-8')) as { at: string };
+
+    g.__syncFail = true;
+    try {
+      expect(await run('sync')).toMatchObject({ ok: false, error: 'remote unreachable' });
+    } finally {
+      delete g.__syncFail;
+    }
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+
+    const status = await run('status');
+    expect(status).toMatchObject({
+      ok: true,
+      supported: true,
+      queued: 4,
+      rejected: 1,
+      lastError: 'remote unreachable',
+    });
+    expect(typeof status.lastSyncAt).toBe('string');
+    expect(ok.at).toBeTruthy();
+  });
+
+  it('prints an error line and exits non-zero when status() throws', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cli-context-'));
+    mkdirSync(join(dir, '.ai-sdlc'));
+    writeFileSync(join(dir, 'package.json'), '{"name":"adopter","private":true}');
+    const pkgDir = join(dir, 'node_modules', 'ai-sdlc-fixture-status-fails');
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(
+      join(pkgDir, 'package.json'),
+      '{"name":"ai-sdlc-fixture-status-fails","main":"index.js"}',
+    );
+    writeFileSync(
+      join(pkgDir, 'index.js'),
+      `exports.registerKnowledgeBackends = (r) =>
+  r.registerKnowledgeBackend('status-fails', () => ({
+    kind: 'status-fails',
+    get: () => null,
+    put: () => ({ path: 'x.md', created: true }),
+    update: () => null,
+    list: () => [],
+    listRaw: () => [],
+    status: async () => { throw new Error('no route'); },
+  }));
+`,
+    );
+    writeFileSync(
+      join(dir, '.ai-sdlc/context.yaml'),
+      'knowledge:\n  backend: status-fails\n  backendModule: ai-sdlc-fixture-status-fails\n',
+    );
+    expect(await run('status')).toEqual({ ok: false, supported: true, error: 'no route' });
+    expect(process.exitCode).toBe(1);
   });
 });
 
