@@ -78,14 +78,15 @@ function readReceivedFile(file: string): ReceivedSender[] {
 }
 
 /**
- * AISDLC-1392: drop the received-log entries whose sender name no longer resolves to a live session, so a
- * dead address stops being accepted. An entry with no name is kept. Returns how many were dropped.
+ * AISDLC-1392: drop `address` from the received logs once a send found its socket gone and its sender name
+ * no longer resolving, so the dead address stops being accepted. Only that address is touched, and only after
+ * such a failed send, so a successful send never rewrites the logs. Returns how many entries were dropped.
  */
-export function pruneReceivedLog(boardDir: string, resolves: (name: string) => boolean): number {
+export function pruneReceivedLog(boardDir: string, address: string): number {
   let dropped = 0;
   for (const f of receivedFiles(boardDir)) {
     const all = readReceivedFile(f);
-    const kept = all.filter((s) => !s.name || resolves(s.name));
+    const kept = all.filter((s) => s.address !== address);
     if (kept.length === all.length) continue;
     dropped += all.length - kept.length;
     try {

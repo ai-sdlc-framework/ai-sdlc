@@ -182,7 +182,7 @@ import {
   pruneReceivedLog,
   createSocketSender,
   defaultResolveDeps,
-  resolveSessionSocket,
+  DeadAddressError,
   sendResolved,
   readSessionRegistry,
   sendToRoster,
@@ -1987,14 +1987,10 @@ export async function runHierarchyCli(
           });
           deps.log(JSON.stringify({ ok: true, ...outcome }));
         } catch (err) {
+          // a received address whose sender no longer resolves is dead: stop accepting it (AISDLC-1392)
+          if (err instanceof DeadAddressError) pruneReceivedLog(deps.boardDir, err.deadAddress);
           process.stderr.write(`cli-hierarchy send: ${(err as Error).message}\n`);
           return 1;
-        } finally {
-          // a received address whose sender no longer resolves is dead: stop accepting it (AISDLC-1392)
-          pruneReceivedLog(
-            deps.boardDir,
-            (name) => resolveSessionSocket(registry, name, resolveDeps) !== undefined,
-          );
         }
         return 0;
       }

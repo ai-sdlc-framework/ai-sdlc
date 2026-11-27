@@ -106,7 +106,13 @@ export {
   type SendCheck,
   type SocketSender,
 } from './send.js';
-export { defaultResolveDeps, resolveSessionSocket, sendResolved } from './send-resolve.js';
+export {
+  DeadAddressError,
+  defaultResolveDeps,
+  processStartOf,
+  resolveSessionSocket,
+  sendResolved,
+} from './send-resolve.js';
 export { resolveThresholds, DEFAULT_CONTEXT_THRESHOLDS } from './thresholds.js';
 export {
   boundedHandoffView,

@@ -26,11 +26,15 @@ export function socketPathExists(address: string): boolean {
   return fs.existsSync(address.slice('uds:'.length));
 }
 
-/** The start time of a process as `ps` prints it, whitespace collapsed; undefined when it is not running. */
+/**
+ * The start time of a process as `ps` prints it in UTC (the zone the harness records `procStart` in),
+ * whitespace collapsed; undefined when it is not running.
+ */
 export function processStartOf(pid: number): string | undefined {
   try {
     const out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
       encoding: 'utf8',
+      env: { ...process.env, TZ: 'UTC' },
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     return out.replace(/\s+/g, ' ').trim() || undefined;
@@ -72,6 +76,16 @@ export function resolveSessionSocket(
     if (SOCKET_ADDRESS.test(address) && deps.socketExists(address)) return address;
   }
   return undefined;
+}
+
+/** A refusal whose received address is dead: its sender name no longer resolves to a live session. */
+export class DeadAddressError extends Error {
+  constructor(
+    message: string,
+    readonly deadAddress: string,
+  ) {
+    super(message);
+  }
 }
 
 export interface SendOutcome {
@@ -123,8 +137,9 @@ export async function sendResolved(opts: {
     }
     const current = resolveSessionSocket(registry, known.name, deps);
     if (!current) {
-      throw new Error(
+      throw new DeadAddressError(
         `refusing to send to '${to}': its socket is gone and '${known.name}' no longer resolves to a live session`,
+        to,
       );
     }
     await sendSocket(current, text);

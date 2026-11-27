@@ -26,6 +26,7 @@ import {
   type RosterEntry,
 } from '../hierarchy/index.js';
 import { createSocketSender } from '../hierarchy/send.js';
+import { processStartOf, resolveSessionSocket } from '../hierarchy/send-resolve.js';
 import { collectVerdicts, writeVerdict } from '../dispatch/board.js';
 import { defaultHierarchyDeps, firstPositional, runHierarchyCli } from './hierarchy.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
@@ -2282,15 +2283,22 @@ describe('send resolves a relaunched session (AISDLC-1392)', () => {
     ...over,
   });
 
-  it('delivers a stale address to the new socket and reports the repair; prunes nothing live', async () => {
-    const t = setup([{ address: OLD, name: 'arcana-planner' }], [reg()]);
+  it('delivers a stale address to the new socket and reports the repair; rewrites no log', async () => {
+    const t = setup(
+      [
+        { address: OLD, name: 'arcana-planner' },
+        { address: 'uds:/tmp/cc-socks/2.sock', name: 'not-in-registry' },
+      ],
+      [reg()],
+    );
     expect(
       await runHierarchyCli(['send', '--to', OLD, '--text', 'hi'], overrides(), t.extras),
     ).toBe(0);
     expect(t.sent).toEqual([[NEW, 'hi']]);
     const out = JSON.parse(logs.at(-1) ?? '{}');
     expect(out.repaired).toEqual({ name: 'arcana-planner', from: OLD, to: NEW });
-    expect(JSON.parse(fs.readFileSync(t.log, 'utf8'))).toHaveLength(1);
+    // a successful send never prunes, even an entry whose name does not resolve
+    expect(JSON.parse(fs.readFileSync(t.log, 'utf8'))).toHaveLength(2);
   });
 
   it('exits 1 with a reason, types nothing, and drops the dead entry when the name no longer resolves', async () => {
@@ -2346,15 +2354,61 @@ describe('send resolves a relaunched session (AISDLC-1392)', () => {
         reg({ messagingSocketPath: '/tmp/cc-socks/custom.sock', startedAt: 1 }),
       ],
     );
+    // OLD is gone from the received log's point of view, but the reused pid 7550 has a live socket: only the
+    // procStart mismatch rejects that entry
+    let oldLive = false;
     const extras = {
       ...t.extras,
       procStartOf: (pid: number) => (pid === 7550 ? 'Tue Nov 24 01:00:00 2026' : START),
-      socketExists: (a: string) => a === 'uds:/tmp/cc-socks/custom.sock',
+      socketExists: (a: string) => a === 'uds:/tmp/cc-socks/custom.sock' || (oldLive && a === OLD),
     };
+    expect(
+      resolveSessionSocket(
+        [
+          { ...reg({ pid: 7550, startedAt: 9, procStart: 'Mon Nov 23 09:00:00 2026' }) },
+          { ...reg({ messagingSocketPath: '/tmp/cc-socks/custom.sock', startedAt: 1 }) },
+        ] as never,
+        'arcana-planner',
+        { procStartOf: extras.procStartOf, socketExists: () => true },
+      ),
+    ).toBe('uds:/tmp/cc-socks/custom.sock');
     expect(await runHierarchyCli(['send', '--to', OLD, '--text', 'hi'], overrides(), extras)).toBe(
       0,
     );
     expect(t.sent).toEqual([['uds:/tmp/cc-socks/custom.sock', 'hi']]);
+    // the same entry with a matching procStart (whitespace aside) is the session
+    oldLive = true;
+    expect(
+      resolveSessionSocket(
+        [reg({ pid: 7550, startedAt: 9, procStart: 'Tue Nov 24  01:00:00 2026' })] as never,
+        'arcana-planner',
+        { procStartOf: extras.procStartOf, socketExists: () => true },
+      ),
+    ).toBe(OLD);
+  });
+
+  it('reads a process start in UTC, the zone procStart is recorded in, whatever the local zone', () => {
+    const saved = process.env.TZ;
+    process.env.TZ = 'America/Denver';
+    try {
+      const started = processStartOf(process.pid);
+      expect(started).toBeDefined();
+      const asUtc = Date.parse(`${started} UTC`);
+      const expected = Date.now() - process.uptime() * 1000;
+      expect(Math.abs(asUtc - expected)).toBeLessThan(60_000);
+      // the real comparison accepts a registry entry carrying that UTC procStart
+      expect(
+        resolveSessionSocket(
+          [reg({ pid: process.pid, procStart: started })] as never,
+          'arcana-planner',
+          { procStartOf: processStartOf, socketExists: () => true },
+        ),
+      ).toBe(`uds:/tmp/cc-socks/${process.pid}.sock`);
+      expect(processStartOf(2 ** 22 + 12345)).toBeUndefined();
+    } finally {
+      if (saved === undefined) delete process.env.TZ;
+      else process.env.TZ = saved;
+    }
   });
 
   it('exits non-zero when the socket sender rejects, never printing ok', async () => {
