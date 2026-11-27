@@ -97,6 +97,23 @@ declares `engines.node` `>=22.12.0` for that reason (AISDLC-1427); on older Node
 ES-module backend fails closed with `KnowledgeBackendError ... failed to load`. A CommonJS
 backend loads on any supported Node.
 
+#### Local paths (AISDLC-1433)
+
+A backend that keeps content on disk (a replica or cache) declares where with the optional
+`KnowledgeStore.localPaths(): string[]`: project-relative files or directories. The push
+gate holds each to the protected-root rules: `cli-context check-scope` fails when a declared
+path is not git-ignored or has tracked files, and with `--rev` when a pushed commit adds a
+file under it. A path outside the repository is skipped (it cannot be committed). If
+`localPaths()` throws, the gate fails closed. The `files` backend declares none; its roots
+are already checked, so a project on `files` sees no new finding.
+
+`cli-context check-backend [--format json]` reports whether `knowledge.backendModule`
+resolves, the factory opens, and each declared path is git-ignored; it exits 1 on any of
+those failures. The `knowledge-backend` check of `ai-sdlc doctor` runs it and maps the report:
+fail when the module does not resolve, the factory does not open, or a path is not
+git-ignored; warn when a non-files backend declares zero paths; pass otherwise and for
+`files` ([doctor.md](doctor.md)). `localPaths()` changes no `put`/`update` signature.
+
 ## Scaffold
 
 `/ai-sdlc init` (and `ai-sdlc init`, `cli-init`, `doctor --fix`) writes two optional files

@@ -23,7 +23,10 @@
  *                     citation rate (AISDLC-778).
  *   check-scope     — fail when a protected entry is in the configured tracked root, or the
  *                     configured protected root is tracked / not git-ignored. With `--rev`, also
- *                     scans every commit in the pushed range, not only HEAD/the index.
+ *                     scans every commit in the pushed range, not only HEAD/the index. Paths a
+ *                     backend declares in `localPaths()` get the protected-root rules (AISDLC-1433).
+ *   check-backend   — report whether the configured backend module resolves, its factory opens,
+ *                     and each declared local path is git-ignored (`--format json` for doctor).
  */
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
@@ -34,7 +37,11 @@ import { now } from '../clock.js';
 import { DEFAULT_KNOWLEDGE_BACKEND, loadKnowledgeConfig } from '../knowledge/config.js';
 import { backendSelection, openKnowledgeStore, toEntries } from '../knowledge/knowledge-store.js';
 import { captureFactForProject, exportableEntries } from '../knowledge/data-room.js';
-import { checkKnowledgeScope, checkKnowledgeScopeRange } from '../knowledge/scope-check.js';
+import {
+  checkKnowledgeBackend,
+  checkKnowledgeScope,
+  checkKnowledgeScopeRange,
+} from '../knowledge/scope-check.js';
 import { INGEST_SOURCES, ingestSource, type IngestSource } from '../knowledge/ingest-sources.js';
 import { ingestMemoryForProject } from '../knowledge/ingest-memory.js';
 import { resolveMemoryDir } from '../memory-dream/resolve-dir.js';
@@ -119,6 +126,8 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
     .middleware((args) => {
       // DEC-0427: a configured non-files backend must resolve before any subcommand runs;
       // KnowledgeBackendError propagates and the command exits non-zero (fail closed).
+      // check-backend reports that failure itself (AISDLC-1433).
+      if (args._[0] === 'check-backend') return;
       const projectDir = String(args['project-dir']);
       const config = loadKnowledgeConfig(projectDir);
       if (config.backend !== DEFAULT_KNOWLEDGE_BACKEND) openKnowledgeStore(config, projectDir);
@@ -342,6 +351,27 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
         if (revs.length > 0) violations.push(...checkKnowledgeScopeRange(projectDir, revs, config));
         for (const v of violations) process.stderr.write(`error: ${v}\n`);
         if (violations.length > 0) process.exitCode = 1;
+      },
+    )
+    .command(
+      'check-backend',
+      'Report whether the knowledge backend resolves, opens, and its local paths are git-ignored',
+      (y) => y.option('format', { type: 'string', choices: ['text', 'json'], default: 'text' }),
+      (args) => {
+        const report = checkKnowledgeBackend(String(args['project-dir']));
+        const bad = report.localPaths.filter((p) => p.inRepo && !p.ignored);
+        if (args.format === 'json') {
+          process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+        } else {
+          process.stdout.write(
+            `backend ${report.backend}: ${report.opened ? 'opens' : 'does not open'}, ${
+              report.localPaths.length
+            } local path(s)\n`,
+          );
+          if (report.error) process.stderr.write(`error: ${report.error}\n`);
+          for (const p of bad) process.stderr.write(`error: ${p.path} is not git-ignored\n`);
+        }
+        if (!report.opened || report.error !== null || bad.length > 0) process.exitCode = 1;
       },
     )
     .command(

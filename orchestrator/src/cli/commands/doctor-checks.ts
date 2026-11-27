@@ -3093,6 +3093,138 @@ export function checkWorkflowDocument(ctx: DoctorRunContext): DoctorCheckResult 
   };
 }
 
+// ── Check: knowledge store backend (AISDLC-1433) ────────────────────────
+
+/** The JSON `cli-context check-backend --format json` prints (pipeline-cli `KnowledgeBackendReport`). */
+interface KnowledgeBackendReport {
+  backend: string;
+  resolved: boolean;
+  opened: boolean;
+  error: string | null;
+  localPaths: { path: string; inRepo: boolean; ignored: boolean }[];
+}
+
+/** `knowledge.backend` from `.ai-sdlc/context.yaml`; `files` when absent or unreadable. */
+function configuredKnowledgeBackend(ctx: DoctorRunContext): string {
+  const raw = ctx.adapters.readFile(join(ctx.projectDir, '.ai-sdlc', 'context.yaml'));
+  if (raw == null) return 'files';
+  try {
+    const backend = (parseYaml(raw) as { knowledge?: { backend?: unknown } } | null)?.knowledge
+      ?.backend;
+    return typeof backend === 'string' && backend !== '' ? backend : 'files';
+  } catch {
+    return 'files';
+  }
+}
+
+/**
+ * A non-files knowledge backend resolves, its factory opens, and every local path it
+ * declares is git-ignored (so its replica or cache cannot be committed). Shells out to
+ * `cli-context check-backend` because the knowledge code lives in pipeline-cli. The
+ * `files` backend passes without running it.
+ */
+export function checkKnowledgeBackend(ctx: DoctorRunContext): DoctorCheckResult[] {
+  const id = 'knowledge-backend';
+  const backend = configuredKnowledgeBackend(ctx);
+  if (backend === 'files') {
+    return [
+      { id, severity: 'pass', title: 'knowledge backend: files (roots checked by check-scope)' },
+    ];
+  }
+  const cli = resolveCliInit(ctx, 'cli-context.mjs');
+  if (!cli) {
+    return [
+      {
+        id,
+        severity: 'warn',
+        title: `could not locate pipeline-cli cli-context; knowledge backend '${backend}' was not checked`,
+        remediation: 'Run `ai-sdlc-plugin/scripts/install-runtime-deps.sh` and re-run doctor',
+      },
+    ];
+  }
+  const res = ctx.adapters.runCommand('node', [
+    cli,
+    'check-backend',
+    '--format',
+    'json',
+    '--project-dir',
+    ctx.projectDir,
+  ]);
+  let report: KnowledgeBackendReport;
+  try {
+    report = JSON.parse(res.stdout) as KnowledgeBackendReport;
+  } catch {
+    return [
+      {
+        id,
+        severity: 'warn',
+        title: 'cli-context check-backend produced no readable report',
+        remediation: res.stderr?.trim() || undefined,
+      },
+    ];
+  }
+  const configHint =
+    'Install the package named by knowledge.backendModule, or fix knowledge.backend in .ai-sdlc/context.yaml';
+  if (!report.resolved) {
+    return [
+      {
+        id,
+        severity: 'fail',
+        title: `knowledge backend '${report.backend}' does not resolve: ${report.error ?? 'unknown error'}`,
+        remediation: configHint,
+      },
+    ];
+  }
+  if (!report.opened) {
+    return [
+      {
+        id,
+        severity: 'fail',
+        title: `knowledge backend '${report.backend}' factory does not open: ${report.error ?? 'unknown error'}`,
+        remediation: `Fix the knowledge.${report.backend} options in .ai-sdlc/context.yaml`,
+      },
+    ];
+  }
+  if (report.error) {
+    return [
+      {
+        id,
+        severity: 'fail',
+        title: `knowledge backend '${report.backend}': ${report.error}`,
+      },
+    ];
+  }
+  const notIgnored = report.localPaths.filter((p) => p.inRepo && !p.ignored);
+  if (notIgnored.length > 0) {
+    return notIgnored.map((p) => ({
+      id,
+      severity: 'fail' as const,
+      title: `knowledge backend '${report.backend}' local path ${p.path} is not git-ignored`,
+      remediation: `Add ${p.path} to .gitignore so the backend's local content cannot be committed`,
+      anonymizableEvidence: { localPaths: report.localPaths.length, notIgnored: notIgnored.length },
+    }));
+  }
+  if (report.localPaths.length === 0) {
+    return [
+      {
+        id,
+        severity: 'warn',
+        title: `knowledge backend '${report.backend}' declares no local paths; check-scope cannot guard a local replica or cache`,
+        remediation:
+          'If the backend keeps content on disk, implement localPaths() in its KnowledgeStore',
+      },
+    ];
+  }
+  return [
+    {
+      id,
+      severity: 'pass',
+      title: `knowledge backend '${report.backend}' opens; ${report.localPaths.length} local path(s) git-ignored`,
+      anonymizableEvidence: { localPaths: report.localPaths.length },
+    },
+  ];
+}
+
 // ── Checks 4, 5, 6: config files validated against their JSON schema (AISDLC-582) ──
 
 type SchemaValidator = ReturnType<InstanceType<typeof Ajv2020>['compile']>;
@@ -3639,6 +3771,12 @@ export const DOCTOR_CHECKS: DoctorCheck[] = [
     description:
       '.ai-sdlc/workflow.yaml validates against the Workflow schema and identifier rules (RFC-0056).',
     run: checkWorkflowDocument,
+  },
+  {
+    id: 'knowledge-backend',
+    description:
+      'A non-files knowledge backend resolves, opens, and its declared local paths are git-ignored (AISDLC-1433).',
+    run: checkKnowledgeBackend,
   },
   {
     id: 'plugin-version',
