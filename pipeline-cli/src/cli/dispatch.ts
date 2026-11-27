@@ -232,7 +232,7 @@ import { gatherPrFacts } from '../hierarchy/pr-facts.js';
 import { annotateSnapshot, appendReconcileLog, rowsForOpen } from '../hierarchy/pr-rows.js';
 import { createSnapshotRunner } from '../hierarchy/pr-snapshot.js';
 import { useGhReadCacheDir } from '../hierarchy/gh-read-cache.js';
-import { reenter } from '../hierarchy/reenter.js';
+import { reenter, type ReenterResult } from '../hierarchy/reenter.js';
 import { decideResumeReview } from '../next-step/resume-decision.js';
 import { defaultRunner } from '../runtime/exec.js';
 import { loadPrLifecycleConfig } from '../hierarchy/pr-lifecycle-config.js';
@@ -426,7 +426,7 @@ export interface DispatchCliDeps {
   cwd?: string;
   /** Role the calling process holds in the roster; null when it holds none. */
   callerRole?: () => HierarchyRole | null;
-  /** Runs `gh` for `reenter`; default the process's `gh`. */
+  /** Runs `gh` and `git` for `reenter` and the `reconcile` pass; default the process's runner. */
   ghRun?: CommandRunner;
   /** Replaces the all-state PR list `rebuild` reads (tests). */
   listAllPrs?: () => import('../dispatch/board-recovery.js').RebuildPr[];
@@ -517,10 +517,13 @@ export async function runDispatchCli(
       // RFC-0054: one coded pass over the open PRs; `--watch` keeps the scheduler running.
       const cliBin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin');
       const cwd = deps.cwd ?? process.cwd();
-      const execute = commandExecutor(createSystemRunner(), cwd, cliBin);
+      // Tests replace the GitHub and git reads of the pass; production uses the process's `gh`.
+      const systemRun = (): CommandRunner => deps.ghRun ?? createSystemRunner();
+      // AISDLC-1453: the pass's own re-entries run in this process (see `reconcilerRunner`).
+      const execute = commandExecutor(reconcilerRunner(systemRun(), cliBin, deps), cwd, cliBin);
       // DEC-0266: the reconciler's only close goes through the `close-superseded` subcommand.
       const closeSuperseded = (pr: number): number | undefined => {
-        const r = createSystemRunner()(
+        const r = systemRun()(
           'node',
           [
             path.join(cliBin, 'cli-dispatch.mjs'),
@@ -538,7 +541,7 @@ export async function runDispatchCli(
         return typeof by === 'number' ? by : undefined;
       };
       // AISDLC-1190: routed PRs and a red main reach the planner session, not only this log.
-      const notifyPlanner = createPlannerNotifier(boardDir, createSystemRunner());
+      const notifyPlanner = createPlannerNotifier(boardDir, systemRun());
       const only = flags['pr'] === undefined ? undefined : Number.parseInt(flags['pr'], 10);
       if (only !== undefined && Number.isNaN(only)) {
         process.stderr.write('cli-dispatch reconcile: --pr must be a number\n');
@@ -565,8 +568,8 @@ export async function runDispatchCli(
         const report = reconcile(facts, {
           boardDir,
           execute,
-          mainHealth: gatherMainHealth(createSystemRunner(), cwd),
-          docsBump: gatherDocsBump(createSystemRunner(), cwd),
+          mainHealth: gatherMainHealth(systemRun(), cwd),
+          docsBump: gatherDocsBump(systemRun(), cwd),
           maxSameHeadActions,
           maxCiRounds,
           closeSuperseded,
@@ -576,7 +579,7 @@ export async function runDispatchCli(
           completedOnMain: () => fetchedCompletedOnMain(cwd),
           enqueueFiled: (pr, headBranch) =>
             autoEnqueueFiled(boardDir, pr, headBranch, {
-              readTaskOnMain: (id) => readTaskOnMain(createSystemRunner(), cwd, id),
+              readTaskOnMain: (id) => readTaskOnMain(systemRun(), cwd, id),
               enqueue: (entries) =>
                 enqueueTasks(boardDir, entries, {
                   baseSha: resolveBaseSha(cwd),
@@ -589,7 +592,7 @@ export async function runDispatchCli(
         for (const st of report.stalls) {
           try {
             desktopNotice(
-              createSystemRunner(),
+              systemRun(),
               `PR #${st.pr} routed to the planner ${st.ageMinutes} min ago and unchanged: ${st.note}`,
             );
           } catch {
@@ -608,11 +611,7 @@ export async function runDispatchCli(
             facts = undefined;
           }
         } else {
-          facts = gatherFacts(
-            createSnapshotRunner(createSystemRunner(), { boardDir }),
-            cwd,
-            boardDir,
-          );
+          facts = gatherFacts(createSnapshotRunner(systemRun(), { boardDir }), cwd, boardDir);
         }
         return facts && only !== undefined ? facts.filter((f) => f.prNumber === only) : facts;
       };
@@ -1736,94 +1735,27 @@ export async function runDispatchCli(
     }
 
     case 'reenter': {
-      const first = argv[1] !== undefined && !argv[1].startsWith('--') ? argv[1] : undefined;
-      const target = first ?? flags['pr'] ?? flags['task-id'] ?? '';
-      if (!target || target === 'true') {
-        process.stderr.write('cli-dispatch reenter: pass a pull request number or a task id\n');
-        return 2;
+      const run = runReenter(argv, flags, boardDir, deps, 'session');
+      if (!run.ok) {
+        process.stderr.write(`${run.message}\n`);
+        return run.code;
       }
-      let note = flags['note'];
-      if (note === undefined && flags['note-file']) {
-        const read = readNoteFile(flags['note-file'], boardDir);
-        if ('error' in read) {
-          process.stderr.write(`cli-dispatch reenter: ${read.error}\n`);
-          return 2;
-        }
-        note = read.note;
-      }
-      if (note === 'true') {
+      const { result, developerRound, workDir } = run;
+      // AISDLC-1053: say which path the next resume takes, so dispatch sees whether the note
+      // reaches a developer.
+      const resumePath =
+        result.kind === 'manifest' || result.kind === 'task-note'
+          ? developerRound
+            ? 'developer-round'
+            : await predictResumePath(workDir, result.taskId)
+          : undefined;
+      if (developerRound && result.kind === 'machine') {
         process.stderr.write(
-          'cli-dispatch reenter: --note <text> (or --note-file <path>) needs a value\n',
+          'cli-dispatch reenter: --developer-round ignored; the PR was routed to the machine, not a manifest\n',
         );
-        return 2;
       }
-      const cwd = deps.cwd ?? process.cwd();
-      const caller = checkDispatchCaller({
-        label: 'cli-dispatch reenter',
-        cwd,
-        boardDir,
-        workDir: flags['work-dir'],
-        worker: flags['worker'],
-        identity: deps.identity,
-        trustedBoard: deps.trustedBoard,
-        installDir: deps.installDir,
-      });
-      if (!caller.ok) {
-        process.stderr.write(`${caller.reason}\n`);
-        return 1;
-      }
-      // Sending a PR back to an executor is a kind of requeue: the same grant applies.
-      const granted = deps.operational ?? loadOperational(cwd, cwd);
-      if (!granted.has('requeue')) {
-        process.stderr.write(
-          'cli-dispatch reenter: refused; the repository policy does not grant requeue to the dispatch session. ' +
-            'Raise it with `cli-decisions escalate` so the decision is recorded and routed\n',
-        );
-        return 1;
-      }
-      const workDir = path.resolve(flags['work-dir'] ?? '.');
-      try {
-        const developerRound = flags['developer-round'] !== undefined;
-        const result = reenter(
-          {
-            target,
-            ...(note === undefined ? {} : { note }),
-            ...(developerRound ? { developerRound: true } : {}),
-            ...(flags['push-only'] !== undefined ? { pushOnly: true } : {}),
-            ...(flags['decision'] && flags['decision'] !== 'true'
-              ? { decisionId: flags['decision'] }
-              : {}),
-          },
-          {
-            boardDir,
-            run: deps.ghRun ?? createSystemRunner(),
-            cwd: workDir,
-            reenteredBy: caller.name,
-            resolveBaseSha: () => flags['base-sha'] ?? resolveBaseSha(workDir),
-            resolveTaskFile: (id) => findTaskFileRelative(id, workDir),
-          },
-        );
-        // AISDLC-1053: say which path the next resume takes, so dispatch sees whether the note
-        // reaches a developer.
-        const resumePath =
-          result.kind === 'manifest' || result.kind === 'task-note'
-            ? developerRound
-              ? 'developer-round'
-              : await predictResumePath(workDir, result.taskId)
-            : undefined;
-        if (developerRound && result.kind === 'machine') {
-          process.stderr.write(
-            'cli-dispatch reenter: --developer-round ignored; the PR was routed to the machine, not a manifest\n',
-          );
-        }
-        out({ ok: true, ...result, ...(resumePath ? { resumePath } : {}) });
-        return 0;
-      } catch (err) {
-        process.stderr.write(
-          `cli-dispatch reenter: ${err instanceof Error ? err.message : String(err)}\n`,
-        );
-        return 1;
-      }
+      out({ ok: true, ...result, ...(resumePath ? { resumePath } : {}) });
+      return 0;
     }
 
     case '':
@@ -1840,6 +1772,134 @@ export async function runDispatchCli(
       return 2;
     }
   }
+}
+
+/** Outcome of {@link runReenter}: the result, or the exit code and the refusal line. */
+type ReenterRun =
+  | { ok: false; code: number; message: string }
+  | { ok: true; result: ReenterResult; developerRound: boolean; workDir: string };
+
+/**
+ * The `reenter` subcommand up to its result, shared by the CLI and the reconciler.
+ *
+ * `startedBy` is a code-level argument, never read from argv, the environment or a file:
+ * `'session'` (the CLI) requires the caller to be the running dispatch session;
+ * `'reconciler'` is passed only by {@link reconcilerRunner}, which the reconcile pass
+ * builds for its own actions (AISDLC-1453). Both run the location checks (main checkout,
+ * trusted board, install location) and the operational `requeue` grant.
+ */
+function runReenter(
+  argv: readonly string[],
+  flags: Record<string, string>,
+  boardDir: string,
+  deps: DispatchCliDeps,
+  startedBy: 'session' | 'reconciler',
+): ReenterRun {
+  const fail = (code: number, message: string): ReenterRun => ({ ok: false, code, message });
+  const first = argv[1] !== undefined && !argv[1].startsWith('--') ? argv[1] : undefined;
+  const target = first ?? flags['pr'] ?? flags['task-id'] ?? '';
+  if (!target || target === 'true') {
+    return fail(2, 'cli-dispatch reenter: pass a pull request number or a task id');
+  }
+  let note = flags['note'];
+  if (note === undefined && flags['note-file']) {
+    const read = readNoteFile(flags['note-file'], boardDir);
+    if ('error' in read) return fail(2, `cli-dispatch reenter: ${read.error}`);
+    note = read.note;
+  }
+  if (note === 'true') {
+    return fail(2, 'cli-dispatch reenter: --note <text> (or --note-file <path>) needs a value');
+  }
+  const cwd = deps.cwd ?? process.cwd();
+  const caller =
+    startedBy === 'reconciler'
+      ? // The reconcile pass carries the trust the tick already has; the location checks
+        // still run (no `identity` here, so they are never skipped).
+        checkDispatchCaller({
+          label: 'cli-dispatch reenter',
+          cwd,
+          boardDir,
+          workDir: flags['work-dir'],
+          worker: RECONCILER_WORKER,
+          trustedBoard: deps.trustedBoard,
+          installDir: deps.installDir,
+          skipCallerIdentity: true,
+        })
+      : checkDispatchCaller({
+          label: 'cli-dispatch reenter',
+          cwd,
+          boardDir,
+          workDir: flags['work-dir'],
+          worker: flags['worker'],
+          identity: deps.identity,
+          trustedBoard: deps.trustedBoard,
+          installDir: deps.installDir,
+        });
+  if (!caller.ok) return fail(1, caller.reason);
+  // Sending a PR back to an executor is a kind of requeue: the same grant applies.
+  const granted = deps.operational ?? loadOperational(cwd, cwd);
+  if (!granted.has('requeue')) {
+    return fail(
+      1,
+      'cli-dispatch reenter: refused; the repository policy does not grant requeue to the dispatch session. ' +
+        'Raise it with `cli-decisions escalate` so the decision is recorded and routed',
+    );
+  }
+  const workDir = path.resolve(flags['work-dir'] ?? cwd);
+  const developerRound = flags['developer-round'] !== undefined;
+  try {
+    const result = reenter(
+      {
+        target,
+        ...(note === undefined ? {} : { note }),
+        ...(developerRound ? { developerRound: true } : {}),
+        ...(flags['push-only'] !== undefined ? { pushOnly: true } : {}),
+        ...(flags['decision'] && flags['decision'] !== 'true'
+          ? { decisionId: flags['decision'] }
+          : {}),
+      },
+      {
+        boardDir,
+        run: deps.ghRun ?? createSystemRunner(),
+        cwd: workDir,
+        reenteredBy: caller.name,
+        resolveBaseSha: () => flags['base-sha'] ?? resolveBaseSha(workDir),
+        resolveTaskFile: (id) => findTaskFileRelative(id, workDir),
+      },
+    );
+    return { ok: true, result, developerRound, workDir };
+  } catch (err) {
+    return fail(1, `cli-dispatch reenter: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** Name the reconciler's re-entries record as `reenteredBy`. */
+export const RECONCILER_WORKER = 'reconciler';
+
+/**
+ * AISDLC-1453: the runner the reconcile pass hands its action executor. A re-entry the
+ * reconciler orders (`land-prep`, `review-resume`, `push-only-reenter`, the developer round)
+ * runs in this process instead of a child `cli-dispatch reenter`, which would walk its parent
+ * processes for a claude session and refuse when the host runs the pass. Every other
+ * command goes to `base` unchanged. Only the exact argv `actionCommands` builds is matched.
+ */
+export function reconcilerRunner(
+  base: CommandRunner,
+  cliBin: string,
+  deps: DispatchCliDeps,
+): CommandRunner {
+  const dispatchBin = path.join(cliBin, 'cli-dispatch.mjs');
+  return (file, args, options) => {
+    if (file !== 'node' || args[0] !== dispatchBin || args[1] !== 'reenter') {
+      return base(file, args, options);
+    }
+    const argv = args.slice(1);
+    const { flags } = parseArgv(argv);
+    const run = runReenter(argv, flags, resolveBoardDir(flags), deps, 'reconciler');
+    return run.ok
+      ? { status: 0, stdout: `${JSON.stringify({ ok: true, ...run.result })}\n`, stderr: '' }
+      : { status: run.code, stdout: '', stderr: `${run.message}\n` };
+  };
 }
 
 /** Commit the manifests of a batch are based on: `origin/main`, else `HEAD`. */
