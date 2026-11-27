@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1399
 title: 'The webhook forwarder subscribes to the push event the receiver handles'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-23'
 labels:

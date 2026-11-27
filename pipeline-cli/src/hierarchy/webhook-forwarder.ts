@@ -13,8 +13,35 @@ import path from 'node:path';
 import type { HierarchyDeps } from './types.js';
 
 export const FORWARDER_LABEL_PREFIX = 'com.ai-sdlc.webhook';
+/** The GitHub kinds the receiver records (`WEBHOOK_EVENT_KINDS` minus the canary kinds); AISDLC-1399 added `push`. */
 export const FORWARD_EVENTS =
-  'pull_request,check_suite,check_run,workflow_run,status,pull_request_review';
+  'pull_request,check_suite,check_run,workflow_run,status,pull_request_review,push';
+
+const xmlDecode = (s: string): string =>
+  s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+/** The `--events` list of the installed agent plist, or undefined when there is none. */
+export function installedForwarderEvents(
+  deps: HierarchyDeps,
+  label = forwarderLabel(deps),
+): string[] | undefined {
+  let plist: string;
+  try {
+    plist = readFileSync(forwarderPlistPath(deps, label), 'utf-8');
+  } catch {
+    return undefined;
+  }
+  const m = /<string>--events<\/string>\s*<string>([^<]*)<\/string>/.exec(plist);
+  return m ? xmlDecode(m[1]!).split(',').filter(Boolean) : [];
+}
+
+/** Whether an installed agent subscribes to other kinds than `FORWARD_EVENTS` (it needs a reinstall). */
+export function forwarderEventsStale(deps: HierarchyDeps, label = forwarderLabel(deps)): boolean {
+  const installed = installedForwarderEvents(deps, label);
+  if (!installed) return false;
+  const want = FORWARD_EVENTS.split(',');
+  return installed.length !== want.length || want.some((e) => !installed.includes(e));
+}
 
 const uid = (): number => (typeof process.getuid === 'function' ? process.getuid() : 0);
 

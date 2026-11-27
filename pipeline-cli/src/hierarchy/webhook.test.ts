@@ -34,7 +34,14 @@ import {
   webhookStatus,
   webhookUp,
 } from './webhook.js';
-import { agentPath, resolveRealGh } from './webhook-forwarder.js';
+import {
+  agentPath,
+  FORWARD_EVENTS,
+  forwarderEventsStale,
+  installedForwarderEvents,
+  resolveRealGh,
+} from './webhook-forwarder.js';
+import { WEBHOOK_EVENT_KINDS } from '../dispatch/webhook-receiver.js';
 import { runWebhookHealthTick } from './webhook-health.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -819,6 +826,88 @@ describe('receiver binds first, then records and installs (AISDLC-1350)', () => 
     expect(
       calls.filter((c) => c[1] === 'bootout' && c[2].endsWith('/io.ai-sdlc.webhook-forward')),
     ).toHaveLength(1);
+  });
+});
+
+describe('forwarder subscribes to the kinds the receiver accepts (AISDLC-1399)', () => {
+  let home: string;
+  const calls: string[][] = [];
+  const mkd = (): HierarchyDeps =>
+    ({
+      ...mk({ PATH: '/opt/bin:/usr/bin', HOME: home, AI_SDLC_WEBHOOK_SECRET: 's3' }),
+      now: () => new Date(),
+      run: (f: string, a: readonly string[]) => {
+        calls.push([f, ...a]);
+        if (f === 'gh' && a[0] === 'repo') return { status: 0, stdout: 'o/r\n', stderr: '' };
+        if (f === 'gh') return { status: 0, stdout: '[]', stderr: '' };
+        if (f === 'launchctl' && a[0] === 'print')
+          return { status: 0, stdout: 'state = running\n', stderr: '' };
+        return { status: 0, stdout: '', stderr: '' };
+      },
+      isExecutable: (f: string) => f === '/opt/bin/gh',
+      sleepMs: () => undefined,
+    }) as unknown as HierarchyDeps;
+  beforeEach(() => {
+    calls.length = 0;
+    home = mkdtempSync(path.join(os.tmpdir(), 'wh-home-'));
+  });
+  afterEach(() => removeFixtureDir(home));
+  const bootstraps = (): string[][] =>
+    calls.filter((c) => c[0] === 'launchctl' && c[1] === 'bootstrap');
+  const writeAgent = (deps: HierarchyDeps, events: string): void => {
+    const plist = forwarderPlistPath(deps);
+    mkdirSync(path.dirname(plist), { recursive: true });
+    writeFileSync(
+      plist,
+      `<array>\n<string>--events</string>\n<string>${events}</string>\n</array>`,
+    );
+  };
+  const recordRunning = (deps: HierarchyDeps): void =>
+    writeFileSync(
+      path.join(dir, 'webhook.json'),
+      JSON.stringify({
+        pid: 99,
+        port: 8765,
+        feed: { kind: 'gh-forward', agent: forwarderLabel(deps) },
+      }),
+    );
+
+  it('FORWARD_EVENTS equals the GitHub kinds the receiver records, push included (AC-1)', () => {
+    const github = WEBHOOK_EVENT_KINDS.filter((k) => !k.startsWith('pipeline-canary-'));
+    expect([...FORWARD_EVENTS.split(',')].sort()).toEqual([...github].sort());
+    expect(FORWARD_EVENTS.split(',')).toContain('push');
+  });
+
+  it('webhook up reinstalls a running forwarder whose agent lacks push (AC-2)', () => {
+    const deps = mkd();
+    writeAgent(deps, 'pull_request,check_suite,check_run,workflow_run,status,pull_request_review');
+    recordRunning(deps);
+    expect(forwarderEventsStale(deps)).toBe(true);
+    webhookUp(deps, undefined, vi.fn(), undefined, 'darwin');
+    expect(bootstraps()).toHaveLength(1);
+    expect(installedForwarderEvents(deps)).toContain('push');
+    expect(forwarderEventsStale(deps)).toBe(false);
+    const state = JSON.parse(readFileSync(path.join(dir, 'webhook.json'), 'utf-8'));
+    expect(state.feed.agent).toBe(forwarderLabel(deps));
+  });
+
+  it('webhook up leaves a running forwarder with the current events alone (AC-2)', () => {
+    const deps = mkd();
+    writeAgent(deps, FORWARD_EVENTS);
+    recordRunning(deps);
+    webhookUp(deps, undefined, vi.fn(), undefined, 'darwin');
+    expect(bootstraps()).toHaveLength(0);
+  });
+
+  it('reads no events without an agent and an empty list without --events', () => {
+    const deps = mkd();
+    expect(installedForwarderEvents(deps)).toBeUndefined();
+    expect(forwarderEventsStale(deps)).toBe(false);
+    const plist = forwarderPlistPath(deps);
+    mkdirSync(path.dirname(plist), { recursive: true });
+    writeFileSync(plist, '<plist/>');
+    expect(installedForwarderEvents(deps)).toEqual([]);
+    expect(forwarderEventsStale(deps)).toBe(true);
   });
 });
 

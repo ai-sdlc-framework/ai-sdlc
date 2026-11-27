@@ -17,6 +17,7 @@ import {
   ForwarderPersistError,
   resolveRepo,
   forwarderAgentAlive,
+  forwarderEventsStale,
   forwarderLabel,
   forwarderPersistence,
   installForwarder,
@@ -607,7 +608,16 @@ export function webhookUp(
   }
   if (before.state === 'up') {
     // A running receiver keeps its feed; only a machine-wide label is replaced by the per-board one.
-    if (!feed && recorded?.kind === 'gh-forward' && legacy) feed = carriedFeed(recorded);
+    // An agent installed before an event kind was added (AISDLC-1399: `push`) is reinstalled too.
+    if (
+      !feed &&
+      recorded?.kind === 'gh-forward' &&
+      (legacy ||
+        (recorded.pid === undefined &&
+          recorded.agent !== undefined &&
+          forwarderEventsStale(deps, recorded.agent)))
+    )
+      feed = carriedFeed(recorded);
     let persistError: ForwarderPersistError | undefined;
     if (feed?.kind === 'gh-forward' && feed.pid === undefined) {
       try {
