@@ -11,6 +11,8 @@ import {
 import { tmpdir } from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
+import net from 'node:net';
+import { EventEmitter } from 'node:events';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -23,6 +25,8 @@ import {
   type IdentityDeps,
   type RosterEntry,
 } from '../hierarchy/index.js';
+import { createSocketSender } from '../hierarchy/send.js';
+import { processStartOf, resolveSessionSocket } from '../hierarchy/send-resolve.js';
 import { collectVerdicts, writeVerdict } from '../dispatch/board.js';
 import { defaultHierarchyDeps, firstPositional, runHierarchyCli } from './hierarchy.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
@@ -1910,7 +1914,7 @@ describe('handoff and send subcommands (AISDLC-766, AISDLC-1036)', () => {
       await runHierarchyCli(
         ['send', '--to', 'uds:/tmp/cc-socks/123.sock', '--text', 'done'],
         overrides(),
-        { sendBrief, sendSocket },
+        { sendBrief, sendSocket, socketExists: () => true },
       ),
     ).toBe(0);
     expect(sent).toEqual([['uds:/tmp/cc-socks/123.sock', 'done']]);
@@ -1919,6 +1923,7 @@ describe('handoff and send subcommands (AISDLC-766, AISDLC-1036)', () => {
         await runHierarchyCli(['send', '--to', to, '--text', 'hi'], overrides(), {
           sendBrief,
           sendSocket,
+          socketExists: () => true,
         }),
       ).toBe(1);
       expect(String(err.mock.calls.at(-1)?.[0])).toContain('not listed');
@@ -1930,6 +1935,7 @@ describe('handoff and send subcommands (AISDLC-766, AISDLC-1036)', () => {
       await runHierarchyCli(['send', '--to', 'alpha-planner', '--text', 'x'], overrides(), {
         sendBrief,
         sendSocket,
+        socketExists: () => true,
       }),
     ).toBe(0);
     expect(sendBrief).toHaveBeenCalledTimes(1);
@@ -2238,5 +2244,204 @@ describe('sweep-worktrees (AISDLC-1108)', () => {
     expect(logs.at(-1)).toBe('would remove 0 worktree(s); branches are never deleted.');
     expect(await runHierarchyCli(['sweep-worktrees'], overrides({ cwd }))).toBe(0);
     expect(logs.at(-1)).toBe('removed 0 worktree(s); branches are never deleted.');
+  });
+});
+
+describe('send resolves a relaunched session (AISDLC-1392)', () => {
+  const OLD = 'uds:/tmp/cc-socks/7550.sock';
+  const NEW = 'uds:/tmp/cc-socks/60563.sock';
+  const START = 'Sun Nov 22 00:38:00 2026';
+
+  function setup(received: unknown[], sessions: Array<Record<string, unknown>>) {
+    writeRoster(path.join(tmp, 'dispatch'), {
+      schemaVersion: 'v1',
+      sessions: [projectEntry('alpha', 'planner', 'planner', 1)],
+    });
+    const handoff = path.join(tmp, 'dispatch', 'handoff');
+    fs.mkdirSync(handoff, { recursive: true });
+    const log = path.join(handoff, 'received-planner.json');
+    fs.writeFileSync(log, JSON.stringify(received));
+    fs.mkdirSync(path.join(tmp, 'sessions'), { recursive: true });
+    sessions.forEach((r, i) =>
+      fs.writeFileSync(path.join(tmp, 'sessions', `${i}.json`), JSON.stringify(r)),
+    );
+    const sent: Array<[string, string]> = [];
+    const sendBrief = vi.fn();
+    const extras = {
+      sendBrief,
+      sendSocket: (a: string, m: string) => void sent.push([a, m]),
+      procStartOf: () => START,
+      socketExists: (a: string) => a === NEW,
+    };
+    return { sent, sendBrief, extras, log };
+  }
+  const reg = (over: Record<string, unknown> = {}) => ({
+    pid: 60563,
+    name: 'arcana-planner',
+    startedAt: 2,
+    procStart: START,
+    ...over,
+  });
+
+  it('delivers a stale address to the new socket and reports the repair; rewrites no log', async () => {
+    const t = setup(
+      [
+        { address: OLD, name: 'arcana-planner' },
+        { address: 'uds:/tmp/cc-socks/2.sock', name: 'not-in-registry' },
+      ],
+      [reg()],
+    );
+    expect(
+      await runHierarchyCli(['send', '--to', OLD, '--text', 'hi'], overrides(), t.extras),
+    ).toBe(0);
+    expect(t.sent).toEqual([[NEW, 'hi']]);
+    const out = JSON.parse(logs.at(-1) ?? '{}');
+    expect(out.repaired).toEqual({ name: 'arcana-planner', from: OLD, to: NEW });
+    // a successful send never prunes, even an entry whose name does not resolve
+    expect(JSON.parse(fs.readFileSync(t.log, 'utf8'))).toHaveLength(2);
+  });
+
+  it('exits 1 with a reason, types nothing, and drops the dead entry when the name no longer resolves', async () => {
+    const t = setup([{ address: OLD, name: 'gone' }, { address: 'uds:/tmp/cc-socks/1.sock' }], []);
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(
+      await runHierarchyCli(['send', '--to', OLD, '--text', 'hi'], overrides(), t.extras),
+    ).toBe(1);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain("'gone' no longer resolves");
+    expect(t.sent).toEqual([]);
+    expect(t.sendBrief).not.toHaveBeenCalled();
+    expect(JSON.parse(fs.readFileSync(t.log, 'utf8'))).toEqual([
+      { address: 'uds:/tmp/cc-socks/1.sock' },
+    ]);
+    // a bare-string (no name) address whose socket is gone is refused too
+    expect(
+      await runHierarchyCli(
+        ['send', '--to', 'uds:/tmp/cc-socks/1.sock', '--text', 'hi'],
+        overrides(),
+        t.extras,
+      ),
+    ).toBe(1);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('no sender name');
+  });
+
+  it('resolves a peer name from another project through the registry', async () => {
+    const t = setup([{ address: OLD, name: 'arcana-planner' }], [reg()]);
+    expect(
+      await runHierarchyCli(
+        ['send', '--to', 'arcana-planner', '--text', 'hi'],
+        overrides(),
+        t.extras,
+      ),
+    ).toBe(0);
+    expect(t.sent).toEqual([[NEW, 'hi']]);
+    expect(JSON.parse(logs.at(-1) ?? '{}').via).toBe(NEW);
+    expect(t.sendBrief).not.toHaveBeenCalled();
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    expect(
+      await runHierarchyCli(['send', '--to', 'arcana-planner', '--text', 'hi'], overrides(), {
+        ...t.extras,
+        socketExists: () => false,
+      }),
+    ).toBe(1);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('does not resolve');
+  });
+
+  it('ignores a reused pid whose start time differs and uses the entry messagingSocketPath', async () => {
+    const t = setup(
+      [{ address: OLD, name: 'arcana-planner' }],
+      [
+        reg({ pid: 7550, startedAt: 9, procStart: 'Mon Nov 23 09:00:00 2026' }),
+        reg({ messagingSocketPath: '/tmp/cc-socks/custom.sock', startedAt: 1 }),
+      ],
+    );
+    // OLD is gone from the received log's point of view, but the reused pid 7550 has a live socket: only the
+    // procStart mismatch rejects that entry
+    let oldLive = false;
+    const extras = {
+      ...t.extras,
+      procStartOf: (pid: number) => (pid === 7550 ? 'Tue Nov 24 01:00:00 2026' : START),
+      socketExists: (a: string) => a === 'uds:/tmp/cc-socks/custom.sock' || (oldLive && a === OLD),
+    };
+    expect(
+      resolveSessionSocket(
+        [
+          { ...reg({ pid: 7550, startedAt: 9, procStart: 'Mon Nov 23 09:00:00 2026' }) },
+          { ...reg({ messagingSocketPath: '/tmp/cc-socks/custom.sock', startedAt: 1 }) },
+        ] as never,
+        'arcana-planner',
+        { procStartOf: extras.procStartOf, socketExists: () => true },
+      ),
+    ).toBe('uds:/tmp/cc-socks/custom.sock');
+    expect(await runHierarchyCli(['send', '--to', OLD, '--text', 'hi'], overrides(), extras)).toBe(
+      0,
+    );
+    expect(t.sent).toEqual([['uds:/tmp/cc-socks/custom.sock', 'hi']]);
+    // the same entry with a matching procStart (whitespace aside) is the session
+    oldLive = true;
+    expect(
+      resolveSessionSocket(
+        [reg({ pid: 7550, startedAt: 9, procStart: 'Tue Nov 24  01:00:00 2026' })] as never,
+        'arcana-planner',
+        { procStartOf: extras.procStartOf, socketExists: () => true },
+      ),
+    ).toBe(OLD);
+  });
+
+  it('reads a process start in UTC, the zone procStart is recorded in, whatever the local zone', () => {
+    const saved = process.env.TZ;
+    process.env.TZ = 'America/Denver';
+    try {
+      const started = processStartOf(process.pid);
+      expect(started).toBeDefined();
+      const asUtc = Date.parse(`${started} UTC`);
+      const expected = Date.now() - process.uptime() * 1000;
+      expect(Math.abs(asUtc - expected)).toBeLessThan(60_000);
+      // the real comparison accepts a registry entry carrying that UTC procStart
+      expect(
+        resolveSessionSocket(
+          [reg({ pid: process.pid, procStart: started })] as never,
+          'arcana-planner',
+          { procStartOf: processStartOf, socketExists: () => true },
+        ),
+      ).toBe(`uds:/tmp/cc-socks/${process.pid}.sock`);
+      expect(processStartOf(2 ** 22 + 12345)).toBeUndefined();
+    } finally {
+      if (saved === undefined) delete process.env.TZ;
+      else process.env.TZ = saved;
+    }
+  });
+
+  it('exits non-zero when the socket sender rejects, never printing ok', async () => {
+    const t = setup([{ address: OLD, name: 'arcana-planner' }], [reg()]);
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    const sendSocket = () => Promise.reject(new Error('connect ECONNREFUSED'));
+    expect(
+      await runHierarchyCli(['send', '--to', OLD, '--text', 'hi'], overrides(), {
+        ...t.extras,
+        sendSocket,
+      }),
+    ).toBe(1);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('ECONNREFUSED');
+    expect(logs.some((l) => l.includes('"ok":true'))).toBe(false);
+  });
+});
+
+describe('createSocketSender (AISDLC-1392)', () => {
+  it('rejects on ENOENT and ECONNREFUSED and resolves on delivery', async () => {
+    await expect(createSocketSender('uds:/nonexistent/x.sock', 'hi')).rejects.toThrow(/ENOENT/);
+    const sockPath = path.join(fs.mkdtempSync('/tmp/sk-'), 'a.sock');
+    const got: string[] = [];
+    const server = net.createServer((c) => c.on('data', (d) => got.push(String(d))));
+    await new Promise<void>((r) => server.listen(sockPath, r));
+    await createSocketSender(`uds:${sockPath}`, 'hello');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(got.join('')).toBe('hello\n');
+    const fake = new EventEmitter();
+    const spy = vi.spyOn(net, 'connect').mockReturnValue(fake as never);
+    const p = createSocketSender(`uds:${sockPath}`, 'x');
+    fake.emit('error', Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }));
+    await expect(p).rejects.toThrow(/ECONNREFUSED/);
+    spy.mockRestore();
+    await new Promise<void>((r) => server.close(() => r()));
   });
 });

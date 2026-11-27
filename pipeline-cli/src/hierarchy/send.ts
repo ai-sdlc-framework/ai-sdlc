@@ -20,43 +20,94 @@ export type SendCheck =
   { ok: true; entry: RosterEntry } | { ok: true; address: string } | { ok: false; reason: string };
 
 /** Delivers one line to the socket address of a message this session received. Injected in tests. */
-export type SocketSender = (address: string, message: string) => void;
+export type SocketSender = (address: string, message: string) => void | Promise<void>;
 
-const SOCKET_ADDRESS = /^uds:\/[A-Za-z0-9._/-]+\.sock$/;
+/** A `from` address a received message carried, with the sender's session name when it sent one. */
+export interface ReceivedSender {
+  address: string;
+  name?: string;
+}
+
+export const SOCKET_ADDRESS = /^uds:\/[A-Za-z0-9._/-]+\.sock$/;
 
 /**
  * AISDLC-1080: the `from` addresses the hooks module recorded for received cross-session messages, in
- * `<board-dir>/handoff/received-<session>.json` (a JSON array of strings, written by `session.receive`).
+ * `<board-dir>/handoff/received-<session>.json` (a JSON array written by `session.receive`). AISDLC-1392:
+ * an element is `{address, name}`; a bare string (the older shape) is an address with no name.
  */
+export function readReceivedSenders(boardDir: string): ReceivedSender[] {
+  const out = new Map<string, ReceivedSender>();
+  for (const f of receivedFiles(boardDir)) {
+    for (const s of readReceivedFile(f)) if (!out.has(s.address)) out.set(s.address, s);
+  }
+  return [...out.values()];
+}
+
 export function readReceivedAddresses(boardDir: string): string[] {
+  return readReceivedSenders(boardDir).map((s) => s.address);
+}
+
+function receivedFiles(boardDir: string): string[] {
   const dir = path.join(boardDir, 'handoff');
-  let files: string[];
   try {
-    files = fs.readdirSync(dir).filter((f) => /^received-.+\.json$/.test(f));
+    return fs
+      .readdirSync(dir)
+      .filter((f) => /^received-.+\.json$/.test(f))
+      .map((f) => path.join(dir, f));
   } catch {
     return [];
   }
-  const out = new Set<string>();
-  for (const f of files) {
-    try {
-      const parsed: unknown = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-      if (Array.isArray(parsed)) {
-        for (const a of parsed) if (typeof a === 'string') out.add(a);
-      }
-    } catch {
-      // an unreadable log contributes no address
-    }
-  }
-  return [...out];
 }
 
-/** Default delivery to a received address: one line written to the unix socket the message came from. */
-export const createSocketSender: SocketSender = (address, message) => {
-  const sock = address.slice('uds:'.length);
-  const client = net.connect(sock);
-  client.on('error', () => undefined);
-  client.end(`${message}\n`);
-};
+function readReceivedFile(file: string): ReceivedSender[] {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!Array.isArray(parsed)) return [];
+    const out: ReceivedSender[] = [];
+    for (const a of parsed) {
+      if (typeof a === 'string') out.push({ address: a });
+      else if (a && typeof a === 'object' && typeof (a as ReceivedSender).address === 'string') {
+        const { address, name } = a as ReceivedSender;
+        out.push(typeof name === 'string' && name ? { address, name } : { address });
+      }
+    }
+    return out;
+  } catch {
+    return []; // an unreadable log contributes no address
+  }
+}
+
+/**
+ * AISDLC-1392: drop `address` from the received logs once a send found its socket gone and its sender name
+ * no longer resolving, so the dead address stops being accepted. Only that address is touched, and only after
+ * such a failed send, so a successful send never rewrites the logs. Returns how many entries were dropped.
+ */
+export function pruneReceivedLog(boardDir: string, address: string): number {
+  let dropped = 0;
+  for (const f of receivedFiles(boardDir)) {
+    const all = readReceivedFile(f);
+    const kept = all.filter((s) => s.address !== address);
+    if (kept.length === all.length) continue;
+    dropped += all.length - kept.length;
+    try {
+      fs.writeFileSync(f, JSON.stringify(kept));
+    } catch {
+      // a log we cannot rewrite stays as it was
+    }
+  }
+  return dropped;
+}
+
+/**
+ * Default delivery to a socket address: one line written to the unix socket. Rejects when the socket is
+ * gone (ENOENT) or nothing listens on it (ECONNREFUSED), so a lost message is never reported as sent.
+ */
+export const createSocketSender: SocketSender = (address, message) =>
+  new Promise<void>((resolve, reject) => {
+    const client = net.connect(address.slice('uds:'.length));
+    client.once('error', reject);
+    client.once('connect', () => client.end(`${message}\n`, () => resolve()));
+  });
 
 /**
  * Find `to` in the roster, or (AISDLC-1080) among the `from` addresses of messages this session received,
@@ -90,7 +141,7 @@ export function sendToRoster(
   send: BriefSender,
   received: readonly string[] = [],
   sendSocket: SocketSender = createSocketSender,
-): void {
+): void | Promise<void> {
   if (/[\r\n]/.test(text)) {
     throw new Error(
       'refusing to send: the text contains a newline (a pane would run it as separate input)',
@@ -98,6 +149,6 @@ export function sendToRoster(
   }
   const check = checkSendTarget(sessions, to, received);
   if (!check.ok) throw new Error(check.reason);
-  if ('address' in check) sendSocket(check.address, text);
-  else send(check.entry, text);
+  if ('address' in check) return sendSocket(check.address, text);
+  send(check.entry, text);
 }

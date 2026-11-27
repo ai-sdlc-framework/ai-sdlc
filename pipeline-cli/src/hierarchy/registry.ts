@@ -28,6 +28,9 @@ export function readSessionRegistry(dir: string): RegistrySession[] {
         status: typeof raw.status === 'string' ? raw.status : 'unknown',
         cwd: typeof raw.cwd === 'string' ? raw.cwd : undefined,
         sessionId: typeof raw.sessionId === 'string' ? raw.sessionId : undefined,
+        procStart: typeof raw.procStart === 'string' ? raw.procStart : undefined,
+        messagingSocketPath:
+          typeof raw.messagingSocketPath === 'string' ? raw.messagingSocketPath : undefined,
       });
     } catch {
       /* skip unreadable or partially written files */

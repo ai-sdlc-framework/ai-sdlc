@@ -98,11 +98,21 @@ export {
 export { buildStuckPrDecision, fileStuckPrDecision } from './stuck-pr-decision.js';
 export {
   checkSendTarget,
+  createSocketSender,
+  pruneReceivedLog,
   readReceivedAddresses,
+  readReceivedSenders,
   sendToRoster,
   type SendCheck,
   type SocketSender,
 } from './send.js';
+export {
+  DeadAddressError,
+  defaultResolveDeps,
+  processStartOf,
+  resolveSessionSocket,
+  sendResolved,
+} from './send-resolve.js';
 export { resolveThresholds, DEFAULT_CONTEXT_THRESHOLDS } from './thresholds.js';
 export {
   boundedHandoffView,

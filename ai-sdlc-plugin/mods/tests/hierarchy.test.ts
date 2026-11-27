@@ -1107,3 +1107,24 @@ describe('hierarchy module: configured rotation thresholds (AISDLC-1163)', () =>
     }
   });
 });
+
+describe('received log script (AISDLC-1392)', () => {
+  it('stores the sender name with its address and replaces an earlier address of the same name', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'recv-'));
+    const run = async (a: { command: string; args: string[] }) =>
+      void execFileSync(a.command, a.args);
+    const msg = (addr: string, name: string) =>
+      `<cross-session-message from="${addr}" from-name="${name}" id="1">x</cross-session-message>`;
+    await recordReceivedSender(run, dir, 'me', msg('uds:/tmp/cc-socks/1.sock', 'peer'));
+    await recordReceivedSender(run, dir, 'me', msg('uds:/tmp/cc-socks/2.sock', 'other'));
+    await recordReceivedSender(run, dir, 'me', msg('uds:/tmp/cc-socks/3.sock', 'peer'));
+    await recordReceivedSender(run, dir, 'me', env('uds:/tmp/cc-socks/4.sock', 'x'));
+    expect(JSON.parse(readFileSync(path.join(dir, 'handoff', 'received-me.json'), 'utf8'))).toEqual(
+      [
+        { address: 'uds:/tmp/cc-socks/2.sock', name: 'other' },
+        { address: 'uds:/tmp/cc-socks/3.sock', name: 'peer' },
+        { address: 'uds:/tmp/cc-socks/4.sock' },
+      ],
+    );
+  });
+});

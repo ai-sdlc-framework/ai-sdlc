@@ -131,9 +131,13 @@ export async function resolveBoardDir(
 const WRITE_SCRIPT =
   "const fs=require('fs');fs.mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});fs.writeFileSync(process.argv[1],process.argv[2])";
 
-/** Appends argv[2] to the JSON array in argv[1] (deduplicated, newest 50), creating the directory. */
+/**
+ * Records `{address: argv[2], name: argv[3]}` in the JSON array in argv[1] (newest 50, creating the directory).
+ * An earlier entry with the same address or the same non-empty name is replaced, so a relaunched sender's
+ * stale address does not linger beside its new one; a bare-string entry from the older shape is kept as is.
+ */
 const RECEIVED_SCRIPT =
-  "const fs=require('fs');const f=process.argv[1];fs.mkdirSync(require('path').dirname(f),{recursive:true});let a=[];try{a=JSON.parse(fs.readFileSync(f,'utf8'))}catch(e){}if(!Array.isArray(a))a=[];a=a.filter(x=>x!==process.argv[2]);a.push(process.argv[2]);fs.writeFileSync(f,JSON.stringify(a.slice(-50)))";
+  "const fs=require('fs');const f=process.argv[1];fs.mkdirSync(require('path').dirname(f),{recursive:true});let a=[];try{a=JSON.parse(fs.readFileSync(f,'utf8'))}catch(e){}if(!Array.isArray(a))a=[];const ad=process.argv[2],nm=process.argv[3]||'';a=a.filter(x=>{const xa=typeof x==='string'?x:x&&x.address;const xn=typeof x==='string'?'':x&&x.name||'';return xa!==ad&&!(nm&&xn===nm)});a.push(nm?{address:ad,name:nm}:{address:ad});fs.writeFileSync(f,JSON.stringify(a.slice(-50)))";
 
 /**
  * AISDLC-1080: remember the verified `from` address of a received cross-session message in
@@ -153,7 +157,11 @@ export async function recordReceivedSender(
   if (!board) return;
   const file = `${board}/handoff/received-${name}.json`;
   await safe(
-    () => run({ command: NODE, args: ['-e', RECEIVED_SCRIPT, file, from] }),
+    () =>
+      run({
+        command: NODE,
+        args: ['-e', RECEIVED_SCRIPT, file, from, senderOf(raw) === from ? '' : senderOf(raw)],
+      }),
     'process.run',
   );
 }

@@ -12,6 +12,7 @@ import path from 'node:path';
 import type { BriefSender } from './brief-notify.js';
 import { readRosterChecked } from './roster.js';
 import { sendToRoster, type SocketSender } from './send.js';
+import { sessionSocketAddress } from './send-resolve.js';
 import type { CommandRunner } from './types.js';
 
 /**
@@ -43,11 +44,6 @@ export function readPlannerAddress(boardDir: string, name: string): string | und
   } catch {
     return undefined;
   }
-}
-
-/** Where Claude Code sessions listen: `/tmp/cc-socks/<pid>.sock`. */
-export function sessionSocketAddress(pid: number): string {
-  return `uds:/tmp/cc-socks/${pid}.sock`;
 }
 
 /**
@@ -98,7 +94,9 @@ export function createPlannerNotifier(
     if (!exists(address)) {
       throw new Error(`the planner socket ${address} is missing; notice held back and retried`);
     }
-    sendToRoster(roster.sessions, address, text, noPane, [address], sendSocket);
+    // The notifier is synchronous: a send that fails after the socket check is still not reported here.
+    const sent = sendToRoster(roster.sessions, address, text, noPane, [address], sendSocket);
+    if (sent) void sent.catch(() => undefined);
   };
 }
 
