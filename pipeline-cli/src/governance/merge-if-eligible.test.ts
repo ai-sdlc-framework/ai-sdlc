@@ -1900,9 +1900,14 @@ describe('governance-sensitive changes are audited, not refused, for trusted PRs
   async function gate(
     files: Record<string, Partial<ExecResult>>,
     mode: 'merge' | 'arm',
-    extra: { auditWriter?: BacklogAuditWriter; prViewOverrides?: Record<string, unknown> } = {},
+    extra: {
+      auditWriter?: BacklogAuditWriter;
+      prViewOverrides?: Record<string, unknown>;
+      extraHandlers?: Record<string, Partial<ExecResult>>;
+    } = {},
   ) {
     const fake = makeFakeRunner({
+      ...extra.extraHandlers,
       'gh pr view 42': { stdout: prView(extra.prViewOverrides) },
       ...MAIN_REF,
       ...files,
@@ -2005,6 +2010,12 @@ describe('governance-sensitive changes are audited, not refused, for trusted PRs
           ['backlog/tasks/aisdlc-9 - x.md', 'renamed', 'backlog/completed/aisdlc-9 - x.md'],
         ]),
         mode,
+        {
+          // AISDLC-1449: the RFC's base copy is read; it declares no review authorities.
+          extraHandlers: {
+            'contents/spec/rfcs/RFC-0048-x.md': { stdout: '---\nid: RFC-0048\n---\n' },
+          },
+        },
       );
       expect(r.eligibility.eligible).toBe(true);
     });
@@ -2501,5 +2512,151 @@ describe('runMergeIfEligible — hold label (AISDLC-1386)', () => {
       expect(r.eligibility.reason).toBe('PR is held (label ai-sdlc/hold)');
       expect(mergeCalls(calls)).toEqual([]);
     }
+  });
+});
+
+describe('runMergeIfEligible — review-authority hold (AISDLC-1449, DEC-0440)', () => {
+  const RFC = 'spec/rfcs/RFC-0018-in-soul-journey-pattern.md';
+  const TASK = 'backlog/completed/aisdlc-9 - do the thing.md';
+  const DECLARED =
+    '---\nid: RFC-0018\nreviewAuthorities:\n  - role: design\n    login: mohirt\n  - role: product\n    login: akillies\n---\n# body\n';
+  const UNDECLARED = '---\nid: RFC-0018\nstatus: Draft\n---\n# body\n';
+  const contents = (path: string) => `contents/${path}?ref=${MAIN_SHA}`;
+  const handlers = (
+    files: ReturnType<typeof changedFiles>,
+    base: Record<string, Partial<ExecResult>>,
+    pr: Record<string, unknown> = {},
+  ): Record<string, Partial<ExecResult>> => ({
+    'gh api repos/org/repo --jq': { stdout: 'true\n' },
+    'gh pr view 42': { stdout: prView(pr) },
+    ...MAIN_REF,
+    ...base,
+    ...files,
+    'gh pr checks 42 --required': { stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]) },
+    ...COMMIT_OPERATOR,
+    ...shaChecks(HEAD_A, [['ci', 'completed', 'success']]),
+    'gh pr merge 42': {},
+  });
+  const run = async (
+    h: Record<string, Partial<ExecResult>>,
+    extra: Partial<RunMergeIfEligibleOptions> = {},
+  ) => {
+    const fake = makeFakeRunner(h);
+    const r = await runMergeIfEligible({
+      prNumber: 42,
+      sourceKind: 'backlog',
+      repoSlug: 'org/repo',
+      repoRoot: '/unused',
+      runner: fake.runner,
+      policyYaml: GREEN_YAML,
+      taskPrefix: 'AISDLC',
+      ...extra,
+    });
+    return { r, calls: fake.calls };
+  };
+  const merges = (calls: RecordedCall[]) => calls.filter((c) => c.args[1] === 'merge');
+
+  it('refuses a change to a declared RFC for every mode, naming the RFC, roles and logins', async () => {
+    for (const mode of ['merge', 'arm'] as const) {
+      const { r, calls } = await run(
+        handlers(changedFiles([[TASK], [RFC, 'modified']]), {
+          [contents(RFC)]: { stdout: DECLARED },
+        }),
+        { mode },
+      );
+      expect(r.merged).toBe(false);
+      expect(r.armed).toBeUndefined();
+      expect(r.eligibility.reason).toMatch(/RFC-0018/);
+      expect(r.eligibility.reason).toMatch(/design \(mohirt\), product \(akillies\)/);
+      expect(r.eligibility.reason.endsWith('merge by hand after they reply (DEC-0440)')).toBe(true);
+      expect(merges(calls)).toEqual([]);
+      // The base copy is read at the main commit, never at the PR head.
+      expect(calls.some((c) => c.args.join(' ').includes(contents(RFC)))).toBe(true);
+      expect(calls.some((c) => c.args.join(' ').includes(`ref=${HEAD_A}`))).toBe(false);
+    }
+  });
+
+  it('refuses the docs lane too', async () => {
+    const { r } = await run(
+      handlers(
+        changedFiles([[RFC, 'modified']]),
+        { [contents(RFC)]: { stdout: DECLARED } },
+        { headRefName: 'docs/rfc-0018-v041' },
+      ),
+      { sourceKind: 'docs', mode: 'arm' },
+    );
+    expect(r.armed).toBeUndefined();
+    expect(r.eligibility.reason).toMatch(/DEC-0440/);
+  });
+
+  it('still refuses when the PR removes the declaration, renames or deletes the RFC', async () => {
+    // The PR head drops reviewAuthorities; the base copy still declares it.
+    for (const files of [
+      changedFiles([[TASK], [RFC, 'modified']]),
+      changedFiles([[TASK], [RFC, 'removed']]),
+      changedFiles([[TASK], ['spec/rfcs/RFC-0018-renamed.md', 'renamed', RFC]]),
+    ]) {
+      const { r, calls } = await run(handlers(files, { [contents(RFC)]: { stdout: DECLARED } }));
+      expect(r.merged).toBe(false);
+      expect(r.eligibility.reason).toMatch(/DEC-0440/);
+      expect(merges(calls)).toEqual([]);
+    }
+  });
+
+  it('merges a change to an undeclared RFC and a newly added RFC', async () => {
+    const changed = await run(
+      handlers(changedFiles([[TASK], [RFC, 'modified']]), {
+        [contents(RFC)]: { stdout: UNDECLARED },
+      }),
+    );
+    expect(changed.r.merged).toBe(true);
+    const empty = await run(
+      handlers(changedFiles([[TASK], [RFC, 'modified']]), {
+        [contents(RFC)]: { stdout: '---\nid: RFC-0018\nreviewAuthorities: []\n---\n' },
+      }),
+    );
+    expect(empty.r.merged).toBe(true);
+    // A new file has no base copy: nothing is read and nothing is refused.
+    const added = await run(handlers(changedFiles([[TASK], ['spec/rfcs/RFC-0999-new.md']]), {}));
+    expect(added.r.merged).toBe(true);
+    expect(added.calls.some((c) => c.args.join(' ').includes('contents/spec/rfcs'))).toBe(false);
+  });
+
+  it('refuses (fail closed) when the base copy cannot be read or parsed', async () => {
+    const unreadable = await run(
+      handlers(changedFiles([[TASK], [RFC, 'modified']]), {
+        [contents(RFC)]: { code: 1, stderr: 'HTTP 502' },
+      }),
+    );
+    expect(unreadable.r.merged).toBe(false);
+    expect(unreadable.r.eligibility.reason).toMatch(/base copy could not be read/);
+    expect(unreadable.r.eligibility.reason).toMatch(/DEC-0440\)$/);
+    const broken = await run(
+      handlers(changedFiles([[TASK], [RFC, 'modified']]), {
+        [contents(RFC)]: { stdout: '---\nid: RFC-0018\nreviewAuthorities: [\n---\n' },
+      }),
+    );
+    expect(broken.r.merged).toBe(false);
+    expect(broken.r.eligibility.reason).toMatch(/could not be parsed/);
+  });
+
+  it('disarms an armed PR it holds (never in a dry run)', async () => {
+    const h = handlers(
+      changedFiles([[TASK], [RFC, 'modified']]),
+      { [contents(RFC)]: { stdout: DECLARED } },
+      { autoMergeRequest: { enabledAt: 'x' } },
+    );
+    const { r, calls } = await run(h, { mode: 'arm' });
+    expect(r.disarmed).toBe(true);
+    expect(r.eligibility.reason).toMatch(/^auto-merge was disarmed; .*DEC-0440\)$/);
+    expect(merges(calls).map((c) => c.args)).toEqual([
+      ['pr', 'merge', '42', '--disable-auto', '--repo', 'org/repo'],
+    ]);
+    const dry = await run(h, { dryRun: true });
+    expect(dry.r.disarmed).toBeUndefined();
+    expect(merges(dry.calls)).toEqual([]);
+    const failing = await run({ ...h, 'gh pr merge 42': { code: 1, stderr: 'nope' } });
+    expect(failing.r.disarmed).toBeUndefined();
+    expect(failing.r.eligibility.reason).toMatch(/^disarming auto-merge failed \(nope\)/);
   });
 });

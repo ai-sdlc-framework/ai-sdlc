@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1449
 title: "A change to an RFC with declared review authorities is never auto-merged"
-status: To Do
+status: Done
 priority: high
 labels:
   - governance

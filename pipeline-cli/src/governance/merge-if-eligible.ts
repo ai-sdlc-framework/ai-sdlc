@@ -44,6 +44,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { auditGovernanceDir } from './audit-dir.js';
+import { reviewAuthorityRefusal } from './rfc-review-authorities.js';
 import { FILE_BRANCH_PREFIX, UPDATE_BRANCH_PREFIX } from '../hierarchy/filing-branches.js';
 import { DOCS_ONLY_PATTERN } from '../../attestation-core/docs-only-paths.mjs';
 import { now } from '../clock.js';
@@ -1671,6 +1672,24 @@ export async function runMergeIfEligible(
   if (opts.sourceKind === 'docs') {
     const pathRefusal = docsLanePathRefusal(changed);
     if (pathRefusal) return refuse(pathRefusal);
+  }
+  // AISDLC-1449 (DEC-0440): an RFC whose base copy declares review authorities is held for
+  // the operator's hand merge, whatever the source kind. The base copy is read at the main
+  // commit the diff was taken against, never the PR head.
+  const authorityRefusal = await reviewAuthorityRefusal(changed, (path) =>
+    readFileFromMain(opts.repoSlug, baseSha!, path, opts.runner, opts.cwd),
+  );
+  if (authorityRefusal) {
+    if (!snapshot.autoMergeArmed || opts.dryRun) return refuse(authorityRefusal);
+    const off = await disarmPr(opts.prNumber, opts.repoSlug, opts.runner, opts.cwd);
+    return {
+      ...refuse(
+        off.ok
+          ? `auto-merge was disarmed; ${authorityRefusal}`
+          : `disarming auto-merge failed (${off.error || 'no error text'}); ${authorityRefusal}`,
+      ),
+      ...(off.ok ? { disarmed: true } : {}),
+    };
   }
   const sensitive = governanceSensitiveChanges(changed);
   const sensitiveNote =

@@ -153,6 +153,34 @@ describe('landEligiblePrs', () => {
     expect(readdirSync(path.join(board, 'notes'))).toHaveLength(2);
   });
 
+  it('records a review-authority hold once and never re-attempts that head (AISDLC-1449)', async () => {
+    const reason =
+      'PR changes an RFC held for review authorities: RFC-0049 (spec/rfcs/RFC-0049-x.md) declares ' +
+      'review authorities product (akillies), design (mohirt) — merge by hand after they reply (DEC-0440)';
+    let tries = 0;
+    const land = async (): Promise<LandOutcome> => {
+      tries++;
+      return { merged: false, armed: false, reason };
+    };
+    const head = 'docs/rfc-0049-amendment';
+    const r1 = await landEligiblePrs(deps(fakeGh([pr(1, { headRefName: head })]), land));
+    expect(r1.refused).toEqual([{ pr: 1, reason }]);
+    // Unchanged fingerprint, and a later tick after checks moved: still no second attempt.
+    await landEligiblePrs(deps(fakeGh([pr(1, { headRefName: head })]), land));
+    await landEligiblePrs(
+      deps(
+        fakeGh([
+          pr(1, { headRefName: head, statusCheckRollup: [{ name: 'a', conclusion: 'SUCCESS' }] }),
+        ]),
+        land,
+      ),
+    );
+    expect(tries).toBe(1);
+    const notes = readdirSync(path.join(board, 'notes'));
+    expect(notes).toEqual([`land-1-${SHA}.authority-hold.txt`]);
+    expect(readFileSync(path.join(board, 'notes', notes[0]!), 'utf-8')).toContain('DEC-0440');
+  });
+
   it('stores the refusal reason in the record and a later landing clears it (AISDLC-1352)', async () => {
     const gh = fakeGh([pr(1)], 'false');
     await landEligiblePrs(

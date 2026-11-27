@@ -9,6 +9,8 @@ import { completeTask } from '../dispatch/complete.js';
 import { PR_STATES, type PrState } from './pr-state.js';
 import {
   actionCommands,
+  AUTHORITY_HOLD_NOTE,
+  authorityHoldReason,
   commandExecutor,
   convertedToDraftOf,
   decide,
@@ -38,6 +40,7 @@ import {
   type ReconcilePr,
 } from './reconcile.js';
 import type { CommandRunner } from './types.js';
+import { reviewAuthorityRefusal } from '../governance/rfc-review-authorities.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let board: string;
@@ -2114,5 +2117,104 @@ describe('a PR converted back to draft is not flipped ready (AISDLC-1385)', () =
     expect(convertedToDraftOf(r(0, 'convert_to_draft:\n'), '/', 1)).toBe('unknown');
     expect(convertedToDraftOf(r(0, 'me\n'), '/', 1)).toBeUndefined();
     expect(convertedToDraftOf(r(1, ''), '/', 1)).toBeNull();
+  });
+});
+
+describe('review-authority hold (AISDLC-1449, DEC-0440)', () => {
+  const RFC = 'spec/rfcs/RFC-0049-system-one-judgment-layer.md';
+  const BASE =
+    '---\nid: RFC-0049\nreviewAuthorities:\n  - { role: product, login: akillies }\n' +
+    '  - { role: design, login: mohirt }\n---\n# body\n';
+  // A docs-lane PR shaped like #3088: an RFC amendment on a docs/* head, green, CLEAN, unarmed.
+  const amendment = (over: Partial<ReconcilePr> = {}): ReconcilePr =>
+    docsPr({
+      prNumber: 3088,
+      title: 'docs(rfc): RFC-0049 operator-question auto-answer amendment',
+      headBranch: 'docs/rfc-0049-amendment',
+      headSha: 'e'.repeat(40),
+      ...over,
+    });
+
+  it('routes the PR to the planner once with the refusal text and never arms it again', async () => {
+    const reason = await reviewAuthorityRefusal(
+      [{ path: RFC, status: 'modified' }],
+      async () => BASE,
+    );
+    expect(reason).not.toBeNull();
+    const calls: string[][] = [];
+    const run: CommandRunner = (file, args) => {
+      calls.push([file, ...args]);
+      return { status: 1, stdout: `PR #3088 | REFUSED | ${reason}\n`, stderr: '' };
+    };
+    const notify = vi.fn();
+    const pass = (at: string) =>
+      reconcile([amendment()], {
+        boardDir: board,
+        execute: commandExecutor(run, '/repo', '/bin'),
+        now: () => new Date(at),
+        notifyPlanner: notify,
+      });
+    expect(decide(amendment()).action).toBe('arm');
+    const r1 = pass('2026-11-26T10:00:00.000Z');
+    pass('2026-11-26T10:05:00.000Z');
+    pass('2026-11-26T10:20:00.000Z');
+    // One arm attempt, refused by the gate; never a retry and never an arm that succeeded.
+    expect(calls.filter((c) => c.includes('--arm'))).toHaveLength(1);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify.mock.calls[0]![0]).toContain('merge by hand after they reply (DEC-0440)');
+    expect(notify.mock.calls[0]![0]).toContain('design (mohirt)');
+    expect(r1.acted).toEqual([
+      expect.objectContaining({ pr: 3088, action: 'route-to-planner', note: AUTHORITY_HOLD_NOTE }),
+    ]);
+    const rec = readLanding(board, 3088)!;
+    expect(rec).toMatchObject({
+      action: 'route-to-planner',
+      failingLine: reason,
+      authorityHold: { headSha: 'e'.repeat(40), reason },
+    });
+    expect(rec.actionFailed).toBeUndefined();
+  });
+
+  it('a new head is evaluated by the gate again', () => {
+    const calls: string[][] = [];
+    const run: CommandRunner = (file, args) => {
+      calls.push([file, ...args]);
+      return {
+        status: 1,
+        stdout: 'PR #3088 | REFUSED | x — merge by hand after they reply (DEC-0440)\n',
+        stderr: '',
+      };
+    };
+    const opts = { boardDir: board, execute: commandExecutor(run, '/repo', '/bin'), now: fixedNow };
+    reconcile([amendment()], opts);
+    reconcile([amendment({ headSha: 'f'.repeat(40) })], opts);
+    expect(calls.filter((c) => c.includes('--arm'))).toHaveLength(2);
+  });
+
+  it('an ordinary arm failure is not a hold', () => {
+    expect(authorityHoldReason('PR #1 | REFUSED | checks pending\n', '')).toBeUndefined();
+    expect(authorityHoldReason('', 'x merge by hand after they reply (DEC-0440)')).toBe(
+      'x merge by hand after they reply (DEC-0440)',
+    );
+    const run: CommandRunner = () => ({
+      status: 1,
+      stdout: 'PR #1 | REFUSED | nope\n',
+      stderr: '',
+    });
+    const r = commandExecutor(
+      run,
+      '/repo',
+      '/bin',
+    )({
+      pr: 1,
+      taskId: '',
+      kind: 'docs',
+      action: 'arm',
+      state: 'no-match',
+      headSha: 'sha',
+      boardDir: board,
+    });
+    expect(r).toMatchObject({ ran: true, failed: true });
+    expect(r.hold).toBeUndefined();
   });
 });

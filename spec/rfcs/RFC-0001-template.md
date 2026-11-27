@@ -112,6 +112,15 @@ requiresDocs: []
 #     evidence: where the status was observed
 #     date: YYYY-MM-DD
 #     owner: TASK-ID
+
+# Optional (AISDLC-1449, DEC-0440): outside authorities that own an area of this
+# RFC. A PR that changes, renames or deletes an RFC whose copy on main declares
+# a non-empty list is never merged by the machine; the operator merges it by
+# hand after the authorities reply. This is the exception to "drafts land on
+# main early". Each entry needs `role`; `login` (a GitHub login) is optional.
+# reviewAuthorities:
+#   - role: design
+#     login: octocat
 ---
 
 # RFC-NNNN: Title

@@ -12,6 +12,11 @@ requires:
   - RFC-0017
   - RFC-0035
 requiresDocs: []
+reviewAuthorities:
+  - role: design
+    login: mohirt
+  - role: product
+    login: akillies
 ---
 
 # RFC-0018: In-Soul Journey Pattern

@@ -38,6 +38,7 @@ import {
   REQUIRES_OK_LIFECYCLES,
   KNOWN_CAPABILITY_IDS,
   validateRuntimeEvidence,
+  validateReviewAuthorities,
   findNewOqResolutionMarkers,
   openQuestionsLines,
   OQ_SECTION_HEADING_REGEX,
@@ -1778,5 +1779,66 @@ describe('AISDLC-764: OQ-resolution marker scan', () => {
       );
       assert.equal(good.status, 0, good.stderr);
     });
+  });
+});
+
+describe('validateReviewAuthorities (AISDLC-1449)', () => {
+  const fm = (body) => `---\nid: RFC-9999\nstatus: Draft\n${body}---\n# RFC\n`;
+
+  it('passes an RFC with no declaration and one with a valid entry', () => {
+    assert.deepEqual(validateReviewAuthorities(fm(''), 'RFC-9999').failures, []);
+    assert.deepEqual(validateReviewAuthorities('# no frontmatter', 'RFC-9999').failures, []);
+    const ok = fm(
+      'reviewAuthorities:\n  - role: design\n    login: mohirt\n  - { role: product }\n',
+    );
+    assert.deepEqual(validateReviewAuthorities(ok, 'RFC-9999').failures, []);
+  });
+
+  it('fails an entry missing role', () => {
+    const r = validateReviewAuthorities(fm('reviewAuthorities:\n  - login: mohirt\n'), 'RFC-9999');
+    assert.equal(r.failures.length, 1);
+    assert.match(r.failures[0].reason, /missing 'role'/);
+  });
+
+  it('fails a value that is not a list', () => {
+    const r = validateReviewAuthorities(fm('reviewAuthorities: design\n'), 'RFC-9999');
+    assert.equal(r.failures.length, 1);
+    assert.match(r.failures[0].reason, /must be a list/);
+  });
+
+  it('fails a non-mapping entry, an invalid login and unparseable YAML', () => {
+    assert.match(
+      validateReviewAuthorities(fm('reviewAuthorities:\n  - design\n'), 'RFC-9999').failures[0]
+        .reason,
+      /must be a mapping/,
+    );
+    assert.match(
+      validateReviewAuthorities(
+        fm('reviewAuthorities:\n  - { role: design, login: "not a login" }\n'),
+        'RFC-9999',
+      ).failures[0].reason,
+      /invalid 'login'/,
+    );
+    assert.match(
+      validateReviewAuthorities(fm('reviewAuthorities: [\n'), 'RFC-9999').failures[0].reason,
+      /could not be parsed/,
+    );
+  });
+
+  it('checkAllRfcs reports a malformed declaration', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rfc-ra-'));
+    try {
+      const rfcs = join(dir, 'rfcs');
+      mkdirSync(rfcs);
+      mkdirSync(join(dir, 'docs'));
+      writeFileSync(
+        join(rfcs, 'RFC-9999-x.md'),
+        fm('requiresDocs: []\nreviewAuthorities:\n  - login: mohirt\n'),
+      );
+      const r = checkAllRfcs({ rfcsDir: rfcs, docsDir: join(dir, 'docs'), repoRoot: dir });
+      assert.ok(r.failures.some((f) => /reviewAuthorities/.test(f.reason)));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

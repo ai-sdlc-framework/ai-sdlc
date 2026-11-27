@@ -10,7 +10,8 @@
  *
  * Each landing stamps `landed` on the task's `done/` verdict. A refusal is written once
  * per head sha to `<board>/notes/`, so a standing refusal does not repeat every tick;
- * the attempt itself is repeated, because a pending check turns green later.
+ * the attempt itself is repeated, because a pending check turns green later. A review-authority
+ * hold (AISDLC-1449, DEC-0440) is the exception: that head is never attempted again.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -20,6 +21,7 @@ import { now as clock } from '../clock.js';
 import { patchDoneVerdict } from '../dispatch/board.js';
 import { completeLandedIterateNeeded } from '../dispatch/complete.js';
 import { resolveTargetRepo, runMergeIfEligible } from '../governance/merge-if-eligible.js';
+import { isReviewAuthorityHold } from '../governance/rfc-review-authorities.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { isFilingBranch } from './filing-branches.js';
 import { cachedGh, GH_READ_TTL_MS } from './gh-read-cache.js';
@@ -166,6 +168,9 @@ export async function landEligiblePrs(deps: LandDeps): Promise<LandReport> {
     if (mode === 'arm' && sha && existsSync(notesPath(deps.boardDir, pr.number, sha, 'armed'))) {
       continue;
     }
+    // AISDLC-1449 (DEC-0440): a head held for review authorities is never attempted again;
+    // the operator merges it by hand.
+    if (sha && existsSync(notesPath(deps.boardDir, pr.number, sha, 'authority-hold'))) continue;
     // A PR refused on this same fingerprint (head, events, checks) is not re-read for 15 minutes.
     const fingerprint = prFingerprint(deps.boardDir, pr);
     if (refusalStillValid(deps.boardDir, pr.number, fingerprint, now())) continue;
@@ -197,6 +202,13 @@ export async function landEligiblePrs(deps: LandDeps): Promise<LandReport> {
     }
     report.refused.push({ pr: pr.number, reason: outcome.reason });
     recordRefusal(deps.boardDir, pr.number, fingerprint, now(), outcome.reason);
+    if (sha && isReviewAuthorityHold(outcome.reason)) {
+      writeOnce(
+        notesPath(deps.boardDir, pr.number, sha, 'authority-hold'),
+        `PR #${pr.number} head ${sha} is held for review authorities: ${outcome.reason}\n`,
+      );
+      continue;
+    }
     if (sha) {
       writeOnce(
         notesPath(deps.boardDir, pr.number, sha, 'refused'),
