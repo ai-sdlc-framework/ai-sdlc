@@ -824,4 +824,68 @@ describe('ClaudeCodeRunner', () => {
       expect(GitHubActionsRunner).toBe(ClaudeCodeRunner);
     });
   });
+
+  describe('child environment and output cap (AISDLC-1396)', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    function childEnv(): NodeJS.ProcessEnv {
+      const [, , opts] = spawnMock.mock.calls[0];
+      return (opts as { env: NodeJS.ProcessEnv }).env;
+    }
+
+    it('drops secrets not on the allow-list and keeps its own credential', async () => {
+      vi.stubEnv('GITHUB_TOKEN', 'secret-not-for-the-agent');
+      vi.stubEnv('ANTHROPIC_API_KEY', 'runner-credential');
+      setupSpawn({ stdout: 'done', stderr: '' });
+      setupGitExec(['f.ts']);
+
+      await new ClaudeCodeRunner().run(makeCtx());
+
+      const env = childEnv();
+      expect(env.GITHUB_TOKEN).toBeUndefined();
+      expect(env.ANTHROPIC_API_KEY).toBe('runner-credential');
+      expect(env.PATH).toBe(process.env.PATH);
+    });
+
+    it('passes names listed in AI_SDLC_RUNNER_ENV_PASSTHROUGH through', async () => {
+      vi.stubEnv('FOO', 'bar');
+      vi.stubEnv('AI_SDLC_RUNNER_ENV_PASSTHROUGH', 'FOO');
+      setupSpawn({ stdout: 'done', stderr: '' });
+      setupGitExec(['f.ts']);
+
+      await new ClaudeCodeRunner().run(makeCtx());
+
+      expect(childEnv().FOO).toBe('bar');
+    });
+
+    it('keeps the tail of output past the cap and says so in the result', async () => {
+      vi.stubEnv('AI_SDLC_RUNNER_OUTPUT_CAP_BYTES', '64');
+      const big = 'y'.repeat(1000);
+      setupSpawn({ stdout: 'done', stderr: big });
+      setupGitExec(['f.ts']);
+
+      const result = await new ClaudeCodeRunner().run(makeCtx());
+
+      expect(result.success).toBe(true);
+      expect(result.outputTruncatedBytes).toBe(big.length - 64);
+      expect(result.summary).toContain('[output truncated');
+      expect(result.summary).toContain('done');
+      expect(result.summary.length).toBeLessThan(200);
+    });
+
+    it('discards an unterminated stdout line longer than the cap', async () => {
+      vi.stubEnv('AI_SDLC_RUNNER_OUTPUT_CAP_BYTES', '64');
+      const runaway = '{' + 'z'.repeat(999);
+      setupSpawn({ stdout: makeStreamResult('done') + runaway, stderr: '' });
+      setupGitExec(['f.ts']);
+
+      const result = await new ClaudeCodeRunner().run(makeCtx());
+
+      expect(result.success).toBe(true);
+      expect(result.outputTruncatedBytes).toBe(runaway.length);
+      expect(result.summary).toContain('done');
+    });
+  });
 });

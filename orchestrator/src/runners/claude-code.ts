@@ -28,6 +28,7 @@ import {
   snapshotWorktree,
   detectCrossRepoWrites,
 } from './git-utils.js';
+import { buildRunnerEnv, RUNNER_CREDENTIAL_ENV, TailBuffer, truncationNote } from './runner-env.js';
 
 /**
  * Build verification step instructions (lint, format, typecheck).
@@ -193,6 +194,9 @@ interface RunClaudeResult {
   stderr: string;
   model: string;
   costUsd?: number;
+  /** Bytes of child output dropped by the output cap (stderr tail + oversized stdout lines). */
+  droppedBytes: number;
+  capBytes: number;
 }
 
 /**
@@ -388,7 +392,7 @@ function runClaude(
     const child = spawn(cmd, args, {
       cwd: workDir,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: buildRunnerEnv(RUNNER_CREDENTIAL_ENV['claude-code']),
       timeout: timeoutMs,
     });
 
@@ -399,8 +403,12 @@ function runClaude(
     let resultCost: number | undefined;
     let resultTokenUsage: TokenUsage | undefined;
 
-    // Buffer for incomplete NDJSON lines
+    // Buffer for incomplete NDJSON lines. Bounded by the output cap: a single
+    // line longer than the cap is discarded and counted (AISDLC-1396).
     let lineBuffer = '';
+    const errBuf = new TailBuffer();
+    const capBytes = errBuf.capBytes;
+    let droppedStdoutBytes = 0;
     const onProgress = opts?.onProgress;
 
     child.stdout.on('data', (data: Buffer) => {
@@ -411,6 +419,10 @@ function runClaude(
       const lines = lineBuffer.split('\n');
       // Keep the last (possibly incomplete) line in the buffer
       lineBuffer = lines.pop() ?? '';
+      if (Buffer.byteLength(lineBuffer) > capBytes) {
+        droppedStdoutBytes += Buffer.byteLength(lineBuffer);
+        lineBuffer = '';
+      }
 
       for (const line of lines) {
         const trimmed = line.trim();
@@ -458,9 +470,8 @@ function runClaude(
       }
     });
 
-    const errChunks: Buffer[] = [];
     child.stderr.on('data', (data: Buffer) => {
-      errChunks.push(data);
+      errBuf.push(data);
       lastActivity = Date.now();
       process.stderr.write(data);
     });
@@ -475,7 +486,7 @@ function runClaude(
     child.on('close', (code) => {
       clearInterval(heartbeat);
       const elapsed = Math.round((Date.now() - startTime) / 1000);
-      const stderr = Buffer.concat(errChunks).toString('utf-8');
+      const stderr = errBuf.toString();
       process.stderr.write(`${logPrefix} exited: code=${code} elapsed=${elapsed}s\n`);
       if (code === 0) {
         resolve({
@@ -483,6 +494,8 @@ function runClaude(
           stderr,
           model: resultTokenUsage?.model ?? model,
           costUsd: resultCost,
+          droppedBytes: droppedStdoutBytes + errBuf.droppedBytes,
+          capBytes,
         });
       } else {
         reject(new Error(`claude exited with code ${code}: ${stderr || resultText || ''}`));
@@ -560,6 +573,10 @@ export class ClaudeCodeRunner implements AgentRunner {
 
       // Token usage from stream-json result event (falls back to stderr parsing)
       const tokenUsage = parseTokenUsage(result.stderr, result.model);
+      const truncation =
+        result.droppedBytes > 0 ? { outputTruncatedBytes: result.droppedBytes } : {};
+      const note =
+        result.droppedBytes > 0 ? `${truncationNote(result.droppedBytes, result.capBytes)}\n` : '';
 
       // Collect changed files (uncommitted + agent-committed), excluding
       // pre-existing untracked noise.
@@ -575,6 +592,7 @@ export class ClaudeCodeRunner implements AgentRunner {
           summary: 'Agent made no changes',
           error: 'No files were modified',
           tokenUsage,
+          ...truncation,
         };
       }
 
@@ -583,8 +601,9 @@ export class ClaudeCodeRunner implements AgentRunner {
         return {
           success: true,
           filesChanged,
-          summary: result.stdout.slice(0, 2000),
+          summary: (note + result.stdout).slice(0, 2000),
           tokenUsage,
+          ...truncation,
         };
       }
 
@@ -634,8 +653,9 @@ export class ClaudeCodeRunner implements AgentRunner {
       return {
         success: true,
         filesChanged,
-        summary: result.stdout.slice(0, 2000),
+        summary: (note + result.stdout).slice(0, 2000),
         tokenUsage,
+        ...truncation,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -143,8 +143,37 @@ Adapters execute external CLIs with full credential scope. The maintainer review
 
 1. **No credential leakage in error messages.** Errors from the underlying CLI are wrapped before re-throwing.
 2. **No credential in logs.** Adapter never `console.log`s the credential or any string derived from it (other than the `getAccountId` hash).
-3. **Environment scrubbed before invocation.** When dispatching, the agent process MUST receive a curated env, not the orchestrator's full env. Other harnesses' credentials in particular MUST NOT leak into a fallback invocation.
+3. **Environment scrubbed before invocation.** When dispatching, the agent process MUST receive a curated env, not the orchestrator's full env. Other harnesses' credentials in particular MUST NOT leak into a fallback invocation Build it with `buildRunnerEnv` (see [Runner child process](#runner-child-process-environment-and-output-cap)).
 4. **`invoke` failures map cleanly to `HarnessResult.status`.** Distinguish `unavailable` (vendor outage / API down) from `failure` (the agent ran but produced wrong output) — fallback chain depends on this distinction.
+5. **Child output buffered through a `TailBuffer`.** Never collect a child's stdout or stderr in an unbounded array.
+
+## Runner child process: environment and output cap
+
+The CLI agent runners in `orchestrator/src/runners/` (`claude-code`, `codex`, `copilot`, `cursor`) spawn a third-party CLI. Since AISDLC-1396 they share `orchestrator/src/runners/runner-env.ts`, and any new runner MUST use it too.
+
+### Environment allow-list
+
+`buildRunnerEnv(RUNNER_CREDENTIAL_ENV.<runner>)` builds the child environment from three sources. Every other variable in the orchestrator's environment (GitHub tokens, other providers' API keys, `GIT_DIR` and friends) is dropped.
+
+1. **Base allow-list**, passed when present: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `COLORTERM`, `LANG`, `TZ`, `TMPDIR`, `TMP`, `TEMP`, `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, the Windows system variables (`SYSTEMROOT`, `COMSPEC`, `PATHEXT`, `WINDIR`, `APPDATA`, `LOCALAPPDATA`, `USERPROFILE`, `PROGRAMDATA`), and every `LC_*`, `XDG_*` and `AI_SDLC_*` name. Names compare case-insensitively, so `https_proxy` passes too. An `AI_SDLC_*` name containing `TOKEN`, `SECRET`, `KEY`, `PASSWORD` or `CREDENTIAL` (for example `AI_SDLC_SIGNING_KEY`, `AI_SDLC_WEBHOOK_SECRET`) is not passed.
+2. **The runner's own credentials** (`RUNNER_CREDENTIAL_ENV`):
+
+   | Runner | Variables |
+   | --- | --- |
+   | `claude-code` | `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` |
+   | `codex` | `CODEX_API_KEY`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `CODEX_HOME` |
+   | `copilot` | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` (the Copilot CLI authenticates with a GitHub token, and the registry enables it on `GH_TOKEN`/`GITHUB_TOKEN`) |
+   | `cursor` | `CURSOR_API_KEY` |
+
+3. **Operator override:** `AI_SDLC_RUNNER_ENV_PASSTHROUGH` is a comma-separated list of extra names passed to every runner child, for example `AI_SDLC_RUNNER_ENV_PASSTHROUGH=AWS_PROFILE,AWS_REGION` for Claude Code on Bedrock, or the variables an OpenShell sandbox needs. A name listed here is passed even if the base rules would drop it.
+
+A new runner adds its entry to `RUNNER_CREDENTIAL_ENV` and passes `env: buildRunnerEnv(RUNNER_CREDENTIAL_ENV.<runner>)` to `spawn`. Never pass `{ ...process.env }`.
+
+### Output cap
+
+Each buffered child stream (stdout and stderr) is held in a `TailBuffer` capped at 8 MiB by default; set `AI_SDLC_RUNNER_OUTPUT_CAP_BYTES` to change it. Past the cap the buffer drops the oldest bytes and keeps the tail, where the CLI's final result lives, so memory stays bounded however much the child writes. Claude Code parses stdout line by line; a single unterminated line longer than the cap is discarded.
+
+When anything was dropped, the runner's `AgentResult` carries `outputTruncatedBytes` (the number of bytes dropped) and its `summary` starts with `[output truncated: dropped the first N bytes, kept the last M]`.
 
 ## Capability matrix maintenance
 
