@@ -650,6 +650,9 @@ export interface DecisionsCliDeps {
   chain?: (workDir: string) => ChainDeps;
 }
 
+/** AISDLC-1388: refusal for `add --file` without `--pr`. */
+const ADD_FILE_NEEDS_PR = 'add --file needs --pr: a filing branch without a PR never lands';
+
 export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
   const chainFor = cliDeps.chain ?? createSystemChainDeps;
   // AISDLC-874: writes resolve from the raw --work-dir, not the read root.
@@ -710,7 +713,7 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
       type: 'boolean',
       default: false,
       describe:
-        'AISDLC-1161: file the event through cli-file (own worktree from origin/main, branch ai-sdlc/file-<dec>-<type>-<hhmm>) instead of writing the local store; works from the Pattern-C parent.',
+        'AISDLC-1161: file the event through cli-file (own worktree from origin/main, branch ai-sdlc/file-<dec>-<type>-<hhmm>) instead of writing the local store; works from the Pattern-C parent. `add --file` needs --pr; an answer for a decision still on its open add filing PR is appended to that branch (AISDLC-1388).',
     })
     .option('pr', {
       type: 'boolean',
@@ -972,6 +975,8 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
             default: 'text' as const,
           }),
       async (argv) => {
+        // AISDLC-1388: nothing lands a filing branch without a PR.
+        if (argv.file && !argv.pr) fail(ADD_FILE_NEEDS_PR);
         const workDir = writeRoot(Boolean(argv.file));
         if (!isDecisionCatalogEnabled()) {
           // AC#6 — degrade-open is read-only; the mutating path refuses.

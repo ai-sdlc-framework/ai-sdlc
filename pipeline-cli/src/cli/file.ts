@@ -209,6 +209,11 @@ interface Publish {
    * `--force-with-lease` pinned to `leaseSha`, keep the open PR, never open another.
    */
   inPlace?: { remoteBranch: string; leaseSha: string };
+  /**
+   * AISDLC-1388: append to an existing filing branch with an open PR: cut from
+   * `origin/<branch>`, fast-forward push to it, never open another PR.
+   */
+  onto?: { branch: string; prUrl: string };
   /** Writes the content into the new worktree; returns repo-relative paths to stage. */
   materialise(worktree: string): string[];
 }
@@ -219,7 +224,8 @@ function publish(
 ): { branch: string; prUrl: string | null; armed?: boolean } {
   git(deps, p.repo, 'fetch', 'origin', 'main');
   const wt = join(p.repo, '.worktrees', p.worktreeDir);
-  git(deps, p.repo, 'worktree', 'add', '-b', p.branch, wt, 'origin/main');
+  const base = p.onto ? `origin/${p.onto.branch}` : 'origin/main';
+  git(deps, p.repo, 'worktree', 'add', '-b', p.branch, wt, base);
   try {
     const paths = p.materialise(wt);
     git(deps, wt, 'add', '--', ...paths);
@@ -239,6 +245,9 @@ function publish(
         'origin',
         `HEAD:refs/heads/${p.inPlace.remoteBranch}`,
       );
+    } else if (p.onto) {
+      // Fast-forward onto the open filing branch; never a force push.
+      git(deps, wt, 'push', 'origin', `HEAD:refs/heads/${p.onto.branch}`);
     } else {
       // Plain fast-forward push of a brand-new branch; never a force push.
       git(deps, wt, 'push', '-u', 'origin', `HEAD:refs/heads/${p.branch}`);
@@ -254,6 +263,11 @@ function publish(
     deps.exec('git', ['worktree', 'remove', '--force', wt], p.repo);
     deps.exec('git', ['branch', '-D', p.branch], p.repo);
     return { branch: p.inPlace.remoteBranch, prUrl: null };
+  }
+  if (p.onto) {
+    deps.exec('git', ['worktree', 'remove', '--force', wt], p.repo);
+    deps.exec('git', ['branch', '-D', p.branch], p.repo);
+    return { branch: p.onto.branch, prUrl: p.onto.prUrl };
   }
   let prUrl: string | null = null;
   if (p.pr) {
@@ -707,6 +721,81 @@ export function closeTask(
   return { ...res, armed: armDocsPr(deps, repo, Number(num)) };
 }
 
+/** Events an open add filing branch carries beyond origin/main (AISDLC-1388). */
+interface OpenFiling {
+  branch: string;
+  prUrl: string;
+  events: Array<Record<string, unknown>>;
+  /** Raw content of each branch-only event file or legacy log line, for content hashes. */
+  raw: string[];
+}
+
+/**
+ * AISDLC-1388: the open `ai-sdlc/file-<dec>-add-<hhmm>` PR whose branch carries the
+ * decision-opened event of `decisionId`, or null. A failing `gh pr list` refuses with the
+ * not-found message plus the gh error.
+ */
+function openAddFiling(
+  deps: FileDeps,
+  repo: string,
+  decisionId: string,
+  notFound: string,
+  mainFiles: Set<string>,
+  mainLog: Set<string>,
+): OpenFiling | null {
+  const list = deps.exec(
+    'gh',
+    ['pr', 'list', '--state', 'open', '--json', 'number,url,headRefName', '--limit', '200'],
+    repo,
+  );
+  if (list.status !== 0) {
+    throw new FileRefusal(
+      `${notFound} (open filing PRs not checked: gh pr list failed: ${list.stderr.trim()})`,
+    );
+  }
+  const head = new RegExp(`^ai-sdlc/file-${decisionId.toLowerCase()}-add-\\d{4}$`);
+  let prs: Array<{ url?: string; headRefName?: string }>;
+  try {
+    prs = JSON.parse(list.stdout || '[]') as Array<{ url?: string; headRefName?: string }>;
+  } catch {
+    return null;
+  }
+  for (const pr of prs) {
+    const branch = pr.headRefName ?? '';
+    if (!head.test(branch) || typeof pr.url !== 'string') continue;
+    const ref = `origin/${branch}`;
+    const fetched = deps.exec(
+      'git',
+      ['fetch', 'origin', `refs/heads/${branch}:refs/remotes/${ref}`],
+      repo,
+    );
+    if (fetched.status !== 0) continue;
+    const events: Array<Record<string, unknown>> = [];
+    const raw: string[] = [];
+    const tree = deps.exec('git', ['ls-tree', '--name-only', ref, `${EVENTS_DIR_REL}/`], repo);
+    for (const f of tree.status === 0 ? tree.stdout.split('\n').filter(Boolean) : []) {
+      if (mainFiles.has(f)) continue;
+      const shown = deps.exec('git', ['show', `${ref}:${f}`], repo);
+      if (shown.status !== 0) continue;
+      raw.push(shown.stdout);
+      events.push(...parseLogStrict(shown.stdout, `${ref} ${f}`).events);
+    }
+    const log = deps.exec('git', ['show', `${ref}:${EVENT_LOG_REL}`], repo);
+    if (log.status === 0) {
+      const parsed = parseLogStrict(log.stdout, `${ref} log`);
+      parsed.lines.forEach((l, i) => {
+        if (mainLog.has(l)) return;
+        raw.push(l);
+        events.push(parsed.events[i]);
+      });
+    }
+    if (events.some((e) => e.decisionId === decisionId && e.type === 'decision-opened')) {
+      return { branch, prUrl: pr.url, events, raw };
+    }
+  }
+  return null;
+}
+
 export function fileDecision(
   repo: string,
   decisionId: string,
@@ -746,11 +835,28 @@ export function fileDecision(
     repo,
   );
   const treeShown: string[] = [];
-  for (const f of tree.status === 0 ? tree.stdout.split('\n').filter(Boolean) : []) {
+  const mainFiles = tree.status === 0 ? tree.stdout.split('\n').filter(Boolean) : [];
+  for (const f of mainFiles) {
     const shown = deps.exec('git', ['show', `origin/main:${f}`], repo);
     if (shown.status === 0) {
       treeShown.push(shown.stdout);
       mainEvents.push(...parseLogStrict(shown.stdout, `origin/main ${f}`).events);
+    }
+  }
+  const notFound = `no decision-opened event for ${decisionId} in ${EVENT_LOG_REL}`;
+  const isOpened = (e: Record<string, unknown>) =>
+    e.decisionId === decisionId && e.type === 'decision-opened';
+  // AISDLC-1388: a decision filed by `add --file --pr` whose PR is still open lives only on
+  // its filing branch; its events count as the base and the answer is appended there.
+  let filing: OpenFiling | null = null;
+  if (!local.events.some(isOpened) && !mainEvents.some(isOpened)) {
+    const mainLog = new Set(
+      mainShow.status === 0 ? parseLogStrict(mainShow.stdout, 'origin/main log').lines : [],
+    );
+    filing = openAddFiling(deps, repo, decisionId, notFound, new Set(mainFiles), mainLog);
+    if (filing) {
+      mainEvents.push(...filing.events);
+      treeShown.push(...filing.raw);
     }
   }
   const onMainPairs = pairCounts(mainEvents);
@@ -772,9 +878,7 @@ export function fileDecision(
       }
     }
   }
-  if (!opened) {
-    throw new FileRefusal(`no decision-opened event for ${decisionId} in ${EVENT_LOG_REL}`);
-  }
+  if (!opened) throw new FileRefusal(notFound);
   const lines = own.map((e) => JSON.stringify(e));
   if (opts.answer) {
     const options = (opened.options as Array<{ id: string }> | undefined) ?? [];
@@ -824,6 +928,7 @@ export function fileDecision(
     subject: `chore(decisions): record ${decisionId} (${opts.taskId})`,
     prBody: `Appends the ${decisionId} event(s) to the decision log.\n\nThe whole log was parsed and checked for duplicate (decisionId, type) pairs before commit.\n\nGenerated by cli-file (AISDLC-801).`,
     pr: opts.pr,
+    ...(filing ? { onto: { branch: filing.branch, prUrl: filing.prUrl } } : {}),
     materialise(wt) {
       const extra = (opts.files ?? []).map(({ rel, content }) => {
         const dest = join(wt, rel);
