@@ -89,6 +89,7 @@ const DECISION_READ_ONLY = Object.freeze([
   'coverage',
   'research',
   'summary',
+  'evidence',
 ]);
 /** Every subcommand name the CLI defines, so a refusal can be told apart from a stray word. */
 const DECISION_KNOWN = Object.freeze([
@@ -111,6 +112,7 @@ const DECISION_KNOWN = Object.freeze([
   'fatigue',
   'corpus',
   'exemplars',
+  'evidence',
 ]);
 /** `add` flags an executor may not use (compared lower-case with dashes removed). */
 const ADD_REFUSED_FLAGS = Object.freeze(['autonomousfallback', 'timebox', 'timeboxhours']);

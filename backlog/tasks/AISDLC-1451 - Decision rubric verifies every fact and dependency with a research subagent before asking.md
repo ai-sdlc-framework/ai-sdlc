@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1451
 title: "Decision rubric verifies every fact and dependency with a research subagent before asking"
-status: To Do
+status: In Progress
 priority: high
 labels:
   - governance

@@ -31,37 +31,65 @@ describe('decision-rubric autonomous mode', () => {
   });
 });
 
-describe('decision-rubric Verify step (AISDLC-1431)', () => {
-  it('has a required Verify step between evidence and options', () => {
-    const verify = raw.indexOf('### 3a. Verify (required)');
-    assert.ok(verify > raw.indexOf('### 3. Evidence'));
-    assert.ok(verify < raw.indexOf('### 4. Three to four options'));
-    assert.match(raw, /Explore` subagent on Sonnet/);
-    assert.match(raw, /web fetch/);
-    assert.match(raw, /Batch every item into one research subagent/);
+describe('decision-rubric evidence ledger (AISDLC-1451, supersedes the AISDLC-1431 Verify step)', () => {
+  const step3 = raw.slice(
+    raw.indexOf('### 3. Evidence'),
+    raw.indexOf('### 4. Three to four options'),
+  );
+
+  it('step 3 sends a separate Sonnet research subagent the exact draft', () => {
+    assert.ok(step3.length > 0);
+    assert.match(step3, /### 3\. Evidence: research subagent and ledger \(required\)/);
+    assert.match(step3, /`model: sonnet`, never the author/);
+    assert.match(step3, /It gets the exact draft text, not a summary/);
+    assert.match(step3, /Pull out EVERY factual claim and EVERY dependency path/);
   });
 
-  it('allows unchecked only in a draft and lists it as an anti-pattern', () => {
-    assert.match(raw, /\*\*unverifiable\*\*/);
-    assert.match(raw, /Allowed only in a draft/);
-    assert.match(raw, /Rendering a decision with a claim still unchecked/);
+  it('gives the ledger shape and the schema file', () => {
+    assert.match(step3, /spec\/schemas\/decision-evidence-ledger\.v1\.schema\.json/);
+    for (const field of [
+      'schemaVersion',
+      'draftSha256',
+      'researchedBy',
+      'researchedAt',
+      'restsOn',
+      'falsifiedBy',
+      'prerequisite',
+    ]) {
+      assert.ok(step3.includes(`"${field}"`), field);
+    }
   });
 
-  it('points the check and the recording at the weakest unverifiable item', () => {
-    assert.match(raw, /The one thing to check\*\*: the weakest \*\*unverifiable\*\* item/);
-    assert.match(raw, /`Check:`\*\* the weakest unverifiable item/);
+  it('no question goes out until the checker passes', () => {
+    assert.match(step3, /cli-decisions\.mjs evidence check/);
+    assert.match(
+      step3,
+      /\*\*No question goes out, and no decision is recorded, until the checker passes\.\*\*/,
+    );
   });
 
-  it('applies Verify unchanged in autonomous mode and maps it in the cause table', () => {
-    assert.match(raw, /The Verify step \(3a\) applies unchanged/);
-    assert.match(raw, /3 \(evidence\) and 3a \(Verify\)/);
-    assert.match(raw, /from unchecked to checked/);
+  it('removes unchecked and unverifiable as final states', () => {
+    assert.match(step3, /There is no unchecked or unverifiable final state/);
+    assert.doesNotMatch(raw, /### 3a\. Verify/);
+    assert.doesNotMatch(raw, /\*\*unverifiable\*\*: /);
+    assert.doesNotMatch(raw, /\*\*unchecked\*\*: /);
+    assert.match(raw, /"Industry research" from memory is not evidence/);
   });
-});
 
-describe('decision-rubric weakening decisions', () => {
-  it('tags weakening decisions and requires a non-weakening fallback', () => {
-    assert.match(raw, /--governance-change weakening --weakens <option-id>/);
-    assert.match(raw, /non-weakening option/);
+  it('points the check and the recording at the weakest assumption', () => {
+    assert.match(raw, /The one thing to check\*\*: the weakest \*\*assumption\*\*/);
+    assert.match(raw, /`Check:`\*\* the weakest assumption/);
+    assert.match(raw, /\.ai-sdlc\/decisions\/evidence\/DEC-NNNN\.json/);
+  });
+
+  it('runs the same step in autonomous mode and maps it in the cause table', () => {
+    assert.match(raw, /Step 3 runs unchanged: the same research subagent gets the exact draft/);
+    assert.match(raw, /\| 3 \(evidence ledger\) \|/);
+  });
+
+  it('rfc-oq-walkthrough refers to the same step', () => {
+    const oq = readFileSync(join(dir, '..', 'skills', 'rfc-oq-walkthrough', 'SKILL.md'), 'utf-8');
+    assert.match(oq, /decision-rubric step 3/);
+    assert.match(oq, /cli-decisions evidence check/);
   });
 });

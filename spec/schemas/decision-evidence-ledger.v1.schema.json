@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/decision-evidence-ledger.v1.schema.json",
+  "title": "DecisionEvidenceLedger",
+  "description": "AISDLC-1451 (DEC-0442). One ledger per decision question, written by a research subagent that is not the question's author. Every factual claim and dependency path the draft rests on is one entry, checked at its source. `cli-decisions evidence check <ledger> [--draft <file>]` validates it and re-verifies file quotes, record and task ids, and paths. When the decision is filed the ledger is stored at .ai-sdlc/decisions/evidence/DEC-NNNN.json.",
+  "type": "object",
+  "required": ["schemaVersion", "ref", "draftSha256", "researchedBy", "researchedAt", "entries"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "ref": {
+      "type": "string",
+      "description": "What the question decides: DEC-NNNN, rfc:RFC-NNNN#OQ-N, or a lower-case slug.",
+      "pattern": "^(DEC-[0-9]{4,}|rfc:RFC-[0-9]{4}#OQ-[A-Za-z0-9.-]+|[a-z0-9][a-z0-9-]*)$"
+    },
+    "draftSha256": {
+      "type": "string",
+      "description": "sha256 of the exact draft the research subagent was given, after the shared normalization (`cli-decisions evidence hash <draft-file>`).",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "researchedBy": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The research subagent (not the author), e.g. `Explore (sonnet)`."
+    },
+    "researchedAt": { "type": "string", "format": "date-time" },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "entryBase": {
+      "type": "object",
+      "required": ["id", "claim", "kind", "status"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+        "claim": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["fact", "dependency", "assumption"] },
+        "status": {
+          "const": "checked",
+          "description": "The only final state. `unchecked`, `unverifiable` and anything else fail the checker."
+        }
+      }
+    },
+    "entry": {
+      "oneOf": [
+        { "$ref": "#/$defs/fact" },
+        { "$ref": "#/$defs/dependency" },
+        { "$ref": "#/$defs/assumption" }
+      ]
+    },
+    "fact": {
+      "allOf": [{ "$ref": "#/$defs/entryBase" }],
+      "required": ["source"],
+      "properties": {
+        "kind": { "const": "fact" },
+        "source": {
+          "oneOf": [
+            { "$ref": "#/$defs/fileSource" },
+            { "$ref": "#/$defs/commandSource" },
+            { "$ref": "#/$defs/urlSource" },
+            { "$ref": "#/$defs/recordSource" }
+          ]
+        }
+      }
+    },
+    "fileSource": {
+      "type": "object",
+      "description": "Re-verified: the quote must appear in the file within 5 lines of `line`.",
+      "required": ["file", "line", "quote"],
+      "additionalProperties": false,
+      "properties": {
+        "file": { "type": "string", "minLength": 1 },
+        "line": { "type": "integer", "minimum": 1 },
+        "quote": { "type": "string", "minLength": 1 }
+      }
+    },
+    "commandSource": {
+      "type": "object",
+      "required": ["command", "output", "ranAt"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "output": { "type": "string", "minLength": 1 },
+        "ranAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "urlSource": {
+      "type": "object",
+      "required": ["url", "readAt", "quote"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string", "pattern": "^https?://" },
+        "readAt": { "type": "string", "format": "date-time" },
+        "quote": { "type": "string", "minLength": 1 }
+      }
+    },
+    "recordSource": {
+      "type": "object",
+      "description": "Re-verified: a DEC, RFC or task id that exists on main.",
+      "required": ["record"],
+      "additionalProperties": false,
+      "properties": {
+        "record": { "type": "string", "pattern": "^(DEC-[0-9]{4,}|RFC-[0-9]{4}|[A-Z][A-Z0-9]*-[0-9]+(\\.[0-9]+)*)$" }
+      }
+    },
+    "dependency": {
+      "allOf": [{ "$ref": "#/$defs/entryBase" }],
+      "required": ["what"],
+      "properties": {
+        "kind": { "const": "dependency" },
+        "what": { "type": "string", "minLength": 1 },
+        "exists": {
+          "type": "object",
+          "description": "Re-verified: the path exists.",
+          "required": ["path"],
+          "additionalProperties": false,
+          "properties": { "path": { "type": "string", "minLength": 1 } }
+        },
+        "prerequisite": {
+          "type": "string",
+          "description": "Re-verified: a filed task that must land first.",
+          "pattern": "^[A-Z][A-Z0-9]*-[0-9]+(\\.[0-9]+)*$"
+        }
+      },
+      "oneOf": [{ "required": ["exists"] }, { "required": ["prerequisite"] }]
+    },
+    "assumption": {
+      "allOf": [{ "$ref": "#/$defs/entryBase" }],
+      "required": ["restsOn", "falsifiedBy"],
+      "properties": {
+        "kind": { "const": "assumption" },
+        "restsOn": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Ids of fact entries that pass.",
+          "items": { "type": "string" }
+        },
+        "falsifiedBy": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
