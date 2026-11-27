@@ -524,6 +524,140 @@ describe('cli-file', () => {
       expect(ghCalls).toHaveLength(0);
     });
 
+    describe('AISDLC-1388 answer on an open add filing PR', () => {
+      const openedEv = {
+        eventVersion: 'v1',
+        type: 'decision-opened',
+        ts: 't',
+        decisionId: 'DEC-0007',
+        options: [{ id: 'a' }],
+        by: 'planner',
+      };
+      type ExecList = () => { status: number; stdout: string; stderr: string };
+      const withList = (list: ExecList): FileDeps => ({
+        ...deps,
+        exec(cmd, args, cwd) {
+          if (cmd === 'gh' && args[1] === 'list') {
+            ghCalls.push(args);
+            return list();
+          }
+          return deps.exec(cmd, args, cwd);
+        },
+      });
+      const url = 'https://github.com/o/r/pull/1';
+
+      it('appends the answer to the add branch and reports its PR', () => {
+        const add = fileDecision(
+          repo,
+          'DEC-0007',
+          { taskId: 'X-1', pr: true, events: [openedEv] },
+          deps,
+        );
+        const d = withList(() => ({
+          status: 0,
+          stdout: JSON.stringify([
+            { number: 2, url: 'https://github.com/o/r/pull/2', headRefName: 'ai-sdlc/other' },
+            { number: 1, url, headRefName: add.branch },
+          ]),
+          stderr: '',
+        }));
+        ghCalls = [];
+        const ans = fileDecision(
+          repo,
+          'DEC-0007',
+          { taskId: 'X-1', pr: true, events: [answered('DEC-0007', 'a')] },
+          d,
+        );
+        expect(ans).toEqual({ branch: add.branch, prUrl: url });
+        const log = sh(remote, 'show', `${add.branch}:${EVENT_LOG_REL}`);
+        expect(log).toContain('"decision-opened"');
+        expect(log).toContain('"operator-answered"');
+        expect(sh(remote, 'rev-list', '--count', `main..${add.branch}`)).toBe('2');
+        expect(sh(remote, 'branch', '--list', 'ai-sdlc/file-dec-0007-answer-*')).toBe('');
+        expect(ghCalls.filter((a) => a[1] === 'create')).toHaveLength(0);
+        expect(sh(repo, 'branch', '--list', 'ai-sdlc/file-dec-0007-answer-*')).toBe('');
+        // a second answer on the same branch is a duplicate pair
+        expect(() =>
+          fileDecision(
+            repo,
+            'DEC-0007',
+            { taskId: 'X-1', pr: true, events: [answered('DEC-0007', 'a')] },
+            d,
+          ),
+        ).toThrow(/duplicate/);
+      });
+
+      it('validates the option against the decision on the branch', () => {
+        const add = fileDecision(
+          repo,
+          'DEC-0007',
+          { taskId: 'X-1', pr: true, events: [openedEv] },
+          deps,
+        );
+        const d = withList(() => ({
+          status: 0,
+          stdout: JSON.stringify([{ number: 1, url, headRefName: add.branch }]),
+          stderr: '',
+        }));
+        expect(() =>
+          fileDecision(
+            repo,
+            'DEC-0007',
+            { taskId: 'X-1', pr: true, events: [answered('DEC-0007', 'zz')] },
+            d,
+          ),
+        ).toThrow(/not an option/);
+      });
+
+      it('refuses as today when no open add PR carries the decision', () => {
+        const d = withList(() => ({
+          status: 0,
+          stdout: JSON.stringify([
+            { number: 3, url, headRefName: 'ai-sdlc/file-dec-0008-add-1200' },
+            { number: 4, url, headRefName: 'ai-sdlc/file-dec-0007-add-9999' },
+            { number: 5, headRefName: 'ai-sdlc/file-dec-0007-add-1200' },
+          ]),
+          stderr: '',
+        }));
+        expect(() =>
+          fileDecision(
+            repo,
+            'DEC-0007',
+            { taskId: 'X-1', pr: false, events: [answered('DEC-0007', 'a')] },
+            d,
+          ),
+        ).toThrow(`no decision-opened event for DEC-0007 in ${EVENT_LOG_REL}`);
+        const garbled = withList(() => ({ status: 0, stdout: 'not json', stderr: '' }));
+        expect(() =>
+          fileDecision(
+            repo,
+            'DEC-0007',
+            { taskId: 'X-1', pr: false, events: [answered('DEC-0007', 'a')] },
+            garbled,
+          ),
+        ).toThrow(/^no decision-opened event for DEC-0007/);
+      });
+
+      it('names the gh failure next to the not-found message', () => {
+        const d = withList(() => ({ status: 1, stdout: '', stderr: 'gh: not logged in' }));
+        expect(() =>
+          fileDecision(
+            repo,
+            'DEC-0007',
+            { taskId: 'X-1', pr: false, events: [answered('DEC-0007', 'a')] },
+            d,
+          ),
+        ).toThrow(/no decision-opened event for DEC-0007 .*gh pr list failed: gh: not logged in/);
+      });
+
+      it('a decision on main never queries open PRs', () => {
+        commitMain(EVENT_LOG_REL, opened({ options: [{ id: 'a' }] }));
+        const r = file([answered('DEC-0001', 'a')]);
+        expect(r.branch).toMatch(/^ai-sdlc\/file-dec-0001-answer-\d{4}$/);
+        expect(ghCalls.filter((a) => a[1] === 'list')).toHaveLength(0);
+      });
+    });
+
     it('refuses an event for a different decision', () => {
       expect(() => file([answered('DEC-0002', 'a')])).toThrow(/in-memory event is for DEC-0002/);
     });
