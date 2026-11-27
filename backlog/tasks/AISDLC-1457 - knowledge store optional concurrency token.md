@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1457
 title: Knowledge store reads and writes carry an optional concurrency token
-status: To Do
+status: In Progress
 priority: medium
 labels:
   - pipeline-cli

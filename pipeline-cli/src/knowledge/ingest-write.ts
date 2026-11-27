@@ -40,7 +40,7 @@ export function countIngestWrite(
   r: WriteResult,
   report: (line: string) => void,
 ): void {
-  if (r.status === 'rejected') {
+  if (r.status === 'rejected' || r.status === 'conflict') {
     counts.rejected++;
     report(`rejected ${r.id}: ${r.reason ?? 'no reason given'}`);
   } else if (r.status === 'proposed') counts.proposed++;
