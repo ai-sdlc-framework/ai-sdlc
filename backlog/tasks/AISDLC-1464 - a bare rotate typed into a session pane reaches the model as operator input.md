@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1464
 title: "Rotation and cross-session delivery stop typing into panes and stop reporting false success (DEC-0455 a)"
-status: To Do
+status: In Progress
 priority: high
 labels:
   - pipeline-cli
