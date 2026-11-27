@@ -17,6 +17,8 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
+import { now as clockNow } from '../clock.js';
+
 import {
   appendDecisionEvent,
   makeDecisionOpenedEvent,
@@ -70,7 +72,7 @@ export interface ProofOptions {
 function fileOf(role: HierarchyRole, name: string, opts: ProofOptions): string {
   return handoffPath(
     { role, name, boardDir: opts.boardDir, ...(opts.file ? { file: opts.file } : {}) },
-    (opts.now ?? (() => new Date()))(),
+    (opts.now ?? clockNow)(),
   );
 }
 
@@ -98,7 +100,7 @@ export function markRotation(
   if (existing && existing.resumeHash !== undefined && existing.resumeHash === current) {
     return { since: existing.at, resumeHash: current, file };
   }
-  const now = (opts.now ?? (() => new Date()))();
+  const now = (opts.now ?? clockNow)();
   writeRotateRequest(opts.boardDir, name, now, current);
   return { since: now.toISOString(), resumeHash: current, file };
 }
