@@ -781,9 +781,16 @@ a regenerating `handoff read` alone never counts as proof. The module and the re
    planner. A later turn end that proves the block clears then; a new `rotate` request re-arms it.
    While an `AskUserQuestion` has no tool_result (`handoff asking`), the session counts as busy: the
    rotation is deferred and the handoff prompt goes in at the first `turn.complete` after the answer.
-2. If the session is still over threshold when the streak holds, the tick sends it a `rotate`
-   request (the same request `cli-hierarchy clear <planner>` sends) and records
-   `rotate-requests/<session>.json`; the tick reports `requested-rotate`. `status` shows
+   Every module rotation attempt, cleared or not, appends one JSON line (role, session, tokens,
+   handoffOk, clearOk, fallback) to `<board-dir>/log/rotations.jsonl` (AISDLC-1464).
+2. If the session is still over threshold when the streak holds, the tick records a rotate
+   request in `rotate-requests/<session>.json` (the same record `cli-hierarchy clear <planner>`
+   writes) and reports `requested-rotate`. A rotate request types nothing into a pane and writes nothing to a
+   socket (AISDLC-1464): the tick result carries the pending requests as `rotateRequests`, and the
+   dispatch hooks module sends `rotate` to each once through `$.session.send`. The target's module
+   consumes it from the dispatch sender (`hierarchy:rotate`); a bare `rotate` with no sender is
+   dropped (`hierarchy:unsent-control`) and never reaches the model. With no dispatch module the
+   session's own threshold check rotates it. `status` shows
    `rotate requested of <name> <N> s ago` while it waits on a long turn.
 3. Only when the session is still over threshold after `ROTATE_GRACE_TICKS` (6) ticks, is not
    `busy` (an unanswered `AskUserQuestion` counts as busy) and its handoff is proven for the current
@@ -1496,19 +1503,36 @@ Exit `0`, `1` on a guard refusal, `2` on a missing or invalid argument.
 
 ### `send`
 
-Message one roster session, the planner's roster guard (AISDLC-1036).
+Check a peer address, the planner's roster guard (AISDLC-1036). It delivers nothing (AISDLC-1464, DEC-0455 a).
 
 ```bash
 cli-hierarchy send --to <name-or-from-address> --text "<message>"
 ```
 
-Address roster names, or reply to the `from` address of a message you received; never a name from memory or convention.
-`--to` may also be the `from="uds:/tmp/cc-socks/<pid>.sock"` address of a cross-session message this session received (the
-hooks module records it in `<board-dir>/handoff/received-<session>.json` on `session.receive`); the text is written to that
-socket. Otherwise `--to` must be a session name listed in this project's roster (`<board-dir>/hierarchy.json`, the list
-`status` prints). Any other name is refused with exit 1 and a reason that names the roster source and
-the names it does list, so a look-alike or another project's session never receives the text. The
-message is typed into the session's pane with the same ownership checks `brief --notify` applies.
+`--to` is a session name listed in this project's roster (`<board-dir>/hierarchy.json`, the list `status` prints), the
+`from="uds:/tmp/cc-socks/<pid>.sock"` address of a cross-session message this session received (the hooks module records
+it in `<board-dir>/handoff/received-<session>.json` on `session.receive`), or the sender name recorded with such an
+address. A stale address is re-resolved through the session registry by its sender name; a dead one is dropped from the
+received log. Any other name is refused with exit 1 and a reason that names the roster source and the names it does list.
+
+A resolved target is also exit 1: the harness publishes no socket wire format, so a raw line written to a session socket
+was dropped while the CLI printed `ok`, and a pane-typed line reaches the model as operator input. `send` therefore
+never writes to a socket and never types into a pane (the planner notifier used by `escalation-file`, `canary` and the
+held-triage tick still writes a raw socket line and is not yet migrated); stderr names the target and its live socket, and stdout prints
+`{"ok":false,"sent":false,"to":...,"address":...}`. The working delivery channels are:
+
+- **`SendMessage`** from a model session (the planner, an executor), to the roster name or the live address.
+- **`$.session.send`** from a hooks module. The dispatch module uses it for `enqueue` wakes, planner notices and
+  `rotate` requests, and records each send in `<board-dir>/handoff/sent-<to>.json`.
+
+The receiving module writes a receipt for every cross-session message in `<board-dir>/handoff/receipt-<session>.json`
+(sender, first words, `consumed` with its label or `forwarded` to the model). `status` prints, per session, the last
+send with its receipt state (`received`, `pending`, `missing` after two minutes, `refused` by the host) and marks a
+send with no receipt `UNHEALTHY`, also when the session's socket file exists: a socket file is never health. Each
+module rotation attempt appends one line to `<board-dir>/log/rotations.jsonl` (role, session, tokens, `handoffOk`,
+`clearOk`, `fallback` of `none`, `compact` or `exit`); `status` prints the last one per session as `last rotation of
+<name>: ...`.
+
 Exit `2` on a missing `--to` or `--text`. A mistake guard, not authentication.
 
 ### `demo`
@@ -3048,7 +3072,7 @@ The hooks module reads the host `session.measure` payload at `context.tokens` an
 
 ## Wakes never reach the executor model (AISDLC-1121)
 
-The executor hooks module consumes every `enqueue` and `rotate` wake from operator-dispatch in its receive handler (`hierarchy:enqueue`, `hierarchy:rotate`) and logs a `wake run|skip` line with the action. A wake is never a prompt. The tick also skips spawning an executor for a queued task that an in-session executor cannot claim (for example a `claude-p-shell` task), and reports the reason once per task.
+The executor hooks module consumes every `enqueue` and `rotate` wake from operator-dispatch in its receive handler (`hierarchy:enqueue`, `hierarchy:rotate`) and logs a `wake run|skip` line with the action. A wake is never a prompt, and a bare `rotate` with no sender (pane-typed, not from dispatch) is dropped as `hierarchy:unsent-control` (AISDLC-1464). The tick also skips spawning an executor for a queued task that an in-session executor cannot claim (for example a `claude-p-shell` task), and reports the reason once per task.
 
 ## Planner session reference (AISDLC-1152)
 

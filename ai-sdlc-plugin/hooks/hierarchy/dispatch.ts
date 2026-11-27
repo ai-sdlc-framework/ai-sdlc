@@ -3,8 +3,21 @@
 // `session.receive`, renders the board pane and wakes executors with `$.session.send`. It NEVER submits a
 // prompt to its model: there is no `prompt.submit` port here, so no code path can. Same call-site rule as
 // executor.ts: `$` is only spelled `$.noun.verb(...)` in the handler that builds the ports.
-import { innerText, log, readMeasure, safe, senderAddressOf, senderOf } from './executor.ts';
+import {
+  WRITE_SCRIPT,
+  innerText,
+  log,
+  ran,
+  readMeasure,
+  resolveBoardDir,
+  safe,
+  senderAddressOf,
+  senderOf,
+  writeBoardFile,
+} from './executor.ts';
 import type { Ports } from './executor.ts';
+
+export { resolveBoardDir };
 
 type Any = any;
 
@@ -78,6 +91,12 @@ export interface DispatchState {
   tickNo?: number;
   /** Executor name -> tick number it was last sent `enqueue`. */
   lastWoke?: Record<string, number>;
+  /**
+   * AISDLC-1464: session name -> the `at` of the rotate request last delivered to it. In memory only: a
+   * restarted dispatch sends `rotate` again for each pending marker, which is intended (a session already
+   * rotating ignores the repeat, and the tick drops a marker once its session is back under threshold).
+   */
+  rotateSent?: Record<string, string>;
   /** Epoch ms of the last reconcile this host ran from the timer (AISDLC-1379). */
   lastReconcileAt?: number;
   /** `.reconcile-wake` mtime the last reconcile accounted for (AISDLC-1379). */
@@ -98,38 +117,6 @@ export function newDispatchState(options?: DispatchOptions): DispatchState {
     ticking: false,
   };
 }
-
-/** Prints the nearest ancestor of the cwd holding a `.git` entry (empty when none). */
-const ROOT_SCRIPT =
-  "const fs=require('fs'),p=require('path');let d=process.cwd();for(;;){if(fs.existsSync(p.join(d,'.git'))){process.stdout.write(d);break}const u=p.dirname(d);if(u===d)break;d=u}";
-
-type Run = (a: { command: string; args: string[] }) => Promise<Any>;
-
-/**
- * AISDLC-1181: the one resolver every handoff writer uses, so the board path handed to `process.run` is
- * always absolute. A relative `.ai-sdlc/dispatch` followed the session cwd (for example `.claude/memory`)
- * and left untracked files in the parent checkout. Order: an absolute `boardDir`, `CLAUDE_PROJECT_DIR`
- * (read by the caller through `$.env.get`; a hooks module has no `process` global), the project root found from the cwd. Returns `undefined` (the caller writes nothing) when none resolves.
- * A hooks module may import nothing but local files, so the root lookup runs in a child node process.
- */
-export async function resolveBoardDir(
-  run: Run,
-  boardDir?: string,
-  projectDir?: string,
-): Promise<string | undefined> {
-  if (boardDir)
-    return boardDir.startsWith('/') || /^[A-Za-z]:[\\/]/.test(boardDir) ? boardDir : undefined;
-  const env = projectDir;
-  if (env && (env.startsWith('/') || /^[A-Za-z]:[\\/]/.test(env)))
-    return `${env}/.ai-sdlc/dispatch`;
-  const r = await safe(() => run({ command: NODE, args: ['-e', ROOT_SCRIPT] }));
-  const root = String(((r.value ?? {}) as Any).stdout ?? '').trim();
-  return root ? `${root}/.ai-sdlc/dispatch` : undefined;
-}
-
-/** Writes the file named by argv[1] (creating its directory) with argv[2]. */
-const WRITE_SCRIPT =
-  "const fs=require('fs');fs.mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});fs.writeFileSync(process.argv[1],process.argv[2])";
 
 /**
  * Records `{address: argv[2], name: argv[3]}` in the JSON array in argv[1] (newest 50, creating the directory).
@@ -327,6 +314,50 @@ export async function refreshPaneBounded(
   return r;
 }
 
+/**
+ * AISDLC-1464: record the last `$.session.send` to `to` in `<board>/handoff/sent-<to>.json`, so
+ * `cli-hierarchy status` can set it beside the receiver's receipt. Never throws.
+ */
+export async function recordSend(
+  p: DispatchPorts,
+  state: DispatchState,
+  to: string,
+  text: string,
+  ok: boolean,
+): Promise<void> {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(to)) return;
+  const body = JSON.stringify({
+    to,
+    from: state.sessionName ?? 'operator-dispatch',
+    text: text.slice(0, 80),
+    ok,
+    at: new Date().toISOString(),
+  });
+  await writeBoardFile(p.runProcess, state, `handoff/sent-${to}.json`, body);
+}
+
+/**
+ * AISDLC-1464: deliver each rotate request the tick reports (`cli-hierarchy clear` and the tick record
+ * them; neither types into a pane nor writes to a socket) as `rotate` through `$.session.send`, which the
+ * target's module consumes. A request is sent once per recorded time; a refused send is retried next tick.
+ */
+export async function deliverRotateRequests(
+  p: DispatchPorts,
+  state: DispatchState,
+  requests: unknown,
+): Promise<void> {
+  if (!requests || typeof requests !== 'object') return;
+  const sent = (state.rotateSent ??= {});
+  for (const [name, at] of Object.entries(requests as Record<string, unknown>)) {
+    if (typeof at !== 'string' || sent[name] === at || name === state.sessionName) continue;
+    const r = await safe(() => p.send({ to: name, text: 'rotate' }));
+    const ok = ran(r);
+    await recordSend(p, state, name, 'rotate', ok);
+    if (ok) sent[name] = at;
+    note(state, ok ? `rotate sent to ${name}` : `rotate to ${name} refused`);
+  }
+}
+
 /** Wake one executor by roster name. The executor module consumes `enqueue ...` from the dispatch session. */
 export async function wake(p: DispatchPorts, name: string, taskId: string): Promise<boolean> {
   const r = await safe(() => p.send({ to: name, text: `enqueue ${taskId}` }));
@@ -349,6 +380,7 @@ async function wakeIdleExecutors(
   for (let i = 0; i < Math.min(ready.length, taskIds.length); i++) {
     lastWoke[ready[i]] = tickNo;
     const ok = await wake(p, ready[i], taskIds[i]);
+    await recordSend(p, state, ready[i], `enqueue ${taskIds[i]}`, ok);
     note(state, ok ? `woke ${ready[i]} for ${taskIds[i]}` : `wake of ${ready[i]} refused`);
   }
 }
@@ -356,6 +388,7 @@ async function wakeIdleExecutors(
 /** Tell the planner something, by roster name. The dispatch model is never prompted. */
 export async function tellPlanner(p: DispatchPorts, state: DispatchState, text: string) {
   const r = await safe(() => p.send({ to: state.plannerName, text }));
+  await recordSend(p, state, state.plannerName, text, ran(r));
   if (!r.ok) await log(p, `send to ${state.plannerName} failed`);
 }
 
@@ -470,6 +503,7 @@ export async function tick(p: DispatchPorts, state: DispatchState): Promise<void
         typeof rep === 'string' ? rep : String(rep.text ?? rep.message ?? JSON.stringify(rep)),
       );
     }
+    await deliverRotateRequests(p, state, result.rotateRequests);
     const blockersText = state.blockers.join('\n');
     if (blockersText !== state.lastBlockers) {
       state.lastBlockers = blockersText;

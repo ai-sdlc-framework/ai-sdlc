@@ -110,8 +110,10 @@ export {
   DeadAddressError,
   defaultResolveDeps,
   processStartOf,
+  noDeliveryPathMessage,
+  resolveDeliveryTarget,
   resolveSessionSocket,
-  sendResolved,
+  type ResolvedTarget,
 } from './send-resolve.js';
 export { resolveThresholds, DEFAULT_CONTEXT_THRESHOLDS } from './thresholds.js';
 export {

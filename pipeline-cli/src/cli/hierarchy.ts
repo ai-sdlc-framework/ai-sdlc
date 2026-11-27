@@ -181,15 +181,15 @@ import {
   type LandReport,
   checkRepoMatch,
   readRosterChecked,
-  readReceivedAddresses,
   readReceivedSenders,
   pruneReceivedLog,
-  createSocketSender,
+  checkSendTarget,
   defaultResolveDeps,
   DeadAddressError,
-  sendResolved,
+  noDeliveryPathMessage,
+  resolveDeliveryTarget,
   readSessionRegistry,
-  sendToRoster,
+  readRotateRequests,
   writeRotateRequest,
   type SocketSender,
   rosterProject,
@@ -494,25 +494,16 @@ function usageDepsOf(over: Partial<UsageDeps> | undefined, now: () => Date): Usa
 const HANDOFF_MAX_CHARS = 8000;
 
 /**
- * Ask a session's hooks module to rotate (AISDLC-1150): deliver `rotate` and record the request
- * so `status` can show its age. @throws the roster refusal when the name is not addressable.
+ * Ask a session's hooks module to rotate (AISDLC-1150): record the request so `status` can show its age.
+ * AISDLC-1464: nothing is typed into a pane or written to a socket here. The dispatch module reads the
+ * request from the tick result and delivers `rotate` with `$.session.send`, which the target's module
+ * consumes; the module's own threshold check rotates it when no dispatch module runs.
+ * @throws the roster refusal when the name is not addressable.
  */
-function sendRotate(
-  deps: HierarchyDeps,
-  name: string,
-  sendBrief: BriefSender | undefined,
-  sendSocket: SocketSender | undefined,
-): void {
+function requestRotate(deps: HierarchyDeps, name: string): void {
   const { roster } = readRosterChecked(deps.boardDir);
-  const sent = sendToRoster(
-    roster.sessions,
-    name,
-    'rotate',
-    sendBrief ?? createTmuxBriefSender(deps.run),
-    readReceivedAddresses(deps.boardDir),
-    sendSocket,
-  );
-  if (sent) void sent.catch(() => undefined);
+  const check = checkSendTarget(roster.sessions, name);
+  if (!check.ok) throw new Error(check.reason);
   // AISDLC-1448: the request carries the RESUME baseline the handoff proof compares against.
   const entry = roster.sessions.find((e) => e.name === name);
   if (entry && entry.role !== 'operator-dispatch') {
@@ -1164,7 +1155,7 @@ export async function runHierarchyCli(
         )?.role;
         if (targetRole === 'planner') {
           try {
-            sendRotate(deps, target, extras.sendBrief, extras.sendSocket);
+            requestRotate(deps, target);
           } catch (err) {
             process.stderr.write(`cli-hierarchy clear: ${(err as Error).message}\n`);
             return 1;
@@ -1621,7 +1612,7 @@ export async function runHierarchyCli(
           // AISDLC-1150: ask the session's module to rotate before any hard restart.
           requestRotate: async (name) => {
             try {
-              sendRotate(deps, name, extras.sendBrief, extras.sendSocket);
+              requestRotate(deps, name);
               return { ok: true };
             } catch (err) {
               return { ok: false, reason: (err as Error).message };
@@ -1855,6 +1846,8 @@ export async function runHierarchyCli(
                 (r) => r.entry.role === 'executor' && r.state === 'idle' && !r.inflightTask,
               )
               .map((r) => r.entry.name),
+            // AISDLC-1464: the dispatch module delivers these as `rotate` through $.session.send.
+            rotateRequests: readRotateRequests(deps.boardDir),
             webhookGate: webhookGate(deps),
             identity: { name: worker, planner: planner?.name ?? '' },
             handoff: dispatchHandoff(deps, worker),
@@ -2108,24 +2101,23 @@ export async function runHierarchyCli(
           socketExists: extras.socketExists ?? defaultResolveDeps.socketExists,
         };
         try {
-          const outcome = await sendResolved({
+          // AISDLC-1464: resolve the target, then refuse: the CLI has no delivery path of its own.
+          const target = resolveDeliveryTarget({
             sessions: roster.sessions,
             to,
             text,
             received: readReceivedSenders(deps.boardDir),
             registry,
-            sendPane: extras.sendBrief ?? createTmuxBriefSender(deps.run),
-            sendSocket: extras.sendSocket ?? createSocketSender,
             deps: resolveDeps,
           });
-          deps.log(JSON.stringify({ ok: true, ...outcome }));
+          process.stderr.write(`cli-hierarchy send: ${noDeliveryPathMessage(target)}\n`);
+          deps.log(JSON.stringify({ ok: false, sent: false, ...target }));
         } catch (err) {
           // a received address whose sender no longer resolves is dead: stop accepting it (AISDLC-1392)
           if (err instanceof DeadAddressError) pruneReceivedLog(deps.boardDir, err.deadAddress);
           process.stderr.write(`cli-hierarchy send: ${(err as Error).message}\n`);
-          return 1;
         }
-        return 0;
+        return 1;
       }
       case 'route-decision': {
         const caller = dispatchCaller('route-decision');

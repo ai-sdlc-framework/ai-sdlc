@@ -19,6 +19,7 @@ import {
   safe,
   setSwallowSink,
   startPinnedTask,
+  writeReceipt,
 } from './executor.ts';
 import type { ExecutorState, Ports } from './executor.ts';
 import {
@@ -72,10 +73,23 @@ async function onReceive(r: Router, $: Any, e: Any, next: Any): Promise<Any> {
       String(e?.text ?? ''),
       r.projectDir,
     );
-  if (r.current === 'operator-dispatch') return dispatchSessionReceive(r.dispatch, $, e, next);
-  if (r.current === 'planner') return plannerSessionReceive(r.planner, $, e, next);
-  if (r.current === 'executor') return executorSessionReceive(r.executor, $, e, next);
-  return next(e);
+  let result: Any;
+  if (r.current === 'operator-dispatch')
+    result = await dispatchSessionReceive(r.dispatch, $, e, next);
+  else if (r.current === 'planner') result = await plannerSessionReceive(r.planner, $, e, next);
+  else if (r.current === 'executor') result = await executorSessionReceive(r.executor, $, e, next);
+  else return next(e);
+  // AISDLC-1464: the delivery receipt `cli-hierarchy status` sets beside the sender's last send.
+  // The dispatch session's own receipts are read by nothing, so it writes none.
+  if (r.sessionName && r.current !== 'operator-dispatch')
+    await writeReceipt(
+      (a) => $.process.run([a.command, ...a.args]),
+      { boardDir: r.boardDir, projectDir: r.projectDir },
+      r.sessionName,
+      String(e?.text ?? ''),
+      result,
+    );
+  return result;
 }
 function onTurnStart(r: Router, $: Any, e: Any, next: Any): Any {
   if (r.current === 'planner') return plannerTurnStart(r.planner, $, e, next);
@@ -276,6 +290,8 @@ export const register = (on: Any, options?: Any): void => {
       if (options?.boardDir) planner.boardDir = options.boardDir;
       // The roster name keys the stored last reply; the launcher sets it, the role is the fallback.
       planner.name = typeof named === 'string' && named ? named : 'planner';
+      if (options?.boardDir) planner.boardDir = options.boardDir;
+      planner.projectDir = router.projectDir;
       router.current = 'planner';
       planner.enabled = true;
       if (planner.resumePending) await resumeAfterClear(p, planner);
@@ -289,6 +305,7 @@ export const register = (on: Any, options?: Any): void => {
     state.cliBin = cliBin;
     state.enabled = true;
     if (options?.boardDir) state.boardDir = options.boardDir;
+    state.projectDir = router.projectDir;
     // INTERIM: if a host fires session.start after a mod-run clear, resume from here as well.
     if (state.resumePending) await resumeAfterClear(p, state);
     await log(p, 'registered role=executor');

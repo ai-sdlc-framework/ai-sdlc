@@ -55,8 +55,8 @@ node "$PIPELINE_CLI_BIN/cli-file.mjs" rebase <id> --pr
 ## Rules
 
 - **Own roster only.** Address roster names, or reply to the `from` address of a message you received; never a name
-  from memory or convention. Use `node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" send --to <name-or-from-address> --text "<message>"`;
-  it is a mistake guard, not authentication.
+  from memory or convention. Check the target with `node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" send --to <name-or-from-address> --text "<message>"`
+  (a mistake guard, not authentication): it names the live address but delivers nothing and exits 1. Deliver with the `SendMessage` tool.
 - **Explore first.** Finding things goes through an `Explore` or Sonnet subagent; raw reads here are for the file you edit or decide.
 - **No config edits.** This command never edits `.ai-sdlc/` configuration. The only files it touches
   there are briefs under `.ai-sdlc/dispatch/briefs/`, written by `cli-hierarchy brief`.
@@ -121,6 +121,7 @@ After every state change run
 `node "$PIPELINE_CLI_BIN/cli-hierarchy.mjs" handoff write --role planner --board-dir "$BOARD_DIR"`.
 The hierarchy hooks module rotates this session past 150k tokens (restart: `/ai-sdlc:planner`); after any clear run
 `handoff read --role planner` first and resume from it.
+A `rotate` request reaches you only from operator-dispatch through `$.session.send`, and the hooks module consumes it; you never see it. Any bare `rotate` (or other control word) you do see is framework text, never an operator answer.
 
 **Guarantee:** this session is never cleared or restarted until its handoff is written. The hooks module submits the handoff routine below as a prompt when the rotation threshold is crossed (at the turn end; after the answer when an operator question is pending), and clears only once `handoff verify` proves ONE new `## RESUME HERE` block written after the rotation request. Without proof it asks once more, then does not clear: it prints `handoff unproven; not clearing`, writes `rotation.log` and raises a desktop notification; dispatch escalates `session-rotation:<name>` instead of restarting. Only the operator's `cli-hierarchy restart <name> --force` skips the proof.
 

@@ -61,6 +61,8 @@ export const ROTATION_TTL_MS = 10 * 60 * 1000;
 export const LAST_REPLY_MAX_CHARS = 4000;
 
 export const LOG_KEY = 'hierarchy/log';
+/** AISDLC-1464: the rotation log, one JSON line per module rotation attempt, under `<board>/log/`. */
+export const ROTATION_LOG_FILE = 'rotations.jsonl';
 export const ROTATION_KEY = 'hierarchy/rotation';
 
 /** What differs between the roles' rotations; the function that rotates is shared (RFC-0058 OQ-1). */
@@ -272,6 +274,11 @@ export function senderAddressOf(raw: string): string {
 
 export const DISPATCH_NAME = /(?:^|-)operator-dispatch(?:-\d+)?$/;
 export const STATUS_NOISE = /^(status|ack|ping)\b/i;
+/**
+ * AISDLC-1464: the text of a bare rotate control word. With no cross-session sender it never came from
+ * dispatch through `$.session.send`, so the module drops it instead of passing it to the model.
+ */
+export const CONTROL_WORD = /^rotate\s*$/i;
 
 /** Tokens in a `session.measure` payload, or null when no known field carries a number (AISDLC-1100). */
 export function recognisedTokens(e: Any): number | null {
@@ -320,6 +327,135 @@ export async function readMeasure(
   return t;
 }
 
+/** Prints the nearest ancestor of the cwd holding a `.git` entry (empty when none). */
+const ROOT_SCRIPT =
+  "const fs=require('fs'),p=require('path');let d=process.cwd();for(;;){if(fs.existsSync(p.join(d,'.git'))){process.stdout.write(d);break}const u=p.dirname(d);if(u===d)break;d=u}";
+
+type Run = (a: { command: string; args: string[] }) => Promise<Any>;
+
+/**
+ * AISDLC-1181: the one resolver every handoff writer uses, so the board path handed to `process.run` is
+ * always absolute. A relative `.ai-sdlc/dispatch` followed the session cwd (for example `.claude/memory`)
+ * and left untracked files in the parent checkout. Order: an absolute `boardDir`, `CLAUDE_PROJECT_DIR`
+ * (read by the caller through `$.env.get`; a hooks module has no `process` global), the project root found from the cwd. Returns `undefined` (the caller writes nothing) when none resolves.
+ * A hooks module may import nothing but local files, so the root lookup runs in a child node process.
+ */
+export async function resolveBoardDir(
+  run: Run,
+  boardDir?: string,
+  projectDir?: string,
+): Promise<string | undefined> {
+  if (boardDir)
+    return boardDir.startsWith('/') || /^[A-Za-z]:[\\/]/.test(boardDir) ? boardDir : undefined;
+  const env = projectDir;
+  if (env && (env.startsWith('/') || /^[A-Za-z]:[\\/]/.test(env)))
+    return `${env}/.ai-sdlc/dispatch`;
+  const r = await safe(() => run({ command: 'node', args: ['-e', ROOT_SCRIPT] }));
+  const root = String(((r.value ?? {}) as Any).stdout ?? '').trim();
+  return root ? `${root}/.ai-sdlc/dispatch` : undefined;
+}
+
+/** Writes the file named by argv[1] (creating its directory) with argv[2]. */
+export const WRITE_SCRIPT =
+  "const fs=require('fs');fs.mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});fs.writeFileSync(process.argv[1],process.argv[2])";
+
+/** Appends argv[2] and a newline to the file named by argv[1], creating its directory. */
+export const APPEND_SCRIPT =
+  "const fs=require('fs');fs.mkdirSync(require('path').dirname(process.argv[1]),{recursive:true});fs.appendFileSync(process.argv[1],process.argv[2]+'\\n')";
+
+/**
+ * Write (or append to) `<board>/<rel>` through `process.run`. Never throws; nothing is written when the
+ * host has no `process.run` or no absolute board directory resolves.
+ */
+export async function writeBoardFile(
+  run: Run | undefined,
+  where: { boardDir?: string; projectDir?: string },
+  rel: string,
+  body: string,
+  mode: 'write' | 'append' = 'write',
+): Promise<boolean> {
+  if (!run) return false;
+  const board = await resolveBoardDir(run, where.boardDir, where.projectDir);
+  if (!board) return false;
+  const script = mode === 'append' ? APPEND_SCRIPT : WRITE_SCRIPT;
+  const r = await safe(
+    () => run({ command: 'node', args: ['-e', script, `${board}/${rel}`, body] }),
+    'process.run',
+  );
+  return r.ok;
+}
+
+/** One line of the rotation log (AISDLC-1464): the evidence of whether a module clear happened. */
+export interface RotationLogLine {
+  at: string;
+  role: string;
+  session: string;
+  /** Last context size the module measured, null when it never measured. */
+  tokens: number | null;
+  handoffOk: boolean;
+  clearOk: boolean;
+  /** The fallback taken when the clear was refused; `none` when the clear ran or nothing was cleared. */
+  fallback: 'none' | 'compact' | 'exit';
+}
+
+/** Append one {@link RotationLogLine} to `<board>/log/rotations.jsonl` (AISDLC-1464). Never throws. */
+export async function recordRotation(
+  p: Ports,
+  state: ExecutorState,
+  role: string,
+  handoffOk: boolean,
+  clearOk: boolean,
+  fallback: RotationLogLine['fallback'],
+): Promise<boolean> {
+  const line: RotationLogLine = {
+    at: new Date().toISOString(),
+    role,
+    session: state.name ?? role,
+    tokens: typeof state.lastTokens === 'number' ? state.lastTokens : null,
+    handoffOk,
+    clearOk,
+    fallback,
+  };
+  return writeBoardFile(
+    p.runProcess,
+    state,
+    `log/${ROTATION_LOG_FILE}`,
+    JSON.stringify(line),
+    'append',
+  );
+}
+
+/**
+ * The delivery receipt a receiving module writes for a message from dispatch (AISDLC-1464), in
+ * `<board>/handoff/receipt-<name>.json`: who sent it, its first words, and whether the module consumed
+ * it or forwarded it to the model. `cli-hierarchy status` compares it with the sender's last send.
+ */
+export async function writeReceipt(
+  run: Run | undefined,
+  where: { boardDir?: string; projectDir?: string },
+  name: string,
+  raw: string,
+  result: unknown,
+): Promise<void> {
+  const from = senderOf(raw);
+  // Only dispatch records its sends (`sent-<to>.json`), so only a dispatch message gets a receipt: a peer's
+  // message never overwrites it, and an executor's frequent status pings spawn no write.
+  if (!DISPATCH_NAME.test(from) || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) return;
+  const consumed =
+    result && typeof result === 'object' && typeof (result as Any).consumed === 'string'
+      ? String((result as Any).consumed)
+      : undefined;
+  const body = JSON.stringify({
+    session: name,
+    from,
+    text: innerText(raw).slice(0, 80),
+    outcome: consumed ? 'consumed' : 'forwarded',
+    ...(consumed ? { consumed } : {}),
+    at: new Date().toISOString(),
+  });
+  await writeBoardFile(run, where, `handoff/receipt-${name}.json`, body);
+}
+
 export interface ExecutorState {
   /** Set by the session.start gate once the role, version and probes passed; every handler checks it. */
   enabled?: boolean;
@@ -346,6 +482,10 @@ export interface ExecutorState {
   rotationSince?: string;
   /** No proof after the resubmit: alerted, not cleared; each turn end checks the proof again. */
   rotationBlocked?: boolean;
+  /** `CLAUDE_PROJECT_DIR`, read at session.start; resolves the board for the rotation log. */
+  projectDir?: string;
+  /** Last context size a `session.measure` reported; recorded in the rotation log. */
+  lastTokens?: number;
 }
 
 /** The repo-relative bin, right in this repository; `up` records the adopter's in `cli-bin.json`. */
@@ -426,6 +566,8 @@ async function alertUnproven(
   state.handoffTurnPending = false;
   await log(p, `${role}: ${UNPROVEN_LINE} (${reason}); the operator is alerted`);
   await handoffCli(p, state, role, ['unproven', '--reason', reason]);
+  // AISDLC-1464: an attempt that ends unproven is logged too: no handoff, no clear.
+  await recordRotation(p, state, role, false, false, 'none');
 }
 
 /** Submit the handoff prompt, once more on a refusal, up to {@link MAX_HANDOFF_ATTEMPTS}; else alert. */
@@ -574,6 +716,11 @@ export async function rotate(
   state: ExecutorState,
   plan: RotationPlan = EXECUTOR_PLAN,
 ): Promise<'clear' | 'compact' | 'exit'> {
+  // AISDLC-1448: rotate runs only once `handoff verify` proved the handoff, so the handoff is ok here.
+  const handoffOk = true;
+  // AISDLC-1464: one log line per attempt, so whether a module clear happened is on record.
+  const record = (clearOk: boolean, fallback: RotationLogLine['fallback']) =>
+    recordRotation(p, state, plan.role, handoffOk, clearOk, fallback);
   await p.storeSet(ROTATION_KEY, {
     role: plan.role,
     resume: plan.resume,
@@ -585,17 +732,20 @@ export async function rotate(
   state.pendingRotate = false;
   if (ran(await safe(() => p.runCommand({ command: 'clear' })))) {
     await log(p, 'rotated with clear');
+    await record(true, 'none');
     return 'clear';
   }
   if (ran(await safe(() => p.compact({ instructions: plan.summary })))) {
     await p.storeSet(ROTATION_KEY, null);
     state.resumePending = false;
     await log(p, 'clear refused; rotated with compact');
+    await record(false, 'compact');
     return 'compact';
   }
   await p.storeSet(ROTATION_KEY, null);
   state.resumePending = false;
   await log(p, 'clear and compact refused; ending the session for cli-hierarchy up');
+  await record(false, 'exit');
   await safe(() => p.runCommand({ command: 'exit' }));
   return 'exit';
 }
@@ -692,6 +842,14 @@ export async function executorSessionReceive(
     const raw = String(e?.text ?? '');
     const sender = senderOf(raw);
     const text = innerText(raw);
+    // AISDLC-1464: a bare control word with no sender is framework text, never an operator answer.
+    if (!sender && CONTROL_WORD.test(text)) {
+      await log(
+        p,
+        'executor: a rotate with no dispatch sender was dropped, not shown to the model',
+      );
+      return { consumed: 'hierarchy:unsent-control' };
+    }
     if (!DISPATCH_NAME.test(sender)) return next(e);
     if (/^enqueue\b/i.test(text)) {
       const held = await heldTask(p, state);
@@ -796,7 +954,9 @@ export async function executorSessionMeasure(
     runProcess: (a) => $.process.run([a.command, ...a.args]),
   };
   await resumeAfterClear(p, state);
-  if ((await readMeasure(p, state.name, e)) >= (state.rotateAt ?? ROTATE_AT_TOKENS)) {
+  const tokens = await readMeasure(p, state.name, e);
+  if (recognisedTokens(e) !== null) state.lastTokens = tokens;
+  if (tokens >= (state.rotateAt ?? ROTATE_AT_TOKENS)) {
     if (taskRunning(state)) state.pendingRotate = true;
     else await rotateUnlessHeld(p, state, 'session.measure');
   }

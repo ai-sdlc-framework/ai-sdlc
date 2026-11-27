@@ -27,6 +27,7 @@ import {
   type RosterEntry,
 } from '../hierarchy/index.js';
 import { createSocketSender } from '../hierarchy/send.js';
+import { readRotateRequests } from '../hierarchy/rotate-request.js';
 import { processStartOf, resolveSessionSocket } from '../hierarchy/send-resolve.js';
 import { collectVerdicts, writeVerdict } from '../dispatch/board.js';
 import { defaultHierarchyDeps, firstPositional, runHierarchyCli } from './hierarchy.js';
@@ -589,6 +590,32 @@ describe('clear, tick and route-decision', () => {
     });
   });
 
+  it('clear of a planner with no socket address records the rotate request and types nothing (AISDLC-1464)', async () => {
+    const board = path.join(tmp, 'dispatch');
+    writeRoster(board, {
+      schemaVersion: 'v1',
+      sessions: [entry('operator-dispatch', 'operator-dispatch'), entry('planner', 'planner')],
+    });
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const sendBrief = vi.fn();
+    const sendSocket = vi.fn();
+    expect(
+      await runHierarchyCli(['clear', 'planner'], overrides({ run }), {
+        ...dispatchCaller,
+        sendBrief,
+        sendSocket,
+      }),
+    ).toBe(0);
+    expect(calls.filter((c) => c[0] === 'send-keys')).toEqual([]);
+    expect(sendBrief).not.toHaveBeenCalled();
+    expect(sendSocket).not.toHaveBeenCalled();
+    expect(readRotateRequests(board).planner).toBeTruthy();
+    expect(JSON.parse(logs.at(-1) as string)).toEqual({ ok: true, rotateRequested: 'planner' });
+  });
+
   it('clear exits 1 with the named refusal when the recorded pane cannot be confirmed', async () => {
     writeRoster(path.join(tmp, 'dispatch'), {
       schemaVersion: 'v1',
@@ -911,6 +938,23 @@ describe('clear, tick and route-decision', () => {
       expect(out.nextWakeSec).toBe(30);
       expect(out.selfClear.available).toBe(false);
       expect(out.selfClear.reason).toContain('cli-hierarchy up');
+      // AISDLC-1464: pending rotate requests ride on the tick result for the dispatch module to send
+      expect(out.rotateRequests).toEqual({});
+    });
+
+    it('a recorded clear request rides on the next tick result (AISDLC-1464)', async () => {
+      seedBoardWithBrief();
+      vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+      const caller = { identity: asCaller('operator-dispatch') };
+      expect(await runHierarchyCli(['clear', 'planner'], overrides({ env: {} }), caller)).toBe(0);
+      const code = await runHierarchyCli(
+        ['tick', '--worker', 'operator-dispatch', '--work-dir', tmp],
+        overrides({ env: {} }),
+        { ...caller, lease, operational: new Set<string>(), enqueue: () => [] },
+      );
+      expect(code).toBe(0);
+      const out = JSON.parse(logs.at(-1) as string);
+      expect(Object.keys(out.rotateRequests)).toEqual(['planner']);
     });
 
     it('an empty board answers nextWakeSec 1800', async () => {
@@ -1951,7 +1995,7 @@ describe('handoff and send subcommands (AISDLC-766, AISDLC-1036)', () => {
     expect(String(err.mock.calls.at(-1)?.[0])).toContain('regenerated from live state');
   });
 
-  it('send types into a roster session and refuses a name outside the roster with the roster source', async () => {
+  it('send to a roster name delivers nothing, exits 1 naming SendMessage and $.session.send, and refuses a name outside the roster (AISDLC-1464)', async () => {
     writeRoster(path.join(tmp, 'dispatch'), {
       schemaVersion: 'v1',
       sessions: [
@@ -1961,16 +2005,24 @@ describe('handoff and send subcommands (AISDLC-766, AISDLC-1036)', () => {
     });
     const sent: Array<[string, string]> = [];
     const sendBrief = (e: RosterEntry, m: string) => void sent.push([e.name, m]);
+    const sendSocket = vi.fn();
+    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     expect(
       await runHierarchyCli(
         ['send', '--to', 'alpha-operator-dispatch', '--text', 'ruling: go'],
         overrides(),
-        { sendBrief },
+        { sendBrief, sendSocket },
       ),
-    ).toBe(0);
-    expect(sent).toEqual([['alpha-operator-dispatch', 'ruling: go']]);
+    ).toBe(1);
+    // no pane fallback and no raw socket line
+    expect(sent).toEqual([]);
+    expect(sendSocket).not.toHaveBeenCalled();
+    const refusal = String(err.mock.calls.at(-1)?.[0]);
+    expect(refusal).toContain('no delivery path');
+    expect(refusal).toContain('SendMessage');
+    expect(refusal).toContain('$.session.send');
+    expect(logs.some((l) => l.includes('"ok":true'))).toBe(false);
 
-    const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     expect(
       await runHierarchyCli(
         ['send', '--to', 'beta-operator-dispatch', '--text', 'hi'],
@@ -1982,10 +2034,10 @@ describe('handoff and send subcommands (AISDLC-766, AISDLC-1036)', () => {
     expect(msg).toContain('not listed');
     expect(msg).toContain('hierarchy.json');
     expect(msg).toContain('alpha-planner');
-    expect(sent).toHaveLength(1);
+    expect(sent).toHaveLength(0);
   });
 
-  it('send accepts the from address of a received message and still refuses freehand names (AISDLC-1080)', async () => {
+  it('send resolves the from address of a received message but writes nothing to it, and still refuses freehand names (AISDLC-1080, AISDLC-1464)', async () => {
     writeRoster(path.join(tmp, 'dispatch'), {
       schemaVersion: 'v1',
       sessions: [projectEntry('alpha', 'planner', 'planner', 1)],
@@ -2006,8 +2058,9 @@ describe('handoff and send subcommands (AISDLC-766, AISDLC-1036)', () => {
         overrides(),
         { sendBrief, sendSocket, socketExists: () => true },
       ),
-    ).toBe(0);
-    expect(sent).toEqual([['uds:/tmp/cc-socks/123.sock', 'done']]);
+    ).toBe(1);
+    expect(sent).toEqual([]);
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('live socket uds:/tmp/cc-socks/123.sock');
     for (const to of ['uds:/tmp/cc-socks/999.sock', 'other-project-planner']) {
       expect(
         await runHierarchyCli(['send', '--to', to, '--text', 'hi'], overrides(), {
@@ -2018,17 +2071,17 @@ describe('handoff and send subcommands (AISDLC-766, AISDLC-1036)', () => {
       ).toBe(1);
       expect(String(err.mock.calls.at(-1)?.[0])).toContain('not listed');
     }
-    expect(sent).toHaveLength(1);
-    expect(sendBrief).not.toHaveBeenCalled();
-    // a roster name still goes through the pane sender
+    expect(sent).toHaveLength(0);
+    // a roster name never falls back to the pane
     expect(
       await runHierarchyCli(['send', '--to', 'alpha-planner', '--text', 'x'], overrides(), {
         sendBrief,
         sendSocket,
         socketExists: () => true,
       }),
-    ).toBe(0);
-    expect(sendBrief).toHaveBeenCalledTimes(1);
+    ).toBe(1);
+    expect(sendBrief).not.toHaveBeenCalled();
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('no delivery path');
   });
 
   it('send refuses a mixed-project roster and a text with a newline', async () => {
@@ -2373,7 +2426,7 @@ describe('send resolves a relaunched session (AISDLC-1392)', () => {
     ...over,
   });
 
-  it('delivers a stale address to the new socket and reports the repair; rewrites no log', async () => {
+  it('re-resolves a stale address to the new socket and reports it, sending nothing; rewrites no log', async () => {
     const t = setup(
       [
         { address: OLD, name: 'arcana-planner' },
@@ -2383,11 +2436,12 @@ describe('send resolves a relaunched session (AISDLC-1392)', () => {
     );
     expect(
       await runHierarchyCli(['send', '--to', OLD, '--text', 'hi'], overrides(), t.extras),
-    ).toBe(0);
-    expect(t.sent).toEqual([[NEW, 'hi']]);
+    ).toBe(1);
+    expect(t.sent).toEqual([]);
     const out = JSON.parse(logs.at(-1) ?? '{}');
+    expect(out).toMatchObject({ ok: false, sent: false, address: NEW });
     expect(out.repaired).toEqual({ name: 'arcana-planner', from: OLD, to: NEW });
-    // a successful send never prunes, even an entry whose name does not resolve
+    // a resolved target never prunes, even an entry whose name does not resolve
     expect(JSON.parse(fs.readFileSync(t.log, 'utf8'))).toHaveLength(2);
   });
 
@@ -2422,9 +2476,9 @@ describe('send resolves a relaunched session (AISDLC-1392)', () => {
         overrides(),
         t.extras,
       ),
-    ).toBe(0);
-    expect(t.sent).toEqual([[NEW, 'hi']]);
-    expect(JSON.parse(logs.at(-1) ?? '{}').via).toBe(NEW);
+    ).toBe(1);
+    expect(t.sent).toEqual([]);
+    expect(JSON.parse(logs.at(-1) ?? '{}').address).toBe(NEW);
     expect(t.sendBrief).not.toHaveBeenCalled();
     const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
     expect(
@@ -2463,9 +2517,10 @@ describe('send resolves a relaunched session (AISDLC-1392)', () => {
       ),
     ).toBe('uds:/tmp/cc-socks/custom.sock');
     expect(await runHierarchyCli(['send', '--to', OLD, '--text', 'hi'], overrides(), extras)).toBe(
-      0,
+      1,
     );
-    expect(t.sent).toEqual([['uds:/tmp/cc-socks/custom.sock', 'hi']]);
+    expect(t.sent).toEqual([]);
+    expect(JSON.parse(logs.at(-1) ?? '{}').address).toBe('uds:/tmp/cc-socks/custom.sock');
     // the same entry with a matching procStart (whitespace aside) is the session
     oldLive = true;
     expect(
@@ -2501,17 +2556,25 @@ describe('send resolves a relaunched session (AISDLC-1392)', () => {
     }
   });
 
-  it('exits non-zero when the socket sender rejects, never printing ok', async () => {
+  it('never writes a raw line to a live socket and never prints ok (AISDLC-1464)', async () => {
     const t = setup([{ address: OLD, name: 'arcana-planner' }], [reg()]);
     const err = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
-    const sendSocket = () => Promise.reject(new Error('connect ECONNREFUSED'));
+    const sendSocket = vi.fn();
     expect(
-      await runHierarchyCli(['send', '--to', OLD, '--text', 'hi'], overrides(), {
+      await runHierarchyCli(['send', '--to', NEW, '--text', 'hi'], overrides(), {
         ...t.extras,
         sendSocket,
       }),
     ).toBe(1);
-    expect(String(err.mock.calls.at(-1)?.[0])).toContain('ECONNREFUSED');
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('not listed');
+    expect(
+      await runHierarchyCli(['send', '--to', 'arcana-planner', '--text', 'hi'], overrides(), {
+        ...t.extras,
+        sendSocket,
+      }),
+    ).toBe(1);
+    expect(sendSocket).not.toHaveBeenCalled();
+    expect(String(err.mock.calls.at(-1)?.[0])).toContain('SendMessage');
     expect(logs.some((l) => l.includes('"ok":true'))).toBe(false);
   });
 });

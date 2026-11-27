@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { classify, renderBoard } from '../../hooks/hierarchy/dispatch.ts';
+import {
+  classify,
+  deliverRotateRequests,
+  newDispatchState,
+  recordSend,
+  renderBoard,
+} from '../../hooks/hierarchy/dispatch.ts';
 import { registerStrict } from './stubs/hierarchy-strict-host.ts';
 
 const env = (from: string, text: string) =>
@@ -217,7 +223,8 @@ describe('dispatch host (AISDLC-1035)', () => {
     expect(await s.receive('executor-alpha', 'status idle')).toEqual({
       consumed: 'hierarchy:status',
     });
-    expect(s.runs.every((a) => a[1] === 'status')).toBe(true);
+    // board-file writes (`node -e`, the AISDLC-1464 receipt) aside, only the pane refresh runs
+    expect(s.runs.filter((a) => a[0] !== '-e').every((a) => a[1] === 'status')).toBe(true);
     expect((await s.render()).text).toContain('status from executor-alpha');
   });
 
@@ -499,6 +506,63 @@ describe('dispatch host (AISDLC-1035)', () => {
     expect(await s.receive('executor-alpha', 'landed #1')).toEqual({
       consumed: 'hierarchy:landed',
     });
+  });
+
+  it('delivers a recorded rotate request through session.send once per request and records the send (AISDLC-1464)', async () => {
+    const s = setup({ ...EMPTY_TICK, rotateRequests: { 'proj-planner': '2026-11-27T00:00:00Z' } });
+    await s.start();
+    await s.timer();
+    await s.timer();
+    expect(sends(s).filter((a: any) => a.text === 'rotate')).toEqual([
+      { to: 'proj-planner', text: 'rotate' },
+    ]);
+    // the send record `cli-hierarchy status` compares with the receiver's receipt
+    const record = s.argvs.find(
+      (a) =>
+        a[1] === '-e' &&
+        String(a[3]).endsWith('/proj/.ai-sdlc/dispatch/handoff/sent-proj-planner.json'),
+    );
+    expect(JSON.parse(String(record?.[4]))).toMatchObject({
+      to: 'proj-planner',
+      text: 'rotate',
+      ok: true,
+    });
+    // a newer request for the same session is delivered again
+    s.setTick({ ...EMPTY_TICK, rotateRequests: { 'proj-planner': '2026-11-27T01:00:00Z' } });
+    await s.timer();
+    expect(sends(s).filter((a: any) => a.text === 'rotate')).toHaveLength(2);
+  });
+
+  it('retries a refused rotate request on the next tick and ignores a malformed list (AISDLC-1464)', async () => {
+    const s = setup({ ...EMPTY_TICK, rotateRequests: { 'proj-planner': 'x', bad: 7 } });
+    await s.start();
+    s.$.session.send.mockImplementationOnce(async () => ({ drop: 'busy' }));
+    await s.timer();
+    await s.timer();
+    expect(sends(s).filter((a: any) => a.text === 'rotate')).toHaveLength(2);
+    expect(sends(s).some((a: any) => a.to === 'bad')).toBe(false);
+  });
+
+  it('never sends rotate to its own session, and records no send for an unsafe name (AISDLC-1464)', async () => {
+    const send = vi.fn(async () => undefined);
+    const runProcess = vi.fn(async () => ({ exitCode: 0, stdout: '' }));
+    const p: any = {
+      send,
+      runProcess,
+      storeGet: async () => undefined,
+      storeSet: async () => undefined,
+      runCommand: async () => undefined,
+      uiOpen: async () => undefined,
+    };
+    const state = {
+      ...newDispatchState({ boardDir: '/b' }),
+      sessionName: 'proj-operator-dispatch',
+    };
+    await deliverRotateRequests(p, state, { 'proj-operator-dispatch': 'x', 'proj-planner': 'y' });
+    expect(send.mock.calls).toEqual([[{ to: 'proj-planner', text: 'rotate' }]]);
+    runProcess.mockClear();
+    await recordSend(p, state, '../x', 'rotate', true);
+    expect(runProcess).not.toHaveBeenCalled();
   });
 
   it('classifies message shapes', () => {

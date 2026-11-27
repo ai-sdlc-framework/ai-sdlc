@@ -10,8 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 
-import type { BriefSender } from './brief-notify.js';
-import { checkSendTarget, SOCKET_ADDRESS, type ReceivedSender, type SocketSender } from './send.js';
+import { checkSendTarget, SOCKET_ADDRESS, type ReceivedSender } from './send.js';
 import type { RegistrySession, RosterEntry } from './types.js';
 
 /** Where Claude Code sessions listen: `/tmp/cc-socks/<pid>.sock`. */
@@ -88,37 +87,48 @@ export class DeadAddressError extends Error {
   }
 }
 
-export interface SendOutcome {
+export interface ResolvedTarget {
   /** What the caller named. */
-  sent: string;
-  /** Set when the named address was stale and the message went to the session's current socket. */
+  to: string;
+  /** The live socket of the session, when one resolved; an address for `SendMessage`, never written to here. */
+  address?: string;
+  /** Set when the named address was stale and the session's current socket was found. */
   repaired?: { name: string; from: string; to: string };
-  /** Set when a name resolved to a socket through the registry. */
-  via?: string;
 }
 
 /**
- * Send one message for `cli-hierarchy send`. A roster name types into its pane as before; a received `uds:`
- * address is used when its socket exists and otherwise re-resolved by the sender's recorded name; any other
- * name must be a sender in the received log and is resolved through the registry. Throws the refusal
- * reason, and rejects when the socket cannot be written.
+ * Why `cli-hierarchy send` delivers nothing (AISDLC-1464, DEC-0455 a). The harness publishes no socket wire
+ * format: a raw line written to a session socket was dropped while the CLI printed ok, and a pane-typed line
+ * reaches the model as operator input. The CLI therefore never writes to a socket and never types into a pane;
+ * it names the target and the two channels that deliver.
  */
-export async function sendResolved(opts: {
+export function noDeliveryPathMessage(target: ResolvedTarget): string {
+  const where = target.address ? ` (live socket ${target.address})` : '';
+  return (
+    `no delivery path from this CLI to '${target.to}'${where}: the harness publishes no socket wire format, so ` +
+    'cli-hierarchy send never writes to a session socket and never types into a pane. Nothing was sent. ' +
+    'Deliver it with the SendMessage tool from a model session, or with $.session.send from a hooks module.'
+  );
+}
+
+/**
+ * Resolve the target of `cli-hierarchy send` (AISDLC-1036, AISDLC-1080, AISDLC-1392) without sending: a roster
+ * name, a received `uds:` address whose socket exists or whose sender name re-resolves, or a sender name in the
+ * received log resolved through the registry. Throws the refusal reason; a dead received address throws
+ * {@link DeadAddressError} so the caller can prune it.
+ */
+export function resolveDeliveryTarget(opts: {
   sessions: readonly RosterEntry[];
   to: string;
   text: string;
   received: readonly ReceivedSender[];
   registry: readonly RegistrySession[];
-  sendPane: BriefSender;
-  sendSocket: SocketSender;
   deps?: ResolveDeps;
-}): Promise<SendOutcome> {
-  const { sessions, to, text, received, registry, sendPane, sendSocket } = opts;
+}): ResolvedTarget {
+  const { sessions, to, text, received, registry } = opts;
   const deps = opts.deps ?? defaultResolveDeps;
   if (/[\r\n]/.test(text)) {
-    throw new Error(
-      'refusing to send: the text contains a newline (a pane would run it as separate input)',
-    );
+    throw new Error('refusing to send: the text contains a newline');
   }
   if (SOCKET_ADDRESS.test(to)) {
     const known = received.find((r) => r.address === to);
@@ -126,10 +136,7 @@ export async function sendResolved(opts: {
       const check = checkSendTarget(sessions, to, []);
       throw new Error(check.ok ? `refusing to send to '${to}'` : check.reason);
     }
-    if (deps.socketExists(to)) {
-      await sendSocket(to, text);
-      return { sent: to };
-    }
+    if (deps.socketExists(to)) return { to, address: to };
     if (!known.name) {
       throw new Error(
         `refusing to send to '${to}': its socket is gone and no sender name was recorded to find the new one`,
@@ -142,13 +149,12 @@ export async function sendResolved(opts: {
         to,
       );
     }
-    await sendSocket(current, text);
-    return { sent: to, repaired: { name: known.name, from: to, to: current } };
+    return { to, address: current, repaired: { name: known.name, from: to, to: current } };
   }
   const check = checkSendTarget(sessions, to, []);
   if (check.ok && 'entry' in check) {
-    sendPane(check.entry, text);
-    return { sent: to };
+    const address = resolveSessionSocket(registry, to, deps);
+    return address ? { to, address } : { to };
   }
   if (!received.some((r) => r.name === to)) {
     throw new Error(check.ok ? `refusing to send to '${to}'` : check.reason);
@@ -157,6 +163,5 @@ export async function sendResolved(opts: {
   if (!address) {
     throw new Error(`refusing to send to '${to}': it does not resolve to a live session socket`);
   }
-  await sendSocket(address, text);
-  return { sent: to, via: address };
+  return { to, address };
 }
