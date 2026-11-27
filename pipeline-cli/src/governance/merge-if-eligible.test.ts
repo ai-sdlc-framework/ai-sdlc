@@ -123,6 +123,8 @@ const SNAPSHOT: PrSnapshot = {
   title: 'fix(spec): do the thing (AISDLC-9)',
   mergeStateStatus: 'CLEAN',
   files: [],
+  labels: [],
+  autoMergeArmed: false,
 };
 
 type Run = [name: string, status: string, conclusion: string | null];
@@ -2398,5 +2400,106 @@ describe('runMergeIfEligible — arm reports what GitHub shows (AISDLC-1009)', (
       ['armed', true],
       ['not-armable', false],
     ]);
+  });
+});
+
+describe('runMergeIfEligible — hold label (AISDLC-1386)', () => {
+  const HOLD = [{ name: 'ai-sdlc/hold' }];
+  const ALL_OK: Record<string, Partial<ExecResult>> = {
+    'gh api repos/org/repo --jq': { stdout: 'true\n' },
+    ...MAIN_REF,
+    ...CLEAN_FILES,
+    'gh pr checks 42 --required': { stdout: JSON.stringify([{ name: 'ci', state: 'SUCCESS' }]) },
+    ...COMMIT_OPERATOR,
+    ...shaChecks(HEAD_A, [['ci', 'completed', 'success']]),
+    'gh pr merge 42': {},
+  };
+  const opts = (runner: Runner, extra: Partial<RunMergeIfEligibleOptions> = {}) => ({
+    prNumber: 42,
+    sourceKind: 'backlog' as const,
+    repoSlug: 'org/repo',
+    repoRoot: '/unused',
+    runner,
+    policyYaml: GREEN_YAML,
+    taskPrefix: 'AISDLC',
+    ...extra,
+  });
+  const mergeCalls = (calls: RecordedCall[]) => calls.filter((c) => c.args[1] === 'merge');
+
+  it('reads the labels and the auto-merge request in the one PR view', async () => {
+    const { runner, calls } = makeFakeRunner({
+      'gh pr view 42': { stdout: prView({ labels: HOLD, autoMergeRequest: { enabledAt: 'x' } }) },
+    });
+    const snap = await fetchPrSnapshot(42, 'org/repo', runner);
+    expect(snap).toMatchObject({ labels: ['ai-sdlc/hold'], autoMergeArmed: true });
+    expect(calls[0].args.join(' ')).toMatch(/labels,autoMergeRequest/);
+    const none = await fetchPrSnapshot(
+      42,
+      'org/repo',
+      makeFakeRunner({ 'gh pr view 42': { stdout: prView({ labels: [{ x: 1 }] }) } }).runner,
+    );
+    expect(none).toMatchObject({ labels: [], autoMergeArmed: false });
+  });
+
+  it('refuses a held PR for merge and for --arm, calling no merge', async () => {
+    for (const mode of ['merge', 'arm'] as const) {
+      const fake = makeFakeRunner({
+        ...ALL_OK,
+        'gh pr view 42': { stdout: prView({ labels: HOLD }) },
+      });
+      const r = await runMergeIfEligible(opts(fake.runner, { mode }));
+      expect(r.merged).toBe(false);
+      expect(r.armed).toBeUndefined();
+      expect(r.eligibility).toEqual({
+        eligible: false,
+        reason: 'PR is held (label ai-sdlc/hold)',
+      });
+      expect(mergeCalls(fake.calls)).toEqual([]);
+    }
+  });
+
+  it('disarms an armed held PR (never in a dry run) and reports a failed disarm', async () => {
+    const armed = { stdout: prView({ labels: HOLD, autoMergeRequest: { enabledAt: 'x' } }) };
+    const fake = makeFakeRunner({ ...ALL_OK, 'gh pr view 42': armed });
+    const r = await runMergeIfEligible(opts(fake.runner, { mode: 'arm' }));
+    expect(r.disarmed).toBe(true);
+    expect(r.merged).toBe(false);
+    expect(r.eligibility.reason).toMatch(/held .*auto-merge was disarmed/);
+    expect(mergeCalls(fake.calls).map((c) => c.args)).toEqual([
+      ['pr', 'merge', '42', '--disable-auto', '--repo', 'org/repo'],
+    ]);
+
+    const dry = makeFakeRunner({ ...ALL_OK, 'gh pr view 42': armed });
+    const d = await runMergeIfEligible(opts(dry.runner, { dryRun: true }));
+    expect(d.eligibility.reason).toBe('PR is held (label ai-sdlc/hold)');
+    expect(mergeCalls(dry.calls)).toEqual([]);
+
+    const failing = makeFakeRunner({
+      ...ALL_OK,
+      'gh pr view 42': armed,
+      'gh pr merge 42': { code: 1, stderr: 'nope' },
+    });
+    const f = await runMergeIfEligible(opts(failing.runner));
+    expect(f.disarmed).toBeUndefined();
+    expect(f.eligibility.reason).toMatch(/disarming auto-merge failed: nope/);
+  });
+
+  it('refuses when the label appears on the re-read before arming or merging', async () => {
+    for (const mode of ['merge', 'arm'] as const) {
+      let views = 0;
+      const calls: RecordedCall[] = [];
+      const delegate = makeFakeRunner(ALL_OK).runner;
+      const runner: Runner = async (command, args, o) => {
+        calls.push({ command, args });
+        if (args[1] === 'view') {
+          views += 1;
+          return { stdout: prView(views === 1 ? {} : { labels: HOLD }), stderr: '', code: 0 };
+        }
+        return delegate(command, args, o);
+      };
+      const r = await runMergeIfEligible(opts(runner, { mode }));
+      expect(r.eligibility.reason).toBe('PR is held (label ai-sdlc/hold)');
+      expect(mergeCalls(calls)).toEqual([]);
+    }
   });
 });

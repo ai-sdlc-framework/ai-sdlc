@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1386
 title: 'A hold label keeps a single PR from being armed or merged'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-11-22'
 labels:
@@ -33,8 +33,8 @@ priority: high
 
 ## Acceptance Criteria
 
-- [ ] #1 A test: `cli-merge-if-eligible` refuses a labelled PR for merge and for `--arm`, and disarms an armed one.
-- [ ] #2 A test: the reconciler takes no arm, flip or merge action on a labelled PR.
-- [ ] #3 A test: `pr-hold` adds and clears the label and refuses an executor caller.
-- [ ] #4 `docs/operations/cli-hierarchy.md` documents the label and command.
-- [ ] #5 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] #1 A test: `cli-merge-if-eligible` refuses a labelled PR for merge and for `--arm`, and disarms an armed one.
+- [x] #2 A test: the reconciler takes no arm, flip or merge action on a labelled PR.
+- [x] #3 A test: `pr-hold` adds and clears the label and refuses an executor caller.
+- [x] #4 `docs/operations/cli-hierarchy.md` documents the label and command.
+- [x] #5 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.

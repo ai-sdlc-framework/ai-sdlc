@@ -416,10 +416,20 @@ export interface PrSnapshot {
   title: string;
   mergeStateStatus: string;
   files: Array<{ path: string; changeType?: string }>;
+  /** AISDLC-1386: label names on the PR (a missing list reads as none). */
+  labels: string[];
+  /** AISDLC-1386: GitHub shows an autoMergeRequest on the PR. */
+  autoMergeArmed: boolean;
 }
 
+/** AISDLC-1386: a PR carrying this label is never armed or merged by the machine. */
+export const PR_HOLD_LABEL = 'ai-sdlc/hold';
+
+/** AISDLC-1386: refusal reason for a held PR. */
+export const PR_HOLD_REASON = `PR is held (label ${PR_HOLD_LABEL})`;
+
 const PR_VIEW_FIELDS =
-  'headRefOid,headRefName,baseRefName,isCrossRepository,author,title,mergeStateStatus,files';
+  'headRefOid,headRefName,baseRefName,isCrossRepository,author,title,mergeStateStatus,files,labels,autoMergeRequest';
 
 /**
  * Read the PR in ONE `gh pr view --json` call (head commit, merge state,
@@ -442,6 +452,9 @@ export async function fetchPrSnapshot(
     const p = JSON.parse(out.stdout) as Record<string, unknown>;
     const author = p['author'] as { login?: unknown } | null | undefined;
     const files = Array.isArray(p['files']) ? (p['files'] as Array<Record<string, unknown>>) : [];
+    const labels = Array.isArray(p['labels'])
+      ? (p['labels'] as Array<Record<string, unknown>>)
+      : [];
     if (
       typeof p['headRefOid'] !== 'string' ||
       !/^[0-9a-f]{40}$/i.test(p['headRefOid']) ||
@@ -468,6 +481,8 @@ export async function fetchPrSnapshot(
           path: f['path'] as string,
           changeType: typeof f['changeType'] === 'string' ? f['changeType'] : undefined,
         })),
+      labels: labels.flatMap((l) => (typeof l?.['name'] === 'string' ? [l['name']] : [])),
+      autoMergeArmed: p['autoMergeRequest'] != null,
     };
   } catch {
     return null;
@@ -1278,6 +1293,40 @@ export async function armPr(
 }
 
 /**
+ * AISDLC-1386: the `gh` argv that turns auto-merge off on a PR. It never merges; it lives here so
+ * every invocation of the merge subcommand stays in this module (AISDLC-975). `pr-hold` and the
+ * reconciler's `disarm-held` action use it.
+ */
+export function disableAutoMergeArgs(prNumber: number, repoSlug?: string): string[] {
+  return [
+    'pr',
+    'merge',
+    String(prNumber),
+    '--disable-auto',
+    ...(repoSlug === undefined ? [] : ['--repo', repoSlug]),
+  ];
+}
+
+/** AISDLC-1386: turn off auto-merge on a held PR. Refusals are returned, not thrown. */
+export async function disarmPr(
+  prNumber: number,
+  repoSlug: string,
+  runner: Runner,
+  cwd?: string,
+): Promise<MergePrResult> {
+  const out = await runner('gh', disableAutoMergeArgs(prNumber, repoSlug), {
+    cwd,
+    allowFailure: true,
+  });
+  return { ok: out.code === 0, error: out.stderr.trim() };
+}
+
+/** True when the PR carries the hold label. */
+export function isHeld(snapshot: Pick<PrSnapshot, 'labels'>): boolean {
+  return snapshot.labels.includes(PR_HOLD_LABEL);
+}
+
+/**
  * Repository `allow_auto_merge` setting (GitHub Free private repos: false, so
  * `--auto` lands a clean PR at once instead of waiting). `null` = unreadable
  * (callers keep the arm path, whose read-back then reports what GitHub shows).
@@ -1401,6 +1450,8 @@ export interface RunMergeIfEligibleResult {
   merged: boolean;
   /** True when auto-merge was armed (`mode: 'arm'`) and the read-back shows an autoMergeRequest. */
   armed?: boolean;
+  /** AISDLC-1386: auto-merge was turned off because the PR is held. */
+  disarmed?: boolean;
   /** Observed outcome in `mode: 'arm'` (AISDLC-1009). */
   outcome?: ArmOutcome;
   /** Repository `allow_auto_merge`; `null` = unreadable (arm mode only). */
@@ -1563,6 +1614,19 @@ export async function runMergeIfEligible(
         '`gh pr view` call, or a required field was missing — refusing (fail-closed)',
     );
   }
+  // AISDLC-1386: a held PR stays open for a human; an armed one is disarmed (never in a dry run).
+  if (isHeld(snapshot)) {
+    if (!snapshot.autoMergeArmed || opts.dryRun) return refuse(PR_HOLD_REASON);
+    const off = await disarmPr(opts.prNumber, opts.repoSlug, opts.runner, opts.cwd);
+    return {
+      ...refuse(
+        off.ok
+          ? `${PR_HOLD_REASON}; auto-merge was disarmed`
+          : `${PR_HOLD_REASON}; disarming auto-merge failed: ${off.error || '(no error text)'}`,
+      ),
+      ...(off.ok ? { disarmed: true } : {}),
+    };
+  }
 
   let taskPrefix = opts.taskPrefix;
   if (taskPrefix === undefined) {
@@ -1667,6 +1731,7 @@ export async function runMergeIfEligible(
     if (!reread) {
       return refuse('could not re-read the PR immediately before arming — refusing (fail-closed)');
     }
+    if (isHeld(reread)) return refuse(PR_HOLD_REASON);
     if (reread.headRefOid.toLowerCase() !== snapshot.headRefOid.toLowerCase()) {
       return refuse(
         `the PR head moved from ${snapshot.headRefOid} to ${reread.headRefOid} after the trust ` +
@@ -1799,6 +1864,7 @@ export async function runMergeIfEligible(
   if (!recheck) {
     return refuse('could not re-read the PR immediately before merging — refusing (fail-closed)');
   }
+  if (isHeld(recheck)) return refuse(PR_HOLD_REASON);
   if (recheck.headRefOid.toLowerCase() !== snapshot.headRefOid.toLowerCase()) {
     return refuse(
       `the PR head moved from ${snapshot.headRefOid} to ${recheck.headRefOid} after the checks ` +

@@ -1258,6 +1258,33 @@ when a brief was ingested; an executor woken on one tick is skipped on the next 
 A hold limits actions, never reporting; the rule is rendered once from `prompt-rules.js` into the
 planner, dispatch and executor commands.
 
+### `pr-hold`
+
+Hold one PR open for a human without pausing the board (AISDLC-1386). `pr-hold <pr> --reason <text>`
+adds the `ai-sdlc/hold` label (creating it in the repository when missing) and posts the reason as a
+PR comment. Holding also turns GitHub auto-merge off (`gh pr merge <pr> --disable-auto`; a PR that was
+not armed is held all the same), because an armed PR merges on green without anything reading the
+label. `pr-hold <pr> --clear` removes the label and comments that the hold was lifted. Only the
+planner or the operator at a shell may run it; dispatch and executors are refused. Prints
+`{"ok": true, "pr", "held", "label", "by", "disarmed"}` (`disarmed` only when holding).
+
+```bash
+cli-hierarchy pr-hold <pr> --reason <text>
+cli-hierarchy pr-hold <pr> --clear
+```
+
+Adding or removing the label by hand on GitHub has the same effect. While the label is on the PR:
+
+- `cli-merge-if-eligible` refuses both merge and `--arm` with `PR is held (label ai-sdlc/hold)`, and
+  turns off auto-merge when it is armed (never in `--dry-run`). The label is read again just before
+  arming or merging, so a label added mid-run still stops it.
+- The [PR reconciler](#pr-reconciler) records the action `held` (ruling `label ai-sdlc/hold`) and takes
+  no arm, flip, merge, rebase or re-enter action on the PR; a PR that merged anyway is still marked
+  landed. A held PR that is still armed (labelled by hand, or re-armed) gets the action `disarm-held`,
+  which turns auto-merge off; the next pass records `held`.
+
+Converting the PR to draft does not hold it; use the label. `hold` pauses the whole board instead.
+
 ### `block` and `unblock`
 
 Park one queued task without pausing the drain (AISDLC-1043). `cli-dispatch block` moves
