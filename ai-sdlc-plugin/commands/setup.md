@@ -25,10 +25,14 @@ the keyring.
 If `$ARGUMENTS` already holds `--agent-merge yes` or `--agent-merge no`, use it
 and do not ask. If `.ai-sdlc/agent-role.yaml` already exists, do not ask either:
 setup never changes an existing merge block, and the report prints its current
-values. Otherwise ask exactly once, with AskUserQuestion, before running setup:
+values. Otherwise ask exactly once, with AskUserQuestion, before running setup,
+with the header `Agent merge` and exactly this question text, on one line:
 
-> Let agents merge pull requests that pass every gate (green checks, clean merge
-> state, review verdict)?
+> Let agents merge pull requests that pass every gate (green checks, clean merge state, review verdict)?
+
+The question evidence gate (AISDLC-1452) passes this one fixed question without
+an evidence ledger only on that exact header and text; any other wording is
+refused.
 
 Options: `yes` and `no`. Pass the answer as `AGENT_MERGE=yes` or `AGENT_MERGE=no`.
 When there is no answer (a non-interactive run, or the question is dismissed),

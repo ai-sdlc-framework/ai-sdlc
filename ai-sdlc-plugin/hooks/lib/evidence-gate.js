@@ -11,6 +11,11 @@
  * passes, and its full text is logged so a decision dressed up as a
  * preference is visible in the gate log.
  *
+ * The /ai-sdlc setup first-run question (AISDLC-1384) is a fixed operator
+ * choice with no fact to research. It passes only on its exact header AND exact
+ * text (`SETUP_QUESTIONS`, pinned to commands/setup.md by a test), and is
+ * logged the same way. Any edit to either is refused like any other question.
+ *
  * The gate refuses; it does not warn. A checker that cannot run is a refusal
  * too, never a pass.
  */
@@ -21,6 +26,15 @@ const { createHash } = require('crypto');
 
 /** The header that exempts a question from the ledger. Exact match, case included. */
 const PREFERENCE_HEADER = 'Preference';
+
+/**
+ * Fixed setup questions exempt from the ledger: header -> exact question text.
+ * Kept in step with ai-sdlc-plugin/commands/setup.md by evidence-gate.test.mjs.
+ */
+const SETUP_QUESTIONS = Object.freeze({
+  'Agent merge':
+    'Let agents merge pull requests that pass every gate (green checks, clean merge state, review verdict)?',
+});
 
 /** `Evidence: <path>` on its own line of the question text. */
 const EVIDENCE_LINE = /^\s*Evidence:\s*(\S+)\s*$/m;
@@ -71,6 +85,10 @@ function runEvidenceGate({ toolInput, check, sessionId = '', now = () => new Dat
       rec('preference', PREFERENCE_HEADER, { questionText: text });
       return;
     }
+    if (Object.hasOwn(SETUP_QUESTIONS, str(q.header)) && SETUP_QUESTIONS[str(q.header)] === text) {
+      rec('setup', str(q.header), { questionText: text });
+      return;
+    }
     const ledger = evidencePath(text);
     if (!ledger) {
       rec('deny', 'no-evidence-line');
@@ -112,4 +130,4 @@ function runEvidenceGate({ toolInput, check, sessionId = '', now = () => new Dat
   };
 }
 
-module.exports = { PREFERENCE_HEADER, RECHECK, evidencePath, runEvidenceGate };
+module.exports = { PREFERENCE_HEADER, RECHECK, SETUP_QUESTIONS, evidencePath, runEvidenceGate };

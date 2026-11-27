@@ -181,6 +181,23 @@ describe('decision gate (AISDLC-1452)', () => {
     expect(out.join('')).toMatch(/decision answered: DEC-0001/);
   });
 
+  it('answer from a Pattern C parent reads the ledger add stored in the active worktree', async () => {
+    mkdirSync(join(tmp, '.worktrees', 't-1'), { recursive: true });
+    const prev = process.env.AI_SDLC_ACTIVE_TASK_ID;
+    process.env.AI_SDLC_ACTIVE_TASK_ID = 'T-1';
+    try {
+      await run(...ADD, '--evidence', writeLedger('A = 1'));
+      const wtLedger = join(tmp, '.worktrees', 't-1', '.ai-sdlc', 'decisions', 'evidence');
+      expect(existsSync(join(wtLedger, 'DEC-0001.json'))).toBe(true);
+      expect(existsSync(stored('DEC-0001'))).toBe(false);
+      await answer();
+      expect(out.join('')).toMatch(/decision answered: DEC-0001/);
+    } finally {
+      if (prev === undefined) delete process.env.AI_SDLC_ACTIVE_TASK_ID;
+      else process.env.AI_SDLC_ACTIVE_TASK_ID = prev;
+    }
+  });
+
   it('answer refuses when the stored ledger no longer passes', async () => {
     await run(...ADD, '--evidence', writeLedger('A = 1'));
     writeFileSync(join(tmp, 'src', 'a.ts'), 'export const A = 3;\n');

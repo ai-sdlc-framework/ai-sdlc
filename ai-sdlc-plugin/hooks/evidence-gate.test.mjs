@@ -21,7 +21,12 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
-const { runEvidenceGate, evidencePath, PREFERENCE_HEADER } = require('./lib/evidence-gate.js');
+const {
+  runEvidenceGate,
+  evidencePath,
+  PREFERENCE_HEADER,
+  SETUP_QUESTIONS,
+} = require('./lib/evidence-gate.js');
 const entry = require('./question-gate.js');
 const HOOK = join(here, 'question-gate.js');
 
@@ -153,6 +158,37 @@ describe('evidence gate', () => {
     for (const header of ['preference', 'Preference only', ' Preference']) {
       const r = runEvidenceGate({ toolInput: ask(DRAFT, header), check: passes, now: NOW });
       assert.equal(r.decision, 'deny', header);
+    }
+  });
+
+  it('passes the /ai-sdlc setup question exactly as commands/setup.md asks it, and logs it', () => {
+    const setup = readFileSync(join(here, '..', 'commands', 'setup.md'), 'utf8');
+    const header = /header `([^`]+)`/.exec(setup)?.[1];
+    const text = /^> (Let agents merge .*)$/m.exec(setup)?.[1];
+    assert.equal(header, 'Agent merge');
+    assert.equal(text, SETUP_QUESTIONS[header]);
+    let called = false;
+    const r = runEvidenceGate({
+      toolInput: ask(text, header),
+      check: () => ((called = true), passes()),
+      now: NOW,
+    });
+    assert.equal(r.decision, 'allow');
+    assert.equal(called, false);
+    assert.equal(r.records[0].outcome, 'setup');
+    assert.equal(r.records[0].questionText, text);
+  });
+
+  it('the setup exemption needs the exact header and text', () => {
+    const text = SETUP_QUESTIONS['Agent merge'];
+    for (const [q, header] of [
+      [`${text} Also pick a store.`, 'Agent merge'],
+      [text, 'agent merge'],
+      [text, 'Storage'],
+      [DRAFT, 'Agent merge'],
+    ]) {
+      const r = runEvidenceGate({ toolInput: ask(q, header), check: passes, now: NOW });
+      assert.equal(r.decision, 'deny', `${header}: ${q}`);
     }
   });
 

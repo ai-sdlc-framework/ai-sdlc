@@ -2038,9 +2038,12 @@ export function buildDecisionsCli(cliDeps: DecisionsCliDeps = {}): Argv {
         // decision (opened before this gate too), operator and autonomous answers alike.
         const catalogRoot = String(argv['work-dir']);
         const supplied = typeof argv.evidence === 'string' && argv.evidence.trim() !== '';
+        // `add` stores the ledger under the write root (the active task's worktree
+        // from a Pattern C parent), so read it there first, then the catalog root.
+        const stored = [workDir, catalogRoot].map((d) => joinPath(d, decisionLedgerRel(id)));
         const ledgerPath = supplied
           ? String(argv.evidence)
-          : joinPath(catalogRoot, decisionLedgerRel(id));
+          : (stored.find((p) => existsSync(p)) ?? stored[stored.length - 1]!);
         const ledgerText = requirePassingLedger(`answer ${id}`, ledgerPath, catalogRoot);
         const evt = makeOperatorAnsweredEvent({
           decisionId: id,
