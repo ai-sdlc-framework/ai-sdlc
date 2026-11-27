@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1451
 title: "Decision rubric verifies every fact and dependency with a research subagent before asking"
-status: In Progress
+status: Done
 priority: high
 labels:
   - governance
@@ -55,18 +55,45 @@ references:
 - `draftSha256` does not match the draft it is checked against.
 
 ## Acceptance Criteria
-- [ ] #1 The rubric skill's step 3 says to send the research subagent described above, gives the exact draft and the ledger shape, and says that no question goes out until the checker passes. The **unchecked** tag is removed as a final state; anything that cannot be checked is either an assumption that rests on checked facts or a gap to close first. `rfc-oq-walkthrough` refers to the same step. Autonomous mode runs the same step.
-- [ ] #2 The ledger has a schema file, and `cli-decisions evidence check <ledger> [--draft <file>]` validates it as in the Design and exits non-zero on any failure, listing each failing entry. Tests cover each fail case listed under "The checker fails the ledger when", a ledger that passes, and a file quote that has drifted from the tree.
-- [ ] #3 `cli-decisions evidence hash <draft-file>` prints the `draftSha256` that the hook in AISDLC-1452 computes over the question text, with one normalization shared by both.
-- [ ] #4 `ai-sdlc doctor` checks `~/.claude/skills/` for a copy of the rubric that would shadow the plugin skill. A `decision-rubric` entry that is a symlink to a plugin `skills/decision-rubric` directory passes; the operator set this up on 2026-11-27, linking to the repo copy. Doctor warns, with the fix (replace it with that symlink), when:
+- [x] #1 The rubric skill's step 3 says to send the research subagent described above, gives the exact draft and the ledger shape, and says that no question goes out until the checker passes. The **unchecked** tag is removed as a final state; anything that cannot be checked is either an assumption that rests on checked facts or a gap to close first. `rfc-oq-walkthrough` refers to the same step. Autonomous mode runs the same step.
+- [x] #2 The ledger has a schema file, and `cli-decisions evidence check <ledger> [--draft <file>]` validates it as in the Design and exits non-zero on any failure, listing each failing entry. Tests cover each fail case listed under "The checker fails the ledger when", a ledger that passes, and a file quote that has drifted from the tree.
+- [x] #3 `cli-decisions evidence hash <draft-file>` prints the `draftSha256` that the hook in AISDLC-1452 computes over the question text, with one normalization shared by both.
+- [x] #4 `ai-sdlc doctor` checks `~/.claude/skills/` for a copy of the rubric that would shadow the plugin skill. A `decision-rubric` entry that is a symlink to a plugin `skills/decision-rubric` directory passes; the operator set this up on 2026-11-27, linking to the repo copy. Doctor warns, with the fix (replace it with that symlink), when:
   - the entry is a real directory;
   - it is a symlink to anywhere else;
   - another skill directory's `SKILL.md` declares `name: decision-rubric`. A backup left inside `skills/` still loads as a skill.
 
   Tests use a temp HOME and cover each case.
-- [ ] #5 `docs/operations/decision-authority.md` describes the ledger and says where it is stored when a decision is filed (`.ai-sdlc/decisions/evidence/DEC-NNNN.json`).
-- [ ] #6 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
+- [x] #5 `docs/operations/decision-authority.md` describes the ledger and says where it is stored when a decision is filed (`.ai-sdlc/decisions/evidence/DEC-NNNN.json`).
+- [x] #6 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
 ## Notes
 - Authority: DEC-0442 (operator direction, 2026-11-27). The gates that enforce this are AISDLC-1452, which depends on this task.
 - Interim, until both land: the planner sends a research subagent and keeps a ledger by hand before every rubric question.
+
+## Final Summary
+
+## Summary
+
+Fixed the failing orchestrator test. src/runtime-gitignore.test.ts has two timing checks that make sure gitignore matching runs in linear time, and their 1000ms limit was too tight for a busy coverage run. Both limits are now 5000ms, which still fails on any non-linear scan. The ledger, checker, doctor and docs work from the earlier commit is unchanged.
+
+## Changes
+
+- /Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/.worktrees/aisdlc-1451/orchestrator/src/runtime-gitignore.test.ts
+
+## Design decisions
+
+The failing test was not changed by this branch, and the code it tests lives in pipeline-cli. Run alone, the slash-line test takes 67ms. It failed at 1020ms against a 1000ms limit only during the loaded coverage run. A non-linear scan of 300k slashes would take far longer than 5000ms, so the check still catches a regression. I raised the other timing check in the same file, the hostile glob line test, to the same limit for the same reason. After the change, `pnpm --filter ./orchestrator test:coverage` passed (240 files, 5341 tests), and so did `pnpm build`, `pnpm test` (exit 0), `pnpm lint` and `pnpm format:check`. This was a resumed round, so I only committed: no rebase, no push, no new PR.
+
+## Verification
+
+- `pnpm build` — passed (dashboard build: Done)
+- `pnpm test` — passed (> bash scripts/check-knowledge-scope.sh)
+- `pnpm lint` — passed (clock-discipline: OK (240 baselined files).)
+- `pnpm format:check` — passed (All matched files use Prettier code style!)
+
+- 3 reviews approved (harness: code-reviewer=claude-code, test-reviewer=claude-code, security-reviewer=claude-code; harness: claude in model-routing.yaml (source: yaml) — using Claude-native agents for all reviewers)
+
+## Follow-up
+
+(none)
