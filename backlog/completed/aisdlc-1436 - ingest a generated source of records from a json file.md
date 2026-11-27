@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1436
 title: Ingest a generated source of records from a JSON file
-status: In Progress
+status: Done
 priority: low
 labels:
   - pipeline-cli
