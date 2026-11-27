@@ -1,0 +1,14 @@
+# Valid: a JudgmentConfig naming a provider and running every judgment in shadow.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: JudgmentConfig
+metadata:
+  name: judgment
+spec:
+  provider: example-provider
+  model: example-model-1.0.0
+  egress:
+    allow: [work-item-text]
+  defaults:
+    mode: shadow
+    timeoutMs: 10000
+    cache: true

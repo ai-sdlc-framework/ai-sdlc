@@ -20,6 +20,12 @@ SCHEMA_FILES: dict[str, str] = {
     "QualityGate": "quality-gate.schema.json",
     "AutonomyPolicy": "autonomy-policy.schema.json",
     "AdapterBinding": "adapter-binding.schema.json",
+    "DesignSystemBinding": "design-system-binding.schema.json",
+    "DesignIntentDocument": "design-intent-document.schema.json",
+    "DorConfig": "dor-config.v1.schema.json",
+    "CompliancePosture": "compliance-posture.v1.schema.json",
+    "JudgmentConfig": "judgment-config.v1.schema.json",
+    "CapabilitiesConfig": "capabilities-config.v1.schema.json",
 }
 
 
@@ -73,11 +79,13 @@ def validate(kind: ResourceKind, data: Any) -> ValidationResult:
     errors: list[ValidationError] = []
     for error in validator.iter_errors(data):
         path = "/" + "/".join(str(p) for p in error.absolute_path) if error.absolute_path else "/"
-        errors.append(ValidationError(
-            path=path,
-            message=error.message,
-            keyword=str(error.validator),
-        ))
+        errors.append(
+            ValidationError(
+                path=path,
+                message=error.message,
+                keyword=str(error.validator),
+            )
+        )
 
     if errors:
         return ValidationResult(valid=False, errors=errors)

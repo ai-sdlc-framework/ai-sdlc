@@ -1,0 +1,25 @@
+# Invalid: compliance.coverage.minimum must be at most 100.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: DesignSystemBinding
+metadata:
+  name: example-design-system
+spec:
+  stewardship:
+    designAuthority:
+      principals: [design-lead]
+      scope: [tokens]
+    engineeringAuthority:
+      principals: [frontend-lead]
+      scope: [catalog]
+  designToolAuthority: collaborative
+  tokens:
+    provider: tokens-studio
+    format: w3c-dtcg
+    source:
+      repository: example/design-tokens
+    versionPolicy: minor
+  catalog:
+    provider: storybook
+  compliance:
+    coverage:
+      minimum: 150

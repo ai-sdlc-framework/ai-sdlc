@@ -1,0 +1,9 @@
+# Valid: a CapabilitiesConfig listing the capabilities expected to be live.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: CapabilitiesConfig
+metadata:
+  name: capabilities
+spec:
+  required:
+    - dor.stage-b
+    - classifier.capture-triage

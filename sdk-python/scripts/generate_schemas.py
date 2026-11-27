@@ -14,20 +14,28 @@ OUTPUT = (
 )
 
 
-# The six resource schemas the SDKs embed (AISDLC-1302).
+# The resource schemas the Python SDK embeds: the eleven resource kinds of the
+# reference plus the schemas they reference (AISDLC-1302, AISDLC-1308).
 SDK_SCHEMAS = [
     "adapter-binding",
     "agent-role",
     "autonomy-policy",
+    "capabilities-config.v1",
     "common",
+    "compliance-posture.v1",
+    "design-intent-document",
+    "design-system-binding",
+    "dor-config.v1",
+    "journey.v1",
+    "judgment-config.v1",
     "pipeline",
     "quality-gate",
 ]
 
 
 def to_snake_case(filename: str) -> str:
-    """'agent-role.schema.json' → 'agent_role_schema'"""
-    name = filename.replace(".schema.json", "").replace("-", "_")
+    """'agent-role.schema.json' → 'agent_role_schema', 'dor-config.v1…' → 'dor_config_v1_schema'"""
+    name = filename.replace(".schema.json", "").replace("-", "_").replace(".", "_")
     return f"{name}_schema"
 
 

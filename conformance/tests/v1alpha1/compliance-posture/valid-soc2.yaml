@@ -1,0 +1,18 @@
+# Valid: a CompliancePosture declaring one attested regime and one audit export.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: CompliancePosture
+metadata:
+  name: posture
+spec:
+  regimes:
+    - id: SOC2-T2
+      controls: [CC6.6, CC8.1]
+      auditFrequency: annual
+      attestedBy: Example Legal LLP
+      attestedAt: '2026-05-16'
+  auditExports:
+    - kind: dsse-envelope
+      format: jsonl
+      retentionPolicy:
+        days: 365
+        tier: hot

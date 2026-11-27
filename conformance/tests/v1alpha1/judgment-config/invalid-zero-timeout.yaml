@@ -1,0 +1,9 @@
+# Invalid: defaults.timeoutMs must be an integer of at least 1.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: JudgmentConfig
+metadata:
+  name: judgment
+spec:
+  provider: example-provider
+  defaults:
+    timeoutMs: 0
