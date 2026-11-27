@@ -1,0 +1,709 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/design-intent-document.schema.json",
+  "title": "AI-SDLC DesignIntentDocument",
+  "description": "Authoritative artifact defining the product's design intent at the strategic level. Shared root of the triad's design axis — both PPA and DesignSystemBinding reference it. Contains split-authority stewardship (product + design + shared + engineering review), soulPurpose (mission, design principles), structured Addendum B fields (constraints, scope boundaries, anti-patterns, measurable signals) with identityClass markers, brandIdentity, experientialTargets, and planned changes for Design→Engineering lookahead.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "$ref": "common.schema.json#/$defs/apiVersion" },
+    "kind": { "type": "string", "const": "DesignIntentDocument" },
+    "metadata": { "$ref": "common.schema.json#/$defs/metadata" },
+    "spec": {
+      "type": "object",
+      "required": ["stewardship", "soulPurpose", "designSystemRef", "triad"],
+      "properties": {
+        "stewardship": { "$ref": "#/$defs/stewardshipSplit" },
+        "soulPurpose": { "$ref": "#/$defs/soulPurpose" },
+        "designSystemRef": { "$ref": "#/$defs/designSystemRef" },
+        "triad": { "$ref": "#/$defs/triad" },
+        "tessellation": { "$ref": "#/$defs/tessellation" },
+        "parentTessellation": {
+          "type": "string",
+          "description": "Present only on Soul DIDs. References the parent Tessellated DID's URI (RFC-0009 §5.3)."
+        },
+        "brandIdentity": { "$ref": "#/$defs/brandIdentity" },
+        "experientialTargets": { "$ref": "#/$defs/experientialTargets" },
+        "plannedChanges": {
+          "type": "array",
+          "description": "Planned design changes surfaced to engineering for lookahead (RFC-0008 §A.9).",
+          "items": { "$ref": "#/$defs/plannedChange" }
+        },
+        "variants": {
+          "type": "array",
+          "description": "In-Soul Variant declarations per RFC-0017 §5.1. Each variant carries distinct visual identity specializations and audience targeting while inheriting the parent Soul DID's compliance regime and substrate invariants.",
+          "items": { "$ref": "#/$defs/variantDeclaration" },
+          "maxItems": 19
+        },
+        "journeys": {
+          "type": "array",
+          "description": "In-Soul Journey declarations per RFC-0018 §5.1 / §6.1. Each journey is a temporally-ordered user flow with named states, transitions, completion criteria, accessibility requirements, and success metrics. Journeys are scoring scopes (not a runtime workflow engine). Schema-enforced flat: journeys[] cannot contain nested journeys[] (OQ-3 resolution). Per-org count limits enforced by the inheritance validator: soft warn at 10+ journeys, hard reject at 50+ (OQ-1 resolution, configurable via .ai-sdlc/journey-config.yaml).",
+          "items": { "$ref": "journey.v1.schema.json" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": { "$ref": "#/$defs/status" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "identityClass": {
+      "type": "string",
+      "enum": ["core", "evolving"],
+      "description": "Identity class per Addendum B. `core` fields trigger full-backlog re-score on change; `evolving` fields only re-score the admission queue. Also weights BM25 corpus construction (core=2x, evolving=1x)."
+    },
+    "triad": {
+      "type": "object",
+      "description": "The Fractal Triad (RFC-0009 §5.1). Required on every DID — single-product, Tessellated, and Soul. Carries the three pillar-authority declarations: design (expression), engineering (coherence), product (identity). `init` scaffolds ${operator} as default for all three authorities on single-product DIDs.",
+      "required": ["design", "engineering", "product"],
+      "properties": {
+        "design": {
+          "type": "object",
+          "description": "Design vertex — accountable for identity expression at this DID's scope.",
+          "required": ["authority"],
+          "properties": {
+            "authority": {
+              "type": "string",
+              "description": "Principal accountable for the design vertex at this DID's scope. Defaults to ${operator} on init for single-product DIDs."
+            },
+            "inheritsFrom": {
+              "type": "string",
+              "description": "Path to parent DID's design vertex. Null/absent for top-level Tessellated DIDs and single-product DIDs."
+            },
+            "imperatives": {
+              "type": "array",
+              "description": "Soul-specific design imperatives (voice register, visual identity specialization, experiential invariants).",
+              "items": { "type": "string" }
+            },
+            "overrides": {
+              "type": "object",
+              "description": "Soul-specific overrides of parent Tessellated DID's design vertex declarations.",
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "engineering": {
+          "type": "object",
+          "description": "Engineering vertex — accountable for coherence between identity and expression at runtime.",
+          "required": ["authority"],
+          "properties": {
+            "authority": {
+              "type": "string",
+              "description": "Principal accountable for the engineering vertex at this DID's scope. Defaults to ${operator} on init for single-product DIDs."
+            },
+            "inheritsFrom": {
+              "type": "string",
+              "description": "Path to parent DID's engineering vertex. Absent for top-level DIDs."
+            },
+            "complianceRegimes": {
+              "type": "array",
+              "description": "Named regulatory or compliance constraints applied at this scope. Eρ₅ scope per RFC-0009 §7.1: HARD regulatory frameworks ONLY (GDPR, HIPAA, SOC2, PCI-DSS, FedRAMP, regional data-residency, regulated-industry rules).",
+              "items": { "type": "string" }
+            },
+            "performanceBudgets": {
+              "type": "object",
+              "description": "Soul-specific performance budgets.",
+              "additionalProperties": true
+            },
+            "dataRetention": {
+              "type": "object",
+              "description": "Soul-specific data retention and isolation requirements.",
+              "additionalProperties": true
+            },
+            "slaTier": {
+              "type": "string",
+              "description": "SLA tier appropriate to this soul's workload."
+            },
+            "substrateInvariants": {
+              "type": "array",
+              "description": "Named invariants the substrate must honor for this soul. Violations trigger Eτ_tessellation_drift per RFC-0009 §7.2.",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        },
+        "product": {
+          "type": "object",
+          "description": "Product vertex — accountable for identity declaration at this DID's scope.",
+          "required": ["authority"],
+          "properties": {
+            "authority": {
+              "type": "string",
+              "description": "Principal accountable for the product vertex at this DID's scope. Defaults to ${operator} on init for single-product DIDs."
+            },
+            "inheritsFrom": {
+              "type": "string",
+              "description": "Path to parent DID's product vertex. Absent for top-level DIDs."
+            },
+            "targetAudience": {
+              "type": "string",
+              "description": "Target audience and persona for this soul."
+            },
+            "problemResonance": {
+              "type": "string",
+              "description": "Source-of-truth for Sα₁ scoring at this DID's scope."
+            },
+            "successMetrics": {
+              "type": "array",
+              "description": "Success metrics for this soul's work.",
+              "items": { "type": "string" }
+            },
+            "monetizationModel": {
+              "type": "string",
+              "description": "Monetization model per soul."
+            },
+            "endgamePhase": {
+              "type": "string",
+              "description": "Endgame phase mapping per platform lifecycle model."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "tessellation": {
+      "type": "object",
+      "description": "Present only on Tessellated DIDs (platform roots). Enumerates child Soul DIDs and cross-soul governance rules (RFC-0009 §5.2).",
+      "required": ["souls"],
+      "properties": {
+        "souls": {
+          "type": "array",
+          "description": "Child Soul DIDs that tile into this Tessellated Platform.",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["soulId", "didUri"],
+            "properties": {
+              "soulId": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+$",
+                "description": "Slug identifier for this soul within the tessellation."
+              },
+              "didUri": {
+                "type": "string",
+                "description": "URI reference to the Soul DID resource."
+              },
+              "status": {
+                "type": "string",
+                "enum": ["active", "deprecated", "draft"],
+                "description": "Lifecycle status of this soul within the tessellation."
+              },
+              "inheritsSubstrate": {
+                "type": "boolean",
+                "default": true,
+                "description": "Whether this soul inherits the platform Tessellated DID's substrate invariants. Defaults to true."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "crossSoulScoringRule": {
+          "type": "string",
+          "enum": ["min", "max", "mean", "weighted-traffic", "weighted-revenue"],
+          "default": "min",
+          "description": "Aggregation rule when substrate work affects multiple souls. Default `min` per RFC-0009 OQ-2 resolution. `weighted-traffic` and `weighted-revenue` are advanced — they require a data source the adopter must provide."
+        },
+        "substrateInvariants": {
+          "type": "array",
+          "description": "Named invariants ALL souls must honor. Violations trigger Eτ_tessellation_drift cross-soul drift detection (RFC-0009 §7.2).",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "stewardshipSplit": {
+      "type": "object",
+      "description": "Split-authority stewardship per §4.4. Replaces v3 single-owner model.",
+      "required": ["productAuthority", "designAuthority"],
+      "properties": {
+        "productAuthority": {
+          "type": "object",
+          "description": "Product-domain fields: Product owns, Design approves. Feeds SA-1 (Problem Resonance).",
+          "required": ["owner", "approvalRequired", "scope"],
+          "properties": {
+            "owner": { "type": "string" },
+            "approvalRequired": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "scope": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          },
+          "additionalProperties": false
+        },
+        "designAuthority": {
+          "type": "object",
+          "description": "Design-domain fields: Design owns, Product approves. Feeds SA-2 (Vibe Coherence).",
+          "required": ["owner", "approvalRequired", "scope"],
+          "properties": {
+            "owner": { "type": "string" },
+            "approvalRequired": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "scope": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          },
+          "additionalProperties": false
+        },
+        "sharedAuthority": {
+          "type": "object",
+          "description": "Shared fields: either pillar can propose, both must approve.",
+          "properties": {
+            "approvalRequired": { "type": "array", "items": { "type": "string" } },
+            "scope": { "type": "array", "items": { "type": "string" } }
+          },
+          "additionalProperties": false
+        },
+        "engineeringReview": {
+          "type": "object",
+          "description": "Engineering reviewer on all fields, blocker only on measurableSignal and detectionPattern feasibility.",
+          "required": ["role"],
+          "properties": {
+            "role": { "type": "string", "enum": ["reviewer"] },
+            "blockingScope": {
+              "type": "array",
+              "description": "Dotted paths where Engineering can block on technical feasibility.",
+              "items": { "type": "string" }
+            },
+            "rationale": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "reviewCadence": {
+          "type": "string",
+          "enum": ["monthly", "quarterly", "biannual", "annual"],
+          "description": "Minimum review frequency. RFC-0008 §4.4 mandates quarterly minimum."
+        }
+      },
+      "additionalProperties": false
+    },
+    "soulPurpose": {
+      "type": "object",
+      "description": "Strategic intent. mission is Product-owned; designPrinciples are Design-owned.",
+      "required": ["mission", "designPrinciples"],
+      "properties": {
+        "mission": { "$ref": "#/$defs/missionField" },
+        "constraints": {
+          "type": "array",
+          "description": "Typed constraint declarations (Addendum B §B.3.2). Each compiles to a dep-parse detection rule. Product-owned.",
+          "items": { "$ref": "#/$defs/constraint" }
+        },
+        "scopeBoundaries": { "$ref": "#/$defs/scopeBoundaries" },
+        "antiPatterns": {
+          "type": "array",
+          "description": "Product-level anti-patterns (Addendum B §B.3.2). Product-owned.",
+          "items": { "$ref": "#/$defs/antiPattern" }
+        },
+        "designPrinciples": {
+          "type": "array",
+          "description": "Design principles with structured measurable signals and anti-patterns. Design-owned.",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/designPrinciple" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "missionField": {
+      "type": "object",
+      "required": ["value"],
+      "properties": {
+        "identityClass": { "$ref": "#/$defs/identityClass" },
+        "value": {
+          "type": "string",
+          "description": "Natural-language mission statement. Literal input to SA-1 (Problem Resonance).",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "constraint": {
+      "type": "object",
+      "description": "Typed constraint declaration with dep-parse detection patterns.",
+      "required": ["id", "concept", "relationship"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "identityClass": { "$ref": "#/$defs/identityClass" },
+        "concept": { "type": "string" },
+        "relationship": {
+          "type": "string",
+          "enum": ["must-not-require", "must-require", "must-not-include", "must-include"]
+        },
+        "rationale": { "type": "string" },
+        "detectionPatterns": {
+          "type": "array",
+          "description": "Patterns compiled into dep-parse rules. Phase 2b gate requires ≥3 patterns per constraint.",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "scopeBoundaries": {
+      "type": "object",
+      "description": "In-scope and out-of-scope term lists with synonyms. Compiled to keyword lists for scope gate.",
+      "properties": {
+        "inScope": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/scopeTerm" }
+        },
+        "outOfScope": {
+          "type": "array",
+          "description": "Out-of-scope terms. Match on core entry triggers hard scope gate.",
+          "items": { "$ref": "#/$defs/scopeTerm" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "scopeTerm": {
+      "type": "object",
+      "required": ["label"],
+      "properties": {
+        "label": { "type": "string" },
+        "identityClass": { "$ref": "#/$defs/identityClass" },
+        "synonyms": {
+          "type": "array",
+          "description": "Alternative terms. Phase 2b gate requires ≥2 synonyms per outOfScope entry.",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "antiPattern": {
+      "type": "object",
+      "description": "Explicit rejection of an approach the product does not take.",
+      "required": ["id", "label"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "identityClass": { "$ref": "#/$defs/identityClass" },
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "detectionPatterns": {
+          "type": "array",
+          "description": "Patterns compiled to term-matching rules. Phase 2b gate requires ≥3 patterns per global anti-pattern, ≥2 per principle-level.",
+          "items": { "type": "string" },
+          "minItems": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "designPrinciple": {
+      "type": "object",
+      "required": ["id", "name", "description", "measurableSignals"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "identityClass": { "$ref": "#/$defs/identityClass" },
+        "measurableSignals": {
+          "type": "array",
+          "description": "Structured measurable signals (replaces free-text measurableSignal from v4).",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/measurableSignal" }
+        },
+        "antiPatterns": {
+          "type": "array",
+          "description": "Principle-scoped anti-patterns.",
+          "items": { "$ref": "#/$defs/antiPattern" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "measurableSignal": {
+      "type": "object",
+      "required": ["id", "metric", "threshold", "operator"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "metric": { "type": "string" },
+        "threshold": { "type": "number" },
+        "operator": { "type": "string", "enum": ["gte", "lte", "gt", "lt", "eq", "neq"] },
+        "scope": { "type": "string" },
+        "identityClass": { "$ref": "#/$defs/identityClass" }
+      },
+      "additionalProperties": false
+    },
+    "designSystemRef": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Reference to an existing DesignSystemBinding resource. Unidirectional — DSB does not back-reference the DID."
+        },
+        "namespace": { "type": "string" },
+        "bindingType": {
+          "type": "string",
+          "enum": ["authoritative", "advisory"],
+          "description": "authoritative: DID governs DSB intent. advisory: DID informs but does not govern."
+        },
+        "syncFields": {
+          "type": "array",
+          "description": "Field-level sync relationships between DID and DSB (sharedAuthority).",
+          "items": {
+            "type": "object",
+            "required": ["did", "dsb", "relationship"],
+            "properties": {
+              "did": { "type": "string" },
+              "dsb": { "type": "string" },
+              "relationship": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "brandIdentity": {
+      "type": "object",
+      "description": "Brand voice and visual identity. Design-owned.",
+      "properties": {
+        "voiceAttributes": { "type": "array", "items": { "type": "string" } },
+        "voiceAntiPatterns": {
+          "type": "array",
+          "description": "Voice anti-patterns (Addendum B). Phase 2b gate requires ≥2 voice anti-patterns.",
+          "items": { "$ref": "#/$defs/antiPattern" }
+        },
+        "visualIdentity": {
+          "type": "object",
+          "properties": {
+            "description": { "type": "string" },
+            "tokenSchemaRef": {
+              "type": "string",
+              "description": "Reference to the token source in the linked DesignSystemBinding (e.g., acme-design-system.spec.tokens)."
+            },
+            "visualConstraints": {
+              "type": "array",
+              "description": "Measurable visual constraints checked against Learn phase metrics.",
+              "items": { "$ref": "#/$defs/visualConstraint" }
+            },
+            "visualAntiPatterns": {
+              "type": "array",
+              "description": "Visual anti-patterns. Phase 2b gate requires ≥2 visual anti-patterns.",
+              "items": { "$ref": "#/$defs/antiPattern" }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "visualConstraint": {
+      "type": "object",
+      "required": ["id", "label", "rule"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "identityClass": { "$ref": "#/$defs/identityClass" },
+        "label": { "type": "string" },
+        "description": { "type": "string" },
+        "rule": {
+          "type": "object",
+          "required": ["metric", "threshold", "operator"],
+          "properties": {
+            "metric": { "type": "string" },
+            "threshold": { "type": "number" },
+            "operator": { "type": "string", "enum": ["gte", "lte", "gt", "lt", "eq", "neq"] }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "experientialTargets": {
+      "type": "object",
+      "description": "Experiential targets for SA-1 BM25 corpus. Product-owned.",
+      "properties": {
+        "onboarding": { "$ref": "#/$defs/experientialTarget" },
+        "dailyUse": { "$ref": "#/$defs/experientialTarget" },
+        "errorRecovery": { "$ref": "#/$defs/experientialTarget" }
+      },
+      "additionalProperties": { "$ref": "#/$defs/experientialTarget" }
+    },
+    "experientialTarget": {
+      "type": "object",
+      "properties": {
+        "identityClass": { "$ref": "#/$defs/identityClass" },
+        "targetEmotion": { "type": "string" },
+        "maxStepsToFirstValue": { "type": "integer", "minimum": 1 },
+        "usabilityTarget": {
+          "type": "object",
+          "properties": {
+            "taskCompletion": { "type": "number", "minimum": 0, "maximum": 1 },
+            "personaType": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "interactionEfficiency": {
+          "type": "object",
+          "properties": {
+            "metric": { "type": "string" },
+            "targetReduction": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "errorRecoveryRate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "maxActionsToRecover": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": true
+    },
+    "plannedChange": {
+      "type": "object",
+      "required": ["id", "changeType", "status"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "changeType": {
+          "type": "string",
+          "enum": [
+            "token-restructure",
+            "token-addition",
+            "token-removal",
+            "component-category-addition",
+            "brand-revision",
+            "theme-expansion"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["planned", "in-progress", "completed", "cancelled"]
+        },
+        "description": { "type": "string" },
+        "estimatedTimeline": { "type": "string" },
+        "affectedTokenPaths": { "type": "array", "items": { "type": "string" } },
+        "estimatedComponentImpact": { "type": "integer", "minimum": 0 },
+        "addedBy": { "type": "string" },
+        "addedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "in-progress" } } },
+          "then": { "required": ["status", "addedBy"] }
+        }
+      ]
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "lastReviewed": { "type": "string", "format": "date-time" },
+        "reviewedBy": { "type": "array", "items": { "type": "string" } },
+        "nextReviewDue": { "type": "string", "format": "date-time" },
+        "designSystemAlignment": {
+          "type": "object",
+          "properties": {
+            "tokenSchemaCoherent": { "type": "boolean" },
+            "complianceRulesReflectPrinciples": { "type": "boolean" },
+            "lastAlignmentCheck": { "type": "string", "format": "date-time" }
+          },
+          "additionalProperties": false
+        },
+        "ppaBinding": {
+          "type": "object",
+          "properties": {
+            "sAlpha2Source": { "type": "string" },
+            "sAlpha1Source": { "type": "string" },
+            "lastScoringRun": { "type": "string", "format": "date-time" }
+          },
+          "additionalProperties": false
+        },
+        "compiledArtifactsHash": {
+          "type": "string",
+          "description": "sha256 of the compiled BM25 + rule artifacts. Used by the reconciler to detect changes."
+        },
+        "conditions": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/condition" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "variantAudienceProfile": {
+      "type": "object",
+      "description": "Variant-scoped audience characteristics. Mirrors Soul DID targetAudience structure. Feeds Sα₁ Problem/Audience Resonance when work items target this variant (RFC-0017 §5.4).",
+      "properties": {
+        "segments": {
+          "type": "array",
+          "description": "Named audience segments this variant targets.",
+          "items": { "type": "string" }
+        },
+        "sizeRange": {
+          "type": "object",
+          "description": "Staff/user size range for this audience.",
+          "properties": {
+            "minStaff": { "type": "integer", "minimum": 0 },
+            "maxStaff": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "variantDesignOverrides": {
+      "type": "object",
+      "description": "Closed framework enum of visual-token surfaces the variant may specialize per RFC-0017 §6.1 + OQ-5 revisit (2026-05-26). voiceRegister cut per Design Authority editorial (6/6 leading design systems treat content register outside the visual token surface). Adopter extensions via vendor reverse-DNS prefix (e.g. 'acme.com/accessibilityProfile') are accepted via patternProperties; non-prefixed unknown keys are rejected.",
+      "properties": {
+        "colorPaletteOverlay": {
+          "type": "string",
+          "description": "Additive color palette overlay over the soul's base palette."
+        },
+        "densityProfile": {
+          "type": "string",
+          "enum": ["compact", "comfortable", "spacious"],
+          "description": "Layout density character for this variant."
+        },
+        "typographyScale": {
+          "type": "string",
+          "enum": ["default", "large-print", "data-dense"],
+          "description": "Typography scale character for this variant."
+        },
+        "motionProfile": {
+          "type": "string",
+          "enum": ["full", "reduced", "none"],
+          "description": "Motion/animation character for this variant."
+        },
+        "radiusProfile": {
+          "type": "string",
+          "enum": ["sharp", "default", "rounded"],
+          "description": "Corner-rounding character for this variant (controls shape, not border stroke weight)."
+        }
+      },
+      "patternProperties": {
+        "^[a-z][a-z0-9-]+(\\.[a-z][a-z0-9-]+)+\\/[a-zA-Z][a-zA-Z0-9-]*$": {
+          "description": "Vendor-prefixed adopter extension. Key MUST follow reverse-DNS prefix convention (e.g. 'acme.com/accessibilityProfile')."
+        }
+      },
+      "additionalProperties": false
+    },
+    "variantDeclaration": {
+      "type": "object",
+      "description": "One variant declaration on a Soul DID per RFC-0017 §5.1. Carries distinct visual identity specializations and audience targeting while inheriting the parent Soul's compliance regime and substrate invariants (§5.3 bounded inheritance).",
+      "required": ["id", "targetAudience", "complianceFloor"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "Kebab-case variant identifier. Must be unique within the parent Soul DID."
+        },
+        "targetAudience": {
+          "$ref": "#/$defs/variantAudienceProfile"
+        },
+        "designOverrides": {
+          "$ref": "#/$defs/variantDesignOverrides"
+        },
+        "complianceFloor": {
+          "type": "string",
+          "const": "inherit",
+          "description": "MUST be 'inherit'. Variants cannot diverge from soul compliance — schema validation rejects any other value (RFC-0017 §5.3 bounded inheritance)."
+        },
+        "designImperatives": {
+          "type": "array",
+          "description": "Variant-scoped Sα₂ inputs layered on soul-level designImperatives. Variant wins on conflict per RFC-0017 §5.4 (most-specific declaration).",
+          "items": { "type": "string" }
+        },
+        "cardinality": {
+          "type": "string",
+          "enum": ["primary", "secondary", "experimental"],
+          "description": "RESERVED: future lifecycle hint per RFC-0017 §5.2. v1 ignores; documents the experimental exit ramp (OQ-8)."
+        },
+        "journeys": {
+          "type": "array",
+          "description": "Variant-scoped Journey declarations per RFC-0018 §5.1. A journey scoped to this variant (scope='variant:<id>') MUST carry complianceFloor: 'inherit'. Count limits apply as for soul-scoped journeys (per-org configurable, defaults soft 10 / hard 50).",
+          "items": { "$ref": "journey.v1.schema.json" }
+        }
+      }
+    }
+  }
+}

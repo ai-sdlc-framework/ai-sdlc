@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/capabilities-config.v1.schema.json",
+  "title": "AI-SDLC CapabilitiesConfig",
+  "description": "Per-repository declaration of the optional capabilities that are expected to be live. A required capability that is degraded or never observed makes the doctor capability-liveness check fail and files a Decision; nothing is ever blocked. Lives at .ai-sdlc/capabilities.yaml and is read from the trusted base branch only. The default is an empty list.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "spec"],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common.schema.json#/$defs/apiVersion"
+    },
+    "kind": {
+      "type": "string",
+      "const": "CapabilitiesConfig"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "required": {
+          "type": "array",
+          "description": "Capability ids this repository expects to be live, for example dor.stage-b.",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9.-]*$"
+          },
+          "uniqueItems": true,
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

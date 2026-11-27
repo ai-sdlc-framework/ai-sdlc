@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/dor-config.v1.schema.json",
+  "title": "AI-SDLC DorConfig",
+  "description": "Per-project configuration for the Definition-of-Ready (DoR) gate (RFC-0011). Lives on disk at .ai-sdlc/dor-config.yaml. Phase 1 schema — consumed by future evaluator phases.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "spec"],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common.schema.json#/$defs/apiVersion"
+    },
+    "kind": {
+      "type": "string",
+      "const": "DorConfig"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    },
+    "spec": {
+      "type": "object",
+      "required": ["evaluationMode"],
+      "properties": {
+        "rubricVersion": {
+          "type": "string",
+          "description": "Pinned rubric version. v1 is the only currently published rubric (RFC-0011 §4).",
+          "enum": ["v1"],
+          "default": "v1"
+        },
+        "evaluationMode": {
+          "type": "string",
+          "enum": ["warn-only", "enforce"],
+          "description": "Per RFC §10 / §13 Q-resolution: warn-only posts comments + flags but does NOT move issues to Needs Clarification; enforce moves issues to Needs Clarification on a failing verdict."
+        },
+        "notifications": {
+          "type": "object",
+          "description": "Where clarification questions are posted (RFC §13 Q5 dual-fanout).",
+          "properties": {
+            "authorChannel": {
+              "type": "boolean",
+              "default": true,
+              "description": "When true, post clarification comment to where the issue was authored (GitHub issue / backlog file / Slack thread)."
+            },
+            "dedicatedChannel": {
+              "type": "object",
+              "description": "Optional centralised triage channel(s). If set, clarification posts go to BOTH the author channel AND the dedicated channel.",
+              "properties": {
+                "slack": {
+                  "type": "string",
+                  "description": "Slack channel ID or #name to mirror clarification comments to.",
+                  "minLength": 1
+                },
+                "github_team": {
+                  "type": "string",
+                  "description": "GitHub team handle (e.g. '@org/triage') to ping on clarification posts.",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false,
+              "minProperties": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "staleness": {
+          "type": "object",
+          "description": "Two-stage warn-then-close staleness policy for issues stuck in Needs Clarification (RFC §13 Q6).",
+          "required": ["warnAfterDays", "closeAfterDays", "closedLabel"],
+          "properties": {
+            "warnAfterDays": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 14,
+              "description": "Days of inactivity before posting the staleness warning to the same channels as the original clarification."
+            },
+            "closeAfterDays": {
+              "type": "integer",
+              "minimum": 2,
+              "default": 28,
+              "description": "Days of inactivity before auto-closing the issue. MUST be greater than warnAfterDays (validated externally — JSON Schema cannot express cross-property constraints for integers without draft-2020 unevaluatedProperties tricks)."
+            },
+            "closedLabel": {
+              "type": "string",
+              "minLength": 1,
+              "default": "closed-as-stale-dor",
+              "description": "Label applied when the issue is auto-closed (so stale-DoR-closures are queryable)."
+            }
+          },
+          "additionalProperties": false
+        },
+        "autoPassRules": {
+          "type": "array",
+          "description": "Auto-pass shortcuts for issue types where the rubric does not apply (RFC §6.4). Per Q-resolution: each rule MAY skip specific gates while retaining others.",
+          "items": {
+            "type": "object",
+            "required": ["kind", "sources"],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Stable rule identifier (e.g. 'dependency-bump', 'doc-typo', 'generated-ci-failure'). Matches the dispatcher's rule registry."
+              },
+              "sources": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "description": "Author identities that trigger this rule (e.g. 'dependabot[bot]', 'renovate[bot]', 'github-actions[bot]')."
+              },
+              "titlePattern": {
+                "type": "string",
+                "description": "Optional regex (JavaScript flavour) the issue title must match for this rule to fire.",
+                "minLength": 1
+              },
+              "maxBodyDiffLines": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Optional cap on body diff size in lines (used by doc-typo)."
+              },
+              "gatesSkipped": {
+                "type": "array",
+                "description": "Gate IDs (1-7) skipped by this rule. Empty array = full skip (legacy auto-pass shortcut).",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 7
+                },
+                "uniqueItems": true,
+                "default": []
+              },
+              "gatesRetained": {
+                "type": "array",
+                "description": "Gate IDs (1-7) still evaluated when this rule matches. Allows partial auto-pass (e.g. dependency bumps still get scope-bounded check).",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 7
+                },
+                "uniqueItems": true,
+                "default": []
+              }
+            },
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "escalation": {
+          "type": "object",
+          "description": "Escalation policy (RFC §6.3 + Phase 6 / AISDLC-115.7). Fires on round-cap (author hasn't responded after maxRoundsBeforeHumanTriage clarification rounds) OR on a low-confidence verdict (per Q4 — never auto-act on low confidence). Routing target is the free-form `triager` string OR the structured `triageRouters` array.",
+          "properties": {
+            "maxRoundsBeforeHumanTriage": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 3,
+              "description": "Round count at which to escalate (RFC §6.3). One round = one clarification post + one expected author edit."
+            },
+            "triager": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Free-form routing target — Slack channel ID/#name, GitHub team handle (@org/team), or plain user identity. The orchestration layer interprets the string. When omitted, escalations are flagged as `unrouted` rather than throwing."
+            },
+            "triageRouters": {
+              "type": "array",
+              "description": "Structured routing targets (legacy / multi-channel). Prefer the simpler `triager` string for new configs.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "github_team": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "slack": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false,
+                "minProperties": 1
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "bypassRequiresRole": {
+          "type": "string",
+          "description": "Trusted-reviewer role required to apply the dor-bypass label (RFC §7.4).",
+          "default": "maintainer"
+        },
+        "blastRadiusThreshold": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "RFC-0014 §12 Q5 Phase 3 — blast-radius count above which a dor-bypass-admitted task triggers the maintainer-tone FYI comment. Below this, the bypass is treated as routine (no FYI). Tunable per project; the default 3 matches the rolled-up-three-tasks-or-deeper bar that empirically distinguishes 'dispatch leaf bypass' from 'foundation-task bypass that should have been rubric-tuned instead'."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

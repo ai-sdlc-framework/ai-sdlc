@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1309
 title: 'Go SDK validates all eleven resource kinds of the reference'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-11-17'
 labels:

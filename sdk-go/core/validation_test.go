@@ -2,11 +2,15 @@ package core
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestValidateValidPipeline(t *testing.T) {
@@ -217,12 +221,74 @@ func TestValidateMetadataNamePattern(t *testing.T) {
 }
 
 func TestEmbeddedSchemasMatchSpec(t *testing.T) {
-	for _, name := range []string{"adapter-binding", "agent-role", "autonomy-policy", "common", "pipeline", "quality-gate"} {
-		file := name + ".schema.json"
+	entries, err := schemaFS.ReadDir("schemas")
+	require.NoError(t, err)
+	names := map[string]bool{}
+	for _, entry := range entries {
+		file := entry.Name()
+		names[file] = true
 		want, err := os.ReadFile(filepath.Join("..", "..", "spec", "schemas", file))
-		assert.NoError(t, err)
+		require.NoError(t, err, "%s has no counterpart in spec/schemas", file)
 		got, err := schemaFS.ReadFile("schemas/" + file)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 		assert.True(t, bytes.Equal(want, got), "%s differs from spec/schemas", file)
+	}
+	// Every kind schema, the common schema and the journey schema the
+	// DesignIntentDocument schema references are embedded.
+	for _, file := range SchemaFiles {
+		assert.True(t, names[file], "%s is not embedded", file)
+	}
+	assert.True(t, names["common.schema.json"])
+	assert.True(t, names["journey.v1.schema.json"])
+}
+
+// fixtureDirs maps each schema-only kind to its conformance fixture directory.
+var fixtureDirs = map[ResourceKind]string{
+	KindDesignSystemBinding:  "design-system-binding",
+	KindDesignIntentDocument: "design-intent-document",
+	KindDorConfig:            "dor-config",
+	KindCompliancePosture:    "compliance-posture",
+	KindJudgmentConfig:       "judgment-config",
+	KindCapabilitiesConfig:   "capabilities-config",
+}
+
+func loadFixture(t *testing.T, path string) interface{} {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var raw interface{}
+	require.NoError(t, yaml.Unmarshal(data, &raw))
+	js, err := json.Marshal(raw)
+	require.NoError(t, err)
+	var doc interface{}
+	require.NoError(t, json.Unmarshal(js, &doc))
+	return doc
+}
+
+func TestValidateNewKindsAgainstFixtures(t *testing.T) {
+	for kind, dir := range fixtureDirs {
+		full := filepath.Join("..", "..", "conformance", "tests", "v1alpha1", dir)
+		entries, err := os.ReadDir(full)
+		require.NoError(t, err)
+		var valid, invalid int
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasSuffix(name, ".yaml") {
+				continue
+			}
+			doc := loadFixture(t, filepath.Join(full, name))
+			result := Validate(kind, doc)
+			switch {
+			case strings.HasPrefix(name, "valid-"):
+				valid++
+				assert.True(t, result.Valid, "%s/%s: %v", dir, name, result.Errors)
+				assert.True(t, ValidateResource(doc).Valid, "%s/%s via ValidateResource", dir, name)
+			case strings.HasPrefix(name, "invalid-"):
+				invalid++
+				assert.False(t, result.Valid, "%s/%s passed validation", dir, name)
+			}
+		}
+		assert.Positive(t, valid, "%s has no valid fixture", dir)
+		assert.Positive(t, invalid, "%s has no invalid fixture", dir)
 	}
 }
