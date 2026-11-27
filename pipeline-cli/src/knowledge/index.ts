@@ -23,8 +23,6 @@ export {
   type KnowledgeStore,
   type KnowledgeStoreRoots,
   type ListScope,
-  type PutOptions,
-  type PutResult,
   type RawStoredEntry,
   type StoreScope,
   type StoredEntry,

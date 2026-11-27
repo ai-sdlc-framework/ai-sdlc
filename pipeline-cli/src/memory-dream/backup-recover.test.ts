@@ -91,7 +91,7 @@ describe('backupMemory', () => {
 const rec = (content: unknown[]): string => JSON.stringify({ message: { content } });
 
 describe('recoverFromTranscripts', () => {
-  it('replays Write, Edit and Read and reports missing bodies', () => {
+  it('replays Write, Edit and Read and reports missing bodies', async () => {
     const projects = tmp();
     const mem = join(tmp(), 'memory');
     const P = '/x/.claude/memory/';
@@ -169,7 +169,7 @@ describe('recoverFromTranscripts', () => {
     expect(readFileSync(join(r.outputDir, 'a.md'), 'utf-8')).toBe('heLLo there');
     expect(readFileSync(join(r.outputDir, 'b.md'), 'utf-8')).toBe('line one\nline two');
     expect(readFileSync(`${r.outputDir}.report.md`, 'utf-8')).toContain('c.md');
-    const applied = applyDream({ outputDir: r.outputDir });
+    const applied = await applyDream({ outputDir: r.outputDir });
     expect(applied.liveDir).toBe(mem);
     expect(existsSync(join(mem, 'a.md'))).toBe(true);
   });

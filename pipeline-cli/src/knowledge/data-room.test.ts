@@ -21,6 +21,7 @@ import { serializeNote } from '../memory-dream/notes.js';
 let root: string;
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 const mk = () => (root = mkdtempSync(join(tmpdir(), 'dataroom-')));
+const AGENT = 'agent:task:AISDLC-1456';
 
 describe('dataRoomRoot config', () => {
   it('is unset by default and read from context.yaml', () => {
@@ -78,20 +79,24 @@ function readdirRec(d: string): string[] {
 }
 
 describe('capture and export', () => {
-  it('writes a protected entry with a citation in the protected root', () => {
+  it('writes a protected entry with a citation in the protected root', async () => {
     mk();
     const prot = join(root, 'prot');
-    const file = captureFact(
-      { backend: 'files' },
-      prot,
-      {
-        id: 'fact-1',
-        value: 'Payment is net 30',
-        sourceDoc: 'msa-signed.md',
-        observed: '2026-11-01',
-      },
-      root,
-    );
+    const input = {
+      id: 'fact-1',
+      value: 'Payment is net 30',
+      sourceDoc: 'msa-signed.md',
+      observed: '2026-11-01',
+      principal: AGENT,
+    };
+    const roots = { trackedRootAbs: join(root, 'kb'), protectedRootAbs: prot };
+    const { file, status } = await captureFact({ backend: 'files' }, roots, input, root);
+    expect(status).toBe('applied');
+    // a second capture of the same id is rejected, never an overwrite
+    expect(await captureFact({ backend: 'files' }, roots, input, root)).toMatchObject({
+      status: 'rejected',
+      file: '',
+    });
     const parsed = parseEntryFile(readFileSync(file, 'utf-8'));
     if (!('fields' in parsed)) throw new Error('parse');
     expect(validateEntryFields(parsed.fields, DEFAULT_ONTOLOGY)).toEqual([]);
@@ -103,20 +108,21 @@ describe('capture and export', () => {
     ).toHaveLength(1);
   });
 
-  it('writes <protectedRoot>/<trunk>/<id>.md through the CLI path and passes validate (AISDLC-1425)', () => {
+  it('writes <protectedRoot>/<trunk>/<id>.md through the CLI path and passes validate (AISDLC-1425)', async () => {
     mk();
-    const file = captureFactForProject(root, {
+    const { file } = await captureFactForProject(root, {
       id: 'fact-1',
       value: 'Payment is net 30',
       sourceDoc: 'msa-signed.md',
       observed: '2026-11-01',
+      principal: AGENT,
     });
     expect(file).toBe(join(root, '.ai-sdlc/knowledge-protected/memory/fact-1.md'));
     expect(readFileSync(file, 'utf-8')).toContain('source: data-room:msa-signed.md');
     expect(validateKnowledge(root).errors).toEqual([]);
   });
 
-  it('survives a memory re-ingest that supersedes notes gone from the folder (AISDLC-1425)', () => {
+  it('survives a memory re-ingest that supersedes notes gone from the folder (AISDLC-1425)', async () => {
     mk();
     const mem = join(root, '.claude/memory');
     mkdirSync(mem, { recursive: true });
@@ -127,15 +133,16 @@ describe('capture and export', () => {
       );
     note('user_role.md');
     note('user_gone.md');
-    ingestMemoryForProject(root, mem, '2026-11-01');
-    captureFactForProject(root, {
+    await ingestMemoryForProject(root, mem, '2026-11-01', AGENT);
+    await captureFactForProject(root, {
       id: 'fact-1',
       value: 'Payment is net 30',
       sourceDoc: 'msa-signed.md',
       observed: '2026-11-01',
+      principal: AGENT,
     });
     rmSync(join(mem, 'user_gone.md'));
-    const r = ingestMemoryForProject(root, mem, '2026-11-02');
+    const r = await ingestMemoryForProject(root, mem, '2026-11-02', AGENT);
     expect(r.superseded).toBe(1);
     const store = openKnowledgeStore(
       { backend: 'files', protectedRoot: join(root, '.ai-sdlc/knowledge-protected') },

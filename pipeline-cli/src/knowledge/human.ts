@@ -1,17 +1,23 @@
 /**
  * Human surface for the knowledge layer (RFC-0053): confirm, correct, supersede,
- * coverage scoring and the plain-text gap dashboard. Every mutation writes a
- * knowledge-log event. Entries are superseded, never deleted.
+ * coverage scoring and the plain-text gap dashboard. Every mutation is one named store write
+ * (DEC-0443), which logs its knowledge-log event. Entries are superseded, never deleted.
  */
 import { createHash } from 'node:crypto';
 import { now } from '../clock.js';
-import { AGENT_CONFIDENCE_CAP, type KnowledgeEntry } from './entry.js';
-import { appendKnowledgeEvent } from './log.js';
-import { openKnowledgeStore, type KnowledgeBackendSelection } from './knowledge-store.js';
-import { type Actor, REOBSERVE_WEIGHT } from './promote.js';
+import type { KnowledgeEntry } from './entry.js';
+import {
+  openKnowledgeStore,
+  type KnowledgeBackendSelection,
+  type WriteResult,
+} from './knowledge-store.js';
+import { type Actor, movedConfidence, notFound } from './promote.js';
 
-/** Confirm: confidence moves 30 percent toward the supplied value; authority never changes. */
-export function confirmEntry(
+/**
+ * Confirm: confidence moves 30 percent toward the supplied value; authority never changes.
+ * `confidence` is the new value when the write was applied or proposed.
+ */
+export async function confirmEntry(
   sel: KnowledgeBackendSelection,
   trackedRootAbs: string,
   id: string,
@@ -19,39 +25,27 @@ export function confirmEntry(
   actor: Actor,
   observed: string | undefined,
   projectRoot: string,
-): number | null {
-  let next = 0;
+): Promise<WriteResult & { confidence?: number }> {
   const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
-  const before = store.update(id, (f) => {
-    const old = Number(f.confidence);
-    next = Math.round((old + REOBSERVE_WEIGHT * (confidence - old)) * 1e6) / 1e6;
-    if (f.writtenBy === 'agent') next = Math.min(next, AGENT_CONFIDENCE_CAP);
-    f.confidence = next;
-    if (observed) f.observed = observed;
-  });
-  if (!before) return null;
-  appendKnowledgeEvent(trackedRootAbs, {
-    event: 'confirmed',
+  const e = store.get(id);
+  if (!e) return notFound(id);
+  const next = movedConfidence(e.fields, confidence);
+  const fields: Record<string, unknown> = { confidence: next };
+  if (observed) fields.observed = observed;
+  const r = await store.write(
     id,
-    by: actor.by,
-    principal: actor.principal,
-    detail: `confidence ${String(before.confidence)} -> ${next}`,
-  });
-  return next;
-}
-
-/** True when an entry's scope is `protected`, normalised as `exportableEntries` does. */
-function isProtectedScope(scope: unknown): boolean {
-  const s = typeof scope === 'string' ? scope : '';
-  return s.trim().toLowerCase() === 'protected';
+    { kind: 'confirm', fields, principal: actor.principal },
+    { scope: e.scope },
+  );
+  return r.status === 'rejected' ? r : { ...r, confidence: next };
 }
 
 /**
  * Correct: replace the value and its hash in place; authority and confidence are untouched.
- * The log sits next to the tracked root and is committed, so a protected entry's event
- * carries no value and no hash of one (RFC-0053 OQ-1, OQ-7; AISDLC-1424).
+ * The store logs field names only, so no value (or hash of one) enters the committed log
+ * (RFC-0053 OQ-1, OQ-7; AISDLC-1424).
  */
-export function correctEntry(
+export async function correctEntry(
   sel: KnowledgeBackendSelection,
   trackedRootAbs: string,
   id: string,
@@ -59,60 +53,58 @@ export function correctEntry(
   actor: Actor,
   observed: string | undefined,
   projectRoot: string,
-): boolean {
+): Promise<WriteResult> {
   const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
-  const before = store.update(id, (f) => {
-    f.value = value;
-    f.contentHash = createHash('sha256').update(value).digest('hex');
-    if (observed) f.observed = observed;
-  });
-  if (!before) return false;
-  appendKnowledgeEvent(trackedRootAbs, {
-    event: 'corrected',
+  const e = store.get(id);
+  if (!e) return notFound(id);
+  const fields: Record<string, unknown> = {
+    value,
+    contentHash: createHash('sha256').update(value).digest('hex'),
+  };
+  if (observed) fields.observed = observed;
+  return store.write(
     id,
-    by: actor.by,
-    principal: actor.principal,
-    detail: isProtectedScope(before.scope)
-      ? 'value corrected (protected; value not logged)'
-      : `value changed from '${String(before.value)}'`,
-  });
-  return true;
+    { kind: 'correct', fields, principal: actor.principal },
+    { scope: e.scope },
+  );
 }
 
-/** Supersede: the new entry links the old one; the old entry stays on disk. */
-export function supersedeEntry(
+/**
+ * Supersede, one store call (DEC-0443): `newId` is created from the old entry with the new
+ * value, linked by `supersedes`, and the old entry is marked `status: superseded` (it stays
+ * on disk). `newId` must not exist yet.
+ */
+export async function supersedeEntry(
   sel: KnowledgeBackendSelection,
   trackedRootAbs: string,
   oldId: string,
   newId: string,
+  value: string,
   actor: Actor,
+  observed: string | undefined,
   projectRoot: string,
-): { ok: boolean; reason: string } {
+): Promise<WriteResult> {
   const store = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot);
-  const oldEntry = store.get(oldId, { scope: 'tracked' });
-  const newEntry = store.get(newId, { scope: 'tracked' });
-  if (!oldEntry) return { ok: false, reason: `entry '${oldId}' not found` };
-  if (!newEntry) return { ok: false, reason: `entry '${newId}' not found` };
-  if (oldId === newId) return { ok: false, reason: 'an entry cannot supersede itself' };
-  store.update(newId, (f) => {
-    f.supersedes = oldId;
-    const rels = Array.isArray(f.relations)
-      ? (f.relations as { type: string; target: string }[])
-      : [];
-    if (!rels.some((r) => r.type === 'supersedes' && r.target === oldId)) {
-      rels.push({ type: 'supersedes', target: oldId });
-    }
-    f.relations = rels;
-  });
-  appendKnowledgeEvent(trackedRootAbs, {
-    event: 'superseded',
-    id: oldId,
-    to: newId,
-    by: actor.by,
-    principal: actor.principal,
-    detail: `${newId} supersedes ${oldId}`,
-  });
-  return { ok: true, reason: `${newId} supersedes ${oldId}` };
+  const old = store.get(oldId, { scope: 'tracked' });
+  if (!old) return notFound(oldId);
+  const { status: _status, supersedes: _supersedes, ...kept } = old.fields;
+  const fields: Record<string, unknown> = {
+    ...kept,
+    id: newId,
+    value,
+    contentHash: createHash('sha256').update(value).digest('hex'),
+    relations: Array.isArray(old.fields.relations)
+      ? (old.fields.relations as { type: string; target: string }[]).filter(
+          (r) => r.type !== 'supersedes',
+        )
+      : [],
+  };
+  if (observed) fields.observed = observed;
+  return store.write(
+    oldId,
+    { kind: 'supersede', fields, body: old.body, principal: actor.principal },
+    { scope: 'tracked' },
+  );
 }
 
 /** Follow `supersedes` links forward: the head is the newest entry in the chain. */

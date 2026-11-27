@@ -42,7 +42,7 @@ export interface UndoResult {
 export const versionsDirFor = (liveDir: string): string => `${liveDir}.dream-versions`;
 const lockPathFor = (liveDir: string): string => `${liveDir}.dream.lock`;
 
-function withLock<T>(liveDir: string, fn: () => T): T {
+async function withLock<T>(liveDir: string, fn: () => Promise<T>): Promise<T> {
   const lock = lockPathFor(liveDir);
   try {
     writeFileSync(lock, `${process.pid}\n`, { flag: 'wx' });
@@ -56,7 +56,7 @@ function withLock<T>(liveDir: string, fn: () => T): T {
     throw e;
   }
   try {
-    return fn();
+    return await fn();
   } finally {
     unlinkSync(lock);
   }
@@ -101,14 +101,14 @@ function swap(liveDir: string, incoming: string, now: Date): string {
 }
 
 /** Runs inside the dream lock right after a swap (apply or undo), for example a re-ingest. */
-export type AfterSwap = (liveDir: string) => void;
+export type AfterSwap = (liveDir: string) => void | Promise<void>;
 
-export function applyDream(opts: {
+export async function applyDream(opts: {
   outputDir: string;
   keep?: number;
   now?: Date;
   afterSwap?: AfterSwap;
-}): ApplyResult {
+}): Promise<ApplyResult> {
   const at = opts.now ?? now();
   const metaPath = metaPathFor(opts.outputDir);
   if (!existsSync(opts.outputDir) || !existsSync(metaPath)) {
@@ -116,7 +116,7 @@ export function applyDream(opts: {
   }
   const meta = JSON.parse(readFileSync(metaPath, 'utf-8')) as RunMeta;
   const liveDir = meta.inputDir;
-  return withLock(liveDir, () => {
+  return withLock(liveDir, async () => {
     const live = readMemoryFolder(liveDir);
     const changed = live.notes.filter((n) => meta.snapshot[n.file] !== n.hash);
     const outIndexPath = join(opts.outputDir, INDEX_FILE);
@@ -140,25 +140,25 @@ export function applyDream(opts: {
       writeFileSync(outIndexPath, `${base}${extra.join('\n')}\n`);
     }
     const saved = swap(liveDir, opts.outputDir, at);
-    opts.afterSwap?.(liveDir);
+    await opts.afterSwap?.(liveDir);
     const pruned = prune(liveDir, opts.keep ?? MIN_KEEP);
     return { liveDir, previousVersion: saved, carriedOver: changed.map((n) => n.file), pruned };
   });
 }
 
-export function undoDream(opts: {
+export async function undoDream(opts: {
   liveDir: string;
   now?: Date;
   afterSwap?: AfterSwap;
-}): UndoResult {
+}): Promise<UndoResult> {
   const at = opts.now ?? now();
-  return withLock(opts.liveDir, () => {
+  return withLock(opts.liveDir, async () => {
     const versions = listVersions(opts.liveDir);
     const latest = versions[versions.length - 1];
     if (!latest) throw new Error(`no previous version to restore for ${opts.liveDir}`);
     const from = join(versionsDirFor(opts.liveDir), latest);
     const savedAs = swap(opts.liveDir, from, at);
-    opts.afterSwap?.(opts.liveDir);
+    await opts.afterSwap?.(opts.liveDir);
     return { liveDir: opts.liveDir, restoredFrom: from, currentSavedAs: savedAs };
   });
 }

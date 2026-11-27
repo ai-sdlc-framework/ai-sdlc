@@ -241,7 +241,7 @@ describe('operations hand a registered backend the project root (AISDLC-1432)', 
     removeFixtureDir(elsewhere);
   });
 
-  it('ingest, promote, human and data-room open the store with the project root, not the cwd', () => {
+  it('ingest, promote, human and data-room open the store with the project root, not the cwd', async () => {
     dir = writeContext(
       mkdtempSync(join(tmpdir(), 'knowledge-ops-')),
       '  backend: recording\n  recording:\n    endpoint: e\n',
@@ -253,15 +253,15 @@ describe('operations hand a registered backend the project root (AISDLC-1432)', 
     const tracked = join(dir, '.ai-sdlc/knowledge');
     const actor = { by: 'human', principal: 'human:op@example.com' } as const;
     const options = { endpoint: 'e' };
-    const opened = (run: () => unknown): KnowledgeBackendContext[] => {
+    const opened = async (run: () => Promise<unknown>): Promise<KnowledgeBackendContext[]> => {
       recorded.length = 0;
-      run();
+      await run();
       return [...recorded];
     };
     const once = [{ projectRoot: dir, options }];
 
     expect(
-      opened(() =>
+      await opened(() =>
         ingestSource('tasks', {
           ...sel,
           projectDir: dir,
@@ -276,20 +276,29 @@ describe('operations hand a registered backend the project root (AISDLC-1432)', 
       typeof promoteEntry
     >[4];
     expect(
-      opened(() => promoteEntry(sel, tracked, 'a', { to: 'canonical', ...actor }, verify)),
+      await opened(() => promoteEntry(sel, tracked, 'a', { to: 'canonical', ...actor }, verify)),
     ).toEqual(once);
-    expect(opened(() => refuteEntry(sel, tracked, 'a', 'wrong', actor, dir))).toEqual(once);
-    expect(opened(() => reobserveEntry(sel, tracked, 'a', 1, actor, undefined, dir))).toEqual(once);
-    expect(opened(() => confirmEntry(sel, tracked, 'a', 1, actor, undefined, dir))).toEqual(once);
-    expect(opened(() => correctEntry(sel, tracked, 'a', 'v', actor, undefined, dir))).toEqual(once);
-    expect(opened(() => supersedeEntry(sel, tracked, 'a', 'b', actor, dir))).toEqual(once);
+    expect(await opened(() => refuteEntry(sel, tracked, 'a', 'wrong', actor, dir))).toEqual(once);
+    expect(await opened(() => reobserveEntry(sel, tracked, 'a', 1, actor, undefined, dir))).toEqual(
+      once,
+    );
+    expect(await opened(() => confirmEntry(sel, tracked, 'a', 1, actor, undefined, dir))).toEqual(
+      once,
+    );
+    expect(await opened(() => correctEntry(sel, tracked, 'a', 'v', actor, undefined, dir))).toEqual(
+      once,
+    );
     expect(
-      opened(() =>
+      await opened(() => supersedeEntry(sel, tracked, 'a', 'b', 'v', actor, undefined, dir)),
+    ).toEqual(once);
+    expect(
+      await opened(() =>
         captureFactForProject(dir, {
           id: 'fact-1',
           value: 'v',
           sourceDoc: 'doc.md',
           observed: '2026-11-26',
+          principal: actor.principal,
         }),
       ),
     ).toEqual(once);
@@ -306,12 +315,10 @@ registerKnowledgeBackend('supplies-ontology', (_cfg, ctx) => {
   return {
     kind: 'supplies-ontology',
     get: () => null,
-    put: (e) => {
+    create: (e) => {
       supplied.puts.push(e.fields);
-      return { path: 'x.md', created: true };
+      return Promise.resolve({ id: 'x', path: 'x.md', created: true, status: 'applied' });
     },
-    update: () => null,
-    create: () => Promise.resolve({ id: 'x', path: '', created: false, status: 'rejected' }),
     write: () => Promise.resolve({ id: 'x', path: '', created: false, status: 'rejected' }),
     list: () => [],
     listRaw: (scope) =>
@@ -376,14 +383,14 @@ describe('a backend may supply the ontology (AISDLC-1435)', () => {
     expect(supplied.calls).toBe(1);
   });
 
-  it('ingest-memory validates notes against the supplied ontology', () => {
+  it('ingest-memory validates notes against the supplied ontology', async () => {
     const mem = join(project(['systems']), 'mem');
     mkdirSync(mem);
     writeFileSync(
       join(mem, 'user_role.md'),
       serializeNote({ name: 'user_role', description: 'role', type: 'user', body: 'b' }),
     );
-    expect(() => ingestMemoryForProject(dir, mem, '2026-11-27')).toThrow(
+    await expect(ingestMemoryForProject(dir, mem, '2026-11-27')).rejects.toThrow(
       /unknown trunk 'memory' \(allowed: systems\)/,
     );
     project(['memory']);
@@ -393,7 +400,7 @@ describe('a backend may supply the ontology (AISDLC-1435)', () => {
       join(mem2, 'user_role.md'),
       serializeNote({ name: 'user_role', description: 'role', type: 'user', body: 'b' }),
     );
-    expect(ingestMemoryForProject(dir, mem2, '2026-11-27').created).toBe(1);
+    expect((await ingestMemoryForProject(dir, mem2, '2026-11-27')).created).toBe(1);
     expect(supplied.puts.map((f) => f.trunk)).toEqual(['memory']);
   });
 

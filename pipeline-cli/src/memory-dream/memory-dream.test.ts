@@ -643,7 +643,7 @@ describe('apply and undo', () => {
     // a session appends while the dream ran
     writeFileSync(join(mem, 'feedback_new.md'), note('New', 'feedback', 'fresh'));
     writeFileSync(join(mem, 'feedback_b.md'), note('Rule B', 'feedback', 'changed after start'));
-    const a = applyDream({
+    const a = await applyDream({
       outputDir: r.outputDir as string,
       now: new Date('2026-10-10T11:00:00Z'),
     });
@@ -652,8 +652,10 @@ describe('apply and undo', () => {
     expect(readFileSync(join(mem, 'MEMORY.md'), 'utf-8')).toContain('feedback_new.md');
     expect(existsSync(join(mem, 'archive', 'project_old.md'))).toBe(true);
     expect(existsSync(r.outputDir as string)).toBe(false);
-    expect(() => applyDream({ outputDir: r.outputDir as string })).toThrow(/not a dream output/);
-    const u = undoDream({ liveDir: mem, now: new Date('2026-10-10T12:00:00Z') });
+    await expect(applyDream({ outputDir: r.outputDir as string })).rejects.toThrow(
+      /not a dream output/,
+    );
+    const u = await undoDream({ liveDir: mem, now: new Date('2026-10-10T12:00:00Z') });
     expect(existsSync(join(mem, 'project_old.md'))).toBe(true);
     expect(existsSync(join(mem, 'feedback_new.md'))).toBe(true);
     expect(u.restoredFrom).toContain('.dream-versions');
@@ -663,7 +665,7 @@ describe('apply and undo', () => {
     seed(FIXTURE, INDEX);
     for (let i = 0; i < 5; i++) {
       const r = await dream(new Date(Date.UTC(2026, 9, 10, i, 0, 0)));
-      applyDream({
+      await applyDream({
         outputDir: r.outputDir as string,
         keep: 1,
         now: new Date(Date.UTC(2026, 9, 10, i, 30, 0)),
@@ -676,10 +678,10 @@ describe('apply and undo', () => {
     seed(FIXTURE, INDEX);
     const r = await dream(new Date('2026-10-10T10:00:00Z'));
     writeFileSync(`${mem}.dream.lock`, '1\n');
-    expect(() => applyDream({ outputDir: r.outputDir as string })).toThrow(/another apply/);
-    expect(() => undoDream({ liveDir: mem })).toThrow(/another apply/);
+    await expect(applyDream({ outputDir: r.outputDir as string })).rejects.toThrow(/another apply/);
+    await expect(undoDream({ liveDir: mem })).rejects.toThrow(/another apply/);
     rmSync(`${mem}.dream.lock`);
-    expect(() => undoDream({ liveDir: mem })).toThrow(/no previous version/);
+    await expect(undoDream({ liveDir: mem })).rejects.toThrow(/no previous version/);
     expect(existsSync(`${mem}.dream.lock`)).toBe(false);
   });
 });
@@ -700,8 +702,8 @@ describe('cli handlers', () => {
       { ...io, out: (l) => json.push(l) },
     );
     expect(JSON.parse(json[0]).dryRun).toBe(true);
-    cmdApply({ output: r.outputDir as string }, io);
-    cmdUndo({ dir: mem }, io);
+    await cmdApply({ output: r.outputDir as string }, io);
+    await cmdUndo({ dir: mem }, io);
     expect(lines.join('\n')).toMatch(/applied:[\s\S]*restored/);
     expect(lines.join('\n')).not.toContain('Dominique');
   });

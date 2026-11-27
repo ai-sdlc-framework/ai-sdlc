@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyDream } from '../memory-dream/apply.js';
 import { metaPathFor } from '../memory-dream/run.js';
 import { readMemoryFolder, serializeNote } from '../memory-dream/notes.js';
@@ -60,8 +60,8 @@ beforeEach(() => {
 afterEach(() => removeFixtureDir(dir));
 
 describe('ingestMemoryForProject', () => {
-  it('turns every note into a protected memory entry cited to the note file', () => {
-    const r = ingestMemoryForProject(dir, mem, '2026-10-29');
+  it('turns every note into a protected memory entry cited to the note file', async () => {
+    const r = await ingestMemoryForProject(dir, mem, '2026-10-29');
     expect(r.created).toBe(4);
     for (const f of ['user_role.md', 'feedback_rule.md', 'project_x.md', 'reference_y.md']) {
       const e = entry(f);
@@ -70,7 +70,7 @@ describe('ingestMemoryForProject', () => {
       expect(e.source).toBe(`.claude/memory/${f}`);
     }
     expect(validateKnowledge(dir).errors).toEqual([]);
-    expect(ingestMemoryForProject(dir, mem, '2026-10-29').unchanged).toBe(4);
+    expect((await ingestMemoryForProject(dir, mem, '2026-10-29')).unchanged).toBe(4);
   });
 
   it.each([
@@ -78,25 +78,25 @@ describe('ingestMemoryForProject', () => {
     ['feedback_rule.md', 'specialist', 'operator'],
     ['project_x.md', 'inferred', undefined],
     ['reference_y.md', 'inferred', undefined],
-  ])('maps %s to %s', (file, authority, proof) => {
-    ingestMemoryForProject(dir, mem, '2026-10-29');
+  ])('maps %s to %s', async (file, authority, proof) => {
+    await ingestMemoryForProject(dir, mem, '2026-10-29');
     const e = entry(file);
     expect(e.authority).toBe(authority);
     expect(e.proof).toBe(proof);
   });
 
-  it('updates a changed note with supersedes and skips invalid notes', () => {
-    ingestMemoryForProject(dir, mem, '2026-10-29');
+  it('updates a changed note with supersedes and skips invalid notes', async () => {
+    await ingestMemoryForProject(dir, mem, '2026-10-29');
     note('user_role.md', 'user', 'changed body');
     writeFileSync(join(mem, 'broken.md'), 'no frontmatter');
-    const r = ingestMemoryForProject(dir, mem, '2026-10-30');
+    const r = await ingestMemoryForProject(dir, mem, '2026-10-30');
     expect(r.updated).toBe(1);
     expect(r.skipped).toBe(1);
     expect(String(entry('user_role.md').supersedes)).toContain('memory-user-role@');
   });
 
-  it('re-ingests under the dream lock after a swap and supersedes removed notes', () => {
-    ingestMemoryForProject(dir, mem, '2026-10-29');
+  it('re-ingests under the dream lock after a swap and supersedes removed notes', async () => {
+    await ingestMemoryForProject(dir, mem, '2026-10-29');
     const out = join(dir, '.claude/memory.dream-out');
     mkdirSync(out);
     for (const f of ['user_role.md', 'feedback_rule.md', 'reference_y.md']) {
@@ -106,11 +106,11 @@ describe('ingestMemoryForProject', () => {
     const snapshot = Object.fromEntries(readMemoryFolder(mem).notes.map((n) => [n.file, n.hash]));
     writeFileSync(metaPathFor(out), JSON.stringify({ inputDir: mem, snapshot }));
     let lockSeen = false;
-    applyDream({
+    await applyDream({
       outputDir: out,
       afterSwap: (live) => {
         lockSeen = existsSync(`${live}.dream.lock`);
-        reingestAfterSwap(dir)(live);
+        return reingestAfterSwap(dir)(live);
       },
     });
     expect(lockSeen).toBe(true);
@@ -118,15 +118,15 @@ describe('ingestMemoryForProject', () => {
     expect(entry('user_role.md').status).toBeUndefined();
   });
 
-  it('does not re-ingest when the memory trunk was never created', () => {
-    reingestAfterSwap(dir)(mem);
+  it('does not re-ingest when the memory trunk was never created', async () => {
+    await reingestAfterSwap(dir)(mem);
     expect(existsSync(protectedMem())).toBe(false);
   });
 });
 
 describe('ledger and scope', () => {
   it('marks harness-recalled notes loaded so the engine does not inject them again', async () => {
-    ingestMemoryForProject(dir, mem, '2026-10-29');
+    await ingestMemoryForProject(dir, mem, '2026-10-29');
     await rebuildIndex(dir);
     expect(recordHarnessRecall(dir, 's1', mem, ['user_role.md'])).toBe(1);
     expect(recordHarnessRecall(dir, 's1', mem, ['user_role.md'])).toBe(0);
@@ -138,17 +138,17 @@ describe('ledger and scope', () => {
   });
 
   it('excludes superseded entries from the index', async () => {
-    ingestMemoryForProject(dir, mem, '2026-10-29');
+    await ingestMemoryForProject(dir, mem, '2026-10-29');
     rmSync(join(mem, 'project_x.md'));
-    ingestMemoryForProject(dir, mem, '2026-10-30');
+    await ingestMemoryForProject(dir, mem, '2026-10-30');
     await rebuildIndex(dir);
     const ids = (await queryIndex(dir, { text: 'banana smoothie' })).map((h) => h.id);
     expect(ids).not.toContain('memory-project-x');
     expect(ids).toContain('memory-user-role');
   });
 
-  it('keeps memory out of the tracked root and flags citations in a PR body', () => {
-    ingestMemoryForProject(dir, mem, '2026-10-29');
+  it('keeps memory out of the tracked root and flags citations in a PR body', async () => {
+    await ingestMemoryForProject(dir, mem, '2026-10-29');
     expect(checkKnowledgeScope(dir)).toEqual([]);
     expect(existsSync(join(dir, '.ai-sdlc/knowledge/memory'))).toBe(false);
     expect(findProtectedCitations(dir, 'see memory-user-role for details')).toEqual([
@@ -168,17 +168,20 @@ function memoryStore(entries: Map<string, StoredEntry>): KnowledgeStore {
       (opts?.path
         ? entries.get(opts.path)
         : [...entries.values()].find((e) => e.fields.id === id)) ?? null,
-    put: (entry, opts) => {
-      const path = opts.path ?? `${String(entry.fields.trunk)}/${String(entry.fields.id)}.md`;
-      const created = !entries.has(path);
-      entries.set(path, { ...entry, scope: opts.scope, path });
-      return { path, created };
-    },
-    update: () => null,
     list: (scope) => (typeof scope === 'object' ? inTrunk(scope.trunk) : [...entries.values()]),
     listRaw: () => [],
-    create: () => Promise.reject(new Error('not used')),
-    write: () => Promise.reject(new Error('not used')),
+    create: (entry, opts) => {
+      const id = String(entry.fields.id);
+      const path = opts.path ?? `${String(entry.fields.trunk)}/${id}.md`;
+      entries.set(path, { ...entry, scope: opts.scope, path });
+      return Promise.resolve({ id, path, created: true, status: 'applied' });
+    },
+    write: (id, op) => {
+      const e = [...entries.values()].find((x) => x.fields.id === id);
+      if (!e || op.kind !== 'reingest') throw new Error(`unexpected write ${op.kind} ${id}`);
+      entries.set(e.path, { ...e, fields: op.fields, body: op.body ?? e.body });
+      return Promise.resolve({ id, path: e.path, created: false, status: 'applied' });
+    },
   };
 }
 
@@ -200,28 +203,51 @@ describe('reingestAfterSwap on a non-files backend (AISDLC-1426)', () => {
   registerKnowledgeBackend('in-memory-1426', () => memoryStore(entries));
   beforeEach(() => entries.clear());
 
-  it('re-ingests through the backend when it holds memory entries and no folder exists', () => {
+  it('re-ingests through the backend when it holds memory entries and no folder exists', async () => {
     useBackend('in-memory-1426');
     entries.set(`${MEMORY_TRUNK}/memory-old.md`, stored('memory-old'));
-    reingestAfterSwap(dir)(mem);
+    await reingestAfterSwap(dir)(mem);
     expect(existsSync(protectedMem())).toBe(false);
     expect(entries.get(`${MEMORY_TRUNK}/memory-user-role.md`)?.fields.authority).toBe('specialist');
     expect(entries.size).toBe(5);
     expect(entries.get(`${MEMORY_TRUNK}/memory-old.md`)?.fields.status).toBe('superseded');
   });
 
-  it('writes nothing when the backend holds no memory entries', () => {
+  it('sets exit code 1 when the backend rejects a re-ingest write', async () => {
+    registerKnowledgeBackend('rejecting-1456', () => ({
+      ...memoryStore(entries),
+      create: async (e) => ({
+        id: String(e.fields.id),
+        path: '',
+        created: false,
+        status: 'rejected',
+        reason: 'read-only replica',
+      }),
+    }));
+    useBackend('rejecting-1456');
+    entries.set(`${MEMORY_TRUNK}/memory-old.md`, stored('memory-old'));
+    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await reingestAfterSwap(dir)(mem);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      err.mockRestore();
+      process.exitCode = 0;
+    }
+  });
+
+  it('writes nothing when the backend holds no memory entries', async () => {
     useBackend('in-memory-1426');
-    reingestAfterSwap(dir)(mem);
+    await reingestAfterSwap(dir)(mem);
     expect(entries.size).toBe(0);
   });
 
-  it('throws KnowledgeBackendError for an unregistered backend', () => {
+  it('throws KnowledgeBackendError for an unregistered backend', async () => {
     useBackend('unregistered-1426');
-    expect(() => reingestAfterSwap(dir)(mem)).toThrow(KnowledgeBackendError);
+    await expect(reingestAfterSwap(dir)(mem)).rejects.toThrow(KnowledgeBackendError);
   });
 
-  it('resolves backendModule from the project, not the working directory', () => {
+  it('resolves backendModule from the project, not the working directory', async () => {
     const pkgDir = join(dir, 'node_modules/ai-sdlc-fixture-1426');
     mkdirSync(pkgDir, { recursive: true });
     writeFileSync(
@@ -230,11 +256,11 @@ describe('reingestAfterSwap on a non-files backend (AISDLC-1426)', () => {
     );
     writeFileSync(
       join(pkgDir, 'index.js'),
-      `exports.roots = [];\nexports.registerKnowledgeBackends = (r) => r.registerKnowledgeBackend('module-1426', (cfg, ctx) => { exports.roots.push(ctx.projectRoot); return { kind: 'module', get: () => null, put: () => ({ path: 'x', created: true }), update: () => null, list: () => [], listRaw: () => [] }; });\n`,
+      `exports.roots = [];\nexports.registerKnowledgeBackends = (r) => r.registerKnowledgeBackend('module-1426', (cfg, ctx) => { exports.roots.push(ctx.projectRoot); return { kind: 'module', get: () => null, list: () => [], listRaw: () => [], create: async (e) => ({ id: String(e.fields.id), path: 'x', created: true, status: 'applied' }), write: async (id) => ({ id, path: '', created: false, status: 'rejected', reason: 'unused' }) }; });\n`,
     );
     useBackend('module-1426', 'ai-sdlc-fixture-1426');
     expect(process.cwd()).not.toBe(dir);
-    const r = ingestMemoryForProject(dir, mem, '2026-11-26');
+    const r = await ingestMemoryForProject(dir, mem, '2026-11-26');
     expect(r.created).toBe(4);
     const req = createRequire(join(dir, 'package.json'));
     expect((req('ai-sdlc-fixture-1426') as { roots: string[] }).roots).toEqual([dir]);

@@ -18,8 +18,6 @@ function stub(over: Partial<KnowledgeStore> = {}): KnowledgeStore {
   return {
     kind: 'stub',
     get: () => null,
-    put: () => ({ path: 'x.md', created: true }),
-    update: () => null,
     list: () => [],
     listRaw: () => [],
     create: () => Promise.reject(new Error('not used')),

@@ -15,10 +15,15 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { reviewsLedgerPath, reviewsLedgerRelativePath } from '../attestation/reviews-ledger.js';
 import { projectAll } from '../decisions/projection.js';
-import { appendKnowledgeEvent } from './log.js';
 import type { Actor } from './promote.js';
 import { hashValue, parseEntryFile, validateEntryFields } from './entry.js';
 import { openKnowledgeStore, type KnowledgeBackendSelection } from './knowledge-store.js';
+import {
+  countIngestWrite,
+  emptyIngestCounts,
+  ingestEntry,
+  type IngestWriteCounts,
+} from './ingest-write.js';
 import type { Ontology } from './ontology.js';
 import { slugify } from './ingest-sections.js';
 
@@ -47,9 +52,7 @@ export interface Candidate {
   authority?: 'specialist' | 'inferred';
 }
 
-export interface IngestResult {
-  created: number;
-  updated: number;
+export interface IngestResult extends IngestWriteCounts {
   unchanged: number;
 }
 
@@ -63,9 +66,9 @@ export interface IngestOptions extends KnowledgeBackendSelection {
   generatedFile?: string;
   /** Command allowlist (`knowledge.allowlistedCommands`); read by the `generated` source. */
   allowlistedCommands?: Record<string, string[]>;
-  /** Where skipped-record reports go; defaults to stderr. */
+  /** Where skipped-record and rejected-write reports go; defaults to stderr. */
   report?: (line: string) => void;
-  /** Recorded on the `superseded` events this ingest writes. */
+  /** Whose principal every store write of this ingest carries (the store logs it). */
   actor: Actor;
 }
 
@@ -317,8 +320,9 @@ export function candidateFields(c: Candidate, observed: string): Record<string, 
   };
 }
 
-export function ingestSource(kind: IngestSource, o: IngestOptions): IngestResult {
-  const result: IngestResult = { created: 0, updated: 0, unchanged: 0 };
+export async function ingestSource(kind: IngestSource, o: IngestOptions): Promise<IngestResult> {
+  const result: IngestResult = { ...emptyIngestCounts(), unchanged: 0 };
+  const report = o.report ?? ((line: string) => process.stderr.write(`${line}\n`));
   const store = openKnowledgeStore(
     {
       backend: o.backend,
@@ -338,19 +342,14 @@ export function ingestSource(kind: IngestSource, o: IngestOptions): IngestResult
       result.unchanged++;
       continue;
     }
-    if (prior) {
-      fields.supersedes = `${c.id}@${String(prior.fields.contentHash)}`;
-      appendKnowledgeEvent(o.trackedRootAbs, {
-        event: 'superseded',
-        id: c.id,
-        by: o.actor.by,
-        principal: o.actor.principal,
-        detail: String(fields.supersedes),
-      });
-    }
+    if (prior) fields.supersedes = `${c.id}@${String(prior.fields.contentHash)}`;
     const body = `\n${c.body}${c.body ? '\n' : ''}`;
-    if (store.put({ fields, body }, { scope: 'tracked', path }).created) result.created++;
-    else result.updated++;
+    const r = await ingestEntry(
+      store,
+      { fields, body },
+      { scope: 'tracked', path, principal: o.actor.principal, exists: prior !== null },
+    );
+    countIngestWrite(result, r, report);
   }
   return result;
 }
