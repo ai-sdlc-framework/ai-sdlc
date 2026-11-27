@@ -1110,3 +1110,194 @@ describe('AISDLC-1327: install entry of the project', () => {
     assert.equal(normPath(r.stdout), normPath(join(cache, '2.0.0', PIPELINE_CLI_REL)));
   });
 });
+
+// ── AISDLC-1389: never exit non-zero without an `ERROR —` line ───────────────
+
+describe('AISDLC-1389: every failure path names itself on stderr', () => {
+  const ERROR_LINE = /^resolve-pipeline-cli\.sh: ERROR — \S/m;
+
+  /** Run a script copy placed under <cwd>/scripts with an isolated HOME. */
+  function runIn(cwd, base, { env = {}, ensureBody, patch } = {}) {
+    const copy = installScriptCopy(cwd);
+    if (ensureBody !== undefined) {
+      writeFileSync(
+        join(cwd, 'scripts', 'ensure-pipeline-cli-built.sh'),
+        `#!/usr/bin/env bash\n${ensureBody}`,
+      );
+    }
+    if (patch) writeFileSync(copy, patch(readFileSync(copy, 'utf-8')));
+    const home = join(base, 'home');
+    mkdirSync(home, { recursive: true });
+    return spawnSync('bash', [copy], {
+      cwd,
+      encoding: 'utf-8',
+      env: { PATH: process.env.PATH, HOME: home, ...env },
+    });
+  }
+
+  function brokenPnpmPath(base) {
+    const bin = join(base, 'fakebin');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, 'pnpm'), '#!/usr/bin/env bash\necho "TS2322: boom" >&2\nexit 1\n');
+    chmodSync(join(bin, 'pnpm'), 0o755);
+    return `${bin}:${process.env.PATH}`;
+  }
+
+  const scenarios = {
+    'ensure helper exits non-zero without output (the silent path)': (base) => {
+      const repo = join(base, 'repo');
+      makeDogfoodRepo(repo, { dist: false });
+      return runIn(repo, base, { ensureBody: 'exit 3\n' });
+    },
+    'repo build fails': (base) => {
+      const repo = join(base, 'repo');
+      makeDogfoodRepo(repo, { dist: false });
+      return runIn(repo, base, { env: { PATH: brokenPnpmPath(base) } });
+    },
+    'ensure helper succeeds but the repo build stays unusable': (base) => {
+      const repo = join(base, 'repo');
+      makeDogfoodRepo(repo, { dist: false });
+      return runIn(repo, base, { ensureBody: 'exit 0\n' });
+    },
+    'AI_SDLC_PIPELINE_REF is not a commit': (base) => {
+      const repo = join(base, 'repo');
+      makeDogfoodRepo(repo, { dist: true });
+      return runIn(repo, base, { env: { AI_SDLC_PIPELINE_REF: 'deadbeefdeadbeef' } });
+    },
+    'main checkout has hierarchy source but no built up.js': (base) => {
+      const repo = join(base, 'repo');
+      makeDogfoodRepo(repo, { dist: true });
+      const upTs = join(repo, 'pipeline-cli', 'src', 'hierarchy', 'up.ts');
+      mkdirSync(dirname(upTs), { recursive: true });
+      writeFileSync(upTs, 'export {};\n');
+      const old = new Date(Date.now() - 60000);
+      utimesSync(upTs, old, old);
+      return runIn(repo, base);
+    },
+    'runtime dependency pin does not converge': (base) => {
+      const plugin = join(base, 'plugin');
+      createFakePipelineBin(join(plugin, PIPELINE_CLI_REL));
+      createFakeMcpBundle(plugin);
+      writeFileSync(
+        join(plugin, 'plugin.json'),
+        JSON.stringify({ runtimeDependencies: { '@ai-sdlc/pipeline-cli': '1.0.0' } }),
+      );
+      writeFileSync(
+        join(plugin, 'node_modules/@ai-sdlc/pipeline-cli/package.json'),
+        JSON.stringify({ name: '@ai-sdlc/pipeline-cli', version: '0.9.0' }),
+      );
+      mkdirSync(join(plugin, 'scripts'), { recursive: true });
+      writeFileSync(join(plugin, 'scripts', 'install-runtime-deps.sh'), 'exit 0\n');
+      const cwd = join(base, 'cwd');
+      mkdirSync(cwd, { recursive: true });
+      return runIn(cwd, base, { env: { CLAUDE_PLUGIN_DIR: plugin } });
+    },
+    'no install topology resolves': (base) => {
+      const cwd = join(base, 'cwd');
+      mkdirSync(cwd, { recursive: true });
+      return runIn(cwd, base);
+    },
+    'a set -e abort with no diagnostic of its own (EXIT-trap safety net)': (base) => {
+      const cwd = join(base, 'cwd');
+      mkdirSync(cwd, { recursive: true });
+      return runIn(cwd, base, {
+        patch: (src) => src.replace(/^PIPELINE_CLI_REL=/m, 'false\nPIPELINE_CLI_REL='),
+      });
+    },
+  };
+
+  for (const [name, run] of Object.entries(scenarios)) {
+    it(`${name}: non-zero exit, empty stdout, an ERROR — line on stderr`, () => {
+      const base = mkdtempSync(join(tmpdir(), 'aisdlc-1389-'));
+      const r = run(base);
+      assert.notEqual(r.status, 0, r.stderr);
+      assert.equal(r.stdout, '');
+      assert.match(r.stderr, ERROR_LINE, `stderr was: ${JSON.stringify(r.stderr)}`);
+      rmSync(base, { recursive: true, force: true });
+    });
+  }
+
+  it('the silent ensure path names the exit code and the rebuild command', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-1389-ensure-'));
+    const repo = join(base, 'repo');
+    makeDogfoodRepo(repo, { dist: false });
+    const r = runIn(repo, base, { ensureBody: 'exit 3\n' });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /ensure-pipeline-cli-built\.sh exited 3/);
+    assert.match(r.stderr, /pnpm --filter @ai-sdlc\/pipeline-cli build/);
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('the safety net names the line of the failed command', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-1389-net-'));
+    const cwd = join(base, 'cwd');
+    mkdirSync(cwd, { recursive: true });
+    const r = runIn(cwd, base, {
+      patch: (src) => src.replace(/^PIPELINE_CLI_REL=/m, 'false\nPIPELINE_CLI_REL='),
+    });
+    assert.match(r.stderr, /exited 1 without a diagnostic \(last failed command at line \d+\)/);
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('a successful run prints no ERROR line', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-1389-ok-'));
+    const plugin = join(base, 'plugin');
+    createFakePipelineBin(join(plugin, PIPELINE_CLI_REL));
+    createFakeMcpBundle(plugin);
+    const cwd = join(base, 'cwd');
+    mkdirSync(cwd, { recursive: true });
+    const r = runIn(cwd, base, { env: { CLAUDE_PLUGIN_DIR: plugin } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.doesNotMatch(r.stderr, /ERROR/);
+    rmSync(base, { recursive: true, force: true });
+  });
+});
+
+describe('AISDLC-1389: adopter layout with a vendored node_modules copy resolves', () => {
+  /** An adopter git repo vendoring the plugin at <repo>/ai-sdlc-plugin with its runtime deps. */
+  function adopterRepo(base) {
+    const repo = join(base, 'adopter');
+    const plugin = join(repo, 'ai-sdlc-plugin');
+    mkdirSync(plugin, { recursive: true });
+    createFakePipelineBin(join(plugin, PIPELINE_CLI_REL));
+    createFakeMcpBundle(plugin);
+    git(repo, 'init', '-q');
+    const home = join(base, 'home');
+    mkdirSync(home, { recursive: true });
+    return { repo, plugin, home };
+  }
+
+  function run(repo, plugin, home) {
+    const copy = installScriptCopy(plugin);
+    return spawnSync('bash', [copy], {
+      cwd: repo,
+      encoding: 'utf-8',
+      env: { PATH: process.env.PATH, HOME: home },
+    });
+  }
+
+  it('resolves the vendored bin from the repo root with no plugin env vars and no cache', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-1389-adopter-'));
+    const { repo, plugin, home } = adopterRepo(base);
+    const r = run(repo, plugin, home);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(normPath(r.stdout), normPath(join(plugin, PIPELINE_CLI_REL)));
+    assert.doesNotMatch(r.stderr, /ERROR/);
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('a vendored pipeline-cli package (package.json, no src) is not treated as the workspace', () => {
+    const base = mkdtempSync(join(tmpdir(), 'aisdlc-1389-vendored-'));
+    const { repo, plugin, home } = adopterRepo(base);
+    mkdirSync(join(repo, 'pipeline-cli'), { recursive: true });
+    writeFileSync(
+      join(repo, 'pipeline-cli', 'package.json'),
+      JSON.stringify({ name: '@ai-sdlc/pipeline-cli', version: '1.0.0' }),
+    );
+    const r = run(repo, plugin, home);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(normPath(r.stdout), normPath(join(plugin, PIPELINE_CLI_REL)));
+    assert.doesNotMatch(r.stderr, /ERROR|own pipeline-cli build/);
+    rmSync(base, { recursive: true, force: true });
+  });
+});

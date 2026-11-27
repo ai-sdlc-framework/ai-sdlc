@@ -61,6 +61,19 @@
 
 set -euo pipefail
 
+# AISDLC-1389: the script never exits non-zero without an `ERROR —` line on stderr.
+# Every failure path calls _error; the EXIT trap is the safety net for any path that
+# does not (a `set -e` abort, a future `exit 1`), naming the exit code and the line
+# of the last failed command.
+_ERROR_SAID=""
+_FAILED_LINE=""
+_error() {
+  echo "resolve-pipeline-cli.sh: ERROR — $*" >&2
+  _ERROR_SAID=1
+}
+trap '_FAILED_LINE=$LINENO' ERR
+trap '_rc=$?; if [ "$_rc" -ne 0 ] && [ -z "$_ERROR_SAID" ]; then echo "resolve-pipeline-cli.sh: ERROR — exited $_rc without a diagnostic${_FAILED_LINE:+ (last failed command at line $_FAILED_LINE)}; rerun with: bash -x \"${BASH_SOURCE[0]}\"" >&2; fi' EXIT
+
 STRICT="${AI_SDLC_RESOLVE_STRICT:-}"
 for arg in "$@"; do
   [ "$arg" = "--strict" ] && STRICT=1
@@ -167,7 +180,7 @@ _exit_if_mismatch() {
   mm="$(_pin_mismatch "$plugin_dir")"
   [ -z "$mm" ] && return 0
   set -- $mm
-  echo "resolve-pipeline-cli.sh: ERROR — $1 is installed at version $2 but plugin.json pins $3 in $plugin_dir; self-heal did not converge. Run: bash \"$plugin_dir/scripts/install-runtime-deps.sh\" \"$plugin_dir\"" >&2
+  _error "$1 is installed at version $2 but plugin.json pins $3 in $plugin_dir; self-heal did not converge. Run: bash \"$plugin_dir/scripts/install-runtime-deps.sh\" \"$plugin_dir\""
   exit 1
 }
 
@@ -176,9 +189,12 @@ _exit_if_mismatch() {
 # a plugin release, so inside a repo that ships the pipeline-cli workspace the
 # repo's own build beats the plugin cache. Everything diagnostic goes to stderr;
 # stdout stays path-only. Never fails the script (safe under set -e).
+# AISDLC-1389: a workspace ships the sources (pipeline-cli/src). A vendored package copy
+# (package.json + bin, no src) is an adopter install: ensure-pipeline-cli-built.sh exits 2
+# for it ("the caller keeps its own fallback"), so it must not enter this branch.
 _is_pipeline_cli_workspace() {
   local pkg="$1/pipeline-cli/package.json"
-  [ -f "$pkg" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"@ai-sdlc/pipeline-cli"' "$pkg"
+  [ -d "$1/pipeline-cli/src" ] && [ -f "$pkg" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"@ai-sdlc/pipeline-cli"' "$pkg"
 }
 
 # 0 when pipeline-cli/dist exists and no source file is newer than its newest output.
@@ -221,7 +237,7 @@ if [ -n "$REPO_WORKTREE_ROOT" ] && _is_pipeline_cli_workspace "$REPO_WORKTREE_RO
     ANCHOR="${REPO_MAIN_ROOT:-$REPO_WORKTREE_ROOT}"
     FULL_REF="$(git -C "$ANCHOR" rev-parse --verify "${AI_SDLC_PIPELINE_REF}^{commit}" 2>/dev/null || true)"
     if [ -z "$FULL_REF" ]; then
-      echo "resolve-pipeline-cli.sh: ERROR — AI_SDLC_PIPELINE_REF=$AI_SDLC_PIPELINE_REF is not a commit in $ANCHOR; unset it to use HEAD" >&2
+      _error "AI_SDLC_PIPELINE_REF=$AI_SDLC_PIPELINE_REF is not a commit in $ANCHOR; unset it to use HEAD"
       exit 1
     fi
     PIN_DIR="$ANCHOR/.ai-sdlc/pipeline-builds/$FULL_REF"
@@ -229,18 +245,18 @@ if [ -n "$REPO_WORKTREE_ROOT" ] && _is_pipeline_cli_workspace "$REPO_WORKTREE_RO
       mkdir -p "$ANCHOR/.ai-sdlc/pipeline-builds"
       git -C "$ANCHOR" worktree prune >&2 2>&1 || true
       if ! git -C "$ANCHOR" worktree add --detach "$PIN_DIR" "$FULL_REF" >&2 2>&1; then
-        echo "resolve-pipeline-cli.sh: ERROR — could not create the scratch worktree $PIN_DIR for $FULL_REF" >&2
+        _error "could not create the scratch worktree $PIN_DIR for $FULL_REF"
         exit 1
       fi
     fi
     if [ ! -d "$PIN_DIR/node_modules" ]; then
       echo "resolve-pipeline-cli.sh: installing dependencies for pinned build $FULL_REF" >&2
       if ! (cd "$PIN_DIR" && pnpm install --frozen-lockfile >&2); then
-        echo "resolve-pipeline-cli.sh: ERROR — pnpm install failed in $PIN_DIR" >&2
+        _error "pnpm install failed in $PIN_DIR"
         exit 1
       fi
     fi
-    bash "$ENSURE_BUILT" "$PIN_DIR" >&2 || { echo "resolve-pipeline-cli.sh: ERROR — pinned build at $FULL_REF failed" >&2; exit 1; }
+    bash "$ENSURE_BUILT" "$PIN_DIR" >&2 || { _error "pinned build at $FULL_REF failed"; exit 1; }
     echo "resolve-pipeline-cli.sh: using PINNED pipeline-cli build $FULL_REF ($PIN_DIR/pipeline-cli) from AI_SDLC_PIPELINE_REF, not HEAD" >&2
     printf '%s' "$PIN_DIR/pipeline-cli/bin"
     exit 0
@@ -248,7 +264,11 @@ if [ -n "$REPO_WORKTREE_ROOT" ] && _is_pipeline_cli_workspace "$REPO_WORKTREE_RO
   for BUILD_ROOT in "$REPO_MAIN_ROOT" "$REPO_WORKTREE_ROOT"; do
     [ -n "$BUILD_ROOT" ] && _is_pipeline_cli_workspace "$BUILD_ROOT" || continue
     # Build the first checkout that exists; the main checkout wins when it is a workspace.
-    if bash "$ENSURE_BUILT" "$BUILD_ROOT" >&2; then break; fi
+    ENSURE_RC=0
+    bash "$ENSURE_BUILT" "$BUILD_ROOT" >&2 || ENSURE_RC=$?
+    [ "$ENSURE_RC" -eq 0 ] && break
+    # AISDLC-1389: this exit used to print nothing of its own and relied on the child's stderr.
+    _error "ensure-pipeline-cli-built.sh exited $ENSURE_RC for $BUILD_ROOT/pipeline-cli; the repo build is unusable and the plugin install is never used here. $REBUILD_HINT"
     exit 1
   done
   # AISDLC-791: a main checkout that ships the hierarchy source must hold a build of it.
@@ -256,7 +276,7 @@ if [ -n "$REPO_WORKTREE_ROOT" ] && _is_pipeline_cli_workspace "$REPO_WORKTREE_RO
     && [ -f "$REPO_MAIN_ROOT/pipeline-cli/src/hierarchy/up.ts" ]; then
     MAIN_UP_JS="$REPO_MAIN_ROOT/pipeline-cli/dist/hierarchy/up.js"
     if [ ! -f "$MAIN_UP_JS" ] || [ "$REPO_MAIN_ROOT/pipeline-cli/src/hierarchy/up.ts" -nt "$MAIN_UP_JS" ]; then
-      echo "resolve-pipeline-cli.sh: ERROR — the main checkout's build at $REPO_MAIN_ROOT/pipeline-cli/dist/hierarchy/up.js is missing or older than src/hierarchy/up.ts; a build that old would start hierarchy sessions without the launch env the lease-push hook requires. In $REPO_MAIN_ROOT $REBUILD_HINT" >&2
+      _error "the main checkout's build at $REPO_MAIN_ROOT/pipeline-cli/dist/hierarchy/up.js is missing or older than src/hierarchy/up.ts; a build that old would start hierarchy sessions without the launch env the lease-push hook requires. In $REPO_MAIN_ROOT $REBUILD_HINT"
       exit 1
     fi
   fi
@@ -278,7 +298,7 @@ if [ -n "$REPO_WORKTREE_ROOT" ] && _is_pipeline_cli_workspace "$REPO_WORKTREE_RO
     REPO_WARN="${REPO_WARN:+$REPO_WARN; }$LABEL build at $ROOT/pipeline-cli is missing or older than its sources"
   done
   # AISDLC-1001: the monorepo never runs on the plugin-cache CLI.
-  echo "resolve-pipeline-cli.sh: ERROR — ${REPO_WARN:-the repo pipeline-cli build is unusable}; refusing to fall back to the plugin install. $REBUILD_HINT" >&2
+  _error "${REPO_WARN:-the repo pipeline-cli build is unusable}; refusing to fall back to the plugin install. $REBUILD_HINT"
   exit 1
 fi
 
@@ -528,6 +548,7 @@ if [ -n "$DIAG_DIR" ] && [ -d "$DIAG_DIR" ]; then
   fi
 fi
 
+_ERROR_SAID=1
 {
   echo "resolve-pipeline-cli.sh: ERROR — @ai-sdlc/pipeline-cli binary not found."
   echo ""
