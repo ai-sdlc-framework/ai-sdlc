@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildContextCli, resolveRole } from './context.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -93,6 +93,49 @@ exports.registerKnowledgeBackends = (r) =>
     expect(calls).toEqual(['put:tracked', 'put:protected', 'list']);
     expect(existsSync(join(dir, '.ai-sdlc/knowledge'))).toBe(false);
     expect(existsSync(join(dir, '.ai-sdlc/knowledge-protected'))).toBe(false);
+  });
+});
+
+describe('cli-context check-backend (AISDLC-1433)', () => {
+  const run = async (format: string) => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const o = vi.spyOn(process.stdout, 'write').mockImplementation((c) => !!out.push(String(c)));
+    const e = vi.spyOn(process.stderr, 'write').mockImplementation((c) => !!err.push(String(c)));
+    try {
+      await buildContextCli([
+        'check-backend',
+        '--format',
+        format,
+        '--project-dir',
+        dir,
+      ]).parseAsync();
+    } finally {
+      o.mockRestore();
+      e.mockRestore();
+    }
+    return { out: out.join(''), err: err.join('') };
+  };
+
+  it('reports an unregistered backend instead of failing before the command runs', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cli-context-'));
+    mkdirSync(join(dir, '.ai-sdlc'));
+    writeFileSync(join(dir, '.ai-sdlc/context.yaml'), 'knowledge:\n  backend: remote\n');
+    const json = JSON.parse((await run('json')).out) as { resolved: boolean; error: string };
+    expect(json.resolved).toBe(false);
+    expect(json.error).toMatch(/'remote' is not registered/);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+    const text = await run('text');
+    expect(text.out).toContain('backend remote: does not open');
+    expect(text.err).toContain('not registered');
+  });
+
+  it('passes the files backend with no local paths', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'cli-context-'));
+    const json = JSON.parse((await run('json')).out) as { backend: string; opened: boolean };
+    expect(json).toMatchObject({ backend: 'files', opened: true, localPaths: [] });
+    expect(process.exitCode ?? 0).toBe(0);
   });
 });
 

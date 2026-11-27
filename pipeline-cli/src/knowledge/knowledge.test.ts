@@ -7,7 +7,12 @@ import { classifyEntry } from './classify.js';
 import { loadKnowledgeConfig } from './config.js';
 import { hashValue } from './entry.js';
 import { DEFAULT_ONTOLOGY, parseOntology } from './ontology.js';
-import { checkKnowledgeScope, checkKnowledgeScopeRange } from './scope-check.js';
+import { registerKnowledgeBackend, type KnowledgeStore } from './knowledge-store.js';
+import {
+  checkKnowledgeBackend,
+  checkKnowledgeScope,
+  checkKnowledgeScopeRange,
+} from './scope-check.js';
 import { findProtectedCitations, validateKnowledge } from './store.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
@@ -373,5 +378,155 @@ describe('checkKnowledgeScope with a protected root outside the repository', () 
     });
     execFileSync('git', ['init', '-q'], { cwd: dir });
     expect(checkKnowledgeScope(dir)).toEqual([]);
+  });
+});
+
+describe('backend local paths (AISDLC-1433)', () => {
+  /** An in-memory store; `knowledge.<backend>.paths` becomes `localPaths()` (absent: none). */
+  const memory = (kind: string, withPaths: boolean) =>
+    registerKnowledgeBackend(kind, (_cfg, ctx) => {
+      const opts = (ctx.options ?? {}) as { paths?: string[]; fail?: string; throwPaths?: boolean };
+      if (opts.fail) throw new Error(opts.fail);
+      const store: KnowledgeStore = {
+        kind,
+        get: () => null,
+        put: () => ({ path: 'x', created: true }),
+        update: () => null,
+        list: () => [],
+        listRaw: () => [],
+      };
+      if (withPaths) {
+        store.localPaths = () => {
+          if (opts.throwPaths) throw new Error('no replica');
+          return opts.paths ?? [];
+        };
+      }
+      return store;
+    });
+  memory('lp-memory', true);
+  memory('lp-none', false);
+
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+      cwd: root,
+      encoding: 'utf-8',
+    }).trim();
+  const commit = (msg: string) => {
+    git('add', '-A', '-f');
+    git('commit', '-q', '-m', msg);
+    return git('rev-parse', 'HEAD');
+  };
+  const repo = (backend: string, opts: string, files: Record<string, string> = {}) => {
+    project({
+      '.ai-sdlc/context.yaml': `knowledge:\n  backend: ${backend}\n  ${backend}:\n${opts}`,
+      '.gitignore': '.ai-sdlc/knowledge-protected/\n',
+      ...files,
+    });
+    git('init', '-q');
+    return commit('base');
+  };
+  const paths = (...p: string[]) => `    paths: [${p.map((x) => `'${x}'`).join(', ')}]\n`;
+
+  it('reports a declared path that is not git-ignored, and one with tracked files', () => {
+    repo('lp-memory', paths('kb-cache', 'kb-replica'), { 'kb-replica/a.md': 'x' });
+    writeFileSync(join(root, '.gitignore'), '.ai-sdlc/knowledge-protected/\nkb-replica/\n');
+    const v = checkKnowledgeScope(root);
+    expect(v).toContain('kb-cache/ (knowledge backend local path is not git-ignored)');
+    expect(v).toContain(
+      'kb-replica/a.md (file under knowledge backend local path is tracked by git)',
+    );
+    expect(v).toHaveLength(2);
+  });
+
+  it('passes an ignored, untracked declared path and skips one outside the repository', () => {
+    repo('lp-memory', paths('kb-cache', '../elsewhere'), {
+      '.gitignore': '.ai-sdlc/knowledge-protected/\nkb-cache\n',
+    });
+    expect(checkKnowledgeScope(root)).toEqual([]);
+  });
+
+  it('fails closed when localPaths() throws', () => {
+    repo('lp-memory', '    throwPaths: true\n');
+    expect(checkKnowledgeScope(root).join()).toContain('localPaths() threw (no replica)');
+    expect(checkKnowledgeScopeRange(root, ['HEAD']).join()).toContain('localPaths() threw');
+  });
+
+  it('reports a declared path present in a pushed commit', () => {
+    const base = repo('lp-memory', paths('kb-cache'), {
+      '.gitignore': '.ai-sdlc/knowledge-protected/\nkb-cache/\n',
+    });
+    mkdirSync(join(root, 'kb-cache'), { recursive: true });
+    writeFileSync(join(root, 'kb-cache/r.json'), '{}');
+    commit('add');
+    rmSync(join(root, 'kb-cache/r.json'));
+    const head = commit('remove');
+    expect(checkKnowledgeScope(root)).toEqual([]);
+    const v = checkKnowledgeScopeRange(root, [head, `^${base}`]);
+    expect(v).toHaveLength(1);
+    expect(v[0]).toContain(
+      'kb-cache/r.json (file under knowledge backend local path is in pushed commit',
+    );
+  });
+
+  it('leaves a backend without localPaths unchanged', () => {
+    const base = repo('lp-none', paths('kb-cache'));
+    writeFileSync(join(root, 'kb-cache'), 'x');
+    const head = commit('add');
+    expect(checkKnowledgeScope(root)).toEqual([]);
+    expect(checkKnowledgeScopeRange(root, [head, `^${base}`])).toEqual([]);
+  });
+
+  describe('checkKnowledgeBackend', () => {
+    it('reports files as resolved and open with no local paths', () => {
+      repo('files', '');
+      expect(checkKnowledgeBackend(root)).toMatchObject({
+        backend: 'files',
+        resolved: true,
+        opened: true,
+        error: null,
+        localPaths: [],
+      });
+    });
+
+    it('reports an unresolved module', () => {
+      project({
+        '.ai-sdlc/context.yaml':
+          'knowledge:\n  backend: lp-absent\n  backendModule: ai-sdlc-no-such-backend\n',
+        'package.json': '{"name":"p","private":true}',
+      });
+      const r = checkKnowledgeBackend(root);
+      expect(r.resolved).toBe(false);
+      expect(r.opened).toBe(false);
+      expect(r.error).toContain('failed to load');
+    });
+
+    it('reports a factory that does not open', () => {
+      repo('lp-memory', "    fail: 'bad endpoint'\n");
+      expect(checkKnowledgeBackend(root)).toMatchObject({
+        resolved: true,
+        opened: false,
+        error: 'bad endpoint',
+      });
+    });
+
+    it('reports a localPaths() failure after opening', () => {
+      repo('lp-memory', '    throwPaths: true\n');
+      const r = checkKnowledgeBackend(root);
+      expect(r.opened).toBe(true);
+      expect(r.error).toContain('no replica');
+    });
+
+    it('reports each declared path and whether it is ignored; zero paths for a bare backend', () => {
+      repo('lp-memory', paths('kb-cache', 'kb-open', '../outside'), {
+        '.gitignore': 'kb-cache/\n',
+      });
+      expect(checkKnowledgeBackend(root).localPaths).toEqual([
+        { path: 'kb-cache', inRepo: true, ignored: true },
+        { path: 'kb-open', inRepo: true, ignored: false },
+        { path: '../outside', inRepo: false, ignored: false },
+      ]);
+      repo('lp-none', '');
+      expect(checkKnowledgeBackend(root).localPaths).toEqual([]);
+    });
   });
 });

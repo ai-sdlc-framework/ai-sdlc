@@ -64,6 +64,7 @@ Checks currently implemented (see `DOCTOR_CHECKS` in `doctor-checks.ts`):
 
 | id | What it audits | Reuses |
 |---|---|---|
+| `knowledge-backend` | The RFC-0053 knowledge store backend (`knowledge.backend` in `.ai-sdlc/context.yaml`). `files` (the default) passes without running anything. For any other backend: fail when `knowledge.backendModule` does not resolve or the backend is not registered, fail when its factory does not open (or `localPaths()` throws), fail for each path it declares in `localPaths()` that is inside the repository and not git-ignored; warn when it declares no local paths; otherwise pass (AISDLC-1433). See [knowledge-store.md](knowledge-store.md#store-backend-dec-0427) | `cli-context check-backend --format json` |
 | `plugin-version` | Installed plugin version vs. latest published | `ai-sdlc-plugin/hooks/check-plugin-version.js --print` (`--deps` prints only the runtime dependency lines, with no network call, AISDLC-1271) |
 | `runtime-deps-pins` | `runtimeDependencies` pins resolve to what's installed; flags `^0.x` caret traps (AISDLC-574) | `ai-sdlc-plugin/scripts/check-stale-runtime-deps.mjs` (AISDLC-580) |
 | `manifests-agree` | `plugin.json` and `.claude-plugin/plugin.json` agree on version + pins (AISDLC-558) | — |

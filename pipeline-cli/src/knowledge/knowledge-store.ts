@@ -79,6 +79,13 @@ export interface KnowledgeStore {
   list(scope: ListScope | { scope: StoreScope; trunk: string }): StoredEntry[];
   /** Every stored file of a root (or of all configured roots) with its parse result or error. */
   listRaw(scope: ListScope): RawStoredEntry[];
+  /**
+   * Project-relative paths (files or directories) where this backend keeps content locally,
+   * such as a replica or cache (AISDLC-1433). `cli-context check-scope` holds each to the
+   * protected-root rules: git-ignored, untracked, absent from pushed commits. Optional: the
+   * files backend declares none, because its roots are already checked.
+   */
+  localPaths?(): string[];
 }
 
 /**
@@ -331,22 +338,22 @@ function loadBackendModule(spec: string, backend: string, projectRoot: string): 
 }
 
 /**
- * Open the knowledge store for a `KnowledgeConfig` (or the roots a caller writes to plus the
- * configured backend). `backend` is required: a missing one throws rather than picking files.
- * `files` gives `FilesKnowledgeStore` (no backend options); relative roots resolve against
- * `projectRoot`. Any other backend must be registered, by `backendModule` (resolved from
- * `projectRoot`) or in process, and its factory receives `{ projectRoot, options }`;
- * otherwise this throws `KnowledgeBackendError` naming the backend and the module
- * (DEC-0427, fail closed). `projectRoot` is required: no store opens without its project.
+ * The factory of the selected backend, or `null` for the built-in `files` backend. Loads
+ * `backendModule` (resolved from `projectRoot`) when set. Throws `KnowledgeBackendError` when
+ * no backend is selected, the module fails to load, or the backend is not registered
+ * (DEC-0427, fail closed). Does not call the factory.
  */
-export function openKnowledgeStore(cfg: KnowledgeStoreRoots, projectRoot: string): KnowledgeStore {
-  const backend = (cfg as Partial<KnowledgeStoreRoots>).backend;
+export function resolveKnowledgeBackend(
+  cfg: KnowledgeBackendSelection,
+  projectRoot: string,
+): KnowledgeBackendFactory | null {
+  const backend = (cfg as Partial<KnowledgeBackendSelection>).backend;
   if (typeof backend !== 'string' || backend === '') {
     throw new KnowledgeBackendError(
       'no knowledge backend selected; pass knowledge.backend from the loaded config (refusing to assume files)',
     );
   }
-  if (backend === DEFAULT_KNOWLEDGE_BACKEND) return new FilesKnowledgeStore(cfg, projectRoot);
+  if (backend === DEFAULT_KNOWLEDGE_BACKEND) return null;
   const spec = cfg.backendModule ?? null;
   if (spec !== null) loadBackendModule(spec, backend, projectRoot);
   const factory = backends.get(backend);
@@ -357,5 +364,20 @@ export function openKnowledgeStore(cfg: KnowledgeStoreRoots, projectRoot: string
       }); refusing to fall back to files`,
     );
   }
+  return factory;
+}
+
+/**
+ * Open the knowledge store for a `KnowledgeConfig` (or the roots a caller writes to plus the
+ * configured backend). `backend` is required: a missing one throws rather than picking files.
+ * `files` gives `FilesKnowledgeStore` (no backend options); relative roots resolve against
+ * `projectRoot`. Any other backend must be registered, by `backendModule` (resolved from
+ * `projectRoot`) or in process, and its factory receives `{ projectRoot, options }`;
+ * otherwise this throws `KnowledgeBackendError` naming the backend and the module
+ * (DEC-0427, fail closed). `projectRoot` is required: no store opens without its project.
+ */
+export function openKnowledgeStore(cfg: KnowledgeStoreRoots, projectRoot: string): KnowledgeStore {
+  const factory = resolveKnowledgeBackend(cfg, projectRoot);
+  if (factory === null) return new FilesKnowledgeStore(cfg, projectRoot);
   return factory(cfg, { projectRoot, options: cfg.backendOptions ?? null });
 }

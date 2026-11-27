@@ -76,6 +76,7 @@ import {
   hookPreamble,
   checkConfigManifest,
   checkWorkflowDocument,
+  checkKnowledgeBackend,
   fixConfigManifest,
   fixWorktreeHooks,
   checkForcePushPolicy,
@@ -1700,6 +1701,96 @@ describe('checkWorkflowDocument (RFC-0056 phase 2)', () => {
     expect(bad.severity).toBe('fail');
     expect(bad.title).toContain('when-identifier');
     expect(run('nope').severity).toBe('warn');
+  });
+});
+
+describe('checkKnowledgeBackend (AISDLC-1433)', () => {
+  function withBackend(yaml: string): void {
+    mkdirSync(join(tmpDir, '.ai-sdlc'), { recursive: true });
+    writeFileSync(join(tmpDir, '.ai-sdlc', 'context.yaml'), yaml);
+  }
+  function withContextCli(): void {
+    mkdirSync(join(tmpDir, 'pipeline-cli', 'bin'), { recursive: true });
+    writeFileSync(join(tmpDir, 'pipeline-cli', 'bin', 'cli-context.mjs'), '');
+  }
+  const report = (over: Record<string, unknown>) =>
+    JSON.stringify({
+      backend: 'remote',
+      resolved: true,
+      opened: true,
+      error: null,
+      localPaths: [{ path: '.kb-cache', inRepo: true, ignored: true }],
+      ...over,
+    });
+  const run = (stdout: string) => {
+    const calls: string[][] = [];
+    const results = checkKnowledgeBackend(
+      makeCtx(
+        makeAdapters({
+          runCommand: (_cmd, args) => {
+            calls.push(args);
+            return { stdout, exitCode: 0 };
+          },
+        }),
+      ),
+    );
+    return { results, calls };
+  };
+
+  it('passes the files backend (default, explicit, unreadable config) without running cli-context', () => {
+    const none = run('');
+    expect(none.results.map((r) => r.severity)).toEqual(['pass']);
+    expect(none.calls).toEqual([]);
+    withBackend('knowledge:\n  backend: files\n');
+    expect(run('').results[0].severity).toBe('pass');
+    withBackend('knowledge: [unclosed\n');
+    expect(run('').results[0].severity).toBe('pass');
+  });
+
+  it('warns when cli-context cannot be located or prints no report', () => {
+    withBackend('knowledge:\n  backend: remote\n');
+    expect(run('').results[0].severity).toBe('warn');
+    withContextCli();
+    const r = run('nope');
+    expect(r.results[0].severity).toBe('warn');
+    expect(r.calls[0]).toContain('check-backend');
+  });
+
+  it('fails an unresolved module, a factory that does not open, and a localPaths error', () => {
+    withBackend('knowledge:\n  backend: remote\n');
+    withContextCli();
+    const unresolved = run(report({ resolved: false, opened: false, error: 'not registered' }));
+    expect(unresolved.results[0].severity).toBe('fail');
+    expect(unresolved.results[0].title).toContain('does not resolve: not registered');
+    const closed = run(report({ opened: false, error: 'bad endpoint' }));
+    expect(closed.results[0].severity).toBe('fail');
+    expect(closed.results[0].title).toContain('factory does not open: bad endpoint');
+    const threw = run(report({ error: 'localPaths() threw' }));
+    expect(threw.results[0].severity).toBe('fail');
+  });
+
+  it('fails each declared path that is not git-ignored; ignores paths outside the repo', () => {
+    withBackend('knowledge:\n  backend: remote\n');
+    withContextCli();
+    const { results } = run(
+      report({
+        localPaths: [
+          { path: '.kb-cache', inRepo: true, ignored: false },
+          { path: '.kb-replica', inRepo: true, ignored: false },
+          { path: '../outside', inRepo: false, ignored: false },
+        ],
+      }),
+    );
+    expect(results.map((r) => r.severity)).toEqual(['fail', 'fail']);
+    expect(results[0].title).toContain('.kb-cache is not git-ignored');
+  });
+
+  it('warns when a non-files backend declares zero paths and passes when all are ignored', () => {
+    withBackend('knowledge:\n  backend: remote\n');
+    withContextCli();
+    expect(run(report({ localPaths: [] })).results[0].severity).toBe('warn');
+    const ok = run(report({}));
+    expect(ok.results.map((r) => r.severity)).toEqual(['pass']);
   });
 });
 

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1433
 title: A knowledge backend declares the local paths that check-scope and doctor verify
-status: To Do
+status: In Progress
 priority: medium
 labels:
   - pipeline-cli
