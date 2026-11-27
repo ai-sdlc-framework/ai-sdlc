@@ -111,6 +111,16 @@ return no entries, and writes create the folders they need.
   `AI_SDLC_PR_BODY_FILE` to enable this check; until it does, the check runs only when a
   pusher sets the variable.
 
+## Sync contract
+
+A store backend that syncs from a remote source (RFC-0053 amendment of 2026-11-26, the
+item-9 decision record) writes the backend's own replica that `list()` reads, then calls
+`rebuildIndex` (`pipeline-cli/src/knowledge/retrieval/service.ts`). Nothing but rebuild
+writes the index; the index stays derived, so RFC-0053 OQ-2 is unchanged.
+
+With a configured API embedder each rebuild re-embeds every entry; there is no embedding
+cache. A `contentHash` cache is a follow-up only if measured cost requires it.
+
 ## Known gaps
 
 - The agent caps (authority `inferred`, confidence 0.85, `reverify` note) apply only when
