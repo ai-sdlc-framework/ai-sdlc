@@ -152,6 +152,27 @@ return no entries, and writes create the folders they need.
   `AI_SDLC_PR_BODY_FILE` to enable this check; until it does, the check runs only when a
   pusher sets the variable.
 
+## Generated records ingest
+
+`node pipeline-cli/bin/cli-context.mjs ingest --source generated --file <path>` writes the
+records of a JSON file to the tracked root (AISDLC-1436, the item-11 decision record). It
+is not an enterprise-gated feature: it reads only the file the operator names, and is
+outside the enterprise gate. `--file` is required with this source.
+
+The file is a JSON array of `{id, trunk, type, value, source, proof}` records, all strings.
+Each valid record is written like any other ingest source: re-ingest is idempotent by
+`contentHash`, and a changed `value` rewrites the entry with `supersedes`. Entries get
+decay `seasonal` and confidence 0.8.
+
+Authority is `specialist` only when `proof` is `allowlisted-command:<id>::<expected>` and
+`<id>` is in `knowledge.promotion.commands`; the command is not run at ingest. Any other
+proof (a path, a test id, free text, or a command id outside the allowlist) is `inferred`.
+
+A record with a missing or non-string field, an id outside `[a-z0-9._-]`, or fields that
+fail entry validation (unknown trunk or type, for example) is reported on stderr with its
+index and skipped; the other records are still written and the run does not fail. The
+write interface is unchanged: this source adds no `put`/`update` signature change.
+
 ## Sync contract
 
 A store backend that syncs from a remote source (RFC-0053 amendment of 2026-11-26, the

@@ -4,6 +4,12 @@
  * knowledge entries. Repo artifacts become `specialist` with the proof set to the
  * source id; no adapter ever writes `canonical`. Re-ingest is idempotent by
  * contentHash, and a changed source rewrites the entry with a `supersedes` record.
+ *
+ * The `generated` source (AISDLC-1436) reads a JSON array of generator records from a
+ * file the operator names with `--file`. It is outside the enterprise gate. A record is
+ * `specialist` only when its proof is an `allowlisted-command:` proof whose id is in the
+ * configured allowlist (the command is not run here); any other proof is `inferred`.
+ * Invalid records are reported and skipped instead of failing the run.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -16,7 +22,14 @@ import { openKnowledgeStore, type KnowledgeBackendSelection } from './knowledge-
 import type { Ontology } from './ontology.js';
 import { slugify } from './ingest-sections.js';
 
-export const INGEST_SOURCES = ['decisions', 'rfc', 'reviews', 'events', 'tasks'] as const;
+export const INGEST_SOURCES = [
+  'decisions',
+  'rfc',
+  'reviews',
+  'events',
+  'tasks',
+  'generated',
+] as const;
 export type IngestSource = (typeof INGEST_SOURCES)[number];
 
 export interface Candidate {
@@ -30,6 +43,8 @@ export interface Candidate {
   /** Source id (DEC-0001, RFC-0053, AISDLC-1, ...). */
   proof: string;
   body: string;
+  /** Defaults to `specialist`; the `generated` source sets it per record. */
+  authority?: 'specialist' | 'inferred';
 }
 
 export interface IngestResult {
@@ -44,6 +59,12 @@ export interface IngestOptions extends KnowledgeBackendSelection {
   ontology: Ontology;
   observed: string;
   eventsFile?: string;
+  /** JSON array of generator records; required by the `generated` source. */
+  generatedFile?: string;
+  /** Command allowlist (`knowledge.allowlistedCommands`); read by the `generated` source. */
+  allowlistedCommands?: Record<string, string[]>;
+  /** Where skipped-record reports go; defaults to stderr. */
+  report?: (line: string) => void;
   /** Recorded on the `superseded` events this ingest writes. */
   actor: Actor;
 }
@@ -209,15 +230,71 @@ function taskCandidates(o: IngestOptions): Candidate[] {
   return out;
 }
 
+const GENERATED_FIELDS = ['id', 'trunk', 'type', 'value', 'source', 'proof'] as const;
+const SAFE_ID = /^[a-z0-9][a-z0-9._-]*$/i;
+const COMMAND_PROOF = 'allowlisted-command:';
+
+/** `specialist` only for an `allowlisted-command:<id>::<expected>` proof with `<id>` allowlisted. */
+export function generatedAuthority(
+  proof: string,
+  allowlist: Record<string, string[]> = {},
+): 'specialist' | 'inferred' {
+  if (!proof.startsWith(COMMAND_PROOF)) return 'inferred';
+  const rest = proof.slice(COMMAND_PROOF.length);
+  const i = rest.indexOf('::');
+  if (i <= 0 || rest.slice(i + 2) === '') return 'inferred';
+  return Object.hasOwn(allowlist, rest.slice(0, i)) ? 'specialist' : 'inferred';
+}
+
+function generatedCandidates(o: IngestOptions): Candidate[] {
+  if (!o.generatedFile) throw new Error('--source generated requires --file <path>');
+  const report = o.report ?? ((line: string) => process.stderr.write(`${line}\n`));
+  const parsed: unknown = JSON.parse(readFileSync(o.generatedFile, 'utf-8'));
+  if (!Array.isArray(parsed)) throw new Error(`${o.generatedFile}: expected a JSON array`);
+  const out: Candidate[] = [];
+  parsed.forEach((raw: unknown, index) => {
+    const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+    const bad = GENERATED_FIELDS.filter((k) => typeof r[k] !== 'string' || r[k] === '');
+    if (bad.length > 0) {
+      report(`skipped record ${index}: missing or non-string ${bad.join(', ')}`);
+      return;
+    }
+    const s = r as Record<(typeof GENERATED_FIELDS)[number], string>;
+    if (!SAFE_ID.test(s.id)) {
+      report(`skipped record ${index}: id '${s.id}' must match ${String(SAFE_ID)}`);
+      return;
+    }
+    const c: Candidate = {
+      id: s.id,
+      trunk: s.trunk,
+      type: s.type,
+      value: oneLine(s.value),
+      decay: 'seasonal',
+      source: s.source,
+      proof: s.proof,
+      body: '',
+      authority: generatedAuthority(s.proof, o.allowlistedCommands),
+    };
+    const errors = validateEntryFields(candidateFields(c, o.observed), o.ontology);
+    if (errors.length > 0) {
+      report(`skipped record ${index} (${s.id}): ${errors.join('; ')}`);
+      return;
+    }
+    out.push(c);
+  });
+  return out;
+}
+
 const ADAPTERS: Record<IngestSource, (o: IngestOptions) => Candidate[]> = {
   decisions: decisionCandidates,
   rfc: rfcCandidates,
   reviews: reviewCandidates,
   events: eventCandidates,
   tasks: taskCandidates,
+  generated: generatedCandidates,
 };
 
-/** Build the entries an adapter would write. Authority is always `specialist`. */
+/** Build the entries an adapter would write. Authority is `specialist` unless the candidate sets it. */
 export function collectCandidates(kind: IngestSource, o: IngestOptions): Candidate[] {
   return ADAPTERS[kind](o);
 }
@@ -229,7 +306,7 @@ export function candidateFields(c: Candidate, observed: string): Record<string, 
     type: c.type,
     value: c.value,
     confidence: 0.8,
-    authority: 'specialist',
+    authority: c.authority ?? 'specialist',
     scope: 'internal',
     source: c.source,
     observed,

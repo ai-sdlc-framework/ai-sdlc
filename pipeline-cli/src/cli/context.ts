@@ -422,11 +422,16 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
     )
     .command(
       'ingest',
-      'Ingest decisions, RFCs, reviews, orchestrator events or backlog tasks as knowledge entries',
+      'Ingest decisions, RFCs, reviews, orchestrator events, backlog tasks or a generated JSON file as knowledge entries',
       (y) =>
         y
           .option('source', { type: 'string', choices: INGEST_SOURCES, demandOption: true })
           .option('events-file', { type: 'string', describe: 'Orchestrator _events.jsonl path' })
+          .option('file', {
+            type: 'string',
+            describe:
+              'JSON array of {id, trunk, type, value, source, proof} records for --source generated (required there). Reads a file you name; outside the enterprise gate',
+          })
           .option('observed', { type: 'string', default: now().toISOString().slice(0, 10) }),
       (args) => {
         const projectDir = String(args['project-dir']);
@@ -441,6 +446,8 @@ export function buildContextCli(argv: string[] = hideBin(process.argv)): Argv {
           ontology: loadOntology(trackedRootAbs).ontology,
           observed: String(args.observed),
           eventsFile: args['events-file'] as string | undefined,
+          generatedFile: args.file as string | undefined,
+          allowlistedCommands: config.allowlistedCommands,
           actor: resolveActor(projectDir),
         });
         process.stdout.write(
