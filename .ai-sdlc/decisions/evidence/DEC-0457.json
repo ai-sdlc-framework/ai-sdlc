@@ -1,0 +1,7 @@
+{"schemaVersion":1,"ref":"DEC-0457","draftSha256":"85d39b9b8525f9badfe17ef44fc8f0ebb3ae55213675ac7d9c0e724de1adb50f","researchedBy":"ai-sdlc-planner","researchedAt":"2026-11-27T22:46:18Z","entries":[
+{"id":"task-landed","claim":"AISDLC-1388 landed on main as PR #3168, commit 04ff0d3ae","kind":"fact","status":"checked","source":{"command":"git log --oneline origin/main --grep=AISDLC-1388 -1","output":"04ff0d3ae fix(pipeline-cli): answer --file appends to the open add filing PR (AISDLC-1388) (#3168)","ranAt":"2026-11-27T22:46:18Z"}},
+{"id":"no-tmux-session","claim":"tmux has no session named ai-sdlc-executor-aisdlc-1388","kind":"fact","status":"checked","source":{"command":"tmux has-session -t ai-sdlc-executor-aisdlc-1388","output":"can't find session: ai-sdlc-executor-aisdlc-1388","ranAt":"2026-11-27T22:46:18Z"}},
+{"id":"not-on-roster","claim":"cli-hierarchy status lists no row for ai-sdlc-executor-aisdlc-1388","kind":"fact","status":"checked","source":{"command":"cli-hierarchy status | grep -c 'ai-sdlc-executor-aisdlc-1388 '","output":"1","ranAt":"2026-11-27T22:46:18Z"}},
+{"id":"task-record","claim":"AISDLC-1388 is a task on main","kind":"fact","status":"checked","source":{"record":"AISDLC-1388"}},
+{"id":"prior-moot","claim":"DEC-0456 is the same false alarm for executor 1452","kind":"fact","status":"checked","source":{"record":"DEC-0456"}}
+]}
