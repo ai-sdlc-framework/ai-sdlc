@@ -133,7 +133,7 @@ function realIngesterBin(dir) {
 
 function runHook(script, env) {
   const started = Date.now();
-  const res = spawnSync(script === HOOK_SH ? 'bash' : process.execPath, [script], {
+  const res = spawnSync(script.endsWith('.sh') ? 'bash' : process.execPath, [script], {
     env,
     input: '{"hook_event_name":"Stop"}',
     encoding: 'utf-8',
@@ -349,7 +349,17 @@ await new Promise((r) => setTimeout(r, 6000));`,
     assert.equal(failing.stdout + failing.stderr, '');
     const missing = sandbox('stub-missing');
     plantTranscripts(missing.dir, 500);
-    const none = runHook(HOOK_SH, { ...missing.env, PIPELINE_CLI_BIN: join(missing.dir, 'nope') });
+    // Run a copy of the hook with no pipeline-cli beside it: from the real plugin
+    // dir the hook would fall back to the checkout's own ingester, which records
+    // no pid and races the teardown removing its usage dir (ENOTEMPTY).
+    const isolated = join(missing.dir, 'plugin', 'hooks');
+    mkdirSync(isolated, { recursive: true });
+    for (const f of ['usage-ingest.js', 'usage-ingest.sh'])
+      cpSync(join(here, f), join(isolated, f));
+    const none = runHook(join(isolated, 'usage-ingest.sh'), {
+      ...missing.env,
+      PIPELINE_CLI_BIN: join(missing.dir, 'nope'),
+    });
     assert.equal(none.status, 0);
     assert.ok(none.ms < hookTimeoutMs());
     assert.equal(none.stdout + none.stderr, '');
