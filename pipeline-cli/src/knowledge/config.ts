@@ -17,6 +17,12 @@ export interface KnowledgeConfig {
   backend: string;
   /** Bare npm package specifier that registers non-files backends; resolved from the project root. */
   backendModule: string | null;
+  /**
+   * The raw `knowledge.<backend>` block (for `backend: remote`, `knowledge.remote`), carried
+   * through unvalidated for the backend's factory to validate; `null` when absent or for
+   * `files`, which takes no options (AISDLC-1432).
+   */
+  backendOptions: unknown;
   trackedRoot: string;
   protectedRoot: string;
   /** Optional raw data-room root (RFC-0053 OQ-7), indexed read-only at scope protected. Unset by default. */
@@ -37,6 +43,7 @@ export function loadKnowledgeConfig(projectRoot: string): KnowledgeConfig {
   const config: KnowledgeConfig = {
     backend: DEFAULT_KNOWLEDGE_BACKEND,
     backendModule: null,
+    backendOptions: null,
     trackedRoot: DEFAULT_TRACKED_ROOT,
     protectedRoot: DEFAULT_PROTECTED_ROOT,
     dataRoomRoot: null,
@@ -54,6 +61,9 @@ export function loadKnowledgeConfig(projectRoot: string): KnowledgeConfig {
   }
   if (typeof knowledge.backendModule === 'string' && knowledge.backendModule !== '') {
     config.backendModule = knowledge.backendModule;
+  }
+  if (config.backend !== DEFAULT_KNOWLEDGE_BACKEND && Object.hasOwn(knowledge, config.backend)) {
+    config.backendOptions = knowledge[config.backend] ?? null;
   }
   if (typeof knowledge.trackedRoot === 'string' && knowledge.trackedRoot !== '') {
     config.trackedRoot = knowledge.trackedRoot;

@@ -67,6 +67,30 @@ specifiers are refused. Selection fails closed: an unregistered backend or a mod
 fails to load raises `KnowledgeBackendError`, `cli-context` exits 1, and the surfacing hook
 surfaces nothing and prints the error to stderr. It never falls back to files.
 
+A registered factory has the signature `(cfg, { projectRoot, options }) => KnowledgeStore`
+(`KnowledgeBackendFactory`, AISDLC-1432). `cfg` holds the roots and the backend selection;
+`projectRoot` is the project the store is opened for (always set: every
+`openKnowledgeStore` call passes it, so relative roots and `backendModule` never resolve
+against the working directory); `options` is the raw `knowledge.<backend>` block of
+`.ai-sdlc/context.yaml`, or `null` when the block is absent. For `backend: remote` that is
+the `knowledge.remote` mapping:
+
+```yaml
+knowledge:
+  backend: remote
+  backendModule: '@example/knowledge-remote'
+  remote:
+    endpoint: https://kb.example.com
+    credentialsRef: env:KB_TOKEN
+```
+
+`loadKnowledgeConfig` carries the block through unvalidated as `backendOptions` (unknown
+keys and nested values arrive unchanged); the backend owns validation. The built-in
+`files` backend takes no options and ignores a `knowledge.files` block.
+
+Release note (0.45.0 factory type): the registered backend factory is now
+`(cfg, { projectRoot, options })`; replace `(cfg, projectRoot)`.
+
 The module is loaded with `require`, so an ES-module backend package (`"type": "module"`)
 relies on `require(esm)`, which runs without a flag from Node 22.12.0. `pipeline-cli`
 declares `engines.node` `>=22.12.0` for that reason (AISDLC-1427); on older Node an

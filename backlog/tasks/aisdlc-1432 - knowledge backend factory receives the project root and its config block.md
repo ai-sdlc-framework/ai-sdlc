@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1432
 title: Knowledge backend factory receives the project root and its config block
-status: To Do
+status: In Progress
 priority: high
 labels:
   - pipeline-cli

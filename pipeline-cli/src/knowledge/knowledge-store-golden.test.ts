@@ -75,7 +75,7 @@ describe('entry bytes on disk (golden)', () => {
       "
     `);
 
-    expect(supersedeEntry({ backend: 'files' }, tracked, 'a', 'b', HUMAN).ok).toBe(true);
+    expect(supersedeEntry({ backend: 'files' }, tracked, 'a', 'b', HUMAN, root).ok).toBe(true);
     expect(read(join(tracked, 'systems/b.md'))).toMatchInlineSnapshot(`
       "---
       id: b
@@ -215,12 +215,17 @@ describe('entry bytes on disk (golden)', () => {
       "
     `);
 
-    const captured = captureFact({ backend: 'files' }, prot, {
-      id: 'fact-1',
-      value: 'Revenue grew',
-      sourceDoc: 'plan.md',
-      observed: '2026-10-09',
-    });
+    const captured = captureFact(
+      { backend: 'files' },
+      prot,
+      {
+        id: 'fact-1',
+        value: 'Revenue grew',
+        sourceDoc: 'plan.md',
+        observed: '2026-10-09',
+      },
+      root,
+    );
     expect(captured).toBe(join(prot, 'memory', 'fact-1.md'));
     expect(read(captured)).toMatchInlineSnapshot(`
       "---

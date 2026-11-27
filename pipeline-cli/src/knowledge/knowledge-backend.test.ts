@@ -8,15 +8,23 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
+  backendSelection,
   FilesKnowledgeStore,
   KnowledgeBackendError,
   openKnowledgeStore,
   registerKnowledgeBackend,
+  type KnowledgeBackendContext,
   type KnowledgeStore,
   type KnowledgeStoreRoots,
 } from './knowledge-store.js';
+import { loadKnowledgeConfig } from './config.js';
+import { ingestSource } from './ingest-sources.js';
+import { promoteEntry, refuteEntry, reobserveEntry } from './promote.js';
+import { confirmEntry, correctEntry, supersedeEntry } from './human.js';
+import { captureFactForProject } from './data-room.js';
+import { DEFAULT_ONTOLOGY } from './ontology.js';
 import { removeFixtureDir } from '../__test-helpers/remove-fixture-dir.js';
 
 let project: string;
@@ -35,7 +43,7 @@ beforeAll(() => {
   writeFileSync(join(project, 'package.json'), '{"name":"adopter","private":true}');
   pkg(
     'ai-sdlc-fixture-backend',
-    `exports.seen = [];\nexports.registerKnowledgeBackends = (r) => r.registerKnowledgeBackend('fixture', (cfg, root) => { exports.seen.push({ cfg, root }); return (${STORE}); });\n`,
+    `exports.seen = [];\nexports.registerKnowledgeBackends = (r) => r.registerKnowledgeBackend('fixture', (cfg, ctx) => { exports.seen.push({ cfg, ctx }); return (${STORE}); });\n`,
   );
   pkg(
     'ai-sdlc-fixture-duplicate',
@@ -84,13 +92,13 @@ describe('openKnowledgeStore backend selection (DEC-0427)', () => {
     expect(store.kind).toBe('fixture-esm');
   });
 
-  it('passes the factory the config and the project root it was opened with', () => {
+  it('passes the factory the config and { projectRoot, options } (AISDLC-1432)', () => {
     const cfg = { trackedRoot: 'kb', backend: 'fixture', backendModule: 'ai-sdlc-fixture-backend' };
     openKnowledgeStore(cfg, project);
     const req = createRequire(join(project, 'package.json'));
-    const seen = (req('ai-sdlc-fixture-backend') as { seen: { cfg: unknown; root: string }[] })
+    const seen = (req('ai-sdlc-fixture-backend') as { seen: { cfg: unknown; ctx: unknown }[] })
       .seen;
-    expect(seen.at(-1)).toEqual({ cfg, root: project });
+    expect(seen.at(-1)).toEqual({ cfg, ctx: { projectRoot: project, options: null } });
   });
 
   it('throws for an unregistered name, naming backend and module', () => {
@@ -141,6 +149,143 @@ describe('openKnowledgeStore backend selection (DEC-0427)', () => {
     );
     open('fixture', 'ai-sdlc-fixture-backend');
     expect(() => open('fixture', 'ai-sdlc-fixture-duplicate')).toThrow(KnowledgeBackendError);
+  });
+});
+
+/** A registered in-process backend that records every `{ projectRoot, options }` it receives. */
+const recorded: KnowledgeBackendContext[] = [];
+registerKnowledgeBackend('recording', (_cfg, ctx) => {
+  recorded.push(ctx);
+  return {
+    kind: 'recording',
+    get: () => null,
+    put: () => ({ path: 'memory/x.md', created: true }),
+    update: () => null,
+    list: () => [],
+    listRaw: () => [],
+  };
+});
+
+function writeContext(dir: string, knowledge: string): string {
+  mkdirSync(join(dir, '.ai-sdlc'), { recursive: true });
+  writeFileSync(join(dir, '.ai-sdlc/context.yaml'), `knowledge:\n${knowledge}`);
+  return dir;
+}
+
+describe('backend options from context.yaml (AISDLC-1432)', () => {
+  let dir: string;
+  afterEach(() => removeFixtureDir(dir));
+
+  it('hands the factory the exact knowledge.<backend> mapping, unvalidated', () => {
+    dir = writeContext(
+      mkdtempSync(join(tmpdir(), 'knowledge-opts-')),
+      [
+        '  backend: recording',
+        '  recording:',
+        '    endpoint: https://kb.example.com',
+        '    credentialsRef: env:KB_TOKEN',
+        '    unknownKey: 7',
+        '    nested:',
+        '      deep: [a, { b: true }]',
+        '',
+      ].join('\n'),
+    );
+    const config = loadKnowledgeConfig(dir);
+    const expected = {
+      endpoint: 'https://kb.example.com',
+      credentialsRef: 'env:KB_TOKEN',
+      unknownKey: 7,
+      nested: { deep: ['a', { b: true }] },
+    };
+    expect(config.backendOptions).toEqual(expected);
+    recorded.length = 0;
+    openKnowledgeStore({ ...backendSelection(config), trackedRoot: 'kb' }, dir);
+    expect(recorded).toEqual([{ projectRoot: dir, options: expected }]);
+  });
+
+  it('passes null options when the block is absent', () => {
+    dir = writeContext(mkdtempSync(join(tmpdir(), 'knowledge-opts-')), '  backend: recording\n');
+    const config = loadKnowledgeConfig(dir);
+    expect(config.backendOptions).toBeNull();
+    recorded.length = 0;
+    openKnowledgeStore({ ...backendSelection(config), trackedRoot: 'kb' }, dir);
+    expect(recorded).toEqual([{ projectRoot: dir, options: null }]);
+  });
+
+  it('carries no options for files, even when a knowledge.files block exists', () => {
+    dir = writeContext(
+      mkdtempSync(join(tmpdir(), 'knowledge-opts-')),
+      '  backend: files\n  files:\n    x: 1\n',
+    );
+    const config = loadKnowledgeConfig(dir);
+    expect(config.backendOptions).toBeNull();
+    expect(
+      openKnowledgeStore({ ...backendSelection(config), trackedRoot: 'kb' }, dir),
+    ).toBeInstanceOf(FilesKnowledgeStore);
+  });
+});
+
+describe('operations hand a registered backend the project root (AISDLC-1432)', () => {
+  let dir: string;
+  let elsewhere: string;
+  afterEach(() => {
+    vi.restoreAllMocks();
+    removeFixtureDir(dir);
+    removeFixtureDir(elsewhere);
+  });
+
+  it('ingest, promote, human and data-room open the store with the project root, not the cwd', () => {
+    dir = writeContext(
+      mkdtempSync(join(tmpdir(), 'knowledge-ops-')),
+      '  backend: recording\n  recording:\n    endpoint: e\n',
+    );
+    elsewhere = mkdtempSync(join(tmpdir(), 'knowledge-cwd-'));
+    vi.spyOn(process, 'cwd').mockReturnValue(elsewhere);
+    const config = loadKnowledgeConfig(dir);
+    const sel = backendSelection(config);
+    const tracked = join(dir, '.ai-sdlc/knowledge');
+    const actor = { by: 'human', principal: 'human:op@example.com' } as const;
+    const options = { endpoint: 'e' };
+    const opened = (run: () => unknown): KnowledgeBackendContext[] => {
+      recorded.length = 0;
+      run();
+      return [...recorded];
+    };
+    const once = [{ projectRoot: dir, options }];
+
+    expect(
+      opened(() =>
+        ingestSource('tasks', {
+          ...sel,
+          projectDir: dir,
+          trackedRootAbs: tracked,
+          ontology: DEFAULT_ONTOLOGY,
+          observed: '2026-11-26',
+          actor,
+        }),
+      ),
+    ).toEqual(once);
+    const verify = { projectDir: dir, config, ontology: DEFAULT_ONTOLOGY } as unknown as Parameters<
+      typeof promoteEntry
+    >[4];
+    expect(
+      opened(() => promoteEntry(sel, tracked, 'a', { to: 'canonical', ...actor }, verify)),
+    ).toEqual(once);
+    expect(opened(() => refuteEntry(sel, tracked, 'a', 'wrong', actor, dir))).toEqual(once);
+    expect(opened(() => reobserveEntry(sel, tracked, 'a', 1, actor, undefined, dir))).toEqual(once);
+    expect(opened(() => confirmEntry(sel, tracked, 'a', 1, actor, undefined, dir))).toEqual(once);
+    expect(opened(() => correctEntry(sel, tracked, 'a', 'v', actor, undefined, dir))).toEqual(once);
+    expect(opened(() => supersedeEntry(sel, tracked, 'a', 'b', actor, dir))).toEqual(once);
+    expect(
+      opened(() =>
+        captureFactForProject(dir, {
+          id: 'fact-1',
+          value: 'v',
+          sourceDoc: 'doc.md',
+          observed: '2026-11-26',
+        }),
+      ),
+    ).toEqual(once);
   });
 });
 

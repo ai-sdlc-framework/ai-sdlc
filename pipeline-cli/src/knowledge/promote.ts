@@ -233,16 +233,20 @@ export function reobserveEntry(
   id: string,
   observedConfidence: number,
   actor: Actor,
-  observedDate?: string,
+  observedDate: string | undefined,
+  projectRoot: string,
 ): number | null {
   let next = 0;
-  const before = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }).update(id, (f) => {
-    const old = Number(f.confidence);
-    next = Math.round((old + REOBSERVE_WEIGHT * (observedConfidence - old)) * 1e6) / 1e6;
-    if (f.writtenBy === 'agent') next = Math.min(next, AGENT_CONFIDENCE_CAP);
-    f.confidence = next;
-    if (observedDate) f.observed = observedDate;
-  });
+  const before = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot).update(
+    id,
+    (f) => {
+      const old = Number(f.confidence);
+      next = Math.round((old + REOBSERVE_WEIGHT * (observedConfidence - old)) * 1e6) / 1e6;
+      if (f.writtenBy === 'agent') next = Math.min(next, AGENT_CONFIDENCE_CAP);
+      f.confidence = next;
+      if (observedDate) f.observed = observedDate;
+    },
+  );
   if (!before) return null;
   appendKnowledgeEvent(trackedRootAbs, {
     event: 'reobserved',
@@ -261,10 +265,14 @@ export function refuteEntry(
   id: string,
   reason: string,
   actor: Actor,
+  projectRoot: string,
 ): boolean {
-  const before = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }).update(id, (f) => {
-    f.authority = 'inferred';
-  });
+  const before = openKnowledgeStore({ ...sel, trackedRoot: trackedRootAbs }, projectRoot).update(
+    id,
+    (f) => {
+      f.authority = 'inferred';
+    },
+  );
   if (!before) return false;
   appendKnowledgeEvent(trackedRootAbs, {
     event: 'refuted',

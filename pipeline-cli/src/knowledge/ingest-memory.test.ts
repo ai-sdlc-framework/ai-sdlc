@@ -228,7 +228,7 @@ describe('reingestAfterSwap on a non-files backend (AISDLC-1426)', () => {
     );
     writeFileSync(
       join(pkgDir, 'index.js'),
-      `exports.roots = [];\nexports.registerKnowledgeBackends = (r) => r.registerKnowledgeBackend('module-1426', (cfg, root) => { exports.roots.push(root); return { kind: 'module', get: () => null, put: () => ({ path: 'x', created: true }), update: () => null, list: () => [], listRaw: () => [] }; });\n`,
+      `exports.roots = [];\nexports.registerKnowledgeBackends = (r) => r.registerKnowledgeBackend('module-1426', (cfg, ctx) => { exports.roots.push(ctx.projectRoot); return { kind: 'module', get: () => null, put: () => ({ path: 'x', created: true }), update: () => null, list: () => [], listRaw: () => [] }; });\n`,
     );
     useBackend('module-1426', 'ai-sdlc-fixture-1426');
     expect(process.cwd()).not.toBe(dir);

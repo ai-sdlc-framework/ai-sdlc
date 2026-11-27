@@ -81,12 +81,17 @@ describe('capture and export', () => {
   it('writes a protected entry with a citation in the protected root', () => {
     mk();
     const prot = join(root, 'prot');
-    const file = captureFact({ backend: 'files' }, prot, {
-      id: 'fact-1',
-      value: 'Payment is net 30',
-      sourceDoc: 'msa-signed.md',
-      observed: '2026-11-01',
-    });
+    const file = captureFact(
+      { backend: 'files' },
+      prot,
+      {
+        id: 'fact-1',
+        value: 'Payment is net 30',
+        sourceDoc: 'msa-signed.md',
+        observed: '2026-11-01',
+      },
+      root,
+    );
     const parsed = parseEntryFile(readFileSync(file, 'utf-8'));
     if (!('fields' in parsed)) throw new Error('parse');
     expect(validateEntryFields(parsed.fields, DEFAULT_ONTOLOGY)).toEqual([]);
@@ -94,7 +99,7 @@ describe('capture and export', () => {
     expect(e.scope).toBe('protected');
     expect(e.source).toBe('data-room:msa-signed.md');
     expect(
-      openKnowledgeStore({ backend: 'files', protectedRoot: prot }).list('protected'),
+      openKnowledgeStore({ backend: 'files', protectedRoot: prot }, root).list('protected'),
     ).toHaveLength(1);
   });
 
@@ -132,10 +137,10 @@ describe('capture and export', () => {
     rmSync(join(mem, 'user_gone.md'));
     const r = ingestMemoryForProject(root, mem, '2026-11-02');
     expect(r.superseded).toBe(1);
-    const store = openKnowledgeStore({
-      backend: 'files',
-      protectedRoot: join(root, '.ai-sdlc/knowledge-protected'),
-    });
+    const store = openKnowledgeStore(
+      { backend: 'files', protectedRoot: join(root, '.ai-sdlc/knowledge-protected') },
+      root,
+    );
     const byStatus = Object.fromEntries(
       store
         .list({ scope: 'protected', trunk: 'memory' })
