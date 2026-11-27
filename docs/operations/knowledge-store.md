@@ -258,6 +258,29 @@ plus the raw stamp as `lastSync`. A `status()` that throws prints
 `{"ok":false,"supported":true,"error":...}` and exits 1. On a backend without the method,
 either command prints `{"ok":true,"supported":false}` and exits 0.
 
+### Session-start sync (AISDLC-1460, DEC-0444)
+
+The `context-surface.sh sessionStart` hook runs the sync at session start only, never on
+every stop: a write already reaches the server at once, so a sync only refreshes the local
+replica, and a per-stop sync would rebuild the whole index after every turn. When
+`knowledge.backend` is not `files`, the hook starts `cli-context sync` detached (never
+awaited) at most once per interval, debounced by the stamp file
+`.ai-sdlc/state/knowledge-sync-launch`, then prints one line from `cli-context status` as the
+hook's `systemMessage`: `knowledge sync: queued N, rejected N, last sync <time|never>`, plus
+`, last error: <message>` when the last sync failed. The interval is
+`knowledge.syncIntervalMinutes` in `.ai-sdlc/context.yaml`, default 15 (a reversible
+default):
+
+```yaml
+knowledge:
+  backend: remote
+  syncIntervalMinutes: 15
+```
+
+With the `files` backend the hook starts nothing and prints nothing. It fails open: a failing
+sync or status never blocks the session; a status failure prints
+`knowledge sync: status unavailable` and nothing more.
+
 With a configured API embedder each rebuild re-embeds every entry; there is no embedding
 cache. A `contentHash` cache is a follow-up only if measured cost requires it.
 
