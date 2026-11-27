@@ -58,7 +58,12 @@ references:
 - [ ] #1 The rubric skill's step 3 says to send the research subagent described above, gives the exact draft and the ledger shape, and says that no question goes out until the checker passes. The **unchecked** tag is removed as a final state; anything that cannot be checked is either an assumption that rests on checked facts or a gap to close first. `rfc-oq-walkthrough` refers to the same step. Autonomous mode runs the same step.
 - [ ] #2 The ledger has a schema file, and `cli-decisions evidence check <ledger> [--draft <file>]` validates it as in the Design and exits non-zero on any failure, listing each failing entry. Tests cover each fail case listed under "The checker fails the ledger when", a ledger that passes, and a file quote that has drifted from the tree.
 - [ ] #3 `cli-decisions evidence hash <draft-file>` prints the `draftSha256` that the hook in AISDLC-1452 computes over the question text, with one normalization shared by both.
-- [ ] #4 `ai-sdlc doctor` warns when a user-level `~/.claude/skills/decision-rubric/SKILL.md` exists. That copy shadows the plugin skill: the stale May 2026 copy is still listed as an unscoped `decision-rubric` skill. The warning tells the operator to remove it. Test with a temp HOME.
+- [ ] #4 `ai-sdlc doctor` checks `~/.claude/skills/` for a copy of the rubric that would shadow the plugin skill. A `decision-rubric` entry that is a symlink to a plugin `skills/decision-rubric` directory passes; the operator set this up on 2026-11-27, linking to the repo copy. Doctor warns, with the fix (replace it with that symlink), when:
+  - the entry is a real directory;
+  - it is a symlink to anywhere else;
+  - another skill directory's `SKILL.md` declares `name: decision-rubric`. A backup left inside `skills/` still loads as a skill.
+
+  Tests use a temp HOME and cover each case.
 - [ ] #5 `docs/operations/decision-authority.md` describes the ledger and says where it is stored when a decision is filed (`.ai-sdlc/decisions/evidence/DEC-NNNN.json`).
 - [ ] #6 `pnpm build && pnpm test && pnpm lint && pnpm format:check` pass.
 
