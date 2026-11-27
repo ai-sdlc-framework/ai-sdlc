@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1443
 title: "An operator question is gated: answered from a decision already on main, decided by the session for class (a)/(b), refused in unattended sessions, and rubric-framed otherwise"
-status: In Progress
+status: Done
 priority: high
 labels:
   - governance
