@@ -560,15 +560,6 @@ describe('AISDLC-654.2: artifacts dir anchored at the project root', () => {
   });
 });
 
-describe('AISDLC-651.3: a parked developer return is not a failure', () => {
-  it('next-step stops with developer-parked and keeps the task status', () => {
-    const step = src('next-step.ts');
-    assert.match(step, /parsed\.parked/);
-    assert.match(step, /'developer-parked'/);
-    assert.match(cmdBody, /developer-parked/);
-  });
-});
-
 describe('/ai-sdlc execute: staged review agents (RFC-0052)', () => {
   it('may spawn the planner and synthesizer and tells the model how to report them', () => {
     assert.match(cmdContent, /Agent\([^)]*ai-sdlc:review-planner, ai-sdlc:review-synthesizer\)/);

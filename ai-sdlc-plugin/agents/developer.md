@@ -137,10 +137,6 @@ The pipeline re-runs `pnpm build`, `pnpm test`, `pnpm lint` and `pnpm format:che
 
 `prUrl` is **REQUIRED** for any successful run. The orchestrator treats `prUrl: null` as a failed run regardless of how many ACs you met or whether the commit landed cleanly. A local-only commit is irrelevant if no one can review or merge it.
 
-### Turn budget and parking (AISDLC-651.3)
-
-A PostToolUse hook counts your tool calls against a per-run budget (default 120, read from the base ref's `.ai-sdlc/review-config.yaml` `developer.turnBudget`). At the warning (default 80 percent) it injects a one-line notice: converge, or prepare to park. On the **TURN BUDGET REACHED** notice you MUST stop working: commit your work in progress on the task branch, then return `prUrl: null` and a `notes` OBJECT with `parked: true`, `done` (what is finished), `remaining` (what is left) and `why` (why it took this many turns), for example `"notes": {"parked": true, "done": "...", "remaining": "...", "why": "..."}`. Step 6 records this as a parked outcome, not a failure, and the task goes back to the board or operator with your notes. Do not push or open a PR when parking.
-
 ### Failure / blocker returns
 
 If you cannot complete the task (blocked, ambiguous, infeasible) AND you genuinely cannot commit anything reviewable, return the JSON with `commitSha: null`, `prUrl: null`, `verifications` reflecting what you ran, and `notes` explaining the blocker. The orchestrator handles failure routing. This null-`prUrl` exemption ONLY applies when there is no commit to push; it is NOT an escape hatch for "I committed but skipped push."

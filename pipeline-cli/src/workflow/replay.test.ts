@@ -35,7 +35,7 @@ interface Fixture {
   approvals?: boolean[];
   rebases?: Array<'skipped' | 'unchanged' | 'changed' | 'failed'>;
   nothingToSpawn?: boolean;
-  devResult?: 'failed' | 'parked' | 'prose';
+  devResult?: 'failed' | 'prose';
   reviewResult?: 'both' | 'missing-security';
   reviewResults?: string[];
   lease?: 'blocking' | 'warning';
@@ -256,13 +256,6 @@ function depsFor(fx: Fixture): Partial<NextStepDeps> {
 function devResultFor(fx: Fixture): string {
   if (fx.devResult === 'failed')
     return JSON.stringify({ ...DEV_RETURN, commitSha: null, notes: 'x' });
-  if (fx.devResult === 'parked') {
-    return JSON.stringify({
-      ...DEV_RETURN,
-      commitSha: null,
-      notes: { parked: true, done: 'half', remaining: 'rest', why: 'turn budget' },
-    });
-  }
   if (fx.devResult === 'prose') return 'I finished the task, all green!';
   return DEV_JSON;
 }
@@ -363,7 +356,7 @@ function reset(): void {
 
 describe('golden replay: engine vs Machine', () => {
   it('has the recorded fixtures', () => {
-    expect(fixtures.length).toBeGreaterThanOrEqual(29);
+    expect(fixtures.length).toBeGreaterThanOrEqual(28);
     expect(fixtures.map((f) => f.name)).toContain('changes-requested-at-cap');
     expect(fixtures.map((f) => f.name)).toContain('reviewer-return-missing');
   });
