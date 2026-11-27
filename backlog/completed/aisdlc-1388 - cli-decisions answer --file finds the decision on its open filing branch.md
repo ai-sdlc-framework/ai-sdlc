@@ -1,7 +1,7 @@
 ---
 id: AISDLC-1388
 title: 'cli-decisions answer --file finds the decision on its open filing branch'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-11-22'
 labels:
