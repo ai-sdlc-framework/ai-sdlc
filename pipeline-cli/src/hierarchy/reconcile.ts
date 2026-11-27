@@ -34,6 +34,7 @@ import { clearRuling, readRuling } from '../dispatch/ruling.js';
 import type { TaskRuling } from '../dispatch/types.js';
 import { DOCS_BRANCH_PREFIXES } from './filing-branches.js';
 import { cachedGh, GH_READ_TTL_MS } from './gh-read-cache.js';
+import { PR_HOLD_LABEL } from '../governance/merge-if-eligible.js';
 import type { CommandRunner } from './types.js';
 
 /** Task set: one action per classifier state (RFC-0054 ownership table). */
@@ -107,6 +108,8 @@ export interface ReconcilePr extends PrFacts {
   choreOnlySince?: string;
   /** AISDLC-1158: the commit the PR merged as, when the merge was read from GitHub. */
   mergeSha?: string;
+  /** AISDLC-1386: the PR carries the hold label; nothing arms, flips or merges it. */
+  held?: boolean;
 }
 
 export interface LandingEntry {
@@ -217,6 +220,10 @@ export function decide(
     state: c.state,
     ...(c.failingLine === undefined ? {} : { failingLine: c.failingLine }),
   };
+  // AISDLC-1386: a held PR waits for a human; no arm, flip, merge or fix round runs on it.
+  if (f.held === true && !f.merged) {
+    return { ...base, action: 'held', ruling: `label ${PR_HOLD_LABEL}` };
+  }
   // No lane owns it: a written reason and the planner, never a silent `none`.
   if (f.unownedReason !== undefined && !f.merged) {
     return { ...base, action: 'route-to-planner', note: `unowned: ${f.unownedReason}` };
@@ -1517,6 +1524,7 @@ interface ListedPr {
   files?: { path: string }[];
   isCrossRepository?: boolean;
   author?: { login?: string };
+  labels?: { name?: string }[];
 }
 
 /** PR number in a `.../pull/<n>` URL. */
@@ -1698,7 +1706,7 @@ export function gatherFacts(
       '--limit',
       '100',
       '--json',
-      'number,title,headRefName,headRefOid,isDraft,mergeStateStatus,autoMergeRequest,files,isCrossRepository,author',
+      'number,title,headRefName,headRefOid,isDraft,mergeStateStatus,autoMergeRequest,files,isCrossRepository,author,labels',
     ],
     { cwd },
   );
@@ -1823,6 +1831,7 @@ export function gatherFacts(
       draft: isDraft,
       ...(p.mergeStateStatus === undefined ? {} : { mergeStateStatus: p.mergeStateStatus }),
       autoMergeArmed: p.autoMergeRequest != null,
+      ...(p.labels?.some((l) => l.name === PR_HOLD_LABEL) ? { held: true } : {}),
       ...(kind === 'docs' && autoMergeIsUnavailable() ? { autoMergeUnavailable: true } : {}),
       changedFiles: files,
       docsOnly: files.length > 0 && files.every((x) => DOCS_FILE_RE.test(x)),

@@ -1898,3 +1898,51 @@ describe('a filing PR that merges between ticks (AISDLC-1428)', () => {
     untouched();
   });
 });
+
+describe('hold label (AISDLC-1386)', () => {
+  const held = { held: true };
+  it('takes no arm, flip or merge action on a held PR, and shows it as held', () => {
+    const armable = taskPr({ autoMergeArmed: false, ...held });
+    const flippable = taskPr({ draft: true, executorDead: true, approvedVerdict: true, ...held });
+    const docs = docsPr(held);
+    for (const f of [armable, flippable, docs]) {
+      expect(decide(f)).toMatchObject({ action: 'held', ruling: 'label ai-sdlc/hold' });
+    }
+    // Without the label the same facts arm and flip.
+    expect(decide(taskPr({ autoMergeArmed: false })).action).toBe('arm');
+    expect(decide({ ...flippable, held: false }).action).toBe('flip-ready-takeover');
+    // A held PR that merged anyway is still marked landed.
+    expect(decide(taskPr({ merged: true, ...held })).action).toBe('mark-landed');
+
+    const execute = vi.fn(() => ({ ran: true }));
+    const report = reconcile([armable, docs], { boardDir: board, execute, now: fixedNow });
+    expect(execute).not.toHaveBeenCalled();
+    expect(readLanding(board, 10)).toMatchObject({ action: 'held', ruling: 'label ai-sdlc/hold' });
+    expect(report.acted.map((a) => a.action)).toEqual(['held', 'held']);
+  });
+
+  it('gatherFacts requests labels and marks a PR carrying the hold label', () => {
+    const calls: string[][] = [];
+    const list = [
+      { name: 'ai-sdlc/hold', n: 5 },
+      { name: 'other', n: 6 },
+    ].map(({ name, n }) => ({
+      number: n,
+      title: `feat: x (AISDLC-${n})`,
+      headRefName: `ai-sdlc/aisdlc-${n}-x`,
+      isCrossRepository: false,
+      author: { login: 'me' },
+      labels: [{ name }],
+    }));
+    const run: CommandRunner = (_f, args) => {
+      calls.push([...args]);
+      if (args[0] === 'api') return { status: 0, stdout: 'me', stderr: '' };
+      if (args[1] === 'list') return { status: 0, stdout: JSON.stringify(list), stderr: '' };
+      return { status: 0, stdout: '{}', stderr: '' };
+    };
+    const facts = gatherFacts(run, '/', board)!;
+    expect(calls.find((a) => a[1] === 'list')!.join(' ')).toMatch(/,labels\b/);
+    expect(facts.find((f) => f.prNumber === 5)?.held).toBe(true);
+    expect(facts.find((f) => f.prNumber === 6)?.held).toBeUndefined();
+  });
+});

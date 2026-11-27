@@ -61,6 +61,8 @@
 import { listVerifySlots } from '../runtime/verify-slots.js';
 import { fetchClosedUnmergedPrs } from '../kpi/closed-unmerged.js';
 import { executorCap, resolveExecutorsMax } from '../hierarchy/executor-cap.js';
+import { prHold } from '../hierarchy/pr-hold.js';
+import { PR_HOLD_LABEL } from '../governance/merge-if-eligible.js';
 import { openPrState } from '../hierarchy/open-pr-limit.js';
 import { clearScaleCeiling, writeScaleCeiling } from '../hierarchy/scale.js';
 import {
@@ -262,6 +264,7 @@ Commands:
   stall-notice  Alert once when queued work has not moved for N minutes (no relaunch, no model)
   webhook    Local GitHub webhook receiver: webhook up|down|status (needs AI_SDLC_WEBHOOK_SECRET)
   hold       Pause claims and relaunches, never reporting (--reason <text>); planner or operator only
+  pr-hold    Keep one PR from being armed or merged (pr-hold <pr> --reason <text> | <pr> --clear); planner or operator only
   scale      Set or clear the runtime executor ceiling (scale --max <n> --reason <text> | --clear); tightens only
   resume     Lift the hold set by hold (resume --budget: override the budget pacer for the window)
   canary     Drive a synthetic task through claim, verdict, clear and re-claim: canary run --no-pr
@@ -380,6 +383,11 @@ Options for demo:
 
 Options for hold:
   --reason <text>          Why the board is held (required); shown by tick and executor-start
+
+Options for pr-hold:
+  <pr>                     PR number; adds the ai-sdlc/hold label and comments the reason
+  --reason <text>          Why the PR is held (required unless --clear)
+  --clear                  Remove the label so the pipeline may arm and merge the PR again
 
 Options for scale:
   --max <n>                Ceiling on spawned executors; refused above executors.max (env AI_SDLC_EXECUTORS_MAX or <board>/config.json)
@@ -1218,6 +1226,39 @@ export async function runHierarchyCli(
           const lifted = clearHold(deps.boardDir, by, deps.now().toISOString());
           deps.log(JSON.stringify({ ok: true, resumed: lifted !== null }));
         }
+        return 0;
+      }
+      case 'pr-hold': {
+        // AISDLC-1386: hold one PR for a human; planner or operator only, like `hold`.
+        const who = resolveCaller(
+          extras.identity ?? createSystemIdentity(deps.boardDir, extras.processLookup),
+        );
+        if (who && who.role !== 'planner') {
+          process.stderr.write(
+            `cli-hierarchy pr-hold: only the planner or the operator may hold a PR; this session is '${who.name}' (${who.role}). Message the planner instead.\n`,
+          );
+          return 1;
+        }
+        const pr = Number(firstPositional(argv));
+        const clear = flags.clear === 'true';
+        const reason = flags.reason && flags.reason !== 'true' ? flags.reason : undefined;
+        if (!Number.isInteger(pr) || pr < 1 || (!clear && !reason)) {
+          process.stderr.write(
+            'cli-hierarchy pr-hold: usage: pr-hold <pr> --reason <text> | pr-hold <pr> --clear\n',
+          );
+          return 2;
+        }
+        const by = who?.name ?? 'the operator';
+        const r = prHold(extras.ghRun ?? deps.run, deps.cwd, pr, {
+          clear,
+          by,
+          ...(reason ? { reason } : {}),
+        });
+        if (!r.ok) {
+          process.stderr.write(`cli-hierarchy pr-hold: ${r.error ?? 'failed'}\n`);
+          return 1;
+        }
+        deps.log(JSON.stringify({ ok: true, pr, held: !clear, label: PR_HOLD_LABEL, by }));
         return 0;
       }
       case 'scale': {
