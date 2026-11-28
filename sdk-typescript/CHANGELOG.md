@@ -1,5 +1,19 @@
 # @ai-sdlc/sdk
 
+## [0.47.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-typescript-v0.46.0...sdk-typescript-v0.47.0) (2026-11-28)
+
+
+### Miscellaneous
+
+* **sdk-typescript:** Synchronize node-packages versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.47.0
+
 ## [0.46.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-typescript-v0.45.0...sdk-typescript-v0.46.0) (2026-11-27)
 
 

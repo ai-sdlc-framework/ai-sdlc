@@ -5,6 +5,31 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.47.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.46.0...orchestrator-v0.47.0) (2026-11-28)
+
+
+### Features
+
+* **orchestrator:** doctor warns when autoMemoryDirectory is not set (AISDLC-1395) ([#3171](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3171)) ([584b2f8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/584b2f8cba8b325706199f48cdb791341dd18e3d))
+* **pipeline-cli:** check decision facts with an evidence ledger (AISDLC-1451) ([#3155](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3155)) ([b585650](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b585650a55c1d2f24a61ee6511de7de122ce8e02))
+* **pipeline-cli:** check knowledge backend local paths in scope gate and doctor (AISDLC-1433) ([#3132](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3132)) ([7adc4a0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7adc4a07e92a53bd3711c174adbc158021498a44))
+* **pipeline-cli:** read the jev key from .env, run liveness on the tick (AISDLC-1442) ([#3147](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3147)) ([05c6e38](https://github.com/ai-sdlc-framework/ai-sdlc/commit/05c6e3813fbe163440f2bb8378ef82924545c6dd))
+
+
+### Bug Fixes
+
+* **ci:** arm auto-merge only for PRs from merge authors (AISDLC-1411) ([#3105](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3105)) ([345f338](https://github.com/ai-sdlc-framework/ai-sdlc/commit/345f338f0e4bd3aba60f3e1a4a56d1c1fee738b7))
+* **ci:** read spec.governance.mergeAuthors in auto-enable (AISDLC-1461) ([#3140](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3140)) ([7c5f117](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7c5f117a435f10e09986c179beb97a33d642936e))
+* **orchestrator:** allow-list runner child env and cap output (AISDLC-1396) ([#3174](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3174)) ([f523302](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f523302159847ef7fdee6608e79147c5170f553b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/pipeline-cli bumped to 0.47.0
+    * @ai-sdlc/reference bumped to 0.47.0
+
 ## [0.46.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.45.0...orchestrator-v0.46.0) (2026-11-27)
 
 

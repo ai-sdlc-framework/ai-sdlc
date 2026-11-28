@@ -1,6 +1,6 @@
 """AI-SDLC Python SDK — native implementation of the AI-SDLC Framework."""
 
-__version__ = "0.4.0"  # x-release-please-version
+__version__ = "0.5.0"  # x-release-please-version
 
 from ai_sdlc.builders.builders import (
     AdapterBindingBuilder,
