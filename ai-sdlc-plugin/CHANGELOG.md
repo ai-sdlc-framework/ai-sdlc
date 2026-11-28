@@ -5,6 +5,29 @@
      conventional-commit messages and prepends a dated section when the
      rolling release PR lands. See docs/operations/release-flow.md. -->
 
+## [0.47.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.46.0...ai-sdlc-plugin-v0.47.0) (2026-11-28)
+
+
+### Features
+
+* **hooks:** run a background knowledge sync at session start (AISDLC-1460) ([#3139](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3139)) ([e614097](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e614097fa1e2854f3392e1909426b6cbee79a2f3))
+* **pipeline-cli:** check decision facts with an evidence ledger (AISDLC-1451) ([#3155](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3155)) ([b585650](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b585650a55c1d2f24a61ee6511de7de122ce8e02))
+* **pipeline-cli:** gate questions, decisions and RFC resolutions on evidence (AISDLC-1452) ([#3162](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3162)) ([f1b7beb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f1b7bebee21fe24b99a9944b35d4198b3a346277))
+* **plugin:** decision rubric verifies every unchecked claim first (AISDLC-1431) ([#3145](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3145)) ([0ef677c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0ef677cac9029c72d58bd2d73d62799ee5aff24a))
+* **plugin:** gate operator questions at AskUserQuestion (AISDLC-1443) ([#3149](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3149)) ([d70fbaf](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d70fbafa2b4ae0221ec3e9caabdd1b2433ee9645))
+
+
+### Bug Fixes
+
+* **pipeline-cli:** dependency preflight reads origin/main for a just-merged dependency (AISDLC-1450) ([#3128](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3128)) ([fea2759](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fea2759cc769bf9de70704fdb069f9c602f39c0c))
+* **pipeline-cli:** never clear or restart a session before its handoff is proven (AISDLC-1448) ([#3150](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3150)) ([e6f8f3b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e6f8f3b601510afac1c939c0a98ad6b43b3421ee))
+* **pipeline-cli:** refuse unattributed decision answers (AISDLC-1405) ([#3104](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3104)) ([d350f4d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d350f4de46b9075c76b0ae6fee090c5345333d96))
+* **pipeline-cli:** send a conflicted routed PR back to an executor (AISDLC-1454) ([#3135](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3135)) ([a17b44e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a17b44ee85c87e398a8c6b7622cdb0c3b6ec3452))
+* **pipeline-cli:** send reaches a relaunched session or fails loudly (AISDLC-1392) ([#2964](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2964)) ([90eff7b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/90eff7b9604ed9721fa113883e07a9e678833444))
+* **pipeline-cli:** stop pane and raw-socket delivery, add receipts (AISDLC-1464) ([#3161](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3161)) ([916e065](https://github.com/ai-sdlc-framework/ai-sdlc/commit/916e06571f84004555c9135fa765d657c3fc00f5))
+* **plugin:** resolve-pipeline-cli.sh never exits non-zero silently (AISDLC-1389) ([#3167](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3167)) ([e6fcb24](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e6fcb2402742072e0e2ac6cbaa07cd7de0a1329a))
+* **plugin:** start the MCP server through a launcher that waits for runtime deps (AISDLC-1398) ([#3173](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3173)) ([09d9775](https://github.com/ai-sdlc-framework/ai-sdlc/commit/09d97754431eea8f93d33e334af957fc60f7dc0f))
+
 ## [0.46.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.45.0...ai-sdlc-plugin-v0.46.0) (2026-11-27)
 
 

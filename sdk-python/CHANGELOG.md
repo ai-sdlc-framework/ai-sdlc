@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-python-v0.4.0...sdk-python-v0.5.0) (2026-11-28)
+
+
+### Features
+
+* **sdk-python:** validate all eleven resource kinds of the reference (AISDLC-1308) ([#3164](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3164)) ([0970db4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0970db420171d83f74f2ff27ae9e263182943f23))
+
+
+### Bug Fixes
+
+* **sdk:** cite correct NIST AI RMF and ISO 42001 clauses (AISDLC-1394) ([#3170](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3170)) ([818ae42](https://github.com/ai-sdlc-framework/ai-sdlc/commit/818ae4245754dcd7cbe9aaa3efda9b6fed14a6bb))
+
 ## [0.4.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-python-v0.3.0...sdk-python-v0.4.0) (2026-11-19)
 
 

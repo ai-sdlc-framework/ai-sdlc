@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.47.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.46.0...pipeline-cli-v0.47.0) (2026-11-28)
+
+
+### Features
+
+* **orchestrator:** doctor warns when autoMemoryDirectory is not set (AISDLC-1395) ([#3171](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3171)) ([584b2f8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/584b2f8cba8b325706199f48cdb791341dd18e3d))
+* **pipeline-cli:** add async named knowledge store writes (AISDLC-1455) ([#3134](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3134)) ([866a56e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/866a56efe3632f898c8f7563938a6dbb4cb68480))
+* **pipeline-cli:** add optional knowledge sync and status commands (AISDLC-1459) ([#3137](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3137)) ([0679269](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0679269fe78e85d087c2b3ad46b179f027fc26c6))
+* **pipeline-cli:** add optional knowledge-store concurrency token (AISDLC-1457) ([#3146](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3146)) ([98ca52c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/98ca52c654bbf87ed9380b2da47df5ebcc729cb0))
+* **pipeline-cli:** check decision facts with an evidence ledger (AISDLC-1451) ([#3155](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3155)) ([b585650](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b585650a55c1d2f24a61ee6511de7de122ce8e02))
+* **pipeline-cli:** check knowledge backend local paths in scope gate and doctor (AISDLC-1433) ([#3132](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3132)) ([7adc4a0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7adc4a07e92a53bd3711c174adbc158021498a44))
+* **pipeline-cli:** gate questions, decisions and RFC resolutions on evidence (AISDLC-1452) ([#3162](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3162)) ([f1b7beb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f1b7bebee21fe24b99a9944b35d4198b3a346277))
+* **pipeline-cli:** hold one PR with the ai-sdlc/hold label (AISDLC-1386) ([#3098](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3098)) ([9679e38](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9679e3851282c7a45f239180a72dd8b3d27afb8b))
+* **pipeline-cli:** hold RFC changes with declared review authorities (AISDLC-1449) ([#3153](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3153)) ([505f032](https://github.com/ai-sdlc-framework/ai-sdlc/commit/505f032f70cb592637b00fe42bc87c231fbcf283))
+* **pipeline-cli:** ingest a generated source of records from JSON (AISDLC-1436) ([#3127](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3127)) ([907c3b8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/907c3b855fe4baa38684dbbebb9654ddc2f38d93))
+* **pipeline-cli:** let a knowledge backend supply the ontology (AISDLC-1435) ([#3133](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3133)) ([cadb3b0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cadb3b030c5229d571dbd4c8428e9a26973a185f))
+* **pipeline-cli:** move knowledge callers to write and create (AISDLC-1456) ([#3138](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3138)) ([2c9425a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2c9425a7c7c58cb106df320751cbfdfdceab2a00))
+* **pipeline-cli:** pass backend factory the project root and options (AISDLC-1432) ([#3126](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3126)) ([7f62d99](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7f62d99072459753dd01367f6d719a79a44cb0ed))
+* **pipeline-cli:** read the jev key from .env, run liveness on the tick (AISDLC-1442) ([#3147](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3147)) ([05c6e38](https://github.com/ai-sdlc-framework/ai-sdlc/commit/05c6e3813fbe163440f2bb8378ef82924545c6dd))
+* **plugin:** gate operator questions at AskUserQuestion (AISDLC-1443) ([#3149](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3149)) ([d70fbaf](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d70fbafa2b4ae0221ec3e9caabdd1b2433ee9645))
+
+
+### Bug Fixes
+
+* **pipeline-cli:** answer --file appends to the open add filing PR (AISDLC-1388) ([#3168](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3168)) ([04ff0d3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/04ff0d3ae4f20913e20b3e82a669420bf13ade95))
+* **pipeline-cli:** bound verify slot waits and name the holder (AISDLC-1413) ([#3124](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3124)) ([c07a225](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c07a22581fb8d0d34d3b6f804b171ede06fac531))
+* **pipeline-cli:** dependency preflight reads origin/main for a just-merged dependency (AISDLC-1450) ([#3128](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3128)) ([fea2759](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fea2759cc769bf9de70704fdb069f9c602f39c0c))
+* **pipeline-cli:** forward push events to the webhook receiver (AISDLC-1399) ([#3102](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3102)) ([faed74b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/faed74b7b13eef4494483cd7b8e2672e378347c8))
+* **pipeline-cli:** hold a PR the merge gate refused on a trust fact (AISDLC-1387) ([#3165](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3165)) ([f0b856b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f0b856ba502bdd7787183bc353a8bc31c1aa895d))
+* **pipeline-cli:** ignore a superseded cancelled gate run (AISDLC-1462) ([#3154](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3154)) ([1dce5ee](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1dce5eef6f85758ba05edfb529514048a6cdc3da))
+* **pipeline-cli:** never clear or restart a session before its handoff is proven (AISDLC-1448) ([#3150](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3150)) ([e6f8f3b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e6f8f3b601510afac1c939c0a98ad6b43b3421ee))
+* **pipeline-cli:** never flip ready a PR someone converted back to draft (AISDLC-1385) ([#3097](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3097)) ([4ce28fb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4ce28fbe5f7af88b7f8ab7b7a29b763156397397))
+* **pipeline-cli:** refuse unattributed decision answers (AISDLC-1405) ([#3104](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3104)) ([d350f4d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d350f4de46b9075c76b0ae6fee090c5345333d96))
+* **pipeline-cli:** run the reconciler's re-entry in process (AISDLC-1453) ([#3131](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3131)) ([fa2bb02](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fa2bb0285b1a9687c0f26107782d8ea40ec4e105))
+* **pipeline-cli:** send a conflicted routed PR back to an executor (AISDLC-1454) ([#3135](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3135)) ([a17b44e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a17b44ee85c87e398a8c6b7622cdb0c3b6ec3452))
+* **pipeline-cli:** send reaches a relaunched session or fails loudly (AISDLC-1392) ([#2964](https://github.com/ai-sdlc-framework/ai-sdlc/issues/2964)) ([90eff7b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/90eff7b9604ed9721fa113883e07a9e678833444))
+* **pipeline-cli:** stop pane and raw-socket delivery, add receipts (AISDLC-1464) ([#3161](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3161)) ([916e065](https://github.com/ai-sdlc-framework/ai-sdlc/commit/916e06571f84004555c9135fa765d657c3fc00f5))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.47.0
+
 ## [0.46.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.45.0...pipeline-cli-v0.46.0) (2026-11-27)
 
 

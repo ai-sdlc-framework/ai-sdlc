@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.10.0...sdk-go-v0.11.0) (2026-11-28)
+
+
+### Features
+
+* **sdk-go:** validate all eleven resource kinds of the reference (AISDLC-1309) ([#3169](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3169)) ([8a6f45b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8a6f45b73ec36bf59ce9c6cb9a0bcd08b485a5fc))
+
+
+### Bug Fixes
+
+* **sdk:** cite correct NIST AI RMF and ISO 42001 clauses (AISDLC-1394) ([#3170](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3170)) ([818ae42](https://github.com/ai-sdlc-framework/ai-sdlc/commit/818ae4245754dcd7cbe9aaa3efda9b6fed14a6bb))
+
 ## [0.10.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.9.0...sdk-go-v0.10.0) (2026-11-19)
 
 

@@ -1,5 +1,19 @@
 # @ai-sdlc/reference
 
+## [0.47.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.46.0...reference-v0.47.0) (2026-11-28)
+
+
+### Features
+
+* **pipeline-cli:** check decision facts with an evidence ledger (AISDLC-1451) ([#3155](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3155)) ([b585650](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b585650a55c1d2f24a61ee6511de7de122ce8e02))
+* **pipeline-cli:** read the jev key from .env, run liveness on the tick (AISDLC-1442) ([#3147](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3147)) ([05c6e38](https://github.com/ai-sdlc-framework/ai-sdlc/commit/05c6e3813fbe163440f2bb8378ef82924545c6dd))
+
+
+### Bug Fixes
+
+* **pipeline-cli:** send a conflicted routed PR back to an executor (AISDLC-1454) ([#3135](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3135)) ([a17b44e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a17b44ee85c87e398a8c6b7622cdb0c3b6ec3452))
+* **sdk:** cite correct NIST AI RMF and ISO 42001 clauses (AISDLC-1394) ([#3170](https://github.com/ai-sdlc-framework/ai-sdlc/issues/3170)) ([818ae42](https://github.com/ai-sdlc-framework/ai-sdlc/commit/818ae4245754dcd7cbe9aaa3efda9b6fed14a6bb))
+
 ## [0.46.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.45.0...reference-v0.46.0) (2026-11-27)
 
 
